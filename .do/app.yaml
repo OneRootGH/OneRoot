@@ -1,0 +1,42 @@
+name: oneroot-shop
+region: nyc
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED
+services:
+  - name: web
+    git:
+      repo_clone_url: https://github.com/OneRootGH/OneRoot.git
+      branch: main
+    source_dir: /
+    dockerfile_path: Dockerfile
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: basic-xxs
+    envs:
+      - key: NODE_ENV
+        value: production
+        scope: RUN_TIME
+      - key: ONEROOT_PUBLIC_DOMAIN
+        value: OneRoot.shop
+        scope: RUN_TIME
+      - key: ONEROOT_SUPPORT_PHONE
+        value: 0547038092
+        scope: RUN_TIME
+      - key: ONEROOT_WHATSAPP_NUMBER
+        value: 233547038092
+        scope: RUN_TIME
+      - key: ONEROOT_SUPPORT_EMAIL
+        value: orders@oneroot.shop
+        scope: RUN_TIME
+      - key: ONEROOT_PICKUP_NOTE
+        value: Pickup and delivery confirmation are handled by OneRoot after the order is received.
+        scope: RUN_TIME
+      - key: ONEROOT_ADMIN_USER
+        value: REPLACE_WITH_ADMIN_USERNAME
+        scope: RUN_TIME
+        type: SECRET
+      - key: ONEROOT_ADMIN_PASSWORD
+        value: REPLACE_WITH_ADMIN_PASSWORD
+        scope: RUN_TIME
+        type: SECRET

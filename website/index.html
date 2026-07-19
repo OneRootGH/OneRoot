@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Order groceries, water delivery, kitchen meals, laundry service, refreshments, and OneRoot essentials online."
+    />
+    <meta name="theme-color" content="#143a2b" />
+    <title>OneRoot.shop | Your One-Stop Essentials Hub</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260719a" />
+  </head>
+  <body>
+    <div class="shop-shell">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
+          <span>
+            <strong>OneRoot.shop</strong>
+            <small>Your One-Stop Essentials Hub</small>
+          </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="#shop">Shop</a>
+          <a href="#services">Services</a>
+          <a href="/track-order.html">Track Order</a>
+          <a href="#contact">Contact</a>
+          <a href="/operations/">Staff App</a>
+        </nav>
+
+        <button id="cartToggleBtn" class="cart-toggle" type="button">
+          <span>Cart</span>
+          <strong id="cartToggleCount">0</strong>
+        </button>
+      </header>
+
+      <main>
+        <section class="hero-section">
+          <div class="hero-copy">
+            <p class="eyebrow">OneRoot Essentials</p>
+            <h1>Daily essentials, ready for order online.</h1>
+            <p class="hero-text">
+              Order cold store items, groceries, laundry pickup, water delivery,
+              kitchen requests, fresh drinks, and equipment support from one
+              trusted neighborhood hub.
+            </p>
+            <div class="hero-actions">
+              <a class="button button-primary" href="#shop">Start Ordering</a>
+              <a class="button button-secondary" href="/track-order.html">Track Existing Order</a>
+            </div>
+            <div class="hero-tags" id="heroContactLine"></div>
+          </div>
+
+          <aside class="hero-panel">
+            <div class="hero-panel-card">
+              <span>Built Around OneRoot Areas</span>
+              <strong>Water, food, laundry, money services, rentals, and kitchen support.</strong>
+              <p>Customers can order items, request services, and leave notes for follow-up on price, pickup, or delivery.</p>
+            </div>
+            <div class="hero-panel-card">
+              <span>Order Workflow</span>
+              <strong>Place order, confirm by phone, fulfill fast.</strong>
+              <p>Orders with quoted services are captured online and finalized by staff after confirmation.</p>
+            </div>
+          </aside>
+        </section>
+
+        <section class="area-section" id="services">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Business Areas</p>
+              <h2>Order across the OneRoot essentials ecosystem</h2>
+            </div>
+            <p class="section-note">
+              Browse by area when you want groceries, water, laundry, quick
+              food items, kitchen requests, apartment enquiries, or community
+              support services.
+            </p>
+          </div>
+          <div id="businessAreaGrid" class="area-grid"></div>
+        </section>
+
+        <section class="shop-section" id="shop">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Online Ordering</p>
+              <h2>Search, add to cart, and send your order</h2>
+            </div>
+            <p id="catalogMeta" class="section-note">Loading OneRoot catalog...</p>
+          </div>
+
+          <div class="shop-layout">
+            <section class="catalog-panel">
+              <div class="catalog-toolbar">
+                <label>
+                  <span>Search</span>
+                  <input id="catalogSearchInput" type="search" placeholder="Item, category, or area" />
+                </label>
+                <label>
+                  <span>Area</span>
+                  <select id="catalogAreaFilter"></select>
+                </label>
+                <label>
+                  <span>Sort</span>
+                  <select id="catalogSortFilter">
+                    <option value="featured">Featured</option>
+                    <option value="price-asc">Price: Low to High</option>
+                    <option value="price-desc">Price: High to Low</option>
+                    <option value="name">Name</option>
+                  </select>
+                </label>
+              </div>
+
+              <div id="catalogResultsMeta" class="results-meta"></div>
+              <div id="catalogGrid" class="catalog-grid"></div>
+            </section>
+
+            <aside class="cart-panel" id="cartPanel">
+              <div class="cart-panel-head">
+                <div>
+                  <p class="eyebrow">Checkout</p>
+                  <h3>Your Order</h3>
+                </div>
+                <button id="closeCartBtn" class="icon-button" type="button" aria-label="Close cart">
+                  ×
+                </button>
+              </div>
+
+              <div id="cartItems" class="cart-items"></div>
+
+              <div class="cart-summary">
+                <div>
+                  <span>Subtotal</span>
+                  <strong id="cartSubtotalValue">GH¢0.00</strong>
+                </div>
+                <p class="cart-summary-note">
+                  Items with price confirmation stay in the order and are
+                  finalized by staff.
+                </p>
+              </div>
+
+              <form id="checkoutForm" class="checkout-form" novalidate>
+                <label>
+                  <span>Customer Name</span>
+                  <input id="customerNameInput" name="customerName" type="text" required />
+                </label>
+
+                <label>
+                  <span>Phone Number</span>
+                  <input id="customerPhoneInput" name="customerPhone" type="tel" required />
+                </label>
+
+                <label>
+                  <span>Email</span>
+                  <input id="customerEmailInput" name="customerEmail" type="email" />
+                </label>
+
+                <label>
+                  <span>Delivery Mode</span>
+                  <select id="deliveryModeInput" name="deliveryMode">
+                    <option value="Delivery">Delivery</option>
+                    <option value="Pickup">Pickup</option>
+                    <option value="Call To Confirm">Call To Confirm</option>
+                  </select>
+                </label>
+
+                <label class="wide-field">
+                  <span>Delivery Address or Pickup Note</span>
+                  <textarea id="deliveryAddressInput" name="deliveryAddress" rows="3"></textarea>
+                </label>
+
+                <label>
+                  <span>Preferred Date</span>
+                  <input id="preferredDateInput" name="preferredDate" type="date" />
+                </label>
+
+                <label>
+                  <span>Preferred Time</span>
+                  <input id="preferredTimeInput" name="preferredTime" type="time" />
+                </label>
+
+                <label>
+                  <span>Payment Method</span>
+                  <select id="paymentMethodInput" name="paymentMethod"></select>
+                </label>
+
+                <label class="wide-field">
+                  <span>Notes</span>
+                  <textarea
+                    id="orderNotesInput"
+                    name="notes"
+                    rows="4"
+                    placeholder="Tell OneRoot any quantity detail, laundry item count, equipment duration, meal preference, or suite enquiry note."
+                  ></textarea>
+                </label>
+
+                <button id="submitOrderBtn" class="button button-primary button-wide" type="submit">
+                  Send Order
+                </button>
+              </form>
+
+              <div id="checkoutMessage" class="checkout-message hidden"></div>
+            </aside>
+          </div>
+        </section>
+
+        <section class="promise-section">
+          <div class="promise-card">
+            <p class="eyebrow">Why OneRoot</p>
+            <h2>An essentials ecosystem, not just a shop.</h2>
+            <p>
+              OneRoot brings together water support, groceries, laundry,
+              payments, accommodation follow-up, quick refreshments, and
+              kitchen requests so one order can solve several daily needs.
+            </p>
+          </div>
+          <div class="promise-grid">
+            <article>
+              <strong>Shared community access</strong>
+              <p>Orders can cover multiple business areas in one checkout.</p>
+            </article>
+            <article>
+              <strong>Fast local follow-up</strong>
+              <p>Website orders are captured centrally for direct staff confirmation.</p>
+            </article>
+            <article>
+              <strong>Price-confirmed services</strong>
+              <p>Quoted items like water delivery, equipment, and laundry still go through the same order flow.</p>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer" id="contact">
+        <div>
+          <strong>OneRoot Essentials</strong>
+          <p id="footerContactLine">Loading contact details...</p>
+        </div>
+        <div class="footer-links">
+          <a href="/track-order.html">Track Order</a>
+          <a href="/operations/">Staff App</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="/website/app.js?v=20260719a"></script>
+  </body>
+</html>

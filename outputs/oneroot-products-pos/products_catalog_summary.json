@@ -1,0 +1,42 @@
+{
+  "catalogVersion": "20260718a",
+  "inputPath": "/Users/philipboakye/Documents/OneRoot Expense Register/Products.xlsx",
+  "workbookOutputPath": "/Users/philipboakye/Documents/OneRoot Expense Register/outputs/oneroot-products-pos/OneRoot_Products_Cleaned.xlsx",
+  "dataFilePath": "/Users/philipboakye/Documents/OneRoot Expense Register/oneroot_product_catalog.js",
+  "countsByArea": {
+    "cold-store-groceries": 452,
+    "fresh-foods-drinks": 68,
+    "laundry-services": 233,
+    "mobile-money": 1,
+    "shared-operations": 6,
+    "water-equipment": 5
+  },
+  "countsByCategory": {
+    "Baby Care": 4,
+    "Drinks & Refreshments": 28,
+    "Frozen Foods & Proteins": 32,
+    "Groceries & Pantry": 327,
+    "Household & Cleaning": 18,
+    "Personal Care": 38,
+    "Sanitary & Tissue Care": 14,
+    "Stationery & School Supplies": 18,
+    "Frozen Treats": 3,
+    "Snacks & Confectionery": 38,
+    "Laundry - Bedding & Linen": 56,
+    "Laundry - Carpets & Rugs": 10,
+    "Laundry - Clothing": 48,
+    "Laundry - Curtains & Covers": 20,
+    "Laundry - Footwear & Bags": 7,
+    "Laundry - General Items": 84,
+    "Laundry - Upholstery": 4,
+    "Laundry - Vehicle Fabrics": 4,
+    "Value Added Services": 1,
+    "Gift Cards": 1,
+    "Service Charges": 5,
+    "Equipment & Construction Consumables": 1,
+    "Water Supply": 4
+  },
+  "removedDuplicateCount": 7,
+  "inspection": "{\"kind\":\"sheet\",\"id\":\"ws/hjuwhw\",\"name\":\"Products\",\"index\":0,\"range\":\"A1:M766\",\"address\":\"A1:M766\",\"tables\":1}\n{\"kind\":\"table\",\"sheet\":\"Products\",\"address\":\"A1:M766\",\"rows\":766,\"cols\":13,\"values\":[[\"SKU\",\"Product Name\",\"Business Area\",\"Normalized Category\",\"Original Category\",\"Sales Price (GHS)\",\"Cost Price (GHS)\",\"Quantity On Hand\",\"Quantity Set?\",\"Track Inventory\",\"Item Type\",\"Notes\"],[\"COLSTOGRO-KO-KO-BA-0398\",\"Ko.Ko Baby Diapers\",\"OneRoot Cold Store & Groceries\",\"Baby Care\",\"Oral Care & Sanitary Products\",2.5,1.8,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Oral Care & Sanitary Products. Stock item for POS and inventory.\"],[\"COLSTOGRO-SOFT-CAR-0654\",\"Soft Care Wet Wipes Big\",\"OneRoot Cold Store & Groceries\",\"Baby Care\",\"Oral Care & Sanitary Products\",25,20,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Oral Care & Sanitary Products. Stock item for POS and inventory.\"],[\"COLSTOGRO-SOFT-CAR-0655\",\"Soft Care Wet Wipes Small\",\"OneRoot Cold Store & Groceries\",\"Baby Care\",\"Oral Care & Sanitary Products\",15,10,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Oral Care & Sanitary Products. Stock item for POS and inventory.\"],[\"COLSTOGRO-SOFTCARE-0656\",\"Softcare Baby Diaper Medium\",\"OneRoot Cold Store & Groceries\",\"Baby Care\",\"Oral Care & Sanitary Products\",3,1.8,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Oral Care & Sanitary Products. Stock item for POS and inventory.\"],[\"COLSTOGRO-POWER-HO-0565\",\"Power Horse\",\"OneRoot Cold Store & Groceries\",\"Drinks & Refreshments\",\"Oral Care & Sanitary Products\",25,20,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Oral Care & Sanitary Products. Stock item for POS and inventory.\"],[\"COLSTOGRO-ABENA-BE-0032\",\"Abena Beef Pate\",\"OneRoot Cold Store & Groceries\",\"Frozen Foods & Proteins\",\"Beverages & Food Items\",25,20,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Beverages & Food Items. Stock item for POS and inventory.\"],[\"COLSTOGRO-BEEF-TRI-0084\",\"Beef Tripe(per half kg)\",\"OneRoot Cold Store & Groceries\",\"Frozen Foods & Proteins\",\"Cold Store\",22.5,0,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Cold Store. Stock item for POS and inventory.\"],[\"COLSTOGRO-BEEF-TRI-0085\",\"Beef Tripe(per kg)\",\"OneRoot Cold Store & Groceries\",\"Frozen Foods & Proteins\",\"Cold Store\",45,35,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Cold Store. Stock item for POS and inventory.\"],[\"COLSTOGRO-BROILER--0125\",\"Broiler Thigh - Brasil(per half kg)\",\"OneRoot Cold Store & Groceries\",\"Frozen Foods & Proteins\",\"Cold Store\",19,14,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Cold Store. Stock item for POS and inventory.\"],[\"COLSTOGRO-BROILER--0126\",\"Broiler Thigh - Brasil(per kg)\",\"OneRoot Cold Store & Groceries\",\"Frozen Foods & Proteins\",\"Cold Store\",38,29.8,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Cold Store. Stock item for POS and inventory.\"],[\"COLSTOGRO-CHICKEN--0158\",\"Chicken Drumstick\",\"OneRoot Cold Store & Groceries\",\"Frozen Foods & Proteins\",\"Cold Store\",40,32,0,\"Yes\",\"Yes\",\"Stock Item\",\"Source category: Cold Store. Stock item for POS and inventory.\"]],\"valuesTruncated\":true,\"valuesPreviewRows\":12,\"valuesPreviewCols\":12,\"valuesPreviewAddress\":\"A1:L12\"}\n{\"kind\":\"sheet\",\"id\":\"ws/a1eijj\",\"name\":\"Summary\",\"index\":1,\"range\":\"A1:E30\",\"address\":\"A1:E30\",\"tables\":1}\n{\"kind\":\"table\",\"sheet\":\"Summary\",\"address\":\"A1:E30\",\"rows\":30,\"cols\":5,\"values\":[[\"Metric\",\"Value\",null,null,null],[\"Catalog Version\",\"20260718a\",null,null,null],[\"Total POS / Inventory Items\",765,null,null,null],[\"Removed Duplicate Rows\",7,null,null,null],[\"Source Workbook Rows\",772,null,null,null],[null,null,null,null,null],[\"Business Area\",\"Items\",null,\"Category\",\"Items\"],[\"OneRoot Cold Store & Groceries\",452,null,\"Baby Care\",4],[\"OneRoot Fresh Foods & Drinks\",68,null,\"Drinks & Refreshments\",28],[\"OneRoot Laundry Services\",233,null,\"Frozen Foods & Proteins\",32],[\"OneRoot Mobile Money Services\",1,null,\"Groceries & Pantry\",327],[\"OneRoot Shared Operations\",6,null,\"Household & Cleaning\",18],[\"OneRoot Water & Equipment Rentals\",5,null,\"Personal Care\",38],[null,null,null,\"Sanitary & Tissue Care\",14],[null,null,null,\"Stationery & School Supplies\",18],[null,null,null,\"Frozen Treats\",3],[null,null,null,\"Snacks & Confectionery\",38],[null,null,null,\"Laundry - Bedding & Linen\",56],[null,null,null,\"Laundry - Carpets & Rugs\",10],[null,null,null,\"Laundry - Clothing\",48],[null,null,null,\"Laundry - Curtains & Covers\",20],[null,null,null,\"Laundry - Footwear & Bags\",7],[null,null,null,\"Laundry - General Items\",84],[null,null,null,\"Laundry - Upholstery\",4],[null,null,null,\"Laundry - Vehicle Fabrics\",4],[null,null,null,\"Value Added Services\",1],[null,null,null,\"Gift Cards\",1],[null,null,null,\"Service Charges\",5],[null,null,null,\"Equipment & Construction Consumables\",1],[null,null,null,\"Water Supply\",4]]}",
+  "formulaErrors": "{\"kind\":\"notice\",\"message\":\"Cell search matched 0 entries.\"}"
+}

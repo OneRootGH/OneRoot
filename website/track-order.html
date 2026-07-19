@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#143a2b" />
+    <title>Track Your Order | OneRoot.shop</title>
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260719a" />
+  </head>
+  <body class="tracking-page">
+    <div class="shop-shell">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
+          <span>
+            <strong>OneRoot.shop</strong>
+            <small>Order Tracking</small>
+          </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="/">Shop</a>
+          <a href="/track-order.html">Track Order</a>
+          <a href="/operations/">Staff App</a>
+        </nav>
+      </header>
+
+      <main class="tracking-main">
+        <section class="tracking-card">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Order Follow-Up</p>
+              <h1>Track your OneRoot order</h1>
+            </div>
+            <p class="section-note">
+              Enter the order number and the same phone number used when the
+              order was placed.
+            </p>
+          </div>
+
+          <form id="trackingForm" class="checkout-form" novalidate>
+            <label>
+              <span>Order Number</span>
+              <input id="trackingOrderNumber" type="text" placeholder="ORO-20260719-AB12" required />
+            </label>
+            <label>
+              <span>Phone Number</span>
+              <input id="trackingPhoneNumber" type="tel" placeholder="0547038092" required />
+            </label>
+            <button id="trackOrderBtn" class="button button-primary button-wide" type="submit">
+              Check Order Status
+            </button>
+          </form>
+
+          <div id="trackingMessage" class="checkout-message hidden"></div>
+          <div id="trackingResult" class="tracking-result hidden"></div>
+        </section>
+      </main>
+    </div>
+
+    <script src="/website/app.js?v=20260719a"></script>
+  </body>
+</html>

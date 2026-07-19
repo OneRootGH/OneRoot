@@ -1,0 +1,17 @@
+{
+  "name": "OneRoot Operations App",
+  "short_name": "OneRoot",
+  "description": "Offline-ready operations app for OneRoot expenses, daily sales, apartments, and petty cash.",
+  "start_url": "./index.html#overview",
+  "display": "standalone",
+  "background_color": "#f7f2ea",
+  "theme_color": "#214131",
+  "icons": [
+    {
+      "src": "./icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

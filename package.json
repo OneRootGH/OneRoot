@@ -1,0 +1,10 @@
+{
+  "name": "oneroot-shop-and-operations",
+  "private": true,
+  "version": "1.0.0",
+  "description": "OneRoot public storefront and operations app server",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  }
+}

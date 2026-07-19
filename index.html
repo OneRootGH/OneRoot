@@ -1,0 +1,1959 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#214131" />
+    <meta http-equiv="Cache-Control" content="no-store, max-age=0" />
+    <meta http-equiv="Pragma" content="no-cache" />
+    <meta http-equiv="Expires" content="0" />
+    <title>OneRoot Operations App</title>
+    <link rel="manifest" href="./manifest.webmanifest?v=20260719d" />
+    <link rel="icon" href="./icon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="./styles.css?v=20260719d" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="app-sidebar">
+        <div class="brand-block">
+          <p class="brand-kicker">OneRoot Essentials</p>
+          <h1>Operations App</h1>
+          <p class="brand-text">
+            Manage expenses, sales, laundry, equipment rentals, apartments,
+            deposits, petty cash, cashbooks, bankbooks, ledgers, mobile
+            money, assets, planning, reminders, and messaging in one
+            offline-ready workspace.
+          </p>
+        </div>
+
+        <nav class="app-nav" aria-label="Primary">
+          <div class="nav-quick-grid">
+            <button class="nav-link" data-view-link="overview" type="button">
+              Dashboard
+            </button>
+            <button class="nav-link" data-view-link="kpi" type="button">
+              KPI Dashboard
+            </button>
+            <button class="nav-link" data-view-link="reports" type="button">
+              Reports
+            </button>
+          </div>
+
+          <details class="nav-group" data-nav-group="control-center">
+            <summary class="nav-group-summary">
+              <span class="nav-group-title">Control Center</span>
+              <span class="nav-group-meta">Search, reminders and messages</span>
+            </summary>
+            <div class="nav-submenu">
+              <button class="nav-link" data-view-link="search" type="button">
+                Global Search
+              </button>
+              <button class="nav-link" data-view-link="reminders" type="button">
+                Reminder Center
+              </button>
+              <button class="nav-link" data-view-link="messages" type="button">
+                WhatsApp / SMS
+              </button>
+            </div>
+          </details>
+
+          <details class="nav-group" data-nav-group="sales-stock">
+            <summary class="nav-group-summary">
+              <span class="nav-group-title">Sales & Stock</span>
+              <span class="nav-group-meta">Daily sales, POS and inventory</span>
+            </summary>
+            <div class="nav-submenu">
+              <button class="nav-link" data-view-link="sales" type="button">
+                Daily Sales
+              </button>
+              <button class="nav-link" data-view-link="pos" type="button">
+                POS
+              </button>
+              <button class="nav-link" data-view-link="inventory" type="button">
+                Inventory
+              </button>
+              <button class="nav-link" data-view-link="online-orders" type="button">
+                Online Orders
+              </button>
+            </div>
+          </details>
+
+          <details class="nav-group" data-nav-group="apartments">
+            <summary class="nav-group-summary">
+              <span class="nav-group-title">Apartments & Tenants</span>
+              <span class="nav-group-meta">Suites, rent and tenant charges</span>
+            </summary>
+            <div class="nav-submenu">
+              <button class="nav-link" data-view-link="apartments" type="button">
+                Apartments
+              </button>
+              <button class="nav-link" data-view-link="deposits" type="button">
+                Deposits & Charges
+              </button>
+            </div>
+          </details>
+
+          <details class="nav-group" data-nav-group="finance-cash">
+            <summary class="nav-group-summary">
+              <span class="nav-group-title">Finance & Cash</span>
+              <span class="nav-group-meta">Spend, cash, payroll and suppliers</span>
+            </summary>
+            <div class="nav-submenu">
+              <button class="nav-link" data-view-link="expenses" type="button">
+                Expenses
+              </button>
+              <button class="nav-link" data-view-link="petty-cash" type="button">
+                Petty Cash
+              </button>
+              <button class="nav-link" data-view-link="cashbook" type="button">
+                Cashbook / Bankbook
+              </button>
+              <button class="nav-link" data-view-link="treasury" type="button">
+                Treasury
+              </button>
+              <button class="nav-link" data-view-link="mobile-money" type="button">
+                Mobile Money
+              </button>
+              <button class="nav-link" data-view-link="ledgers" type="button">
+                Ledgers
+              </button>
+              <button class="nav-link" data-view-link="procurement" type="button">
+                Procurement
+              </button>
+              <button class="nav-link" data-view-link="salary" type="button">
+                Salary
+              </button>
+              <button class="nav-link" data-view-link="suppliers" type="button">
+                Suppliers
+              </button>
+            </div>
+          </details>
+
+          <details class="nav-group" data-nav-group="service-operations">
+            <summary class="nav-group-summary">
+              <span class="nav-group-title">Service Operations</span>
+              <span class="nav-group-meta">Laundry, rentals, assets and planning</span>
+            </summary>
+            <div class="nav-submenu">
+              <button class="nav-link" data-view-link="laundry" type="button">
+                Laundry Tickets
+              </button>
+              <button class="nav-link" data-view-link="equipment-rentals" type="button">
+                Equipment Rentals
+              </button>
+              <button class="nav-link" data-view-link="assets" type="button">
+                Assets
+              </button>
+              <button class="nav-link" data-view-link="maintenance" type="button">
+                Maintenance
+              </button>
+              <button class="nav-link" data-view-link="forecast" type="button">
+                Forecast
+              </button>
+              <button class="nav-link" data-view-link="recurring" type="button">
+                Recurring
+              </button>
+            </div>
+          </details>
+
+          <details class="nav-group" data-nav-group="workspace-tools">
+            <summary class="nav-group-summary">
+              <span class="nav-group-title">Workspace Tools</span>
+              <span class="nav-group-meta">Access, upload and backup tools</span>
+            </summary>
+            <div class="nav-submenu">
+              <button class="nav-link" data-view-link="access" type="button">
+                Access
+              </button>
+              <button class="nav-link" data-view-link="audit" type="button">
+                Audit Trail
+              </button>
+              <button class="nav-link" data-view-link="data-hub" type="button">
+                Data Hub
+              </button>
+            </div>
+          </details>
+        </nav>
+
+        <section class="sidebar-card">
+          <p class="sidebar-label">Workbook</p>
+          <a
+            id="downloadExcelLink"
+            class="button button-secondary button-link"
+            href="./outputs/oneroot-essentials-register/OneRoot_Essentials_Operations_Register.xlsx?v=20260712b"
+            download
+          >
+            Download Uploadable Excel Workbook
+          </a>
+          <p class="muted-text">
+            Use the workbook when you want dropdown-driven entry for upload or
+            staff handover.
+          </p>
+        </section>
+
+        <section class="sidebar-card">
+          <label class="currency-picker" for="currencySelect">
+            <span>Display currency</span>
+            <select id="currencySelect" name="currencySelect"></select>
+          </label>
+        </section>
+      </aside>
+
+      <div class="app-main">
+        <header class="topbar section-card">
+          <div>
+            <p id="currentViewEyebrow" class="eyebrow">Workspace</p>
+            <h2 id="currentViewTitle">Dashboard</h2>
+            <p id="currentViewSummary" class="muted-text">
+              A live operating dashboard across the full OneRoot business ecosystem.
+            </p>
+          </div>
+
+          <div class="topbar-actions">
+            <button id="workspaceAuthBtn" class="button button-ghost" type="button">
+              Access Setup
+            </button>
+            <button id="exportActiveWorkbookBtn" class="button button-secondary" type="button">
+              Export Full Workbook
+            </button>
+            <button id="printReportBtn" class="button button-ghost" type="button">
+              Print Active View
+            </button>
+          </div>
+        </header>
+
+        <main class="view-stage">
+          <section class="view-panel" data-view-panel="overview">
+            <section class="section-card hero-card">
+              <div class="hero-copy">
+                <p class="eyebrow">Business Snapshot</p>
+                <h3>Keep the essentials ecosystem moving every day.</h3>
+                <p class="hero-text">
+                  OneRoot customers cross between water, groceries, laundry,
+                  mobile money, accommodation, and quick-refreshment services.
+                  This app keeps the operating picture together so spending,
+                  cash, rent, and sales do not drift apart.
+                </p>
+              </div>
+
+              <div class="hero-actions">
+                <button class="button button-primary" data-go-view="expenses" type="button">
+                  Record Expense
+                </button>
+                <button class="button button-secondary" data-go-view="sales" type="button">
+                  Record Daily Sales
+                </button>
+                <button class="button button-secondary" data-go-view="petty-cash" type="button">
+                  Manage Petty Cash
+                </button>
+                <button class="button button-ghost" data-go-view="data-hub" type="button">
+                  Excel & Backup Center
+                </button>
+              </div>
+            </section>
+
+            <section class="dashboard-grid">
+              <article class="section-card stat-card stat-card-feature">
+                <span>This Month's Sales</span>
+                <strong id="overviewSalesValue">0.00</strong>
+                <p id="overviewMonthLabel" class="muted-text">Current month</p>
+              </article>
+
+              <article class="section-card stat-card">
+                <span>This Month's Expenses</span>
+                <strong id="overviewExpensesValue">0.00</strong>
+                <p class="muted-text">Direct operating spend</p>
+              </article>
+
+              <article class="section-card stat-card">
+                <span>Petty Cash Balance</span>
+                <strong id="overviewPettyValue">0.00</strong>
+                <p class="muted-text">Expected cash on hand</p>
+              </article>
+
+              <article class="section-card stat-card">
+                <span>Apartment Balance Due</span>
+                <strong id="overviewOutstandingValue">0.00</strong>
+                <p class="muted-text">Rent, bills, arrears, and late fees</p>
+              </article>
+            </section>
+
+            <section class="two-column-grid">
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Operating Narrative</p>
+                    <h3>What Needs Attention</h3>
+                  </div>
+                </div>
+                <p id="overviewNarrative" class="body-copy">
+                  No transactions yet. Start with the area that moves first in
+                  your day.
+                </p>
+                <div id="overviewControlGrid" class="module-grid compact-module-grid"></div>
+                <div id="overviewModuleGrid" class="module-grid"></div>
+              </article>
+
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Business Areas</p>
+                    <h3>Area Performance This Month</h3>
+                  </div>
+                </div>
+                <div id="overviewAreaPerformanceGrid" class="module-grid"></div>
+              </article>
+            </section>
+
+            <section class="two-column-grid">
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Profit Monitor</p>
+                    <h3>Captured Revenue, Spend & Margin</h3>
+                  </div>
+                </div>
+                <div id="overviewProfitGrid" class="module-grid compact-module-grid"></div>
+              </article>
+
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Workspace Watch</p>
+                    <h3>Priority Alerts</h3>
+                  </div>
+                </div>
+                <div id="overviewAlertList" class="activity-list"></div>
+              </article>
+            </section>
+
+            <section class="section-card">
+              <div class="section-heading compact">
+                <div>
+                  <p class="kicker">Recent Activity</p>
+                  <h3>Latest Updates</h3>
+                </div>
+              </div>
+              <div id="recentActivityList" class="activity-list"></div>
+            </section>
+          </section>
+
+          <section class="view-panel" data-view-panel="reports">
+            <div id="reportsViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="kpi">
+            <div id="kpiViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="search">
+            <div id="searchViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="reminders">
+            <div id="remindersViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="messages">
+            <div id="messagesViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="ledgers">
+            <div id="ledgersViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="expenses">
+            <section class="page-grid">
+              <section class="section-card form-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="kicker">Record Spending</p>
+                    <h3 id="formHeading">Add Expense</h3>
+                  </div>
+
+                  <button id="resetFormBtn" class="button button-ghost" type="button">
+                    Clear Form
+                  </button>
+                </div>
+
+                <form id="expenseForm" novalidate>
+                  <div class="form-grid">
+                    <label>
+                      <span>Date</span>
+                      <input id="expenseDate" name="expenseDate" type="date" required />
+                    </label>
+
+                    <label>
+                      <span>Business Area</span>
+                      <select id="businessArea" name="businessArea" required>
+                        <option value="">Choose business area</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Vendor / Payee</span>
+                      <input
+                        id="vendor"
+                        name="vendor"
+                        type="text"
+                        placeholder="Who was paid?"
+                        required
+                      />
+                    </label>
+
+                    <label>
+                      <span>Expense Type</span>
+                      <select id="category" name="category" required>
+                        <option value="">Choose expense type</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Payment Method</span>
+                      <select id="paymentMethod" name="paymentMethod" required>
+                        <option value="">Choose payment method</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Receipt Status</span>
+                      <select id="receiptStatus" name="receiptStatus">
+                        <option value="Uploaded">Uploaded</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Not Required">Not Required</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Amount</span>
+                      <input
+                        id="amount"
+                        name="amount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        required
+                      />
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Description</span>
+                      <input
+                        id="description"
+                        name="description"
+                        type="text"
+                        placeholder="What was purchased?"
+                      />
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Notes</span>
+                      <textarea
+                        id="notes"
+                        name="notes"
+                        rows="3"
+                        placeholder="Approval, reimbursement, audit, or context notes"
+                      ></textarea>
+                    </label>
+                  </div>
+
+                  <div class="form-actions">
+                    <button id="submitExpenseBtn" class="button button-primary" type="submit">
+                      Save Expense
+                    </button>
+                    <button id="cancelEditBtn" class="button button-secondary hidden" type="button">
+                      Cancel Edit
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <aside class="sidebar-column">
+                <section class="section-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="kicker">Expense Snapshot</p>
+                      <h3>Current View</h3>
+                    </div>
+                  </div>
+
+                  <div class="stat-grid">
+                    <article class="stat-card">
+                      <span>Total Spend</span>
+                      <strong id="totalSpendValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Average Expense</span>
+                      <strong id="averageExpenseValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Receipt Coverage</span>
+                      <strong id="receiptCoverageValue">0%</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Entries In View</span>
+                      <strong id="entriesInViewValue">0</strong>
+                    </article>
+                  </div>
+
+                  <div class="summary-note">
+                    <span id="resultsCountText">No expenses recorded yet.</span>
+                    <span id="lastActivityText">Start by saving your first expense.</span>
+                  </div>
+                </section>
+
+                <section class="section-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="kicker">Budget Planner</p>
+                      <h3>Monthly Controls</h3>
+                    </div>
+                  </div>
+
+                  <form id="budgetForm" class="budget-planner-form" novalidate>
+                    <div class="budget-form-grid">
+                      <label>
+                        <span>Budget Month</span>
+                        <input id="budgetMonth" name="budgetMonth" type="month" required />
+                      </label>
+
+                      <label>
+                        <span>Business Area</span>
+                        <select id="budgetArea" name="budgetArea" required>
+                          <option value="">Choose business area</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        <span>Expense Type</span>
+                        <select id="budgetCategory" name="budgetCategory" required>
+                          <option value="">Choose expense type</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        <span>Budget Amount</span>
+                        <input
+                          id="budgetAmount"
+                          name="budgetAmount"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          required
+                        />
+                      </label>
+                    </div>
+
+                    <div class="form-actions">
+                      <button id="saveBudgetBtn" class="button button-primary" type="submit">
+                        Save Budget
+                      </button>
+                    </div>
+                  </form>
+
+                  <div class="budget-overview">
+                    <article class="budget-summary-card">
+                      <span>Planned</span>
+                      <strong id="monthBudgetValue">0.00</strong>
+                    </article>
+
+                    <article class="budget-summary-card">
+                      <span>Actual (Budgeted)</span>
+                      <strong id="monthActualValue">0.00</strong>
+                    </article>
+
+                    <article class="budget-summary-card">
+                      <span>Variance</span>
+                      <strong id="monthVarianceValue">0.00</strong>
+                    </article>
+                  </div>
+
+                  <div class="budget-list-wrap">
+                    <p id="budgetListMeta" class="muted-text">
+                      Set budgets to compare plan against actual spend.
+                    </p>
+                    <div id="budgetList" class="budget-list"></div>
+                  </div>
+                </section>
+              </aside>
+            </section>
+
+            <section class="section-card">
+              <div class="section-heading">
+                <div>
+                  <p class="kicker">Filter Expenses</p>
+                  <h3>Expense Register Controls</h3>
+                </div>
+
+                <button id="clearExpenseFiltersBtn" class="button button-ghost" type="button">
+                  Clear Filters
+                </button>
+              </div>
+
+              <div class="filter-grid">
+                <label>
+                  <span>Search</span>
+                  <input
+                    id="expenseSearchFilter"
+                    name="expenseSearchFilter"
+                    type="search"
+                    placeholder="Vendor, area, type, description..."
+                  />
+                </label>
+
+                <label>
+                  <span>Month</span>
+                  <input id="expenseMonthFilter" name="expenseMonthFilter" type="month" />
+                </label>
+
+                <label>
+                  <span>Business Area</span>
+                  <select id="expenseAreaFilter" name="expenseAreaFilter">
+                    <option value="">All Areas</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Expense Type</span>
+                  <select id="expenseCategoryFilter" name="expenseCategoryFilter">
+                    <option value="">All Expense Types</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Payment Method</span>
+                  <select id="expensePaymentFilter" name="expensePaymentFilter">
+                    <option value="">All Methods</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Receipt Status</span>
+                  <select id="expenseReceiptFilter" name="expenseReceiptFilter">
+                    <option value="">Any Status</option>
+                    <option value="Uploaded">Uploaded</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Not Required">Not Required</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="two-column-grid">
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Spend Signals</p>
+                    <h3>Business Area Breakdown</h3>
+                  </div>
+                </div>
+                <p id="categoryBreakdownMeta" class="muted-text">No activity yet.</p>
+                <div id="categoryBreakdown" class="breakdown-list"></div>
+              </article>
+
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Review Points</p>
+                    <h3>Expense Pulse</h3>
+                  </div>
+                </div>
+
+                <div class="pulse-list">
+                  <article>
+                    <span>This Month</span>
+                    <strong id="thisMonthValue">0.00</strong>
+                  </article>
+
+                  <article>
+                    <span>Previous Month</span>
+                    <strong id="previousMonthValue">0.00</strong>
+                  </article>
+
+                  <article>
+                    <span>Largest Expense</span>
+                    <strong id="largestExpenseValue">None yet</strong>
+                  </article>
+
+                  <article>
+                    <span>Receipt Follow-up</span>
+                    <strong id="receiptFollowUpValue">0 pending</strong>
+                  </article>
+                </div>
+              </article>
+            </section>
+
+            <section class="section-card">
+              <div class="section-heading">
+                <div>
+                  <p class="kicker">Detailed Register</p>
+                  <h3>Expense Log</h3>
+                </div>
+
+                <p id="tableFootnote" class="muted-text">
+                  Export respects your current filters.
+                </p>
+              </div>
+
+              <div class="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date / Ref</th>
+                      <th>Business Area</th>
+                      <th>Vendor</th>
+                      <th>Expense Type</th>
+                      <th>Description</th>
+                      <th>Payment</th>
+                      <th>Receipt</th>
+                      <th>Amount</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="expenseTableBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section class="view-panel" data-view-panel="sales">
+            <section class="page-grid compact-page-grid">
+              <section class="section-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="kicker">Revenue Capture</p>
+                    <h3 id="salesFormHeading">Daily Sales Tracker</h3>
+                  </div>
+
+                  <p id="salesFootnote" class="muted-text">
+                    Record one total daily sales amount for each business area.
+                  </p>
+                </div>
+
+                <form id="salesForm" novalidate>
+                  <div class="mini-form-grid">
+                    <label>
+                      <span>Sales Date</span>
+                      <input id="salesDate" name="salesDate" type="date" required />
+                    </label>
+
+                    <label>
+                      <span>Business Area</span>
+                      <select id="salesArea" name="salesArea" required>
+                        <option value="">Choose business area</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Total Daily Sales</span>
+                      <input
+                        id="salesAmount"
+                        name="salesAmount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        required
+                      />
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Notes</span>
+                      <textarea
+                        id="salesNotes"
+                        name="salesNotes"
+                        rows="2"
+                        placeholder="Optional note about the day, promo, or event"
+                      ></textarea>
+                    </label>
+                  </div>
+
+                  <div class="form-actions">
+                    <button id="submitSalesBtn" class="button button-primary" type="submit">
+                      Save Daily Sales
+                    </button>
+                    <button id="resetSalesBtn" class="button button-ghost" type="button">
+                      Clear Form
+                    </button>
+                    <button id="cancelSalesEditBtn" class="button button-secondary hidden" type="button">
+                      Cancel Edit
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <aside class="sidebar-column">
+                <section class="section-card">
+                  <div class="mini-stat-grid">
+                    <article class="stat-card">
+                      <span>Total Sales In View</span>
+                      <strong id="totalSalesValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Sales Entries</span>
+                      <strong id="salesEntriesValue">0</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Average Daily Sales</span>
+                      <strong id="averageSalesValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Best Sales Day</span>
+                      <strong id="bestSalesDayValue">None yet</strong>
+                    </article>
+                  </div>
+                </section>
+              </aside>
+            </section>
+
+            <section class="section-card">
+              <div class="section-heading">
+                <div>
+                  <p class="kicker">Filter Sales</p>
+                  <h3>Daily Sales View</h3>
+                </div>
+
+                <button id="clearSalesFiltersBtn" class="button button-ghost" type="button">
+                  Clear Filters
+                </button>
+              </div>
+
+              <div class="filter-grid">
+                <label>
+                  <span>Search</span>
+                  <input
+                    id="salesSearchFilter"
+                    name="salesSearchFilter"
+                    type="search"
+                    placeholder="Business area or notes..."
+                  />
+                </label>
+
+                <label>
+                  <span>Month</span>
+                  <input id="salesMonthFilter" name="salesMonthFilter" type="month" />
+                </label>
+
+                <label>
+                  <span>Business Area</span>
+                  <select id="salesAreaFilter" name="salesAreaFilter">
+                    <option value="">All Areas</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="section-card">
+              <div class="table-wrap compact-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Business Area</th>
+                      <th>Source</th>
+                      <th>Total Sales</th>
+                      <th>Notes</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="salesTableBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section class="view-panel" data-view-panel="apartments">
+            <section class="page-grid compact-page-grid">
+              <section class="section-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="kicker">Property Management</p>
+                    <h3 id="rentalFormHeading">Apartment Rentals, Cycles & Bills</h3>
+                  </div>
+
+                  <p id="rentalFootnote" class="muted-text">
+                    Capture tenant profile, long-cycle rent, monthly bills, and due-date follow-up for each suite.
+                  </p>
+                </div>
+
+                <form id="rentalForm" novalidate>
+                  <div class="mini-form-grid rental-form-grid rental-extended-grid">
+                    <div class="wide-field form-section-title">Record Month & Occupancy</div>
+                    <label>
+                      <span>Billing Month</span>
+                      <input id="rentalMonth" name="rentalMonth" type="month" required />
+                    </label>
+
+                    <label>
+                      <span>Suite / Apartment</span>
+                      <select id="rentalSuite" name="rentalSuite" required>
+                        <option value="">Choose suite</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Occupancy Status</span>
+                      <select id="occupancyStatus" name="occupancyStatus" required>
+                        <option value="">Choose status</option>
+                      </select>
+                    </label>
+
+                    <div class="wide-field apartment-capture-panel">
+                      <label>
+                        <span>Monthly Capture Mode</span>
+                        <select id="rentalCaptureMode" name="rentalCaptureMode">
+                          <option value="retrospective">Retrospective: month already happened</option>
+                          <option value="prospective">Prospective: prepare upcoming month</option>
+                        </select>
+                      </label>
+                      <p id="captureModeSummaryText" class="muted-text">
+                        Retrospective mode is for entering actual rent, bills, and payments for a month that has already happened.
+                      </p>
+                    </div>
+
+                    <div class="wide-field form-section-title">Tenant Profile & Stay Period</div>
+
+                    <label>
+                      <span>Tenant / Occupant</span>
+                      <input
+                        id="tenantName"
+                        name="tenantName"
+                        type="text"
+                        placeholder="Tenant or occupant name"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Tenant Phone</span>
+                      <input
+                        id="tenantPhone"
+                        name="tenantPhone"
+                        type="tel"
+                        placeholder="Primary contact number"
+                      />
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Tenant Address</span>
+                      <textarea
+                        id="tenantAddress"
+                        name="tenantAddress"
+                        rows="2"
+                        placeholder="Residential or postal address for the tenancy agreement"
+                      ></textarea>
+                    </label>
+
+                    <label>
+                      <span>Emergency Contact</span>
+                      <input
+                        id="emergencyContact"
+                        name="emergencyContact"
+                        type="text"
+                        placeholder="Emergency contact name or phone"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Tenant ID / Reference</span>
+                      <input
+                        id="tenantIdRef"
+                        name="tenantIdRef"
+                        type="text"
+                        placeholder="National ID, passport, or internal ref"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Move-In Date</span>
+                      <input id="moveInDate" name="moveInDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Move-Out Date</span>
+                      <input id="moveOutDate" name="moveOutDate" type="date" />
+                    </label>
+
+                    <div class="wide-field form-section-title">Rent Cycle & Renewal Setup</div>
+
+                    <label>
+                      <span>Rent Cycle</span>
+                      <select id="rentCycleType" name="rentCycleType" required>
+                        <option value="">Choose rent cycle</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Cycle Months</span>
+                      <input
+                        id="rentCycleMonths"
+                        name="rentCycleMonths"
+                        type="number"
+                        min="1"
+                        step="1"
+                        placeholder="6, 12, or custom"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Cycle Amount</span>
+                      <input
+                        id="rentCycleAmount"
+                        name="rentCycleAmount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Rent Due This Record</span>
+                      <input id="rentDue" name="rentDue" type="number" min="0" step="0.01" placeholder="0.00" />
+                    </label>
+
+                    <label>
+                      <span>Rent Paid</span>
+                      <input id="rentPaid" name="rentPaid" type="number" min="0" step="0.01" placeholder="0.00" />
+                    </label>
+
+                    <label>
+                      <span>Rent Coverage Start</span>
+                      <input id="rentCoverageStartDate" name="rentCoverageStartDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Rent Coverage End</span>
+                      <input id="rentCoverageEndDate" name="rentCoverageEndDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Next Rent Due Date</span>
+                      <input id="nextRentDueDate" name="nextRentDueDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Renewal Date</span>
+                      <input id="renewalDate" name="renewalDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Rent Payment Date</span>
+                      <input id="rentPaymentDate" name="rentPaymentDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Rent Payment Method</span>
+                      <select id="rentPaymentMethod" name="rentPaymentMethod">
+                        <option value="">Choose payment method</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Rent Reference</span>
+                      <input
+                        id="rentPaymentReference"
+                        name="rentPaymentReference"
+                        type="text"
+                        placeholder="Receipt no., MoMo ref, bank ref"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Rent Received By</span>
+                      <input
+                        id="rentReceivedBy"
+                        name="rentReceivedBy"
+                        type="text"
+                        placeholder="Staff member who received payment"
+                      />
+                    </label>
+
+                    <div class="wide-field form-section-title">Monthly Bills & Custom Charges</div>
+
+                    <div class="wide-field apartment-bills-helper">
+                      <p id="monthlyBillsHelperText" class="muted-text">
+                        For a bills-only month, leave Rent Due This Record and Rent Paid at 0.00, then fill only the bills section below. Use Generate Monthly Bill Records on the right when you want the next month created from the latest suite profile.
+                      </p>
+                      <div class="apartment-bills-helper-row">
+                        <strong id="calculatedBillsDueValue">Current monthly bills: 0.00</strong>
+                        <button id="fillBillsPaidBtn" class="button button-ghost" type="button">
+                          Use Current Total as Bills Paid
+                        </button>
+                      </div>
+                    </div>
+
+                    <label>
+                      <span>Water Bill</span>
+                      <input id="waterBill" name="waterBill" type="number" min="0" step="0.01" placeholder="0.00" />
+                    </label>
+
+                    <label>
+                      <span>Toilet Bill</span>
+                      <input id="toiletBill" name="toiletBill" type="number" min="0" step="0.01" placeholder="0.00" />
+                    </label>
+
+                    <label>
+                      <span>Sweeping & Gutter Cleaning</span>
+                      <input id="sweepingBill" name="sweepingBill" type="number" min="0" step="0.01" placeholder="0.00" />
+                    </label>
+
+                    <label>
+                      <span>Waste Management</span>
+                      <input id="wasteBill" name="wasteBill" type="number" min="0" step="0.01" placeholder="0.00" />
+                    </label>
+
+                    <label>
+                      <span>Bill Due Date</span>
+                      <input id="billDueDate" name="billDueDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Total Bills Paid</span>
+                      <input
+                        id="billAmountPaid"
+                        name="billAmountPaid"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Bill Payment Date</span>
+                      <input id="billPaymentDate" name="billPaymentDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Bill Payment Method</span>
+                      <select id="billPaymentMethod" name="billPaymentMethod">
+                        <option value="">Choose payment method</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Bill Reference</span>
+                      <input
+                        id="billPaymentReference"
+                        name="billPaymentReference"
+                        type="text"
+                        placeholder="Bill payment reference"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Bill Received By</span>
+                      <input
+                        id="billReceivedBy"
+                        name="billReceivedBy"
+                        type="text"
+                        placeholder="Staff member who recorded bills"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Arrears Brought Forward</span>
+                      <input
+                        id="arrearsBroughtForward"
+                        name="arrearsBroughtForward"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </label>
+
+                    <label>
+                      <span>Late Fee / Penalty</span>
+                      <input
+                        id="lateFee"
+                        name="lateFee"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                      />
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Custom Bill Items</span>
+                      <textarea
+                        id="customBillItems"
+                        name="customBillItems"
+                        rows="3"
+                        placeholder="One per line, for example: Security contribution: 20"
+                      ></textarea>
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Notes</span>
+                      <textarea
+                        id="rentalNotes"
+                        name="rentalNotes"
+                        rows="3"
+                        placeholder="Payment note, renewal update, tenant issue, or occupancy comment"
+                      ></textarea>
+                    </label>
+                  </div>
+
+                  <p class="muted-text">
+                    New paid tenant captures will automatically download a tenancy agreement. For existing tenants, use
+                    the Agreement action from the rental table or portfolio card after payment details have been saved.
+                  </p>
+
+                  <div class="form-actions">
+                    <button id="submitRentalBtn" class="button button-primary" type="submit">
+                      Save Rental Record
+                    </button>
+                    <button id="resetRentalBtn" class="button button-ghost" type="button">
+                      Clear Form
+                    </button>
+                    <button id="cancelRentalEditBtn" class="button button-secondary hidden" type="button">
+                      Cancel Edit
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <aside class="sidebar-column">
+                <section class="section-card">
+                  <div class="mini-stat-grid">
+                    <article class="stat-card">
+                      <span>Occupied Suites</span>
+                      <strong id="occupiedSuitesValue">0</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Vacant / Available</span>
+                      <strong id="vacantSuitesValue">0</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Rent Due In View</span>
+                      <strong id="rentDueValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Rent Paid In View</span>
+                      <strong id="rentPaidValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Bills Due In View</span>
+                      <strong id="billsDueValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Bills Paid In View</span>
+                      <strong id="billsPaidValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Total Balance Due</span>
+                      <strong id="rentOutstandingValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Due Alerts</span>
+                      <strong id="rentalAlertsValue">0</strong>
+                    </article>
+                  </div>
+                </section>
+
+                <section class="section-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="kicker">Alerts & Renewals</p>
+                      <h3>Due Tracker</h3>
+                    </div>
+                  </div>
+
+                  <p id="apartmentAlertMeta" class="muted-text">
+                    Rent due, bill due, overdue, and renewal reminders will appear here.
+                  </p>
+                  <div id="apartmentAlertList" class="pulse-list"></div>
+                </section>
+
+                <section class="section-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="kicker">Monthly Controls</p>
+                      <h3>Bill Generation</h3>
+                    </div>
+                  </div>
+
+                  <div class="mini-form-grid">
+                    <label>
+                      <span>Generate Month</span>
+                      <input id="generateRentalMonth" name="generateRentalMonth" type="month" />
+                    </label>
+                  </div>
+
+                  <div class="form-actions">
+                    <button id="generateRentalMonthBtn" class="button button-secondary" type="button">
+                      Generate Monthly Bill Records
+                    </button>
+                    <button id="printApartmentReportBtn" class="button button-ghost" type="button">
+                      Print Apartment Report
+                    </button>
+                  </div>
+                </section>
+
+                <section class="section-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="kicker">Agreement Files</p>
+                      <h3>Ready Agreements</h3>
+                    </div>
+                  </div>
+
+                  <p id="agreementReadyMeta" class="muted-text">
+                    Prepared tenancy agreements will appear here so you can download them again if the browser blocks the automatic file download.
+                  </p>
+                  <div id="agreementReadyList" class="guide-list compact-guide-list"></div>
+                </section>
+              </aside>
+            </section>
+
+            <section class="section-card">
+              <div class="section-heading">
+                <div>
+                  <p class="kicker">Filter Apartments</p>
+                  <h3>Rental View</h3>
+                </div>
+
+                <button id="clearRentalFiltersBtn" class="button button-ghost" type="button">
+                  Clear Filters
+                </button>
+              </div>
+
+              <div class="filter-grid">
+                <label>
+                  <span>Search</span>
+                  <input
+                    id="rentalSearchFilter"
+                    name="rentalSearchFilter"
+                    type="search"
+                    placeholder="Suite, tenant, or note..."
+                  />
+                </label>
+
+                <label>
+                  <span>Month</span>
+                  <input id="rentalMonthFilter" name="rentalMonthFilter" type="month" />
+                </label>
+
+                <label>
+                  <span>Suite</span>
+                  <select id="rentalSuiteFilter" name="rentalSuiteFilter">
+                    <option value="">All Suites</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Occupancy</span>
+                  <select id="rentalStatusFilter" name="rentalStatusFilter">
+                    <option value="">Any Status</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Alert Type</span>
+                  <select id="rentalAlertFilter" name="rentalAlertFilter">
+                    <option value="">Any Alert</option>
+                    <option value="rent-due">Rent Due</option>
+                    <option value="bill-due">Bill Due</option>
+                    <option value="overdue">Overdue</option>
+                    <option value="renewal">Renewal Due</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="section-card">
+              <div class="table-wrap compact-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Month</th>
+                      <th>Suite</th>
+                      <th>Status</th>
+                      <th>Tenant & Cycle</th>
+                      <th>Rent</th>
+                      <th>Bills</th>
+                      <th>Due Dates & Alerts</th>
+                      <th>Balance</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="rentalTableBody"></tbody>
+                </table>
+              </div>
+            </section>
+
+            <section class="section-card">
+              <div class="section-heading">
+                <div>
+                  <p class="kicker">Tenant Accounts</p>
+                  <h3>Portfolio Snapshot</h3>
+                </div>
+              </div>
+
+              <div id="apartmentPortfolioList" class="module-grid"></div>
+            </section>
+          </section>
+
+          <section class="view-panel" data-view-panel="pos">
+            <div id="posViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="inventory">
+            <div id="inventoryViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="online-orders">
+            <div id="onlineOrdersViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="petty-cash">
+            <section class="page-grid compact-page-grid">
+              <section class="section-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="kicker">Cash Control</p>
+                    <h3 id="pettyCashFormHeading">Petty Cash Ledger</h3>
+                  </div>
+
+                  <p id="pettyCashFootnote" class="muted-text">
+                    Track float top-ups, petty cash spending, returns, and adjustments.
+                  </p>
+                </div>
+
+                <form id="pettyCashForm" novalidate>
+                  <div class="mini-form-grid rental-form-grid">
+                    <label>
+                      <span>Date</span>
+                      <input id="pettyCashDate" name="pettyCashDate" type="date" required />
+                    </label>
+
+                    <label>
+                      <span>Transaction Type</span>
+                      <select id="pettyCashType" name="pettyCashType" required>
+                        <option value="">Choose transaction type</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Business Area</span>
+                      <select id="pettyCashArea" name="pettyCashArea" required>
+                        <option value="">Choose business area</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Expense Type</span>
+                      <select id="pettyCashCategory" name="pettyCashCategory">
+                        <option value="">Choose expense type</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span id="pettyCashVendorLabel">Payee / Purpose</span>
+                      <input
+                        id="pettyCashVendor"
+                        name="pettyCashVendor"
+                        type="text"
+                        placeholder="Who received the cash or why?"
+                        required
+                      />
+                    </label>
+
+                    <label>
+                      <span>Amount</span>
+                      <input
+                        id="pettyCashAmount"
+                        name="pettyCashAmount"
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        placeholder="0.00"
+                        required
+                      />
+                    </label>
+
+                    <label>
+                      <span>Receipt Status</span>
+                      <select id="pettyCashReceiptStatus" name="pettyCashReceiptStatus">
+                        <option value="Uploaded">Uploaded</option>
+                        <option value="Pending">Pending</option>
+                        <option value="Not Required">Not Required</option>
+                      </select>
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Notes</span>
+                      <textarea
+                        id="pettyCashNotes"
+                        name="pettyCashNotes"
+                        rows="2"
+                        placeholder="Reason, reference, reconciliation note, or staff context"
+                      ></textarea>
+                    </label>
+                  </div>
+
+                  <p id="pettyCashContextNote" class="muted-text">
+                    Expense-paid entries are also synced into the expense register using payment method Petty Cash.
+                  </p>
+
+                  <div class="form-actions">
+                    <button id="submitPettyCashBtn" class="button button-primary" type="submit">
+                      Save Petty Cash Entry
+                    </button>
+                    <button id="resetPettyCashBtn" class="button button-ghost" type="button">
+                      Clear Form
+                    </button>
+                    <button id="cancelPettyCashEditBtn" class="button button-secondary hidden" type="button">
+                      Cancel Edit
+                    </button>
+                  </div>
+                </form>
+              </section>
+
+              <aside class="sidebar-column">
+                <section class="section-card">
+                  <div class="mini-stat-grid">
+                    <article class="stat-card">
+                      <span>Cash Balance</span>
+                      <strong id="pettyCashBalanceValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Total Inflows</span>
+                      <strong id="pettyCashInflowValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Total Outflows</span>
+                      <strong id="pettyCashOutflowValue">0.00</strong>
+                    </article>
+
+                    <article class="stat-card">
+                      <span>Pending Receipts</span>
+                      <strong id="pettyCashPendingValue">0</strong>
+                    </article>
+
+                    <article class="stat-card stat-card-wide">
+                      <span>Ledger Entries In View</span>
+                      <strong id="pettyCashEntriesValue">0</strong>
+                    </article>
+                  </div>
+                </section>
+
+                <section class="section-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="kicker">Petty Cash Budget</p>
+                      <h3>Monthly Allocation</h3>
+                    </div>
+                  </div>
+
+                  <form id="pettyCashBudgetForm" class="budget-planner-form" novalidate>
+                    <div class="budget-form-grid">
+                      <label>
+                        <span>Budget Month</span>
+                        <input id="pettyCashBudgetMonth" name="pettyCashBudgetMonth" type="month" required />
+                      </label>
+
+                      <label>
+                        <span>Business Area</span>
+                        <select id="pettyCashBudgetArea" name="pettyCashBudgetArea" required>
+                          <option value="">Choose business area</option>
+                        </select>
+                      </label>
+
+                      <label>
+                        <span>Budget Amount</span>
+                        <input
+                          id="pettyCashBudgetAmount"
+                          name="pettyCashBudgetAmount"
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          placeholder="0.00"
+                          required
+                        />
+                      </label>
+
+                      <label class="wide-field">
+                        <span>Notes</span>
+                        <textarea
+                          id="pettyCashBudgetNotes"
+                          name="pettyCashBudgetNotes"
+                          rows="2"
+                          placeholder="Optional note for this petty cash allocation"
+                        ></textarea>
+                      </label>
+                    </div>
+
+                    <div class="form-actions">
+                      <button id="savePettyCashBudgetBtn" class="button button-primary" type="submit">
+                        Save Petty Cash Budget
+                      </button>
+                    </div>
+                  </form>
+
+                  <div class="budget-overview">
+                    <article class="budget-summary-card">
+                      <span>Budgeted</span>
+                      <strong id="pettyCashBudgetedValue">0.00</strong>
+                    </article>
+
+                    <article class="budget-summary-card">
+                      <span>Expense Paid</span>
+                      <strong id="pettyCashBudgetUsedValue">0.00</strong>
+                    </article>
+
+                    <article class="budget-summary-card">
+                      <span>Remaining</span>
+                      <strong id="pettyCashBudgetRemainingValue">0.00</strong>
+                    </article>
+                  </div>
+
+                  <div class="budget-list-wrap">
+                    <p id="pettyCashBudgetMeta" class="muted-text">
+                      Set a monthly petty cash allocation by business area.
+                    </p>
+                    <div id="pettyCashBudgetList" class="budget-list"></div>
+                  </div>
+                </section>
+              </aside>
+            </section>
+
+            <section class="section-card">
+              <div class="section-heading">
+                <div>
+                  <p class="kicker">Filter Petty Cash</p>
+                  <h3>Ledger View</h3>
+                </div>
+
+                <button id="clearPettyCashFiltersBtn" class="button button-ghost" type="button">
+                  Clear Filters
+                </button>
+              </div>
+
+              <div class="filter-grid">
+                <label>
+                  <span>Search</span>
+                  <input
+                    id="pettyCashSearchFilter"
+                    name="pettyCashSearchFilter"
+                    type="search"
+                    placeholder="Purpose, payee, area, or notes..."
+                  />
+                </label>
+
+                <label>
+                  <span>Month</span>
+                  <input id="pettyCashMonthFilter" name="pettyCashMonthFilter" type="month" />
+                </label>
+
+                <label>
+                  <span>Transaction Type</span>
+                  <select id="pettyCashTypeFilter" name="pettyCashTypeFilter">
+                    <option value="">All Types</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Business Area</span>
+                  <select id="pettyCashAreaFilter" name="pettyCashAreaFilter">
+                    <option value="">All Areas</option>
+                  </select>
+                </label>
+
+                <label>
+                  <span>Receipt Status</span>
+                  <select id="pettyCashReceiptFilter" name="pettyCashReceiptFilter">
+                    <option value="">Any Status</option>
+                    <option value="Uploaded">Uploaded</option>
+                    <option value="Pending">Pending</option>
+                    <option value="Not Required">Not Required</option>
+                  </select>
+                </label>
+              </div>
+            </section>
+
+            <section class="section-card">
+              <div class="table-wrap compact-table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Date</th>
+                      <th>Type</th>
+                      <th>Business Area</th>
+                      <th>Expense Type</th>
+                      <th>Payee / Purpose</th>
+                      <th>Receipt</th>
+                      <th>Cash Effect</th>
+                      <th>Notes</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody id="pettyCashTableBody"></tbody>
+                </table>
+              </div>
+            </section>
+          </section>
+
+          <section class="view-panel" data-view-panel="salary">
+            <div id="salaryViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="procurement">
+            <div id="procurementViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="laundry">
+            <div id="laundryViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="equipment-rentals">
+            <div id="equipmentRentalsViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="deposits">
+            <div id="depositsViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="cashbook">
+            <div id="cashbookViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="treasury">
+            <div id="treasuryViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="mobile-money">
+            <div id="mobileMoneyViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="suppliers">
+            <div id="suppliersViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="assets">
+            <div id="assetsViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="forecast">
+            <div id="forecastViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="recurring">
+            <div id="recurringViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="maintenance">
+            <div id="maintenanceViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="access">
+            <div id="accessViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="audit">
+            <div id="auditViewRoot"></div>
+          </section>
+
+          <section class="view-panel" data-view-panel="data-hub">
+            <section class="page-grid compact-page-grid">
+              <section class="section-card">
+                <div class="section-heading">
+                  <div>
+                    <p class="kicker">Excel & Backups</p>
+                    <h3>Workbook Center</h3>
+                  </div>
+                </div>
+
+                <p class="body-copy">
+                  Use this area whenever you need the uploadable Excel workbook,
+                  a live workbook export from the current app data, expense CSV
+                  tools, or a full backup of the app records stored on this
+                  device.
+                </p>
+
+                <div class="action-grid">
+                  <a
+                    id="downloadWorkbookHubLink"
+                    class="button button-primary button-link"
+                    href="./outputs/oneroot-essentials-register/OneRoot_Essentials_Operations_Register.xlsx?v=20260712b"
+                    download
+                  >
+                    Download Uploadable Excel Workbook
+                  </a>
+                  <button id="exportWorkbookBtn" class="button button-primary" type="button">
+                    Export Live Excel Workbook
+                  </button>
+                  <button id="importWorkbookBtn" class="button button-secondary" type="button">
+                    Import Excel Workbook
+                  </button>
+                  <button id="exportBackupBtn" class="button button-secondary" type="button">
+                    Export Full App Backup
+                  </button>
+                  <button id="importBackupBtn" class="button button-ghost" type="button">
+                    Import Full App Backup
+                  </button>
+                  <button id="importCsvBtn" class="button button-secondary" type="button">
+                    Import Expense CSV
+                  </button>
+                  <button id="downloadTemplateBtn" class="button button-ghost" type="button">
+                    Download Expense CSV Template
+                  </button>
+                  <button id="exportCsvBtn" class="button button-secondary" type="button">
+                    Export Filtered Expenses (CSV)
+                  </button>
+                  <a
+                    class="button button-secondary button-link"
+                    href="./outputs/oneroot-products-pos/OneRoot_Products_Cleaned.xlsx?v=20260718a"
+                    download
+                  >
+                    Download Cleaned POS Catalog
+                  </a>
+                  <button id="loadSampleBtn" class="button button-secondary" type="button">
+                    Load Demo Data
+                  </button>
+                  <button id="installAppBtn" class="button button-ghost" type="button">
+                    Install App
+                  </button>
+                </div>
+
+                <p id="workbookStatusText" class="muted-text">
+                  The workbook includes ready-to-fill sheets with dropdown menus
+                  for business area, expense type, apartment suite, petty cash
+                  type, salary type, payment method, and receipt status.
+                </p>
+                <p id="workbookImportHintText" class="muted-text">
+                  Import a filled workbook to merge `Expenses`,
+                  `Budget_Planner`, `Daily_Sales`, `Apartments`, `Petty_Cash`,
+                  `Petty_Cash_Budget`, and `Salary_Register` back into the app
+                  without replacing records already stored here.
+                </p>
+                <p id="backupStatusText" class="muted-text">
+                  Export a backup before moving to another device or browser so
+                  your records can be restored later.
+                </p>
+
+                <div class="sheet-pill-list" aria-label="Workbook sheets">
+                  <span class="sheet-pill">Summary</span>
+                  <span class="sheet-pill">Expenses</span>
+                  <span class="sheet-pill">Budget_Planner</span>
+                  <span class="sheet-pill">Daily_Sales</span>
+                  <span class="sheet-pill">Apartments</span>
+                  <span class="sheet-pill">Petty_Cash</span>
+                  <span class="sheet-pill">Petty_Cash_Budget</span>
+                  <span class="sheet-pill">Salary_Register</span>
+                  <span class="sheet-pill">Supplier_Ledger</span>
+                  <span class="sheet-pill">Recurring_Controls</span>
+                  <span class="sheet-pill">Maintenance_Log</span>
+                  <span class="sheet-pill">Lists</span>
+                </div>
+
+                <p id="installHintText" class="muted-text">
+                  In supported browsers, you can install this workspace like an app for faster access.
+                </p>
+              </section>
+
+              <aside class="sidebar-column">
+                <section class="section-card">
+                  <div class="section-heading compact">
+                    <div>
+                      <p class="kicker">Workbook Support</p>
+                      <h3>Where To Find It</h3>
+                    </div>
+                  </div>
+
+                  <p class="body-copy">
+                    The workbook is now available in two obvious places: the
+                    left sidebar and this Data Hub workbook center. Use it for
+                    staff handover, offline spreadsheet entry, or later upload
+                    sharing.
+                  </p>
+
+                  <a
+                    class="button button-secondary button-link"
+                    href="./outputs/oneroot-essentials-register/OneRoot_Essentials_Operations_Register.xlsx?v=20260712b"
+                    download
+                  >
+                    Download Current Workbook
+                  </a>
+
+                  <div class="guide-list compact-guide-list">
+                    <p>1. Download the workbook before sending it to staff or filling it later.</p>
+                    <p>2. Use the dropdown sheets to capture expenses, sales, rent, bills, petty cash, salary payments, supplier payables, recurring controls, and maintenance work.</p>
+                    <p>3. Export a full app backup too if you want a safe restore copy of browser data.</p>
+                  </div>
+                </section>
+              </aside>
+            </section>
+
+            <section class="two-column-grid">
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Current Data</p>
+                    <h3>Workspace Counts</h3>
+                  </div>
+                </div>
+                <div id="dataHubCounts" class="module-grid"></div>
+              </article>
+
+              <article class="section-card">
+                <div class="section-heading compact">
+                  <div>
+                    <p class="kicker">Operating Notes</p>
+                    <h3>How To Work With This App</h3>
+                  </div>
+                </div>
+                <div class="guide-list">
+                  <p>Use Expenses for normal purchases and services paid by any method.</p>
+                  <p>Use Daily Sales for one total amount per business area each day.</p>
+                  <p>Use Apartments for rent and monthly bills. For a bills-only month, leave the rent fields at 0.00 and fill only the bill fields.</p>
+                  <p>Use Generate Monthly Bill Records to create the next month from the latest apartment profile without replacing existing records.</p>
+                  <p>Use Petty Cash for float movements and small cash spending; expense-paid entries sync into Expenses.</p>
+                  <p>Use Salary to manage monthly payroll, deductions, part-payments, and outstanding staff balances by business area.</p>
+                  <p>Use Suppliers to track what you owe, what you have paid, and what is overdue with vendors.</p>
+                  <p>Use Recurring to generate repeated expense, supplier, maintenance, or apartment billing records when they fall due.</p>
+                  <p>Use Maintenance to track repairs, cleaning tasks, technicians, open work, and completion costs.</p>
+                </div>
+              </article>
+            </section>
+          </section>
+        </main>
+      </div>
+    </div>
+
+    <input
+      id="workbookImportFileInput"
+      type="file"
+      accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+      hidden
+    />
+    <input id="expenseImportFileInput" type="file" accept=".csv,text/csv" hidden />
+    <input id="backupImportFileInput" type="file" accept=".json,application/json" hidden />
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <script src="./vendor/jszip.min.js?v=20260718a"></script>
+    <script src="./script.js?v=20260719d"></script>
+    <script src="./oneroot_product_catalog.js?v=20260718a"></script>
+    <script src="./pos_inventory_extension.js?v=20260719b"></script>
+    <script src="./online_orders_extension.js?v=20260719a"></script>
+  </body>
+</html>
