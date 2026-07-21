@@ -54,6 +54,10 @@ const TENANCY_PLACEHOLDER_LINE = "_______________________________";
 const AGREEMENT_READY_FILE_LIMIT = 6;
 const PAYSLIP_READY_FILE_LIMIT = 8;
 const WORKBOOK_EXPORT_ROW_LIMIT = 299;
+const HOSTED_WORKSPACE_SNAPSHOT_PATH =
+  "./data/public/oneroot-hosted-workspace-seed.json?v=20260721a";
+const HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY =
+  "oneroot-expense-register:hosted-workspace-snapshot:v1";
 
 const BUSINESS_AREAS = [
   {
@@ -1688,14 +1692,18 @@ const state = {
 const elements = {};
 let toastTimeout = null;
 let deferredInstallPrompt = null;
+let startupToastMessage = "";
 const LOCAL_PREVIEW_REFRESH_FLAG = "oneroot-local-preview-refresh-v4";
 
-document.addEventListener("DOMContentLoaded", init);
+document.addEventListener("DOMContentLoaded", () => {
+  void init();
+});
 
-function init() {
+async function init() {
   captureElements();
   decorateNavigationMenus();
   bindEvents();
+  await restoreHostedWorkspaceSnapshotIfNeeded();
   reconcileActiveUserProfile();
   reconcileAuthenticationSession({ skipPersist: true });
   populateCurrencyOptions();
@@ -1707,7 +1715,104 @@ function init() {
   resetPettyCashForm({ silent: true });
   navigateTo(resolveInitialView(), { syncHash: true });
   render();
+  if (startupToastMessage) {
+    showToast(startupToastMessage);
+    startupToastMessage = "";
+  }
   registerServiceWorker();
+}
+
+function isHostedWorkspaceEnvironment() {
+  const hostname = normalizeText(window.location.hostname).toLowerCase();
+  return hostname !== "" && !["127.0.0.1", "localhost", "::1"].includes(hostname);
+}
+
+function canRestoreHostedWorkspaceSnapshot() {
+  return getWorkspaceRecordTotal(state) === 0 && state.userProfiles.length === 0;
+}
+
+async function fetchHostedWorkspaceSnapshot() {
+  const response = await fetch(HOSTED_WORKSPACE_SNAPSHOT_PATH, {
+    cache: "no-store"
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted snapshot request failed with ${response.status}.`);
+  }
+
+  return sanitizeImportedBackup(await response.json());
+}
+
+function restoreWorkspaceFromImport(imported) {
+  state.expenses = imported.expenses;
+  state.budgets = imported.budgets;
+  state.sales = imported.sales;
+  state.rentals = imported.rentals;
+  state.pettyCash = imported.pettyCash;
+  state.pettyCashBudgets = imported.pettyCashBudgets;
+  state.salaryRecords = imported.salaryRecords;
+  state.cashbookEntries = imported.cashbookEntries;
+  state.purchaseOrders = imported.purchaseOrders;
+  state.laundryTickets = imported.laundryTickets;
+  state.equipmentRentalBookings = imported.equipmentRentalBookings;
+  state.securityDepositRecords = imported.securityDepositRecords;
+  state.ledgerEntries = imported.ledgerEntries;
+  state.mobileMoneyReconciliations = imported.mobileMoneyReconciliations;
+  state.suppliers = imported.suppliers;
+  state.assetRecords = imported.assetRecords;
+  state.forecastPlans = imported.forecastPlans;
+  state.recurringControls = imported.recurringControls;
+  state.maintenanceRecords = imported.maintenanceRecords;
+  state.userProfiles = imported.userProfiles;
+  state.currency = imported.currency;
+  state.activeUserId = imported.activeUserId;
+  state.editingExpenseId = null;
+  state.editingSalesId = null;
+  state.editingRentalId = null;
+  state.editingPettyCashId = null;
+  state.editingSalaryId = null;
+  state.editingCashbookId = null;
+  state.editingPurchaseOrderId = null;
+  state.editingLaundryTicketId = null;
+  state.editingEquipmentRentalId = null;
+  state.editingSecurityDepositId = null;
+  state.editingLedgerId = null;
+  state.editingMobileMoneyId = null;
+  state.editingSupplierId = null;
+  state.editingAssetId = null;
+  state.editingForecastId = null;
+  state.editingUserId = null;
+  state.editingRecurringId = null;
+  state.editingMaintenanceId = null;
+}
+
+async function restoreHostedWorkspaceSnapshotIfNeeded() {
+  if (!isHostedWorkspaceEnvironment() || !canRestoreHostedWorkspaceSnapshot()) {
+    return;
+  }
+
+  if (normalizeText(localStorage.getItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY)) !== "") {
+    return;
+  }
+
+  try {
+    const imported = await fetchHostedWorkspaceSnapshot();
+    const totalRecords = getWorkspaceRecordTotal(imported);
+
+    if (totalRecords === 0) {
+      localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, "empty");
+      return;
+    }
+
+    restoreWorkspaceFromImport(imported);
+    persistAllData();
+    localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, imported.exportedAt || "loaded");
+    startupToastMessage = `Uploaded online snapshot loaded with ${totalRecords} record${
+      totalRecords === 1 ? "" : "s"
+    }.`;
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function decorateNavigationMenus() {
@@ -2158,6 +2263,7 @@ function captureElements() {
     "exportCsvBtn",
     "exportBackupBtn",
     "importBackupBtn",
+    "restoreHostedSnapshotBtn",
     "loadSampleBtn",
     "installAppBtn",
     "workbookStatusText",
@@ -2285,6 +2391,7 @@ function bindEvents() {
   elements.importCsvBtn.addEventListener("click", () => elements.expenseImportFileInput.click());
   elements.exportBackupBtn.addEventListener("click", exportFullBackup);
   elements.importBackupBtn.addEventListener("click", () => elements.backupImportFileInput.click());
+  elements.restoreHostedSnapshotBtn.addEventListener("click", handleRestoreHostedSnapshot);
   elements.workbookImportFileInput.addEventListener("change", handleWorkbookImportFile);
   elements.expenseImportFileInput.addEventListener("change", handleExpenseImportFile);
   elements.backupImportFileInput.addEventListener("change", handleBackupImportFile);
@@ -22071,47 +22178,8 @@ async function handleBackupImportFile(event) {
       return;
     }
 
-    state.expenses = imported.expenses;
-    state.budgets = imported.budgets;
-    state.sales = imported.sales;
-    state.rentals = imported.rentals;
-    state.pettyCash = imported.pettyCash;
-    state.pettyCashBudgets = imported.pettyCashBudgets;
-    state.salaryRecords = imported.salaryRecords;
-    state.cashbookEntries = imported.cashbookEntries;
-    state.purchaseOrders = imported.purchaseOrders;
-    state.laundryTickets = imported.laundryTickets;
-    state.equipmentRentalBookings = imported.equipmentRentalBookings;
-    state.securityDepositRecords = imported.securityDepositRecords;
-    state.ledgerEntries = imported.ledgerEntries;
-    state.mobileMoneyReconciliations = imported.mobileMoneyReconciliations;
-    state.suppliers = imported.suppliers;
-    state.assetRecords = imported.assetRecords;
-    state.forecastPlans = imported.forecastPlans;
-    state.recurringControls = imported.recurringControls;
-    state.maintenanceRecords = imported.maintenanceRecords;
-    state.userProfiles = imported.userProfiles;
-    state.currency = imported.currency;
-    state.activeUserId = imported.activeUserId;
-    state.editingExpenseId = null;
-    state.editingSalesId = null;
-    state.editingRentalId = null;
-    state.editingPettyCashId = null;
-    state.editingSalaryId = null;
-    state.editingCashbookId = null;
-    state.editingPurchaseOrderId = null;
-    state.editingLaundryTicketId = null;
-    state.editingEquipmentRentalId = null;
-    state.editingSecurityDepositId = null;
-    state.editingLedgerId = null;
-    state.editingMobileMoneyId = null;
-    state.editingSupplierId = null;
-    state.editingAssetId = null;
-    state.editingForecastId = null;
-    state.editingUserId = null;
-    state.editingRecurringId = null;
-    state.editingMaintenanceId = null;
-
+    restoreWorkspaceFromImport(imported);
+    localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, imported.exportedAt || "restored");
     reconcileActiveUserProfile();
     persistAllData();
     populateCurrencyOptions();
@@ -22127,6 +22195,47 @@ async function handleBackupImportFile(event) {
     showToast("That backup file could not be imported.");
   } finally {
     elements.backupImportFileInput.value = "";
+  }
+}
+
+async function handleRestoreHostedSnapshot() {
+  try {
+    const imported = await fetchHostedWorkspaceSnapshot();
+    const totalRecords = getWorkspaceRecordTotal(imported);
+    const exportedDate = normalizeDateInput(imported.exportedAt);
+    const sourceDate = exportedDate ? formatDisplayDate(exportedDate) : "the uploaded snapshot";
+
+    if (totalRecords === 0) {
+      showToast("The uploaded online snapshot does not contain any usable records.");
+      return;
+    }
+
+    const shouldReplace = window.confirm(
+      `Replace the current workspace with the uploaded online snapshot from ${sourceDate}? It will restore ${totalRecords} record${
+        totalRecords === 1 ? "" : "s"
+      }.`
+    );
+
+    if (!shouldReplace) {
+      return;
+    }
+
+    restoreWorkspaceFromImport(imported);
+    localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, imported.exportedAt || "restored");
+    reconcileActiveUserProfile();
+    reconcileAuthenticationSession({ skipPersist: true });
+    persistAllData();
+    populateCurrencyOptions();
+    resetExpenseForm({ silent: true });
+    resetSalesForm({ silent: true });
+    resetRentalForm({ silent: true });
+    resetPettyCashForm({ silent: true });
+    initializeBudgetPlanner();
+    render();
+    showToast(`Uploaded online snapshot restored with ${totalRecords} record${totalRecords === 1 ? "" : "s"}.`);
+  } catch (error) {
+    console.error(error);
+    showToast("The uploaded online snapshot could not be restored right now.");
   }
 }
 

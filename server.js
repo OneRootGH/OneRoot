@@ -581,7 +581,12 @@ function serveOperationsRoute(pathname, request, response) {
     return true;
   }
 
-  if (relativePath.startsWith("assets/") || relativePath.startsWith("outputs/") || relativePath.startsWith("vendor/")) {
+  if (
+    relativePath.startsWith("assets/") ||
+    relativePath.startsWith("outputs/") ||
+    relativePath.startsWith("vendor/") ||
+    relativePath.startsWith("data/public/")
+  ) {
     const safePath = assertSafeChildPath(ROOT_DIR, relativePath);
 
     if (!safePath || !fs.existsSync(safePath)) {

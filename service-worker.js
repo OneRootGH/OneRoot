@@ -1,4 +1,4 @@
-const CACHE_NAME = "oneroot-operations-app-v28";
+const CACHE_NAME = "oneroot-operations-app-v29";
 const SCOPE_PATH = new URL(self.registration.scope || self.location.href).pathname;
 const BASE_PATH = SCOPE_PATH.endsWith("/") ? SCOPE_PATH : `${SCOPE_PATH}/`;
 
@@ -15,6 +15,7 @@ const APP_SHELL_ASSETS = [
   "oneroot_product_catalog.js",
   "pos_inventory_extension.js",
   "online_orders_extension.js",
+  "data/public/oneroot-hosted-workspace-seed.json",
   "assets/oneroot-logo.png",
   "manifest.webmanifest",
   "icon.svg",
