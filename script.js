@@ -401,6 +401,7 @@ const USER_ROLE_OPTIONS = [
   { value: "finance", label: "Finance" },
   { value: "operations", label: "Operations" },
   { value: "apartment-manager", label: "Apartment Manager" },
+  { value: "sales-stock-operator", label: "Sales & Stock Operator" },
   { value: "cashier", label: "Cashier" },
   { value: "viewer", label: "Viewer" }
 ];
@@ -695,6 +696,18 @@ const ROLE_PRESET_MAP = {
       "deposits",
       "assets",
       "maintenance"
+    ]
+  },
+  "sales-stock-operator": {
+    description:
+      "Use only the Sales & Stock menus together with Laundry Tickets and Equipment Rentals.",
+    views: [
+      "sales",
+      "pos",
+      "inventory",
+      "online-orders",
+      "laundry",
+      "equipment-rentals"
     ]
   },
   cashier: {
