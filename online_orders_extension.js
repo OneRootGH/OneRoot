@@ -1,5 +1,6 @@
 (function initOnlineOrdersModule() {
   const ADMIN_ORDERS_ENDPOINT = "/api/admin/orders";
+  const ONLINE_ORDERS_AUTH_STORAGE_KEY = "oneroot-expense-register:online-orders-auth:v1";
   const AUDIT_TRAIL_STORAGE_KEY = "oneroot-expense-register:audit-trail:v1";
   const AUDIT_TRAIL_LIMIT = 2500;
   const PAYMENT_STATUS_OPTIONS = [
@@ -21,11 +22,13 @@
 
   state.onlineOrders = [];
   state.onlineOrderFilters = createDefaultOnlineOrderFilters();
+  state.onlineOrdersAuth = loadOnlineOrdersAuth();
   state.onlineOrdersMeta = {
     loading: false,
     loaded: false,
     error: "",
     lastLoadedAt: "",
+    authRequired: false,
     statuses: ["new", "confirmed", "preparing", "ready", "completed", "cancelled"]
   };
 
@@ -114,11 +117,8 @@
     return options;
   };
 
-  document.addEventListener("DOMContentLoaded", () => {
-    void ensureOnlineOrdersLoaded();
-  });
-
   document.body.addEventListener("click", handleOnlineOrdersClick);
+  document.body.addEventListener("submit", handleOnlineOrdersSubmit);
   document.body.addEventListener("input", handleOnlineOrdersInput);
   document.body.addEventListener("change", handleOnlineOrdersInput);
   window.addEventListener("focus", () => {
@@ -161,6 +161,90 @@
     };
   }
 
+  function loadOnlineOrdersAuth() {
+    try {
+      if (!("sessionStorage" in window)) {
+        return { username: "", password: "" };
+      }
+
+      const raw = window.sessionStorage.getItem(ONLINE_ORDERS_AUTH_STORAGE_KEY);
+      const parsed = raw ? JSON.parse(raw) : {};
+
+      return {
+        username: normalizeText(parsed.username),
+        password: String(parsed.password || "")
+      };
+    } catch (error) {
+      console.error(error);
+      return { username: "", password: "" };
+    }
+  }
+
+  function persistOnlineOrdersAuth() {
+    try {
+      if (!("sessionStorage" in window)) {
+        return;
+      }
+
+      window.sessionStorage.setItem(
+        ONLINE_ORDERS_AUTH_STORAGE_KEY,
+        JSON.stringify({
+          username: normalizeText(state.onlineOrdersAuth?.username),
+          password: String(state.onlineOrdersAuth?.password || "")
+        })
+      );
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function clearOnlineOrdersAuth() {
+    state.onlineOrdersAuth = { username: "", password: "" };
+
+    try {
+      if (!("sessionStorage" in window)) {
+        return;
+      }
+
+      window.sessionStorage.removeItem(ONLINE_ORDERS_AUTH_STORAGE_KEY);
+    } catch (error) {
+      console.error(error);
+    }
+  }
+
+  function hasOnlineOrdersAuth() {
+    return Boolean(
+      normalizeText(state.onlineOrdersAuth?.username) &&
+        String(state.onlineOrdersAuth?.password || "")
+    );
+  }
+
+  function buildOnlineOrdersAuthHeader() {
+    const username = normalizeText(state.onlineOrdersAuth?.username);
+    const password = String(state.onlineOrdersAuth?.password || "");
+
+    if (!username || !password) {
+      return "";
+    }
+
+    try {
+      return `Basic ${window.btoa(`${username}:${password}`)}`;
+    } catch (error) {
+      return `Basic ${window.btoa(unescape(encodeURIComponent(`${username}:${password}`)))}`;
+    }
+  }
+
+  function buildOnlineOrdersRequestHeaders(baseHeaders = {}) {
+    const headers = { ...baseHeaders };
+    const authorization = buildOnlineOrdersAuthHeader();
+
+    if (authorization) {
+      headers.Authorization = authorization;
+    }
+
+    return headers;
+  }
+
   function supportsOrdersApi() {
     return ["http:", "https:"].includes(window.location.protocol);
   }
@@ -182,13 +266,38 @@
       return;
     }
 
+    if (!hasOnlineOrdersAuth()) {
+      state.onlineOrders = [];
+      state.onlineOrdersMeta.loading = false;
+      state.onlineOrdersMeta.loaded = false;
+      state.onlineOrdersMeta.authRequired = true;
+      state.onlineOrdersMeta.error =
+        "Enter the order desk username and password to load online orders from the server.";
+      renderOnlineOrdersPage();
+
+      if (options.toast) {
+        showToast(state.onlineOrdersMeta.error);
+      }
+      return;
+    }
+
     state.onlineOrdersMeta.loading = true;
     state.onlineOrdersMeta.error = "";
+    state.onlineOrdersMeta.authRequired = false;
     renderOnlineOrdersPage();
 
     try {
-      const response = await fetch(ADMIN_ORDERS_ENDPOINT, { cache: "no-store" });
+      const response = await fetch(ADMIN_ORDERS_ENDPOINT, {
+        cache: "no-store",
+        headers: buildOnlineOrdersRequestHeaders()
+      });
       const payload = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        state.onlineOrders = [];
+        state.onlineOrdersMeta.authRequired = true;
+        throw new Error("The order desk username or password is not correct.");
+      }
 
       if (!response.ok) {
         throw new Error(
@@ -204,6 +313,7 @@
       state.onlineOrdersMeta.loaded = true;
       state.onlineOrdersMeta.lastLoadedAt = new Date().toISOString();
       state.onlineOrdersMeta.error = "";
+      state.onlineOrdersMeta.authRequired = false;
 
       if (options.toast) {
         showToast(`Online orders refreshed. ${state.onlineOrders.length} order${state.onlineOrders.length === 1 ? "" : "s"} loaded.`);
@@ -272,7 +382,17 @@
       return;
     }
 
-    if (!state.onlineOrdersMeta.loaded && !state.onlineOrdersMeta.loading && supportsOrdersApi()) {
+    if (state.currentView !== "online-orders") {
+      return;
+    }
+
+    if (
+      !state.onlineOrdersMeta.loaded &&
+      !state.onlineOrdersMeta.loading &&
+      supportsOrdersApi() &&
+      hasOnlineOrdersAuth() &&
+      !state.onlineOrdersMeta.authRequired
+    ) {
       void ensureOnlineOrdersLoaded();
     }
 
@@ -281,6 +401,7 @@
       return;
     }
 
+    const showAuthForm = !hasOnlineOrdersAuth() || state.onlineOrdersMeta.authRequired;
     const orders = getFilteredOnlineOrders();
     const stats = buildOnlineOrderStats(orders);
 
@@ -305,8 +426,9 @@
           Website orders are stored on the server so staff can confirm, prepare, complete, and follow up from one place.
         </p>
 
+        ${showAuthForm ? buildOnlineOrdersAuthMarkup() : ""}
         ${
-          state.onlineOrdersMeta.error
+          state.onlineOrdersMeta.error && !showAuthForm
             ? `<div class="status-banner warning">${escapeHtml(state.onlineOrdersMeta.error)}</div>`
             : ""
         }
@@ -447,6 +569,63 @@
             </tbody>
           </table>
         </div>
+      </section>
+    `;
+  }
+
+  function buildOnlineOrdersAuthMarkup() {
+    const username = normalizeText(state.onlineOrdersAuth?.username);
+    const errorMessage = normalizeText(state.onlineOrdersMeta.error);
+
+    return `
+      <section class="section-card inset-card">
+        <div class="section-heading compact">
+          <div>
+            <p class="kicker">Order Desk Access</p>
+            <h3>Unlock Online Orders</h3>
+          </div>
+        </div>
+        <p class="muted-text">
+          The Staff App now opens directly. Enter the protected OneRoot.shop order desk username and password here whenever you need server order access.
+        </p>
+        ${
+          errorMessage
+            ? `<div class="status-banner warning">${escapeHtml(errorMessage)}</div>`
+            : ""
+        }
+        <form id="onlineOrdersAuthForm" novalidate>
+          <div class="mini-form-grid">
+            <label>
+              <span>Order Desk Username</span>
+              <input
+                id="onlineOrdersAuthUsername"
+                name="onlineOrdersAuthUsername"
+                type="text"
+                value="${escapeHtml(username)}"
+                autocomplete="username"
+                placeholder="Enter order desk username"
+                required
+              />
+            </label>
+            <label>
+              <span>Order Desk Password</span>
+              <input
+                id="onlineOrdersAuthPassword"
+                name="onlineOrdersAuthPassword"
+                type="password"
+                autocomplete="current-password"
+                placeholder="Enter order desk password"
+                required
+              />
+            </label>
+          </div>
+          <div class="form-actions">
+            <button class="button button-primary" type="submit">Unlock Online Orders</button>
+            <button class="button button-ghost" data-online-orders-action="clear-auth" type="button">
+              Clear Saved Access
+            </button>
+          </div>
+        </form>
       </section>
     `;
   }
@@ -813,6 +992,18 @@
       return;
     }
 
+    if (action === "clear-auth") {
+      clearOnlineOrdersAuth();
+      state.onlineOrders = [];
+      state.onlineOrdersMeta.loaded = false;
+      state.onlineOrdersMeta.authRequired = true;
+      state.onlineOrdersMeta.error =
+        "Order desk access cleared. Enter the username and password again when you need online orders.";
+      renderOnlineOrdersPage();
+      showToast("Saved online order access cleared.");
+      return;
+    }
+
     if (!orderId) {
       return;
     }
@@ -852,16 +1043,52 @@
     }
   }
 
+  function handleOnlineOrdersSubmit(event) {
+    if (event.target.id !== "onlineOrdersAuthForm") {
+      return;
+    }
+
+    event.preventDefault();
+
+    const formData = new FormData(event.target);
+    const username = normalizeText(formData.get("onlineOrdersAuthUsername"));
+    const password = String(formData.get("onlineOrdersAuthPassword") || "");
+
+    if (!username) {
+      showToast("Enter the order desk username.");
+      return;
+    }
+
+    if (!password) {
+      showToast("Enter the order desk password.");
+      return;
+    }
+
+    state.onlineOrdersAuth = { username, password };
+    persistOnlineOrdersAuth();
+    state.onlineOrdersMeta.authRequired = false;
+    state.onlineOrdersMeta.error = "";
+    void ensureOnlineOrdersLoaded({ force: true, toast: true });
+  }
+
   async function updateOnlineOrder(orderId, payload) {
     try {
       const response = await fetch(`${ADMIN_ORDERS_ENDPOINT}/${encodeURIComponent(orderId)}`, {
         method: "PATCH",
-        headers: {
+        headers: buildOnlineOrdersRequestHeaders({
           "Content-Type": "application/json"
-        },
+        }),
         body: JSON.stringify(payload)
       });
       const result = await response.json().catch(() => ({}));
+
+      if (response.status === 401) {
+        state.onlineOrders = [];
+        state.onlineOrdersMeta.authRequired = true;
+        state.onlineOrdersMeta.error = "The order desk username or password is not correct.";
+        renderOnlineOrdersPage();
+        throw new Error("Order desk access expired. Enter the username and password again.");
+      }
 
       if (!response.ok || !result.ok || !result.order) {
         throw new Error(Array.isArray(result.errors) ? result.errors[0] : "Order update failed.");

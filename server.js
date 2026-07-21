@@ -569,11 +569,6 @@ function serveOperationsRoute(pathname, request, response) {
     return true;
   }
 
-  if (!isAuthorizedAdminRequest(request)) {
-    sendUnauthorized(response);
-    return true;
-  }
-
   const relativePath = pathname.replace(/^\/operations\/?/, "");
 
   if (!relativePath) {
