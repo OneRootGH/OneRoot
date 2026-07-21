@@ -1717,6 +1717,7 @@ async function init() {
   decorateNavigationMenus();
   bindEvents();
   await restoreHostedWorkspaceSnapshotIfNeeded();
+  await hydrateHostedWorkspaceAccessIfNeeded();
   reconcileActiveUserProfile();
   reconcileAuthenticationSession({ skipPersist: true });
   populateCurrencyOptions();
@@ -1768,6 +1769,10 @@ function getHostedWorkspaceBusinessRecordTotal(workspace = state) {
 
 function canRestoreHostedWorkspaceSnapshot() {
   return getHostedWorkspaceBusinessRecordTotal(state) === 0;
+}
+
+function needsHostedWorkspaceAccessHydration() {
+  return isHostedWorkspaceEnvironment() && (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0);
 }
 
 async function fetchHostedWorkspaceSnapshot() {
@@ -1866,6 +1871,38 @@ async function restoreHostedWorkspaceSnapshotIfNeeded() {
     startupToastMessage = `Uploaded online snapshot loaded with ${totalRecords} record${
       totalRecords === 1 ? "" : "s"
     }.`;
+  } catch (error) {
+    console.error(error);
+  }
+}
+
+async function hydrateHostedWorkspaceAccessIfNeeded() {
+  if (!needsHostedWorkspaceAccessHydration()) {
+    return;
+  }
+
+  try {
+    const imported = await fetchHostedWorkspaceSnapshot();
+
+    if (!Array.isArray(imported.userProfiles) || imported.userProfiles.length === 0) {
+      return;
+    }
+
+    state.userProfiles = mergeUserProfiles(state.userProfiles, imported.userProfiles);
+
+    if (!normalizeText(state.activeUserId) && normalizeText(imported.activeUserId)) {
+      state.activeUserId = normalizeText(imported.activeUserId);
+    }
+
+    reconcileActiveUserProfile({ skipPersist: true });
+    persistUserProfiles();
+    persistSettings();
+
+    if (!startupToastMessage) {
+      startupToastMessage = `Workspace access restored for this browser with ${imported.userProfiles.length} profile${
+        imported.userProfiles.length === 1 ? "" : "s"
+      }.`;
+    }
   } catch (error) {
     console.error(error);
   }
