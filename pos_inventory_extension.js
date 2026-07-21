@@ -825,14 +825,14 @@
     if (id.startsWith("posDraft")) {
       handlePosDraftInput(id, value);
       if (shouldRenderAfterPosDraftInput(id)) {
-        renderPosPage();
+        renderPosPage(buildPosLiveRenderOptions(event.target));
       }
       return;
     }
 
     if (id.startsWith("posFilter")) {
       handlePosFilterInput(id, value);
-      renderPosPage();
+      renderPosPage(buildPosLiveRenderOptions(event.target));
       return;
     }
 
@@ -865,14 +865,14 @@
     if (id.startsWith("posDraft")) {
       handlePosDraftInput(id, value);
       if (shouldRenderAfterPosDraftInput(id)) {
-        renderPosPage();
+        renderPosPage(buildPosLiveRenderOptions(event.target));
       }
       return;
     }
 
     if (id.startsWith("posFilter")) {
       handlePosFilterInput(id, value);
-      renderPosPage();
+      renderPosPage(buildPosLiveRenderOptions(event.target));
       return;
     }
 
@@ -1202,7 +1202,40 @@
     return tagName === "input" || tagName === "textarea" || Boolean(target?.isContentEditable);
   }
 
-  function focusControlById(id) {
+  function buildControlViewportState(control) {
+    return {
+      targetId: normalizeText(control?.id),
+      scrollX: window.scrollX || 0,
+      scrollY: window.scrollY || 0,
+      selectionStart:
+        typeof control?.selectionStart === "number" ? control.selectionStart : null,
+      selectionEnd:
+        typeof control?.selectionEnd === "number" ? control.selectionEnd : null
+    };
+  }
+
+  function restoreWindowScrollPosition(scrollState) {
+    if (!scrollState) {
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(() => {
+        window.scrollTo(scrollState.scrollX || 0, scrollState.scrollY || 0);
+      });
+    });
+  }
+
+  function buildPosLiveRenderOptions(control) {
+    const viewportState = buildControlViewportState(control);
+    return {
+      preserveScroll: true,
+      focusState: viewportState,
+      scrollState: viewportState
+    };
+  }
+
+  function focusControlById(id, options = {}) {
     const control = document.getElementById(id);
 
     if (!control || control.disabled) {
@@ -1222,23 +1255,29 @@
         typeof control.value === "string"
       ) {
         const valueLength = control.value.length;
-        control.setSelectionRange(valueLength, valueLength);
+        const selectionStart = Number.isFinite(options.selectionStart)
+          ? Math.max(Math.min(options.selectionStart, valueLength), 0)
+          : valueLength;
+        const selectionEnd = Number.isFinite(options.selectionEnd)
+          ? Math.max(Math.min(options.selectionEnd, valueLength), selectionStart)
+          : selectionStart;
+        control.setSelectionRange(selectionStart, selectionEnd);
       }
     });
   }
 
-  function restoreModuleFocus(moduleName) {
+  function restoreModuleFocus(moduleName, options = {}) {
     if (state.currentView !== moduleName) {
       return;
     }
 
-    const targetId = uiFocusState[moduleName];
+    const targetId = normalizeText(options.targetId) || uiFocusState[moduleName];
 
     if (!targetId) {
       return;
     }
 
-    focusControlById(targetId);
+    focusControlById(targetId, options);
   }
 
   function loadPosOrders() {
@@ -3028,7 +3067,7 @@
     `;
   }
 
-  function renderPosPage() {
+  function renderPosPage(options = {}) {
     const root = document.getElementById("posViewRoot");
 
     if (!root) {
@@ -3104,76 +3143,18 @@
         </p>
 
         <form id="posOrderForm" novalidate>
-          <div class="quick-panel-grid pos-quick-panel-grid">
-            <article class="quick-panel-card">
-              <span class="kicker">Quick Area</span>
-              <div class="quick-chip-row">
-                <button
-                  class="quick-chip ${state.posDraft.businessAreaId === "" ? "is-active" : ""}"
-                  data-pos-action="set-area"
-                  type="button"
-                >
-                  All POS Areas
-                </button>
-                ${areaOptions
-                  .map(
-                    (area) => `
-                      <button
-                        class="quick-chip ${state.posDraft.businessAreaId === area.value ? "is-active" : ""}"
-                        data-pos-action="set-area"
-                        ${buildDataAttributes({ "area-id": area.value })}
-                        type="button"
-                      >
-                        ${escapeHtml(getBusinessArea(area.value).shortLabel)}
-                      </button>
-                    `
-                  )
-                  .join("")}
-              </div>
-            </article>
-
-            <article class="quick-panel-card">
-              <span class="kicker">Quick Payment</span>
-              <div class="quick-chip-row">
-                ${paymentOptions
-                  .map(
-                    (paymentMethod) => `
-                      <button
-                        class="quick-chip ${state.posDraft.paymentMethod === paymentMethod ? "is-active" : ""}"
-                        data-pos-action="set-payment"
-                        ${buildDataAttributes({ "payment-method": paymentMethod })}
-                        type="button"
-                      >
-                        ${escapeHtml(paymentMethod)}
-                      </button>
-                    `
-                  )
-                  .join("")}
-              </div>
-            </article>
-
-            <article class="quick-panel-card">
-              <span class="kicker">Quick Quantity</span>
-              <div class="quick-chip-row">
-                ${[1, 2, 3, 5]
-                  .map(
-                    (quantity) => `
-                      <button
-                        class="quick-chip ${state.posDraft.quantity === quantity ? "is-active" : ""}"
-                        data-pos-action="set-draft-quantity"
-                        ${buildDataAttributes({ quantity })}
-                        type="button"
-                      >
-                        x${escapeHtml(String(quantity))}
-                      </button>
-                    `
-                  )
-                  .join("")}
-              </div>
-            </article>
-          </div>
-
           <div class="mini-form-grid pos-meta-grid pos-meta-grid-tight">
+            <label>
+              <span>Payment Method</span>
+              <select id="posDraftPaymentMethod">
+                ${buildSelectMarkup(
+                  paymentOptions.map((item) => ({ value: item, label: item })),
+                  state.posDraft.paymentMethod,
+                  "Choose payment method"
+                )}
+              </select>
+            </label>
+
             <label>
               <span>Order Date</span>
               <input id="posDraftOrderDate" type="date" value="${escapeHtml(
@@ -3185,17 +3166,6 @@
               <span>POS Area Filter</span>
               <select id="posDraftBusinessArea">
                 ${buildSelectMarkup(areaOptions, state.posDraft.businessAreaId, "All POS Areas")}
-              </select>
-            </label>
-
-            <label>
-              <span>Payment Method</span>
-              <select id="posDraftPaymentMethod">
-                ${buildSelectMarkup(
-                  paymentOptions.map((item) => ({ value: item, label: item })),
-                  state.posDraft.paymentMethod,
-                  "Choose payment method"
-                )}
               </select>
             </label>
 
@@ -3472,6 +3442,55 @@
               </div>
             </section>
           </div>
+
+          <div class="quick-panel-grid pos-quick-panel-grid">
+            <article class="quick-panel-card">
+              <span class="kicker">Quick Area</span>
+              <div class="quick-chip-row">
+                <button
+                  class="quick-chip ${state.posDraft.businessAreaId === "" ? "is-active" : ""}"
+                  data-pos-action="set-area"
+                  type="button"
+                >
+                  All POS Areas
+                </button>
+                ${areaOptions
+                  .map(
+                    (area) => `
+                      <button
+                        class="quick-chip ${state.posDraft.businessAreaId === area.value ? "is-active" : ""}"
+                        data-pos-action="set-area"
+                        ${buildDataAttributes({ "area-id": area.value })}
+                        type="button"
+                      >
+                        ${escapeHtml(getBusinessArea(area.value).shortLabel)}
+                      </button>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </article>
+
+            <article class="quick-panel-card">
+              <span class="kicker">Quick Quantity</span>
+              <div class="quick-chip-row">
+                ${[1, 2, 3, 5]
+                  .map(
+                    (quantity) => `
+                      <button
+                        class="quick-chip ${state.posDraft.quantity === quantity ? "is-active" : ""}"
+                        data-pos-action="set-draft-quantity"
+                        ${buildDataAttributes({ quantity })}
+                        type="button"
+                      >
+                        x${escapeHtml(String(quantity))}
+                      </button>
+                    `
+                  )
+                  .join("")}
+              </div>
+            </article>
+          </div>
         </form>
       </section>
 
@@ -3620,7 +3639,11 @@
       </section>
     `;
 
-    restoreModuleFocus("pos");
+    restoreModuleFocus("pos", options.focusState || {});
+
+    if (options.preserveScroll) {
+      restoreWindowScrollPosition(options.scrollState);
+    }
   }
 
   function renderInventoryPage() {
