@@ -1772,7 +1772,10 @@ function canRestoreHostedWorkspaceSnapshot() {
 }
 
 function needsHostedWorkspaceAccessHydration() {
-  return isHostedWorkspaceEnvironment() && (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0);
+  return (
+    isHostedWorkspaceEnvironment() &&
+    (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0 || isWorkspaceLocked())
+  );
 }
 
 async function fetchHostedWorkspaceSnapshot() {
@@ -1883,8 +1886,20 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
 
   try {
     const imported = await fetchHostedWorkspaceSnapshot();
+    const nextSnapshotFlag = normalizeText(imported.exportedAt) || "access-restored";
 
     if (!Array.isArray(imported.userProfiles) || imported.userProfiles.length === 0) {
+      return;
+    }
+
+    const existingProfiles = Array.isArray(state.userProfiles) ? state.userProfiles : [];
+    const existingProfileKeys = new Set(existingProfiles.map(buildUserProfileMergeKey));
+    const missingHostedProfiles = imported.userProfiles.some(
+      (profile) => !existingProfileKeys.has(buildUserProfileMergeKey(profile))
+    );
+    const snapshotFlag = normalizeText(localStorage.getItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY));
+
+    if (existingProfiles.length > 0 && !missingHostedProfiles && snapshotFlag === nextSnapshotFlag) {
       return;
     }
 
@@ -1897,11 +1912,17 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
     reconcileActiveUserProfile({ skipPersist: true });
     persistUserProfiles();
     persistSettings();
+    localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, nextSnapshotFlag);
 
     if (!startupToastMessage) {
-      startupToastMessage = `Workspace access restored for this browser with ${imported.userProfiles.length} profile${
-        imported.userProfiles.length === 1 ? "" : "s"
-      }.`;
+      startupToastMessage =
+        existingProfiles.length === 0
+          ? `Workspace access restored for this browser with ${imported.userProfiles.length} profile${
+              imported.userProfiles.length === 1 ? "" : "s"
+            }.`
+          : `Workspace access synced from the uploaded online snapshot with ${imported.userProfiles.length} profile${
+              imported.userProfiles.length === 1 ? "" : "s"
+            }.`;
     }
   } catch (error) {
     console.error(error);
