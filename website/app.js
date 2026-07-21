@@ -16,7 +16,8 @@
       area: "",
       sort: "featured"
     },
-    visibleItemCount: INITIAL_VISIBLE_ITEM_COUNT
+    visibleItemCount: INITIAL_VISIBLE_ITEM_COUNT,
+    isCartOpen: false
   };
 
   const elements = {};
@@ -26,6 +27,8 @@
   function init() {
     captureElements();
     bindEvents();
+    state.isCartOpen = !isCompactViewport();
+    syncCartPanelLayout();
 
     if (elements.checkoutForm) {
       restoreCustomerDraftIntoForm();
@@ -46,14 +49,23 @@
       "catalogSearchInput",
       "catalogAreaFilter",
       "catalogSortFilter",
+      "clearCatalogFiltersBtn",
+      "catalogQuickFilters",
       "catalogResultsMeta",
       "catalogGrid",
       "cartToggleBtn",
       "cartToggleCount",
       "closeCartBtn",
+      "cartScrim",
       "cartPanel",
       "cartItems",
+      "cartItemCountValue",
+      "cartAreaCountValue",
+      "cartQuoteCountValue",
       "cartSubtotalValue",
+      "mobileCartBar",
+      "mobileCartCount",
+      "mobileCartTotal",
       "checkoutForm",
       "customerNameInput",
       "customerPhoneInput",
@@ -93,12 +105,16 @@
       renderCatalog();
     });
 
+    elements.clearCatalogFiltersBtn?.addEventListener("click", clearCatalogFilters);
     elements.checkoutForm?.addEventListener("submit", handleCheckoutSubmit);
     elements.trackingForm?.addEventListener("submit", handleTrackingSubmit);
 
     elements.checkoutForm?.addEventListener("input", persistCustomerDraftFromForm);
     elements.cartToggleBtn?.addEventListener("click", toggleCartPanel);
+    elements.mobileCartBar?.addEventListener("click", openCartPanel);
     elements.closeCartBtn?.addEventListener("click", closeCartPanel);
+    elements.cartScrim?.addEventListener("click", closeCartPanel);
+    window.addEventListener("resize", syncCartPanelLayout);
 
     document.body.addEventListener("click", handleBodyClick);
   }
@@ -138,8 +154,10 @@
       populatePaymentMethods();
       renderContactLines();
       renderBusinessAreas();
+      renderCatalogQuickFilters();
       renderCatalog();
       renderCart();
+      syncCartPanelLayout();
     } catch (error) {
       console.error(error);
       setText(
@@ -239,7 +257,10 @@
         const helperText = getAreaHelperText(area.id);
         return `
           <article class="area-card">
-            <span class="count-pill">${escapeHtml(String(area.itemCount || 0))} items</span>
+            <div class="area-card-top">
+              <span class="area-mark">${escapeHtml(getAreaMonogram(area.id))}</span>
+              <span class="count-pill">${escapeHtml(String(area.itemCount || 0))} items</span>
+            </div>
             <strong>${escapeHtml(area.label)}</strong>
             <p>${escapeHtml(helperText)}</p>
             <button class="button button-secondary" data-area-jump="${escapeHtml(area.id)}" type="button">
@@ -249,6 +270,37 @@
         `;
       })
       .join("");
+  }
+
+  function renderCatalogQuickFilters() {
+    if (!elements.catalogQuickFilters) {
+      return;
+    }
+
+    const activeAreaId = normalizeText(state.filters.area);
+    elements.catalogQuickFilters.innerHTML = [
+      `
+        <button
+          class="filter-chip ${activeAreaId === "" ? "is-active" : ""}"
+          data-filter-area=""
+          type="button"
+        >
+          All Areas
+        </button>
+      `,
+      ...state.businessAreas.map(
+        (area) => `
+          <button
+            class="filter-chip ${activeAreaId === area.id ? "is-active" : ""}"
+            data-filter-area="${escapeHtml(area.id)}"
+            type="button"
+          >
+            <span>${escapeHtml(getAreaMonogram(area.id))}</span>
+            ${escapeHtml(area.shortLabel || area.label)}
+          </button>
+        `
+      )
+    ].join("");
   }
 
   function getAreaHelperText(areaId) {
@@ -335,6 +387,11 @@
     const filteredItems = getFilteredCatalog();
     const visibleItems = filteredItems.slice(0, state.visibleItemCount);
     const moreItemsAvailable = filteredItems.length > visibleItems.length;
+    const activeAreaLabel = state.filters.area ? getAreaLabel(state.filters.area) : "All Areas";
+    const activeSearch = normalizeText(state.filters.search);
+    const quoteItemCount = filteredItems.filter((item) => Number(item.salesPrice || 0) <= 0).length;
+
+    renderCatalogQuickFilters();
 
     setText(
       elements.catalogMeta,
@@ -344,10 +401,31 @@
     );
 
     if (elements.catalogResultsMeta) {
-      elements.catalogResultsMeta.textContent =
-        filteredItems.length > visibleItems.length
-          ? `Showing ${visibleItems.length} of ${filteredItems.length} items. Use search or Show More to narrow faster.`
-          : `${filteredItems.length} item${filteredItems.length === 1 ? "" : "s"} shown.`;
+      elements.catalogResultsMeta.innerHTML = `
+        <div class="results-badge-row">
+          <span class="results-badge">${escapeHtml(activeAreaLabel)}</span>
+          <span class="results-badge">${escapeHtml(
+            `${filteredItems.length} item${filteredItems.length === 1 ? "" : "s"}`
+          )}</span>
+          <span class="results-badge">${escapeHtml(
+            `${quoteItemCount} quote line${quoteItemCount === 1 ? "" : "s"}`
+          )}</span>
+          ${
+            activeSearch
+              ? `<span class="results-badge results-badge-search">Search: ${escapeHtml(activeSearch)}</span>`
+              : ""
+          }
+        </div>
+        <p class="results-meta-copy">
+          ${
+            filteredItems.length > visibleItems.length
+              ? escapeHtml(
+                  `Showing ${visibleItems.length} of ${filteredItems.length} items. Use filters or Show More to narrow faster.`
+                )
+              : escapeHtml(`${filteredItems.length} item${filteredItems.length === 1 ? "" : "s"} shown.`)
+          }
+        </p>
+      `;
     }
 
     if (filteredItems.length === 0) {
@@ -382,13 +460,17 @@
 
   function buildCatalogCardMarkup(item) {
     const displayPrice = getItemPriceMarkup(item);
+    const isQuoteItem = Number(item.salesPrice || 0) <= 0;
 
     return `
-      <article class="catalog-card">
+      <article class="catalog-card ${isQuoteItem ? "catalog-card-quote" : ""}">
         <div class="catalog-card-header">
-          <div>
-            <strong>${escapeHtml(item.name)}</strong>
-            <p>${escapeHtml(getAreaLabel(item.businessAreaId))}</p>
+          <div class="catalog-card-identity">
+            <span class="catalog-mark">${escapeHtml(getAreaMonogram(item.businessAreaId))}</span>
+            <div>
+              <strong>${escapeHtml(item.name)}</strong>
+              <p>${escapeHtml(getAreaLabel(item.businessAreaId))}</p>
+            </div>
           </div>
           <span class="catalog-price">${displayPrice}</span>
         </div>
@@ -402,19 +484,22 @@
         <p>${escapeHtml(item.notes || "Available for quick OneRoot order capture.")}</p>
 
         <div class="catalog-card-footer">
-          <input
-            type="number"
-            min="1"
-            step="1"
-            value="1"
-            inputmode="numeric"
-            data-item-quantity="${escapeHtml(item.id)}"
-            aria-label="Quantity for ${escapeHtml(item.name)}"
-          />
+          <label class="quantity-field">
+            <span>Qty</span>
+            <input
+              type="number"
+              min="1"
+              step="1"
+              value="1"
+              inputmode="numeric"
+              data-item-quantity="${escapeHtml(item.id)}"
+              aria-label="Quantity for ${escapeHtml(item.name)}"
+            />
+          </label>
           <button class="button button-primary" data-shop-action="add-to-cart" data-item-id="${escapeHtml(
             item.id
           )}" type="button">
-            Add
+            ${isQuoteItem ? "Add Quote Item" : "Add To Order"}
           </button>
         </div>
       </article>
@@ -434,21 +519,37 @@
       return;
     }
 
-    const totalQuantity = state.cart.reduce((sum, item) => sum + item.quantity, 0);
-    const subtotal = Number(
-      state.cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0).toFixed(2)
-    );
+    const { totalQuantity, subtotal, areaCount, quoteCount } = getCartMetrics();
 
     elements.cartToggleCount.textContent = String(totalQuantity);
     elements.cartSubtotalValue.textContent = formatCurrency(subtotal);
+    setText(elements.cartItemCountValue, String(totalQuantity));
+    setText(elements.cartAreaCountValue, String(areaCount));
+    setText(elements.cartQuoteCountValue, String(quoteCount));
+
+    if (elements.mobileCartCount) {
+      elements.mobileCartCount.textContent = `${totalQuantity} item${totalQuantity === 1 ? "" : "s"}`;
+    }
+
+    if (elements.mobileCartTotal) {
+      elements.mobileCartTotal.textContent = formatCurrency(subtotal);
+    }
+
+    if (elements.mobileCartBar) {
+      elements.mobileCartBar.classList.toggle(
+        "hidden",
+        totalQuantity === 0 || (isCompactViewport() && state.isCartOpen)
+      );
+    }
 
     if (state.cart.length === 0) {
       elements.cartItems.innerHTML = `
-        <article class="cart-item">
-          <strong>Your cart is empty</strong>
-          <p>Add groceries, requests, drinks, or services to start an online order.</p>
+        <article class="cart-item cart-empty-state">
+          <strong>Your order basket is empty</strong>
+          <p>Add groceries, requests, drinks, or services to start a OneRoot order.</p>
         </article>
       `;
+      syncCartPanelLayout();
       return;
     }
 
@@ -457,9 +558,12 @@
         (item) => `
           <article class="cart-item">
             <div class="cart-item-row">
-              <div>
+              <div class="cart-item-row-main">
+                <span class="cart-item-mark">${escapeHtml(getAreaMonogram(item.businessAreaId))}</span>
+                <div>
                 <strong>${escapeHtml(item.name)}</strong>
                 <p>${escapeHtml(getAreaLabel(item.businessAreaId))} • ${escapeHtml(item.category || "General")}</p>
+                </div>
               </div>
               <strong>${
                 item.unitPrice > 0
@@ -484,9 +588,26 @@
         `
       )
       .join("");
+
+    syncCartPanelLayout();
   }
 
   function handleBodyClick(event) {
+    const areaFilterButton = event.target.closest("button[data-filter-area]");
+
+    if (areaFilterButton) {
+      state.filters.area = normalizeText(areaFilterButton.dataset.filterArea);
+      state.visibleItemCount = INITIAL_VISIBLE_ITEM_COUNT;
+
+      if (elements.catalogAreaFilter) {
+        elements.catalogAreaFilter.value = state.filters.area;
+      }
+
+      renderCatalog();
+      document.getElementById("shop")?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
     const addButton = event.target.closest("button[data-shop-action='add-to-cart']");
 
     if (addButton) {
@@ -559,6 +680,11 @@
         quantity,
         notes: item.notes || ""
       });
+    }
+
+    const quantityInput = document.querySelector(`input[data-item-quantity="${cssEscape(itemId)}"]`);
+    if (quantityInput) {
+      quantityInput.value = "1";
     }
 
     persistCart();
@@ -913,15 +1039,27 @@
   }
 
   function toggleCartPanel() {
-    elements.cartPanel?.classList.toggle("hidden");
+    if (!isCompactViewport()) {
+      elements.cartPanel?.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+
+    state.isCartOpen = !state.isCartOpen;
+    syncCartPanelLayout();
   }
 
   function openCartPanel() {
-    elements.cartPanel?.classList.remove("hidden");
+    state.isCartOpen = true;
+    syncCartPanelLayout();
   }
 
   function closeCartPanel() {
-    elements.cartPanel?.classList.add("hidden");
+    if (!isCompactViewport()) {
+      return;
+    }
+
+    state.isCartOpen = false;
+    syncCartPanelLayout();
   }
 
   function getComparablePrice(item) {
@@ -935,6 +1073,72 @@
       areaId ||
       "Business Area"
     );
+  }
+
+  function getAreaMonogram(areaId) {
+    return (
+      getAreaLabel(areaId)
+        .replace(/[^A-Za-z0-9 ]+/g, " ")
+        .split(/\s+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part.charAt(0).toUpperCase())
+        .join("") || "OR"
+    );
+  }
+
+  function clearCatalogFilters() {
+    state.filters.search = "";
+    state.filters.area = "";
+    state.filters.sort = "featured";
+    state.visibleItemCount = INITIAL_VISIBLE_ITEM_COUNT;
+    setInputValue(elements.catalogSearchInput, "");
+    setInputValue(elements.catalogAreaFilter, "");
+    setInputValue(elements.catalogSortFilter, "featured");
+    renderCatalog();
+  }
+
+  function getCartMetrics() {
+    const totalQuantity = state.cart.reduce((sum, item) => sum + item.quantity, 0);
+    const subtotal = Number(
+      state.cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0).toFixed(2)
+    );
+    const areaCount = new Set(state.cart.map((item) => item.businessAreaId)).size;
+    const quoteCount = state.cart.filter((item) => Number(item.unitPrice || 0) <= 0).length;
+
+    return { totalQuantity, subtotal, areaCount, quoteCount };
+  }
+
+  function isCompactViewport() {
+    return window.matchMedia("(max-width: 1024px)").matches;
+  }
+
+  function syncCartPanelLayout() {
+    const compact = isCompactViewport();
+    const shouldShowCart = !compact || state.isCartOpen;
+    const cartMetrics = getCartMetrics();
+
+    if (elements.cartPanel) {
+      elements.cartPanel.classList.toggle("hidden", !shouldShowCart);
+      elements.cartPanel.classList.toggle("cart-panel-drawer", compact);
+    }
+
+    if (elements.cartScrim) {
+      elements.cartScrim.classList.toggle("hidden", !compact || !state.isCartOpen);
+    }
+
+    if (elements.closeCartBtn) {
+      elements.closeCartBtn.classList.toggle("hidden", !compact);
+    }
+
+    if (elements.mobileCartBar) {
+      elements.mobileCartBar.classList.toggle(
+        "hidden",
+        cartMetrics.totalQuantity === 0 || (compact && state.isCartOpen)
+      );
+    }
+
+    document.body.classList.toggle("cart-drawer-open", compact && state.isCartOpen);
   }
 
   function getStatusClassName(value) {
