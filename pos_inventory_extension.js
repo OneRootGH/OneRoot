@@ -2911,6 +2911,69 @@
     `;
   }
 
+  function buildPosProductRowMarkup(item, options = {}) {
+    const selected = options.selectedProductId === item.id;
+    const draftQuantity = Math.max(parsePositiveInteger(options.draftQuantity), 1);
+    const stockLabel = item.trackInventory
+      ? `Stock ${formatInventoryQuantity(item.quantityOnHand)}`
+      : "Service item";
+    const areaLabel = getBusinessArea(item.businessAreaId).shortLabel;
+    const identityLabel = buildInventoryIdentityLabel(item);
+    const addLabel = draftQuantity > 1 ? `+${draftQuantity}` : "Add";
+
+    return `
+      <article class="pos-product-row ${selected ? "is-selected" : ""}">
+        <div class="pos-product-row-main">
+          <div class="pos-product-row-top">
+            <strong>${escapeHtml(item.name)}</strong>
+            <span class="tag tag-category">${escapeHtml(item.category)}</span>
+          </div>
+          <span class="table-secondary">${escapeHtml(areaLabel)} • ${escapeHtml(stockLabel)}${
+      identityLabel ? ` • ${escapeHtml(identityLabel)}` : ""
+    }</span>
+        </div>
+        <div class="pos-product-row-price">
+          <strong>${formatCurrency(item.salesPrice)}</strong>
+        </div>
+        <div class="pos-product-row-actions">
+          <button
+            class="edit-btn"
+            data-pos-action="choose-product"
+            ${buildDataAttributes({ "product-id": item.id })}
+            type="button"
+          >
+            View
+          </button>
+          <button
+            class="button button-primary quick-action-button"
+            data-pos-action="quick-add-item"
+            ${buildDataAttributes({ "product-id": item.id, quantity: draftQuantity })}
+            type="button"
+          >
+            ${escapeHtml(addLabel)}
+          </button>
+          <button
+            class="button button-secondary quick-action-button"
+            data-pos-action="quick-add-item"
+            ${buildDataAttributes({ "product-id": item.id, quantity: 1 })}
+            type="button"
+          >
+            +1
+          </button>
+        </div>
+      </article>
+    `;
+  }
+
+  function hasActivePosOrderFilters() {
+    return Boolean(
+      normalizeText(state.posFilters.search) ||
+        normalizeMonthInput(state.posFilters.month) ||
+        normalizeBusinessAreaId(state.posFilters.area) ||
+        normalizeText(state.posFilters.paymentMethod)
+    );
+  }
+
   function buildInventoryLowStockCardMarkup(item) {
     return `
       <article class="inventory-low-stock-card">
@@ -2993,6 +3056,8 @@
     const cartAreaSummary = getPosCartAreaIds()
       .map((areaId) => getBusinessArea(areaId).shortLabel)
       .join(", ");
+    const cartItemCount = state.posDraft.items.reduce((sum, item) => sum + item.quantity, 0);
+    const historyOpen = hasActivePosOrderFilters() || Boolean(state.editingPosOrderId);
 
     root.innerHTML = `
       <section class="section-card">
@@ -3015,12 +3080,31 @@
           </div>
         </div>
 
-        <p class="muted-text">
-          Use the quick area, barcode scan, search, and product cards below to capture sales faster. Press <strong>/</strong> to jump to product search, or scan into the barcode box and press <strong>Enter</strong> to add the item immediately.
+        <div class="pos-counter-strip">
+          <article class="stat-card">
+            <span>Today</span>
+            <strong>${formatCurrency(todaySales)}</strong>
+          </article>
+          <article class="stat-card">
+            <span>Cart</span>
+            <strong>${formatCurrency(cartTotal)}</strong>
+          </article>
+          <article class="stat-card">
+            <span>Items</span>
+            <strong>${escapeHtml(String(cartItemCount))}</strong>
+          </article>
+          <article class="stat-card">
+            <span>Serving Area</span>
+            <strong>${escapeHtml(currentAreaLabel)}</strong>
+          </article>
+        </div>
+
+        <p class="muted-text pos-serving-note">
+          Serve faster with one compact counter view: set area and payment once, scan or search, tap add, then save. Press <strong>/</strong> to jump to product search, or scan into the barcode box and press <strong>Enter</strong>.
         </p>
 
         <form id="posOrderForm" novalidate>
-          <div class="quick-panel-grid">
+          <div class="quick-panel-grid pos-quick-panel-grid">
             <article class="quick-panel-card">
               <span class="kicker">Quick Area</span>
               <div class="quick-chip-row">
@@ -3089,7 +3173,7 @@
             </article>
           </div>
 
-          <div class="mini-form-grid pos-meta-grid">
+          <div class="mini-form-grid pos-meta-grid pos-meta-grid-tight">
             <label>
               <span>Order Date</span>
               <input id="posDraftOrderDate" type="date" value="${escapeHtml(
@@ -3114,21 +3198,30 @@
                 )}
               </select>
             </label>
+
+            <div class="pos-quick-tools">
+              <button class="button button-ghost" data-pos-action="focus-search" type="button">
+                Focus Search
+              </button>
+              <button class="button button-ghost" data-pos-action="reset-draft" type="button">
+                New Order
+              </button>
+            </div>
           </div>
 
-          <div class="pos-builder-grid">
-            <section class="section-card inset-card">
+          <div class="pos-builder-grid pos-builder-grid-tight">
+            <section class="section-card inset-card pos-catalog-card">
               <div class="section-heading compact">
                 <div>
                   <p class="kicker">Fast Search</p>
-                  <h3>Tap Product To Add</h3>
+                  <h3>Tap To Add</h3>
                 </div>
-                <button class="button button-ghost" data-pos-action="focus-search" type="button">
-                  Focus Search
-                </button>
+                <span class="table-secondary">${escapeHtml(String(matchingProductCount))} matching item${
+      matchingProductCount === 1 ? "" : "s"
+    }</span>
               </div>
 
-              <div class="mini-form-grid">
+              <div class="mini-form-grid pos-search-grid">
                 <label class="wide-field">
                   <span>Barcode Scan</span>
                   <div class="scanner-row">
@@ -3182,7 +3275,7 @@
               ${
                 selectedProduct
                   ? `
-                    <div class="inventory-helper-card">
+                    <div class="inventory-helper-card pos-selected-product-card">
                       <strong>${escapeHtml(selectedProduct.name)}</strong>
                       <span>${escapeHtml(getBusinessArea(selectedProduct.businessAreaId).shortLabel)} • ${escapeHtml(
                         selectedProduct.category
@@ -3200,7 +3293,7 @@
                     </div>
                   `
                   : `
-                    <div class="empty-state">Search across all POS areas, or choose one area filter if you want a narrower counter view.</div>
+                    <div class="empty-state pos-inline-empty-state">Search across all POS areas, or choose one area filter if you want a narrower counter view.</div>
                   `
               }
 
@@ -3212,7 +3305,7 @@
                         <strong>Frequent Items</strong>
                         <span>${escapeHtml(currentAreaLabel)}</span>
                       </div>
-                      <div class="product-grid product-grid-compact">
+                      <div class="pos-frequent-rail">
                         ${frequentProducts
                           .map((item) =>
                             buildPosProductCardMarkup(item, {
@@ -3228,7 +3321,7 @@
                   : ""
               }
 
-              <div class="compact-section">
+              <div class="compact-section pos-results-section">
                 <div class="results-meta">
                   <strong>Matching Products</strong>
                   <span>${escapeHtml(String(matchingProductCount))} match${
@@ -3239,10 +3332,10 @@
                   visibleProducts.length === 0
                     ? `<div class="empty-state">No products match this search yet.</div>`
                     : `
-                      <div class="product-grid">
+                      <div class="pos-results-list">
                         ${visibleProducts
                           .map((item) =>
-                            buildPosProductCardMarkup(item, {
+                            buildPosProductRowMarkup(item, {
                               selectedProductId: selectedProduct?.id || "",
                               draftQuantity: state.posDraft.quantity
                             })
@@ -3254,7 +3347,7 @@
               </div>
             </section>
 
-            <section class="section-card inset-card cart-summary-card">
+            <section class="section-card inset-card cart-summary-card pos-checkout-card">
               <div class="section-heading compact">
                 <div>
                   <p class="kicker">Current Cart</p>
@@ -3268,9 +3361,7 @@
               <div class="cart-stat-row">
                 <article class="stat-card">
                   <span>Items</span>
-                  <strong>${escapeHtml(
-                    String(state.posDraft.items.reduce((sum, item) => sum + item.quantity, 0))
-                  )}</strong>
+                  <strong>${escapeHtml(String(cartItemCount))}</strong>
                 </article>
                 <article class="stat-card">
                   <span>Areas</span>
@@ -3288,7 +3379,7 @@
                 state.posDraft.items.length === 0
                   ? `<div class="empty-state">No items in the cart yet.</div>`
                   : `
-                    <div class="table-wrap compact-table-wrap">
+                    <div class="table-wrap compact-table-wrap cart-items-shell">
                       <table>
                         <thead>
                           <tr>
@@ -3342,11 +3433,8 @@
                   `
               }
 
-              <div class="compact-section">
-                <div class="results-meta">
-                  <strong>Optional Customer Details</strong>
-                  <span>Only fill when needed</span>
-                </div>
+              <details class="pos-optional-panel">
+                <summary>Customer details and notes</summary>
                 <div class="mini-form-grid">
                   <label>
                     <span>Customer Name</span>
@@ -3369,9 +3457,9 @@
                     )}</textarea>
                   </label>
                 </div>
-              </div>
+              </details>
 
-              <div class="form-actions">
+              <div class="form-actions pos-checkout-actions">
                 <button class="button button-primary" data-pos-submit="save" type="submit">
                   ${escapeHtml(state.editingPosOrderId ? "Update POS Order" : "Save POS Order")}
                 </button>
@@ -3387,146 +3475,148 @@
         </form>
       </section>
 
-      <section class="section-card">
-        <div class="section-heading">
-          <div>
-            <p class="kicker">Saved Orders</p>
-            <h3>POS Order History</h3>
-          </div>
-          <div class="module-actions">
-            <button class="button button-secondary" data-pos-action="focus-order-search" type="button">
-              Focus Order Search
-            </button>
-            <button class="button button-ghost" data-pos-action="clear-filters" type="button">
-              Clear Filters
-            </button>
-          </div>
-        </div>
-
-        <div class="filter-grid">
-          <label>
-            <span>Search</span>
-            <input id="posFilterSearch" type="search" value="${escapeHtml(
-              state.posFilters.search
-            )}" placeholder="Order number, customer, or item..." />
-          </label>
-
-          <label>
-            <span>Month</span>
-            <input id="posFilterMonth" type="month" value="${escapeHtml(state.posFilters.month)}" />
-          </label>
-
-          <label>
-            <span>Business Area</span>
-            <select id="posFilterArea">
-              ${buildSelectMarkup(areaOptions, state.posFilters.area, "All Areas")}
-            </select>
-          </label>
-
-          <label>
-            <span>Payment Method</span>
-            <select id="posFilterPaymentMethod">
-              ${buildSelectMarkup(
-                paymentOptions.map((item) => ({ value: item, label: item })),
-                state.posFilters.paymentMethod,
-                "All Methods"
-              )}
-            </select>
-          </label>
-        </div>
-
-        <div class="results-meta">
-          <strong>${escapeHtml(String(filteredOrders.length))} order${
+      <section class="section-card pos-history-shell">
+        <details ${historyOpen ? "open" : ""}>
+          <summary class="pos-history-summary">
+            <div>
+              <p class="kicker">Saved Orders</p>
+              <h3>POS Order History</h3>
+            </div>
+            <div class="pos-history-summary-meta">
+              <strong>${escapeHtml(String(filteredOrders.length))} order${
       filteredOrders.length === 1 ? "" : "s"
     } in view</strong>
-          <span>POS sales ${formatCurrency(totalSales)} • Items sold ${escapeHtml(
+              <span>POS sales ${formatCurrency(totalSales)} • Items sold ${escapeHtml(
       String(totalItemsSold)
     )} • Today ${formatCurrency(todaySales)}</span>
-        </div>
-      </section>
+            </div>
+          </summary>
 
-      <section class="section-card">
-        <div class="table-wrap compact-table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Date / Order</th>
-                <th>Areas</th>
-                <th>Customer</th>
-                <th>Payment</th>
-                <th>Items</th>
-                <th>Total</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${
-                filteredOrders.length === 0
-                  ? `
-                    <tr>
-                      <td colspan="7" class="empty-state">
-                        No POS orders match the current view yet.
-                      </td>
-                    </tr>
-                  `
-                  : filteredOrders
-                      .map(
-                        (record) => `
-                          <tr>
-                            <td>
-                              <span class="table-primary">${escapeHtml(
-                                formatDisplayDate(record.orderDate)
-                              )}</span>
-                              <span class="table-secondary">${escapeHtml(record.orderNumber)}</span>
-                            </td>
-                            <td>
-                              <span class="tag tag-area">${escapeHtml(getPosOrderAreaLabel(record))}</span>
-                              <span class="table-secondary">${escapeHtml(getPosOrderAreaSummary(record))}</span>
-                            </td>
-                            <td>
-                              <span class="table-primary">${escapeHtml(record.customerName || "Walk-in Customer")}</span>
-                              <span class="table-secondary">${escapeHtml(record.customerPhone || "No phone saved")}</span>
-                            </td>
-                            <td>${escapeHtml(record.paymentMethod)}</td>
-                            <td>
-                              <span class="table-primary">${escapeHtml(String(record.itemCount))} item${
-                          record.itemCount === 1 ? "" : "s"
-                        }</span>
-                              <span class="table-secondary">${escapeHtml(
-                                record.items
-                                  .slice(0, 3)
-                                  .map((item) => item.name)
-                                  .join(", ") || "No items"
-                              )}</span>
-                            </td>
-                            <td class="amount-cell">${formatCurrency(record.totalAmount)}</td>
-                            <td>
-                              <div class="row-actions">
-                                <button class="edit-btn" data-pos-action="print-receipt" ${buildDataAttributes({
-                                  id: record.id
-                                })} type="button">
-                                  Receipt
-                                </button>
-                                <button class="edit-btn" data-pos-action="edit-order" ${buildDataAttributes({
-                                  id: record.id
-                                })} type="button">
-                                  Edit
-                                </button>
-                                <button class="delete-btn" data-pos-action="delete-order" ${buildDataAttributes({
-                                  id: record.id
-                                })} type="button">
-                                  Delete
-                                </button>
-                              </div>
-                            </td>
-                          </tr>
-                        `
-                      )
-                      .join("")
-              }
-            </tbody>
-          </table>
-        </div>
+          <div class="pos-history-body">
+            <div class="module-actions">
+              <button class="button button-secondary" data-pos-action="focus-order-search" type="button">
+                Focus Order Search
+              </button>
+              <button class="button button-ghost" data-pos-action="clear-filters" type="button">
+                Clear Filters
+              </button>
+            </div>
+
+            <div class="filter-grid">
+              <label>
+                <span>Search</span>
+                <input id="posFilterSearch" type="search" value="${escapeHtml(
+                  state.posFilters.search
+                )}" placeholder="Order number, customer, or item..." />
+              </label>
+
+              <label>
+                <span>Month</span>
+                <input id="posFilterMonth" type="month" value="${escapeHtml(state.posFilters.month)}" />
+              </label>
+
+              <label>
+                <span>Business Area</span>
+                <select id="posFilterArea">
+                  ${buildSelectMarkup(areaOptions, state.posFilters.area, "All Areas")}
+                </select>
+              </label>
+
+              <label>
+                <span>Payment Method</span>
+                <select id="posFilterPaymentMethod">
+                  ${buildSelectMarkup(
+                    paymentOptions.map((item) => ({ value: item, label: item })),
+                    state.posFilters.paymentMethod,
+                    "All Methods"
+                  )}
+                </select>
+              </label>
+            </div>
+
+            <div class="table-wrap compact-table-wrap pos-history-table-shell">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date / Order</th>
+                    <th>Areas</th>
+                    <th>Customer</th>
+                    <th>Payment</th>
+                    <th>Items</th>
+                    <th>Total</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  ${
+                    filteredOrders.length === 0
+                      ? `
+                        <tr>
+                          <td colspan="7" class="empty-state">
+                            No POS orders match the current view yet.
+                          </td>
+                        </tr>
+                      `
+                      : filteredOrders
+                          .map(
+                            (record) => `
+                              <tr>
+                                <td>
+                                  <span class="table-primary">${escapeHtml(
+                                    formatDisplayDate(record.orderDate)
+                                  )}</span>
+                                  <span class="table-secondary">${escapeHtml(record.orderNumber)}</span>
+                                </td>
+                                <td>
+                                  <span class="tag tag-area">${escapeHtml(getPosOrderAreaLabel(record))}</span>
+                                  <span class="table-secondary">${escapeHtml(getPosOrderAreaSummary(record))}</span>
+                                </td>
+                                <td>
+                                  <span class="table-primary">${escapeHtml(record.customerName || "Walk-in Customer")}</span>
+                                  <span class="table-secondary">${escapeHtml(record.customerPhone || "No phone saved")}</span>
+                                </td>
+                                <td>${escapeHtml(record.paymentMethod)}</td>
+                                <td>
+                                  <span class="table-primary">${escapeHtml(String(record.itemCount))} item${
+                              record.itemCount === 1 ? "" : "s"
+                            }</span>
+                                  <span class="table-secondary">${escapeHtml(
+                                    record.items
+                                      .slice(0, 3)
+                                      .map((item) => item.name)
+                                      .join(", ") || "No items"
+                                  )}</span>
+                                </td>
+                                <td class="amount-cell">${formatCurrency(record.totalAmount)}</td>
+                                <td>
+                                  <div class="row-actions">
+                                    <button class="edit-btn" data-pos-action="print-receipt" ${buildDataAttributes({
+                                      id: record.id
+                                    })} type="button">
+                                      Receipt
+                                    </button>
+                                    <button class="edit-btn" data-pos-action="edit-order" ${buildDataAttributes({
+                                      id: record.id
+                                    })} type="button">
+                                      Edit
+                                    </button>
+                                    <button class="delete-btn" data-pos-action="delete-order" ${buildDataAttributes({
+                                      id: record.id
+                                    })} type="button">
+                                      Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            `
+                          )
+                          .join("")
+                  }
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </details>
       </section>
     `;
 
