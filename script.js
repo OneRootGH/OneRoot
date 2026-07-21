@@ -55,7 +55,7 @@ const AGREEMENT_READY_FILE_LIMIT = 6;
 const PAYSLIP_READY_FILE_LIMIT = 8;
 const WORKBOOK_EXPORT_ROW_LIMIT = 299;
 const HOSTED_WORKSPACE_SNAPSHOT_PATH =
-  "./data/public/oneroot-hosted-workspace-seed.json?v=20260721a";
+  "./data/public/oneroot-hosted-workspace-seed.json?v=20260721b";
 const HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY =
   "oneroot-expense-register:hosted-workspace-snapshot:v1";
 
@@ -1727,8 +1727,34 @@ function isHostedWorkspaceEnvironment() {
   return hostname !== "" && !["127.0.0.1", "localhost", "::1"].includes(hostname);
 }
 
+function getHostedWorkspaceBusinessRecordTotal(workspace = state) {
+  return (
+    (workspace.expenses?.length || 0) +
+    (workspace.budgets?.length || 0) +
+    (workspace.sales?.length || 0) +
+    (workspace.rentals?.length || 0) +
+    (workspace.pettyCash?.length || 0) +
+    (workspace.pettyCashBudgets?.length || 0) +
+    (workspace.salaryRecords?.length || 0) +
+    (workspace.cashbookEntries?.length || 0) +
+    (workspace.purchaseOrders?.length || 0) +
+    (workspace.laundryTickets?.length || 0) +
+    (workspace.equipmentRentalBookings?.length || 0) +
+    (workspace.securityDepositRecords?.length || 0) +
+    (workspace.ledgerEntries?.length || 0) +
+    (workspace.mobileMoneyReconciliations?.length || 0) +
+    (workspace.suppliers?.length || 0) +
+    (workspace.assetRecords?.length || 0) +
+    (workspace.forecastPlans?.length || 0) +
+    (workspace.recurringControls?.length || 0) +
+    (workspace.maintenanceRecords?.length || 0) +
+    (workspace.posOrders?.length || 0) +
+    (workspace.inventoryItems?.length || 0)
+  );
+}
+
 function canRestoreHostedWorkspaceSnapshot() {
-  return getWorkspaceRecordTotal(state) === 0 && state.userProfiles.length === 0;
+  return getHostedWorkspaceBusinessRecordTotal(state) === 0;
 }
 
 async function fetchHostedWorkspaceSnapshot() {
@@ -1764,6 +1790,9 @@ function restoreWorkspaceFromImport(imported) {
   state.recurringControls = imported.recurringControls;
   state.maintenanceRecords = imported.maintenanceRecords;
   state.userProfiles = imported.userProfiles;
+  state.posOrders = imported.posOrders || [];
+  state.inventoryItems = imported.inventoryItems || [];
+  state.auditTrail = imported.auditTrail || [];
   state.currency = imported.currency;
   state.activeUserId = imported.activeUserId;
   state.editingExpenseId = null;
@@ -1784,6 +1813,20 @@ function restoreWorkspaceFromImport(imported) {
   state.editingUserId = null;
   state.editingRecurringId = null;
   state.editingMaintenanceId = null;
+  state.editingPosOrderId = null;
+  state.editingInventoryItemId = null;
+  if (typeof createEmptyPosDraft === "function") {
+    state.posDraft = createEmptyPosDraft();
+  }
+  if (typeof createEmptyInventoryDraft === "function") {
+    state.inventoryDraft = createEmptyInventoryDraft();
+  }
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: false });
+  }
+  if (typeof primeAuditSnapshots === "function") {
+    primeAuditSnapshots();
+  }
 }
 
 async function restoreHostedWorkspaceSnapshotIfNeeded() {
