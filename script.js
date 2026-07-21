@@ -55,9 +55,11 @@ const AGREEMENT_READY_FILE_LIMIT = 6;
 const PAYSLIP_READY_FILE_LIMIT = 8;
 const WORKBOOK_EXPORT_ROW_LIMIT = 299;
 const HOSTED_WORKSPACE_SNAPSHOT_PATH =
-  "./data/public/oneroot-hosted-workspace-seed.json?v=20260721b";
+  "./data/public/oneroot-hosted-workspace-seed.json?v=20260721c";
 const HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY =
   "oneroot-expense-register:hosted-workspace-snapshot:v1";
+const HOSTED_WORKSPACE_ACCESS_FLAG_KEY =
+  "oneroot-expense-register:hosted-workspace-access:v1";
 
 const BUSINESS_AREAS = [
   {
@@ -1767,15 +1769,29 @@ function getHostedWorkspaceBusinessRecordTotal(workspace = state) {
   );
 }
 
-function canRestoreHostedWorkspaceSnapshot() {
-  return getHostedWorkspaceBusinessRecordTotal(state) === 0;
-}
-
 function needsHostedWorkspaceAccessHydration() {
   return (
     isHostedWorkspaceEnvironment() &&
     (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0 || isWorkspaceLocked())
   );
+}
+
+function getHostedWorkspaceSnapshotRevision(imported) {
+  return normalizeText(imported?.exportedAt) || "loaded";
+}
+
+function shouldRestoreHostedWorkspaceSnapshot(imported) {
+  const hostedTotal = getHostedWorkspaceBusinessRecordTotal(imported);
+
+  if (hostedTotal === 0) {
+    return false;
+  }
+
+  const localTotal = getHostedWorkspaceBusinessRecordTotal(state);
+  const currentSnapshotFlag = normalizeText(localStorage.getItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY));
+  const nextSnapshotFlag = getHostedWorkspaceSnapshotRevision(imported);
+
+  return localTotal === 0 || (currentSnapshotFlag !== nextSnapshotFlag && localTotal < hostedTotal);
 }
 
 async function fetchHostedWorkspaceSnapshot() {
@@ -1851,29 +1867,31 @@ function restoreWorkspaceFromImport(imported) {
 }
 
 async function restoreHostedWorkspaceSnapshotIfNeeded() {
-  if (!isHostedWorkspaceEnvironment() || !canRestoreHostedWorkspaceSnapshot()) {
-    return;
-  }
-
-  if (normalizeText(localStorage.getItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY)) !== "") {
+  if (!isHostedWorkspaceEnvironment()) {
     return;
   }
 
   try {
     const imported = await fetchHostedWorkspaceSnapshot();
-    const totalRecords = getWorkspaceRecordTotal(imported);
+    const totalRecords = getHostedWorkspaceBusinessRecordTotal(imported);
+    const nextSnapshotFlag = getHostedWorkspaceSnapshotRevision(imported);
 
     if (totalRecords === 0) {
-      localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, "empty");
       return;
     }
 
+    if (!shouldRestoreHostedWorkspaceSnapshot(imported)) {
+      return;
+    }
+
+    const localTotal = getHostedWorkspaceBusinessRecordTotal(state);
     restoreWorkspaceFromImport(imported);
     persistAllData();
-    localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, imported.exportedAt || "loaded");
-    startupToastMessage = `Uploaded online snapshot loaded with ${totalRecords} record${
-      totalRecords === 1 ? "" : "s"
-    }.`;
+    localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, nextSnapshotFlag);
+    startupToastMessage =
+      localTotal === 0
+        ? `Uploaded online snapshot loaded with ${totalRecords} record${totalRecords === 1 ? "" : "s"}.`
+        : `Uploaded online snapshot synced with ${totalRecords} record${totalRecords === 1 ? "" : "s"}.`;
   } catch (error) {
     console.error(error);
   }
@@ -1897,9 +1915,13 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
     const missingHostedProfiles = imported.userProfiles.some(
       (profile) => !existingProfileKeys.has(buildUserProfileMergeKey(profile))
     );
-    const snapshotFlag = normalizeText(localStorage.getItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY));
+    const accessSnapshotFlag = normalizeText(localStorage.getItem(HOSTED_WORKSPACE_ACCESS_FLAG_KEY));
 
-    if (existingProfiles.length > 0 && !missingHostedProfiles && snapshotFlag === nextSnapshotFlag) {
+    if (
+      existingProfiles.length > 0 &&
+      !missingHostedProfiles &&
+      accessSnapshotFlag === nextSnapshotFlag
+    ) {
       return;
     }
 
@@ -1912,7 +1934,7 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
     reconcileActiveUserProfile({ skipPersist: true });
     persistUserProfiles();
     persistSettings();
-    localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, nextSnapshotFlag);
+    localStorage.setItem(HOSTED_WORKSPACE_ACCESS_FLAG_KEY, nextSnapshotFlag);
 
     if (!startupToastMessage) {
       startupToastMessage =
