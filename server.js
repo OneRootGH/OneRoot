@@ -318,6 +318,18 @@ function normalizeWorkspaceSnapshotPayload(payload) {
   };
 }
 
+function countWorkspaceBusinessRecords(payload) {
+  const workspace = getWorkspaceRoot(payload);
+
+  return Object.entries(workspace).reduce((total, [key, value]) => {
+    if (key === "userProfiles") {
+      return total;
+    }
+
+    return total + (Array.isArray(value) ? value.length : 0);
+  }, 0);
+}
+
 function readWorkspaceSnapshotFile() {
   ensureWorkspaceStore();
 
@@ -695,6 +707,7 @@ function createWorkspaceSession(profile) {
   pruneWorkspaceSessions();
   const token = crypto.randomBytes(24).toString("hex");
   WORKSPACE_SESSIONS.set(token, {
+    userId: normalizeText(profile.id || profile.username),
     username: profile.username,
     role: profile.role,
     fullName: profile.fullName,
@@ -731,6 +744,7 @@ function getWorkspaceSession(request) {
 }
 
 function sanitizeWorkspaceAuthProfile(record) {
+  const id = normalizeText(record?.id || record?.userId || record?.profileId || record?.username);
   const fullName = normalizeText(record?.fullName || record?.name);
   const username = normalizeText(record?.username || record?.user).toLowerCase();
   const role = normalizeText(record?.role).toLowerCase();
@@ -752,11 +766,12 @@ function sanitizeWorkspaceAuthProfile(record) {
       passwordHash
   );
 
-  if (!fullName || !username || !role || !passwordHash || !active || !loginEnabled) {
+  if (!id || !fullName || !username || !role || !passwordHash || !active || !loginEnabled) {
     return null;
   }
 
   return {
+    id,
     fullName,
     username,
     role,
@@ -764,10 +779,51 @@ function sanitizeWorkspaceAuthProfile(record) {
   };
 }
 
+function sanitizeWorkspaceAccessProfile(record) {
+  const id = normalizeText(record?.id || record?.userId || record?.profileId || record?.username);
+  const fullName = normalizeText(record?.fullName || record?.name);
+  const username = normalizeText(record?.username || record?.user).toLowerCase();
+  const role = normalizeText(record?.role).toLowerCase();
+  const active = Boolean(
+    record?.active === true ||
+      record?.active === "true" ||
+      record?.active === 1 ||
+      record?.active === "1" ||
+      record?.active === undefined
+  );
+  const loginEnabled = Boolean(
+    record?.loginEnabled === true ||
+      record?.loginEnabled === "true" ||
+      record?.loginEnabled === 1 ||
+      record?.loginEnabled === "1" ||
+      normalizeText(record?.passwordHash)
+  );
+
+  if (!id || !fullName || !username || !role || !active || !loginEnabled) {
+    return null;
+  }
+
+  return {
+    id,
+    fullName,
+    username,
+    role,
+    active: true,
+    loginEnabled: true
+  };
+}
+
 function extractWorkspaceAuthProfiles(payload) {
   const workspaceRoot = getWorkspaceRoot(payload);
   return Array.isArray(workspaceRoot?.userProfiles)
     ? workspaceRoot.userProfiles.map(sanitizeWorkspaceAuthProfile).filter(Boolean)
+    : [];
+}
+
+function extractWorkspaceAccessProfiles(payload) {
+  const workspaceRoot = getWorkspaceRoot(payload);
+  return Array.isArray(workspaceRoot?.userProfiles)
+    ? workspaceRoot.userProfiles.map(sanitizeWorkspaceAccessProfile).filter(Boolean)
     : [];
 }
 
@@ -1331,6 +1387,33 @@ async function handleApiRoute(request, response, pathname, url) {
   }
 
   if (pathname === "/api/workspace-session") {
+    if (request.method === "GET") {
+      await refreshWorkspaceAuthProfileCache();
+      const session = getWorkspaceSession(request);
+      const validSession =
+        session &&
+        loadWorkspaceAuthProfiles().some(
+          (item) => item.username === session.username && item.role === session.role
+        )
+          ? session
+          : null;
+
+      sendJson(response, 200, {
+        ok: true,
+        authenticated: Boolean(validSession),
+        loginRequired: loadWorkspaceAuthProfiles().length > 0,
+        session: validSession
+          ? {
+              userId: normalizeText(validSession.userId),
+              username: validSession.username,
+              fullName: validSession.fullName,
+              role: validSession.role
+            }
+          : null
+      });
+      return true;
+    }
+
     if (request.method === "POST") {
       try {
         await refreshWorkspaceAuthProfileCache();
@@ -1378,6 +1461,31 @@ async function handleApiRoute(request, response, pathname, url) {
           "Set-Cookie": buildWorkspaceSessionCookie(request, "", 0)
         }
       );
+      return true;
+    }
+  }
+
+  if (pathname === "/api/workspace-access" && request.method === "GET") {
+    try {
+      const snapshot = await readWorkspaceSnapshotStore();
+      const profiles = extractWorkspaceAccessProfiles(snapshot);
+
+      sendJson(response, 200, {
+        ok: true,
+        loginRequired: profiles.length > 0,
+        exportedAt: normalizeText(snapshot.exportedAt),
+        recordCount: countWorkspaceBusinessRecords(snapshot),
+        profiles
+      });
+      return true;
+    } catch (error) {
+      sendJson(response, 200, {
+        ok: true,
+        loginRequired: false,
+        exportedAt: "",
+        recordCount: 0,
+        profiles: []
+      });
       return true;
     }
   }

@@ -66,6 +66,8 @@ const HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY =
 const HOSTED_WORKSPACE_ACCESS_FLAG_KEY =
   "oneroot-expense-register:hosted-workspace-access:v1";
 const HOSTED_WORKSPACE_LIVE_SYNC_PATH = "/api/workspace";
+const HOSTED_WORKSPACE_ACCESS_PATH = "/api/workspace-access";
+const HOSTED_WORKSPACE_SESSION_PATH = "/api/workspace-session";
 const HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY =
   "oneroot-expense-register:hosted-workspace-live:v1";
 
@@ -1721,6 +1723,8 @@ const hostedWorkspaceSyncState = {
   hooksInstalled: false,
   uploadTimer: null,
   uploadDelayMs: 1200,
+  pollTimer: null,
+  pollIntervalMs: 30000,
   uploadInFlight: false,
   uploadQueued: false,
   suppressDepth: 0,
@@ -1740,12 +1744,18 @@ async function init() {
   captureElements();
   decorateNavigationMenus();
   bindEvents();
-  await restoreHostedWorkspaceSnapshotIfNeeded();
-  await hydrateHostedWorkspaceAccessIfNeeded();
+  if (isHostedWorkspaceEnvironment()) {
+    await hydrateHostedWorkspaceAccessIfNeeded();
+    await hydrateHostedWorkspaceSessionIfNeeded({ force: true });
+  } else {
+    await restoreHostedWorkspaceSnapshotIfNeeded();
+    await hydrateHostedWorkspaceAccessIfNeeded();
+  }
   reconcileActiveUserProfile();
   reconcileAuthenticationSession({ skipPersist: true });
   installHostedWorkspaceSyncHooks();
   await restoreHostedWorkspaceLiveSyncIfNeeded({ render: false });
+  startHostedWorkspaceSyncPolling();
   populateCurrencyOptions();
   initializeBudgetPlanner();
   applyReportPreset(state.reportFilters.preset, { silent: true });
@@ -1815,17 +1825,17 @@ function getHostedWorkspaceSyncStatusMeta() {
       };
     case "auth-required":
       return {
-        title: "Snapshot Only",
+        title: "Sign In Required",
         detail:
           hostedWorkspaceSyncState.detail ||
           (loginRequired
-            ? "This device is showing the uploaded snapshot only. Sign out and sign in again to reconnect live shared records."
-            : "This device is showing the uploaded snapshot until live shared access is available."),
+            ? "This device is waiting for a live workspace sign-in before it can open shared records."
+            : "This device is waiting for live shared access to become available."),
         recordLabel,
         liveSyncLabel,
         snapshotLabel,
         actionHint: loginRequired
-          ? "If entries from another PC are missing, sign out and sign in again on that device, then refresh shared data."
+          ? "Sign in on this device, then it will connect directly to the shared workspace."
           : "Use Refresh Shared Data to compare this device with the live shared workspace."
       };
     case "sync-error":
@@ -1915,6 +1925,38 @@ function shouldRestoreHostedWorkspaceSnapshot(imported) {
   const nextSnapshotFlag = getHostedWorkspaceSnapshotRevision(imported);
 
   return localTotal === 0 || (currentSnapshotFlag !== nextSnapshotFlag && localTotal < hostedTotal);
+}
+
+async function fetchHostedWorkspaceAccessState() {
+  const response = await fetch(HOSTED_WORKSPACE_ACCESS_PATH, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted access request failed with ${response.status}.`);
+  }
+
+  return await response.json();
+}
+
+async function fetchHostedWorkspaceSessionState() {
+  const response = await fetch(HOSTED_WORKSPACE_SESSION_PATH, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  if (!response.ok) {
+    throw new Error(`Hosted session request failed with ${response.status}.`);
+  }
+
+  return await response.json();
 }
 
 async function fetchHostedWorkspaceSnapshot() {
@@ -2039,6 +2081,44 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
   }
 
   try {
+    if (isHostedWorkspaceEnvironment()) {
+      const payload = await fetchHostedWorkspaceAccessState();
+      const nextSnapshotFlag = normalizeText(payload.exportedAt) || "access-restored";
+      const importedProfiles = sanitizeImportedCollection(
+        Array.isArray(payload.profiles) ? payload.profiles : [],
+        sanitizeStoredUserProfile
+      );
+
+      if (!payload.loginRequired) {
+        state.userProfiles = [];
+        state.signedInUserId = "";
+        persistUserProfiles();
+        clearAuthSession();
+      } else if (importedProfiles.length > 0) {
+        state.userProfiles =
+          !Array.isArray(state.userProfiles) || state.userProfiles.length === 0 || isWorkspaceLocked()
+            ? importedProfiles
+            : mergeUserProfiles(state.userProfiles, importedProfiles);
+
+        reconcileActiveUserProfile({ skipPersist: true });
+        persistUserProfiles();
+        persistSettings();
+        localStorage.setItem(HOSTED_WORKSPACE_ACCESS_FLAG_KEY, nextSnapshotFlag);
+      }
+
+      setHostedWorkspaceSyncStatus(
+        payload.loginRequired ? "auth-required" : "live-connected",
+        payload.loginRequired
+          ? `Live shared workspace available with ${formatHostedWorkspaceRecordLabel(payload.recordCount || 0)}. Sign in to continue.`
+          : `Live shared workspace available with ${formatHostedWorkspaceRecordLabel(payload.recordCount || 0)}.`,
+        {
+          recordTotal: payload.recordCount || 0,
+          liveSyncAt: payload.exportedAt || ""
+        }
+      );
+      return;
+    }
+
     const imported = await fetchHostedWorkspaceSnapshot();
     const nextSnapshotFlag = normalizeText(imported.exportedAt) || "access-restored";
 
@@ -2084,6 +2164,49 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
     }
   } catch (error) {
     console.error(error);
+  }
+}
+
+async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
+  if (!isHostedWorkspaceEnvironment()) {
+    return null;
+  }
+
+  try {
+    const payload = await fetchHostedWorkspaceSessionState();
+    const session = payload && payload.authenticated ? payload.session : null;
+
+    if (!session) {
+      if (payload?.loginRequired) {
+        state.signedInUserId = "";
+        clearAuthSession();
+      }
+      return null;
+    }
+
+    const username = normalizeText(session.username).toLowerCase();
+    const matchedProfile =
+      state.userProfiles.find(
+        (profile) =>
+          normalizeText(profile.id) === normalizeText(session.userId) ||
+          normalizeText(profile.username).toLowerCase() === username
+      ) || null;
+    const resolvedUserId = normalizeText(matchedProfile?.id || session.userId);
+
+    if (resolvedUserId) {
+      state.signedInUserId = resolvedUserId;
+      state.activeUserId = resolvedUserId;
+      persistAuthSession(resolvedUserId, { username });
+
+      if (!options.skipPersist) {
+        persistSettings();
+      }
+    }
+
+    return session;
+  } catch (error) {
+    console.error(error);
+    return null;
   }
 }
 
@@ -2296,11 +2419,15 @@ async function ensureHostedWorkspaceServerSession() {
   const password = String(session.password || "");
 
   if (!username || !password) {
+    if (isWorkspaceLoginRequired() && !state.signedInUserId) {
+      await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
+    }
+
     setHostedWorkspaceSyncStatus(
       isWorkspaceLoginRequired() ? "auth-required" : "snapshot-only",
       isWorkspaceLoginRequired()
-        ? "This device needs a fresh workspace sign-in before it can compare with live shared records."
-        : "Using the uploaded snapshot until live shared access is available."
+        ? "This device needs a live workspace sign-in before it can compare with shared records."
+        : "Using the hosted workspace when live shared access becomes available."
     );
     return Boolean(state.signedInUserId) || !isWorkspaceLoginRequired();
   }
@@ -2586,6 +2713,9 @@ async function handleRefreshHostedWorkspaceSync() {
     return;
   }
 
+  await hydrateHostedWorkspaceAccessIfNeeded();
+  await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
+
   const refreshed = await restoreHostedWorkspaceLiveSyncIfNeeded({
     force: true,
     render: false,
@@ -2627,6 +2757,9 @@ async function handlePushHostedWorkspaceSync() {
     return;
   }
 
+  await hydrateHostedWorkspaceAccessIfNeeded();
+  await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
+
   if (isWorkspaceLocked()) {
     showToast("Sign in first before uploading this device to the live shared workspace.");
     return;
@@ -2650,6 +2783,31 @@ async function handlePushHostedWorkspaceSync() {
   showToast(
     hostedWorkspaceSyncState.detail || "This device could not upload to the live shared workspace right now."
   );
+}
+
+function startHostedWorkspaceSyncPolling() {
+  if (!isHostedWorkspaceEnvironment()) {
+    return;
+  }
+
+  if (hostedWorkspaceSyncState.pollTimer) {
+    window.clearInterval(hostedWorkspaceSyncState.pollTimer);
+  }
+
+  hostedWorkspaceSyncState.pollTimer = window.setInterval(() => {
+    if (document.visibilityState === "hidden") {
+      return;
+    }
+
+    void (async () => {
+      await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
+      const changed = await restoreHostedWorkspaceLiveSyncIfNeeded({ render: false });
+
+      if (changed) {
+        render();
+      }
+    })();
+  }, hostedWorkspaceSyncState.pollIntervalMs);
 }
 
 function decorateNavigationMenus() {
@@ -4231,6 +4389,8 @@ function handleStorageSync(event) {
 
 async function handleWindowFocusSync() {
   refreshStateFromStorage({ keepView: true });
+  await hydrateHostedWorkspaceAccessIfNeeded();
+  await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
   await restoreHostedWorkspaceLiveSyncIfNeeded({ render: false });
   render();
 }
@@ -4335,7 +4495,7 @@ function isPasswordLoginEnabledForProfile(profile) {
     profile &&
       profile.active &&
       getUserLoginMode(profile) === "password-required" &&
-      normalizeText(profile.passwordHash)
+      (isHostedWorkspaceEnvironment() || normalizeText(profile.passwordHash))
   );
 }
 
@@ -17137,6 +17297,44 @@ async function handleAccessLoginSubmit(event) {
 
   if (!password) {
     showToast("Enter the password for this workspace user.");
+    return;
+  }
+
+  if (isHostedWorkspaceEnvironment()) {
+    const serverSessionEstablished = await establishServerWorkspaceSession(username, password);
+
+    if (!serverSessionEstablished) {
+      showToast("The username or password is not correct.");
+      return;
+    }
+
+    await hydrateHostedWorkspaceAccessIfNeeded();
+    await hydrateHostedWorkspaceSessionIfNeeded({ force: true });
+    await restoreHostedWorkspaceLiveSyncIfNeeded({
+      force: true,
+      render: false,
+      uploadIfRemoteEmpty: true
+    });
+
+    const profile =
+      state.userProfiles.find(
+        (item) => normalizeText(item.username).toLowerCase() === username
+      ) || null;
+
+    if (profile) {
+      state.signedInUserId = profile.id;
+      state.activeUserId = profile.id;
+      persistAuthSession(profile.id, {
+        username: profile.username
+      });
+    }
+
+    persistSettings();
+    navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
+    render();
+    showToast(
+      `Signed in as ${profile?.fullName || username}. The live shared workspace is now connected.`
+    );
     return;
   }
 
