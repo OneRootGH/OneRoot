@@ -22,6 +22,7 @@ const USER_PROFILE_STORAGE_KEY = "oneroot-expense-register:users:v1";
 const VIEW_STORAGE_KEY = "oneroot-expense-register:view:v2";
 const AUTH_SESSION_STORAGE_KEY = "oneroot-expense-register:auth-session:v1";
 const AUTH_SIGN_OUT_FLAG_KEY = "oneroot-expense-register:auth-signed-out:v1";
+const AUTH_RESET_MIGRATION_KEY = "oneroot-expense-register:auth-reset:20260722a";
 const ONLINE_ORDERS_AUTH_STORAGE_KEY = "oneroot-expense-register:online-orders-auth:v1";
 const LIVE_DATA_STORAGE_KEYS = new Set([
   STORAGE_KEY,
@@ -1758,6 +1759,7 @@ async function init() {
   bindEvents();
   if (isHostedWorkspaceEnvironment()) {
     resetHostedWorkspaceOnlineCache();
+    await resetHostedWorkspaceAuthStateIfNeeded();
     await hydrateHostedWorkspaceAccessIfNeeded();
     await hydrateHostedWorkspaceSessionIfNeeded({ force: true });
   } else {
@@ -4714,6 +4716,31 @@ function setHostedWorkspaceSignOutSuspended(suspended) {
   }
 }
 
+function hasHostedWorkspaceAuthResetApplied() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return false;
+    }
+
+    return normalizeText(window.localStorage.getItem(AUTH_RESET_MIGRATION_KEY)) === "done";
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+function markHostedWorkspaceAuthResetApplied() {
+  try {
+    if (typeof window === "undefined" || !window.localStorage) {
+      return;
+    }
+
+    window.localStorage.setItem(AUTH_RESET_MIGRATION_KEY, "done");
+  } catch (error) {
+    console.error(error);
+  }
+}
+
 function findHostedWorkspaceProfileBySession(session = {}) {
   const sessionUserId = normalizeText(session.userId);
   const sessionUsername = normalizeText(session.username).toLowerCase();
@@ -4846,6 +4873,18 @@ async function clearServerWorkspaceSession(options = {}) {
     console.error(error);
     return false;
   }
+}
+
+async function resetHostedWorkspaceAuthStateIfNeeded() {
+  if (!isHostedWorkspaceEnvironment() || hasHostedWorkspaceAuthResetApplied()) {
+    return;
+  }
+
+  const workspaceToken = getHostedWorkspaceSessionToken();
+  setHostedWorkspaceSignOutSuspended(true);
+  clearAuthSession();
+  markHostedWorkspaceAuthResetApplied();
+  await clearServerWorkspaceSession({ sessionToken: workspaceToken });
 }
 
 function getUserLoginMode(profile) {
