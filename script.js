@@ -2171,9 +2171,10 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
       } else if (importedProfiles.length > 0) {
         const savedSession = loadAuthSession();
         const savedSessionUsername = normalizeText(savedSession.username).toLowerCase();
+        const savedSessionVerified = savedSession.serverAuthenticated === true;
         state.userProfiles = importedProfiles;
 
-        if (savedSessionUsername) {
+        if (savedSessionUsername && savedSessionVerified) {
           const matchedSignedInProfile =
             state.userProfiles.find(
               (profile) => normalizeText(profile.username).toLowerCase() === savedSessionUsername
@@ -2182,7 +2183,8 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
           if (matchedSignedInProfile) {
             state.signedInUserId = matchedSignedInProfile.id;
             persistAuthSession(matchedSignedInProfile.id, {
-              username: matchedSignedInProfile.username
+              username: matchedSignedInProfile.username,
+              serverAuthenticated: true
             });
           }
         }
@@ -2307,7 +2309,8 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
       setHostedWorkspaceSignOutSuspended(false);
       persistAuthSession(resolvedUserId, {
         username,
-        workspaceToken: nextWorkspaceToken
+        workspaceToken: nextWorkspaceToken,
+        serverAuthenticated: true
       });
 
       if (!options.skipPersist) {
@@ -2556,9 +2559,17 @@ async function ensureHostedWorkspaceServerSession() {
       return false;
     }
 
-    if (isWorkspaceLoginRequired() && !state.signedInUserId) {
-      await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
+    const restoredSession = await hydrateHostedWorkspaceSessionIfNeeded({
+      force: true,
+      skipPersist: true
+    });
+
+    if (restoredSession) {
+      return true;
     }
+
+    state.signedInUserId = "";
+    clearAuthSession();
 
     setHostedWorkspaceSyncStatus(
       isWorkspaceLoginRequired() ? "auth-required" : "snapshot-only",
@@ -2566,7 +2577,7 @@ async function ensureHostedWorkspaceServerSession() {
         ? "This device needs a live workspace sign-in before it can compare with shared records."
         : "Using the hosted workspace when live shared access becomes available."
     );
-    return Boolean(state.signedInUserId) || !isWorkspaceLoginRequired();
+    return !isWorkspaceLoginRequired();
   }
 
   const established = await hydrateHostedWorkspaceSessionIfNeeded({
@@ -2576,13 +2587,15 @@ async function ensureHostedWorkspaceServerSession() {
   });
 
   if (!established) {
+    state.signedInUserId = "";
+    clearAuthSession();
     setHostedWorkspaceSyncStatus(
       "auth-required",
       "The saved workspace sign-in on this device expired. Sign out and sign in again to reconnect live shared records."
     );
   }
 
-  return Boolean(established) || Boolean(state.signedInUserId) || !isWorkspaceLoginRequired();
+  return Boolean(established) || !isWorkspaceLoginRequired();
 }
 
 async function fetchHostedWorkspaceLiveSnapshot() {
@@ -2595,6 +2608,9 @@ async function fetchHostedWorkspaceLiveSnapshot() {
   });
 
   if (response.status === 401) {
+    state.signedInUserId = "";
+    clearAuthSession();
+    closeHostedWorkspaceEventStream();
     setHostedWorkspaceSyncStatus(
       "auth-required",
       "This device could not open the live shared workspace. Sign out and sign in again, then refresh shared data."
@@ -4805,6 +4821,10 @@ function persistAuthSession(userId, options = {}) {
         options.workspaceToken !== undefined
           ? normalizeText(options.workspaceToken)
           : normalizeText(existingSession.workspaceToken),
+      serverAuthenticated:
+        options.serverAuthenticated !== undefined
+          ? options.serverAuthenticated === true
+          : existingSession.serverAuthenticated === true,
       signedInAt: new Date().toISOString()
     });
 
@@ -4959,8 +4979,11 @@ function reconcileAuthenticationSession(options = {}) {
   if (!signedInProfile) {
     const storedSession = loadAuthSession();
     const storedUsername = normalizeText(storedSession.username).toLowerCase();
+    const canRecoverHostedSession =
+      !isHostedWorkspaceEnvironment() || storedSession.serverAuthenticated === true;
     const recoveredProfile =
       storedUsername &&
+      canRecoverHostedSession &&
       state.userProfiles.find(
         (profile) =>
           isPasswordLoginEnabledForProfile(profile) &&
@@ -4970,13 +4993,25 @@ function reconcileAuthenticationSession(options = {}) {
     if (recoveredProfile) {
       state.signedInUserId = recoveredProfile.id;
       persistAuthSession(recoveredProfile.id, {
-        username: recoveredProfile.username
+        username: recoveredProfile.username,
+        serverAuthenticated: canRecoverHostedSession
       });
       signedInProfile = recoveredProfile;
     }
   }
 
   if (!signedInProfile) {
+    if (isHostedWorkspaceEnvironment()) {
+      const storedSession = loadAuthSession();
+
+      if (
+        normalizeText(storedSession.username) &&
+        storedSession.serverAuthenticated !== true
+      ) {
+        clearAuthSession();
+      }
+    }
+
     if (state.signedInUserId) {
       state.signedInUserId = "";
       clearAuthSession();
@@ -17801,7 +17836,8 @@ async function handleAccessLoginSubmit(event) {
     setHostedWorkspaceSignOutSuspended(false);
     persistAuthSession(resolvedUserId, {
       username: normalizeText(workspaceSession.username) || username,
-      workspaceToken: normalizeText(workspaceSession.token)
+      workspaceToken: normalizeText(workspaceSession.token),
+      serverAuthenticated: true
     });
     await hydrateHostedWorkspaceSessionIfNeeded({
       force: true,
@@ -17827,7 +17863,8 @@ async function handleAccessLoginSubmit(event) {
       state.activeUserId = profile.id;
       persistAuthSession(profile.id, {
         username: profile.username,
-        workspaceToken: normalizeText(workspaceSession.token)
+        workspaceToken: normalizeText(workspaceSession.token),
+        serverAuthenticated: true
       });
     }
 
@@ -17862,12 +17899,14 @@ async function handleAccessLoginSubmit(event) {
   state.activeUserId = profile.id;
   setHostedWorkspaceSignOutSuspended(false);
   persistAuthSession(profile.id, {
-    username: profile.username
+    username: profile.username,
+    serverAuthenticated: false
   });
   const serverSessionEstablished = await establishServerWorkspaceSession(profile.username, password);
   persistAuthSession(profile.id, {
     username: profile.username,
-    workspaceToken: normalizeText(serverSessionEstablished?.token)
+    workspaceToken: normalizeText(serverSessionEstablished?.token),
+    serverAuthenticated: Boolean(serverSessionEstablished)
   });
   await restoreHostedWorkspaceLiveSyncIfNeeded({
     force: true,
