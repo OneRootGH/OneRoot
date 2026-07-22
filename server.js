@@ -735,6 +735,33 @@ function pruneWorkspaceSessions() {
   }
 }
 
+function getWorkspaceSessionTokenFromRequest(request) {
+  const cookieToken = parseCookies(request)[WORKSPACE_SESSION_COOKIE];
+
+  if (cookieToken) {
+    return cookieToken;
+  }
+
+  const headerToken = normalizeText(request.headers["x-workspace-session"]);
+
+  if (headerToken) {
+    return headerToken;
+  }
+
+  const authorizationHeader = normalizeText(request.headers.authorization);
+
+  if (authorizationHeader.toLowerCase().startsWith("bearer ")) {
+    return normalizeText(authorizationHeader.slice(7));
+  }
+
+  try {
+    const requestUrl = new URL(request.url || "/", "http://localhost");
+    return normalizeText(requestUrl.searchParams.get("session_token"));
+  } catch (error) {
+    return "";
+  }
+}
+
 function buildWorkspaceSessionCookie(request, token, maxAgeSeconds = Math.floor(WORKSPACE_SESSION_TTL_MS / 1000)) {
   const cookieParts = [
     `${WORKSPACE_SESSION_COOKIE}=${encodeURIComponent(token)}`,
@@ -767,7 +794,7 @@ function createWorkspaceSession(profile) {
 
 function clearWorkspaceSession(request) {
   pruneWorkspaceSessions();
-  const token = parseCookies(request)[WORKSPACE_SESSION_COOKIE];
+  const token = getWorkspaceSessionTokenFromRequest(request);
 
   if (token) {
     WORKSPACE_SESSIONS.delete(token);
@@ -776,7 +803,7 @@ function clearWorkspaceSession(request) {
 
 function getWorkspaceSession(request) {
   pruneWorkspaceSessions();
-  const token = parseCookies(request)[WORKSPACE_SESSION_COOKIE];
+  const token = getWorkspaceSessionTokenFromRequest(request);
 
   if (!token) {
     return null;
@@ -1468,6 +1495,7 @@ async function handleApiRoute(request, response, pathname, url) {
           200,
           {
             ok: true,
+            token,
             username: profile.username,
             fullName: profile.fullName,
             role: profile.role

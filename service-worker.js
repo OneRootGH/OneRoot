@@ -1,4 +1,4 @@
-const CACHE_NAME = "oneroot-operations-app-v44";
+const CACHE_NAME = "oneroot-operations-app-v45";
 const SCOPE_PATH = new URL(self.registration.scope || self.location.href).pathname;
 const BASE_PATH = SCOPE_PATH.endsWith("/") ? SCOPE_PATH : `${SCOPE_PATH}/`;
 

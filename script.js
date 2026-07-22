@@ -1955,12 +1955,17 @@ async function fetchHostedWorkspaceAccessState() {
   return await response.json();
 }
 
-async function fetchHostedWorkspaceSessionState() {
+async function fetchHostedWorkspaceSessionState(options = {}) {
   const response = await fetch(HOSTED_WORKSPACE_SESSION_PATH, {
     cache: "no-store",
     credentials: "same-origin",
     headers: {
-      Accept: "application/json"
+      ...buildHostedWorkspaceSessionHeaders(
+        {
+          Accept: "application/json"
+        },
+        options
+      )
     }
   });
 
@@ -2185,7 +2190,9 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
   }
 
   try {
-    const payload = await fetchHostedWorkspaceSessionState();
+    const persistedWorkspaceToken =
+      normalizeText(options.sessionToken) || getHostedWorkspaceSessionToken();
+    const payload = await fetchHostedWorkspaceSessionState(options);
     const session = payload && payload.authenticated ? payload.session : null;
 
     if (!session) {
@@ -2209,7 +2216,10 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
     if (resolvedUserId) {
       state.signedInUserId = resolvedUserId;
       state.activeUserId = resolvedUserId;
-      persistAuthSession(resolvedUserId, { username });
+      persistAuthSession(resolvedUserId, {
+        username,
+        workspaceToken: persistedWorkspaceToken
+      });
 
       if (!options.skipPersist) {
         persistSettings();
@@ -2467,9 +2477,9 @@ async function fetchHostedWorkspaceLiveSnapshot() {
   const response = await fetch(HOSTED_WORKSPACE_LIVE_SYNC_PATH, {
     cache: "no-store",
     credentials: "same-origin",
-    headers: {
+    headers: buildHostedWorkspaceSessionHeaders({
       Accept: "application/json"
-    }
+    })
   });
 
   if (response.status === 401) {
@@ -2537,7 +2547,14 @@ function startHostedWorkspaceEventStream() {
   }
 
   try {
-    const eventSource = new EventSource(HOSTED_WORKSPACE_EVENTS_PATH);
+    const sessionToken = getHostedWorkspaceSessionToken();
+    const eventSourceUrl = new URL(HOSTED_WORKSPACE_EVENTS_PATH, window.location.origin);
+
+    if (sessionToken) {
+      eventSourceUrl.searchParams.set("session_token", sessionToken);
+    }
+
+    const eventSource = new EventSource(eventSourceUrl.toString());
     hostedWorkspaceSyncState.eventSource = eventSource;
 
     eventSource.addEventListener("workspace", () => {
@@ -2758,10 +2775,10 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
     const response = await fetch(HOSTED_WORKSPACE_LIVE_SYNC_PATH, {
       method: "PUT",
       credentials: "same-origin",
-      headers: {
+      headers: buildHostedWorkspaceSessionHeaders({
         Accept: "application/json",
         "Content-Type": "application/json"
-      },
+      }),
       body: JSON.stringify(payload)
     });
 
@@ -4552,6 +4569,23 @@ function loadAuthSession() {
   }
 }
 
+function getHostedWorkspaceSessionToken() {
+  return normalizeText(loadAuthSession().workspaceToken);
+}
+
+function buildHostedWorkspaceSessionHeaders(headers = {}, options = {}) {
+  const sessionToken = normalizeText(options.sessionToken) || getHostedWorkspaceSessionToken();
+
+  if (!sessionToken) {
+    return { ...headers };
+  }
+
+  return {
+    ...headers,
+    "X-Workspace-Session": sessionToken
+  };
+}
+
 function persistAuthSession(userId, options = {}) {
   try {
     if (!("sessionStorage" in window)) {
@@ -4569,6 +4603,10 @@ function persistAuthSession(userId, options = {}) {
           options.password !== undefined
             ? String(options.password || "")
             : String(existingSession.password || ""),
+        workspaceToken:
+          options.workspaceToken !== undefined
+            ? normalizeText(options.workspaceToken)
+            : normalizeText(existingSession.workspaceToken),
         signedInAt: new Date().toISOString()
       })
     );
@@ -4592,7 +4630,7 @@ function clearAuthSession() {
 
 async function establishServerWorkspaceSession(username, password) {
   if (typeof fetch !== "function") {
-    return false;
+    return null;
   }
 
   try {
@@ -4608,21 +4646,26 @@ async function establishServerWorkspaceSession(username, password) {
       })
     });
 
-    return response.ok;
+    if (!response.ok) {
+      return null;
+    }
+
+    return await response.json();
   } catch (error) {
     console.error(error);
-    return false;
+    return null;
   }
 }
 
-function clearServerWorkspaceSession() {
+function clearServerWorkspaceSession(options = {}) {
   if (typeof fetch !== "function") {
     return;
   }
 
   fetch("/api/workspace-session", {
     method: "DELETE",
-    credentials: "same-origin"
+    credentials: "same-origin",
+    headers: buildHostedWorkspaceSessionHeaders({}, options)
   }).catch((error) => {
     console.error(error);
   });
@@ -17463,15 +17506,30 @@ async function handleAccessLoginSubmit(event) {
   }
 
   if (isHostedWorkspaceEnvironment()) {
-    const serverSessionEstablished = await establishServerWorkspaceSession(username, password);
+    const workspaceSession = await establishServerWorkspaceSession(username, password);
 
-    if (!serverSessionEstablished) {
+    if (!workspaceSession) {
       showToast("The username or password is not correct.");
       return;
     }
 
+    persistAuthSession("", {
+      username,
+      password,
+      workspaceToken: normalizeText(workspaceSession.token)
+    });
     await hydrateHostedWorkspaceAccessIfNeeded();
-    await hydrateHostedWorkspaceSessionIfNeeded({ force: true });
+    const hydratedSession = await hydrateHostedWorkspaceSessionIfNeeded({
+      force: true,
+      sessionToken: normalizeText(workspaceSession.token)
+    });
+
+    if (!hydratedSession) {
+      clearAuthSession();
+      showToast("The live workspace session could not be restored. Please sign in again.");
+      return;
+    }
+
     await restoreHostedWorkspaceLiveSyncIfNeeded({
       force: true,
       render: false,
@@ -17488,7 +17546,8 @@ async function handleAccessLoginSubmit(event) {
       state.activeUserId = profile.id;
       persistAuthSession(profile.id, {
         username: profile.username,
-        password
+        password,
+        workspaceToken: normalizeText(workspaceSession.token)
       });
     }
 
@@ -17526,6 +17585,11 @@ async function handleAccessLoginSubmit(event) {
     password
   });
   const serverSessionEstablished = await establishServerWorkspaceSession(profile.username, password);
+  persistAuthSession(profile.id, {
+    username: profile.username,
+    password,
+    workspaceToken: normalizeText(serverSessionEstablished?.token)
+  });
   await restoreHostedWorkspaceLiveSyncIfNeeded({
     force: true,
     render: false,
@@ -17537,7 +17601,7 @@ async function handleAccessLoginSubmit(event) {
   navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
   render();
   showToast(
-    serverSessionEstablished || hostedWorkspaceSyncState.mode === "live-connected"
+    Boolean(serverSessionEstablished) || hostedWorkspaceSyncState.mode === "live-connected"
       ? `Signed in as ${profile.fullName}. Live shared workspace connected.`
       : `Signed in as ${profile.fullName}. If another device is missing, use Refresh Shared Data or sign in again there first.`
   );
@@ -17545,11 +17609,12 @@ async function handleAccessLoginSubmit(event) {
 
 function signOutWorkspaceUser(options = {}) {
   const signedInProfile = getAuthenticatedUserProfile();
+  const workspaceToken = getHostedWorkspaceSessionToken();
   state.signedInUserId = "";
   state.accessLoginDraft = createEmptyAccessLoginDraft();
   closeHostedWorkspaceEventStream();
   clearAuthSession();
-  clearServerWorkspaceSession();
+  clearServerWorkspaceSession({ sessionToken: workspaceToken });
   navigateTo("access", { syncHash: true, showAccessToast: false });
   render();
 
