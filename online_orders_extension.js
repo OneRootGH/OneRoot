@@ -233,8 +233,23 @@
     ).toLowerCase();
   }
 
+  function getOnlineOrdersSessionToken() {
+    try {
+      return typeof getHostedWorkspaceSessionToken === "function"
+        ? normalizeText(getHostedWorkspaceSessionToken())
+        : "";
+    } catch (error) {
+      console.error(error);
+      return "";
+    }
+  }
+
   function canAttemptOnlineOrdersLoad() {
-    return Boolean(getOnlineOrdersUsername());
+    return Boolean(
+      getOnlineOrdersUsername() ||
+        getOnlineOrdersSessionToken() ||
+        normalizeText(state.signedInUserId)
+    );
   }
 
   async function tryRestoreOnlineOrdersWorkspaceSession() {
