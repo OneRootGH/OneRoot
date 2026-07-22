@@ -736,12 +736,6 @@ function pruneWorkspaceSessions() {
 }
 
 function getWorkspaceSessionTokenFromRequest(request) {
-  const cookieToken = parseCookies(request)[WORKSPACE_SESSION_COOKIE];
-
-  if (cookieToken) {
-    return cookieToken;
-  }
-
   const headerToken = normalizeText(request.headers["x-workspace-session"]);
 
   if (headerToken) {
@@ -756,10 +750,22 @@ function getWorkspaceSessionTokenFromRequest(request) {
 
   try {
     const requestUrl = new URL(request.url || "/", "http://localhost");
-    return normalizeText(requestUrl.searchParams.get("session_token"));
+    const queryToken = normalizeText(requestUrl.searchParams.get("session_token"));
+
+    if (queryToken) {
+      return queryToken;
+    }
   } catch (error) {
     return "";
   }
+
+  const cookieToken = parseCookies(request)[WORKSPACE_SESSION_COOKIE];
+
+  if (cookieToken) {
+    return cookieToken;
+  }
+
+  return "";
 }
 
 function buildWorkspaceSessionCookie(request, token, maxAgeSeconds = Math.floor(WORKSPACE_SESSION_TTL_MS / 1000)) {

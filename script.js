@@ -4582,7 +4582,8 @@ function buildHostedWorkspaceSessionHeaders(headers = {}, options = {}) {
 
   return {
     ...headers,
-    "X-Workspace-Session": sessionToken
+    "X-Workspace-Session": sessionToken,
+    Authorization: `Bearer ${sessionToken}`
   };
 }
 
