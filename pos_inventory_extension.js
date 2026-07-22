@@ -5,6 +5,7 @@
   const PRODUCT_CATALOG_VERSION =
     normalizeText(window.ONE_ROOT_PRODUCT_CATALOG_VERSION) || "20260718a";
   const POS_ORDER_STORAGE_KEY = "oneroot-expense-register:pos-orders:v1";
+  const POS_COUNTER_CLOSURE_STORAGE_KEY = "oneroot-expense-register:pos-counter-closures:v1";
   const INVENTORY_ITEM_STORAGE_KEY = "oneroot-expense-register:inventory-items:v1";
   const AUDIT_TRAIL_STORAGE_KEY = "oneroot-expense-register:audit-trail:v1";
   const POS_SYNC_SOURCE_TYPE = "pos-summary";
@@ -37,15 +38,22 @@
     snapshotByStateKey: new Map(),
     isRefreshingSnapshots: false
   };
+  let posTransactionInFlight = false;
 
   const originalRender = render;
   const originalRenderDataHub = renderDataHub;
   const originalRefreshStateFromStorage = refreshStateFromStorage;
   const originalPersistAllData = persistAllData;
+  const originalResetHostedWorkspaceOnlineCache =
+    typeof resetHostedWorkspaceOnlineCache === "function"
+      ? resetHostedWorkspaceOnlineCache
+      : null;
   const originalExportFullBackup = exportFullBackup;
   const originalHandleBackupImportFile = handleBackupImportFile;
   const originalSanitizeImportedBackup = sanitizeImportedBackup;
   const originalGetWorkspaceRecordTotal = getWorkspaceRecordTotal;
+  const originalRestoreWorkspaceFromImport =
+    typeof restoreWorkspaceFromImport === "function" ? restoreWorkspaceFromImport : null;
   const originalBuildHostedWorkspaceSyncPayload =
     typeof buildHostedWorkspaceSyncPayload === "function"
       ? buildHostedWorkspaceSyncPayload
@@ -68,6 +76,16 @@
   extendRolePresets();
   extendStorageKeys();
 
+  if (typeof originalResetHostedWorkspaceOnlineCache === "function") {
+    resetHostedWorkspaceOnlineCache = function patchedResetHostedWorkspaceOnlineCache() {
+      originalResetHostedWorkspaceOnlineCache();
+
+      if ("posCounterClosures" in state) {
+        state.posCounterClosures = [];
+      }
+    };
+  }
+
   if (typeof originalBuildHostedWorkspaceSyncPayload === "function") {
     buildHostedWorkspaceSyncPayload = function patchedBuildHostedWorkspaceSyncPayload(
       source = state,
@@ -77,6 +95,9 @@
       const workspace = source && typeof source === "object" ? source : state;
 
       payload.workspace.posOrders = Array.isArray(workspace.posOrders) ? workspace.posOrders : [];
+      payload.workspace.posCounterClosures = Array.isArray(workspace.posCounterClosures)
+        ? workspace.posCounterClosures
+        : [];
       payload.workspace.inventoryItems = Array.isArray(workspace.inventoryItems)
         ? workspace.inventoryItems
         : [];
@@ -94,6 +115,10 @@
       const result = originalMergeHostedWorkspaceImport(nextImported);
 
       state.posOrders = mergePosOrders(state.posOrders, nextImported.posOrders || []);
+      state.posCounterClosures = mergePosCounterClosures(
+        state.posCounterClosures,
+        nextImported.posCounterClosures || []
+      );
       state.inventoryItems = mergeInventoryItems(
         state.inventoryItems,
         nextImported.inventoryItems || []
@@ -109,6 +134,23 @@
 
       if (typeof primeAuditSnapshots === "function") {
         primeAuditSnapshots();
+      }
+
+      return result;
+    };
+  }
+
+  if (typeof originalRestoreWorkspaceFromImport === "function") {
+    restoreWorkspaceFromImport = function patchedRestoreWorkspaceFromImport(imported, options = {}) {
+      const result = originalRestoreWorkspaceFromImport(imported, options);
+      const nextImported = imported && typeof imported === "object" ? imported : {};
+
+      if (Array.isArray(nextImported.posCounterClosures)) {
+        state.posCounterClosures = sortPosCounterClosures(
+          nextImported.posCounterClosures.map(sanitizeStoredPosCounterClosure).filter(Boolean)
+        );
+      } else if (options.preserveMissingCollections !== true) {
+        state.posCounterClosures = [];
       }
 
       return result;
@@ -169,10 +211,14 @@
   if (typeof isHostedWorkspaceEnvironment === "function" && isHostedWorkspaceEnvironment()) {
     state.inventoryItems = Array.isArray(state.inventoryItems) ? state.inventoryItems : [];
     state.posOrders = Array.isArray(state.posOrders) ? state.posOrders : [];
+    state.posCounterClosures = Array.isArray(state.posCounterClosures)
+      ? state.posCounterClosures
+      : [];
     state.auditTrail = Array.isArray(state.auditTrail) ? state.auditTrail : [];
   } else {
     state.inventoryItems = loadInventoryItems();
     state.posOrders = loadPosOrders();
+    state.posCounterClosures = loadPosCounterClosures();
     state.auditTrail = loadAuditTrail();
   }
   state.editingPosOrderId = null;
@@ -244,6 +290,9 @@
         ? sortInventoryItems(state.inventoryItems)
         : [];
       state.posOrders = Array.isArray(state.posOrders) ? sortPosOrders(state.posOrders) : [];
+      state.posCounterClosures = Array.isArray(state.posCounterClosures)
+        ? sortPosCounterClosures(state.posCounterClosures)
+        : [];
       state.auditTrail = Array.isArray(state.auditTrail) ? sortAuditTrail(state.auditTrail) : [];
       primeAuditSnapshots();
       return;
@@ -251,6 +300,7 @@
 
     state.inventoryItems = loadInventoryItems();
     state.posOrders = loadPosOrders();
+    state.posCounterClosures = loadPosCounterClosures();
     state.auditTrail = loadAuditTrail();
     reconcilePosGeneratedSales({ persist: false });
     primeAuditSnapshots();
@@ -259,6 +309,7 @@
   persistAllData = function patchedPersistAllData() {
     originalPersistAllData();
     persistPosOrders();
+    persistPosCounterClosures();
     persistInventoryItems();
     persistAuditTrail();
   };
@@ -294,6 +345,7 @@
         maintenanceRecords: state.maintenanceRecords,
         userProfiles: state.userProfiles,
         posOrders: state.posOrders,
+        posCounterClosures: state.posCounterClosures,
         inventoryItems: state.inventoryItems,
         auditTrail: state.auditTrail
       }
@@ -329,6 +381,9 @@
 
     imported.posOrders = sortPosOrders(
       sanitizeImportedCollection(workspace.posOrders, sanitizeStoredPosOrder)
+    );
+    imported.posCounterClosures = sortPosCounterClosures(
+      sanitizeImportedCollection(workspace.posCounterClosures, sanitizeStoredPosCounterClosure)
     );
     imported.inventoryItems = mergeCatalogSeedWithStoredInventory(
       sanitizeImportedCollection(workspace.inventoryItems, sanitizeStoredInventoryItem)
@@ -391,6 +446,7 @@
       state.maintenanceRecords = imported.maintenanceRecords;
       state.userProfiles = imported.userProfiles;
       state.posOrders = imported.posOrders;
+      state.posCounterClosures = imported.posCounterClosures;
       state.inventoryItems = imported.inventoryItems;
       state.auditTrail = imported.auditTrail;
       state.currency = imported.currency;
@@ -453,6 +509,7 @@
     return (
       originalGetWorkspaceRecordTotal(workspace) +
       (workspace.posOrders?.length || 0) +
+      (workspace.posCounterClosures?.length || 0) +
       (workspace.inventoryItems?.length || 0) +
       (workspace.auditTrail?.length || 0)
     );
@@ -467,8 +524,17 @@
       detail: `${formatDisplayDate(record.orderDate)} • ${getPosOrderAreaLabel(record)}`,
       view: "pos"
     }));
+    const closeoutItems = state.posCounterClosures.map((record) => ({
+      sortKey: record.closedAt || record.updatedAt || record.orderDate,
+      module: "POS Closeout",
+      title: `${formatDisplayDate(record.orderDate)} • ${formatCurrency(record.totalAmount)}`,
+      detail: `${record.areaLabel || "All POS Areas"} • ${record.orderCount} order${
+        record.orderCount === 1 ? "" : "s"
+      }`,
+      view: "pos"
+    }));
 
-    return [...items, ...posItems].sort((left, right) =>
+    return [...items, ...posItems, ...closeoutItems].sort((left, right) =>
       (right.sortKey || "").localeCompare(left.sortKey || "")
     );
   };
@@ -493,6 +559,23 @@
         record.notes,
         record.items
           .map((item) => [item.name, item.sku, item.barcode, getBusinessArea(item.businessAreaId || record.businessAreaId).label].join(" "))
+          .join(" ")
+      ].join(" ")
+    }));
+    const closeoutResults = state.posCounterClosures.map((record) => ({
+      module: "POS Closeout",
+      view: "pos",
+      sortKey: record.closedAt || record.orderDate,
+      title: `${formatDisplayDate(record.orderDate)} • ${formatCurrency(record.totalAmount)}`,
+      detail: `${record.areaLabel || "All POS Areas"} • ${record.orderCount} order${
+        record.orderCount === 1 ? "" : "s"
+      }`,
+      searchText: [
+        record.areaLabel,
+        record.closedByName,
+        record.notes,
+        record.paymentBreakdown
+          .map((entry) => `${entry.paymentMethod} ${entry.amount}`)
           .join(" ")
       ].join(" ")
     }));
@@ -526,7 +609,7 @@
       ].join(" ")
     }));
 
-    return [...baseResults, ...posResults, ...inventoryResults, ...auditResults]
+    return [...baseResults, ...posResults, ...closeoutResults, ...inventoryResults, ...auditResults]
       .filter((result) => matchesModule(result.view))
       .filter((result) => {
         if (!query) {
@@ -818,6 +901,10 @@
         exportPosOrdersCsv();
       }
 
+      if (action === "close-counter") {
+        void handleCloseCounter();
+      }
+
       if (action === "focus-search") {
         uiFocusState.pos = "posDraftProductSearch";
         focusControlById("posDraftProductSearch");
@@ -1068,12 +1155,14 @@
 
   function extendStorageKeys() {
     LIVE_DATA_STORAGE_KEYS.add(POS_ORDER_STORAGE_KEY);
+    LIVE_DATA_STORAGE_KEYS.add(POS_COUNTER_CLOSURE_STORAGE_KEY);
     LIVE_DATA_STORAGE_KEYS.add(INVENTORY_ITEM_STORAGE_KEY);
     LIVE_DATA_STORAGE_KEYS.add(AUDIT_TRAIL_STORAGE_KEY);
 
     if (typeof registerHostedWorkspaceSyncStorageKeys === "function") {
       registerHostedWorkspaceSyncStorageKeys([
         POS_ORDER_STORAGE_KEY,
+        POS_COUNTER_CLOSURE_STORAGE_KEY,
         INVENTORY_ITEM_STORAGE_KEY,
         AUDIT_TRAIL_STORAGE_KEY
       ]);
@@ -1609,6 +1698,32 @@
     }
   }
 
+  function loadPosCounterClosures() {
+    try {
+      const raw = localStorage.getItem(POS_COUNTER_CLOSURE_STORAGE_KEY);
+
+      if (!raw) {
+        return [];
+      }
+
+      const parsed = JSON.parse(raw);
+
+      if (!Array.isArray(parsed)) {
+        return [];
+      }
+
+      return sortPosCounterClosures(
+        parsed
+          .filter((record) => record && typeof record === "object")
+          .map(sanitizeStoredPosCounterClosure)
+          .filter(Boolean)
+      );
+    } catch (error) {
+      console.error(error);
+      return [];
+    }
+  }
+
   function loadInventoryItems() {
     try {
       const raw = localStorage.getItem(INVENTORY_ITEM_STORAGE_KEY);
@@ -1729,6 +1844,54 @@
     };
   }
 
+  function sanitizeStoredPosCounterClosure(record) {
+    const orderDate = normalizeDateInput(record.orderDate || record.date);
+    const businessAreaId = normalizeBusinessAreaId(record.businessAreaId || record.businessArea);
+    const paymentBreakdown = Array.isArray(record.paymentBreakdown)
+      ? record.paymentBreakdown
+          .map((entry) => {
+            const paymentMethod = normalizeText(entry?.paymentMethod || entry?.label);
+            const amount = Number(parseOptionalAmount(entry?.amount).toFixed(2));
+
+            if (!paymentMethod || amount <= 0) {
+              return null;
+            }
+
+            return {
+              paymentMethod,
+              amount
+            };
+          })
+          .filter(Boolean)
+      : [];
+    const totalAmount = Number(parseOptionalAmount(record.totalAmount).toFixed(2));
+
+    if (!orderDate || totalAmount < 0) {
+      return null;
+    }
+
+    return {
+      id: normalizeText(record.id) || generateId(),
+      createdAt: record.createdAt || record.closedAt || new Date().toISOString(),
+      updatedAt: record.updatedAt || record.closedAt || record.createdAt || new Date().toISOString(),
+      closedAt: record.closedAt || record.updatedAt || record.createdAt || new Date().toISOString(),
+      orderDate,
+      businessAreaId,
+      areaLabel:
+        normalizeText(record.areaLabel) ||
+        (businessAreaId ? getBusinessArea(businessAreaId).shortLabel : "All POS Areas"),
+      orderCount: Math.max(parsePositiveInteger(record.orderCount), 0),
+      itemCount: Math.max(parsePositiveInteger(record.itemCount), 0),
+      totalAmount,
+      dailySalesLedgerTotal: Number(parseOptionalAmount(record.dailySalesLedgerTotal).toFixed(2)),
+      cashSalesTotal: Number(parseOptionalAmount(record.cashSalesTotal).toFixed(2)),
+      paymentBreakdown,
+      notes: normalizeText(record.notes),
+      closedByUserId: normalizeText(record.closedByUserId),
+      closedByName: normalizeText(record.closedByName)
+    };
+  }
+
   function sanitizeStoredPosOrderItem(item) {
     const productId = normalizeText(item.productId || item.inventoryItemId || item.id);
     const quantity = Math.max(parsePositiveInteger(item.quantity), 1);
@@ -1841,6 +2004,20 @@
     });
   }
 
+  function sortPosCounterClosures(records) {
+    return [...records].sort((left, right) => {
+      const dateDifference = (right.orderDate || "").localeCompare(left.orderDate || "");
+
+      if (dateDifference !== 0) {
+        return dateDifference;
+      }
+
+      return (right.closedAt || right.updatedAt || "").localeCompare(
+        left.closedAt || left.updatedAt || ""
+      );
+    });
+  }
+
   function sortInventoryItems(records) {
     return [...records].sort((left, right) => {
       const activeDifference = Number(right.active) - Number(left.active);
@@ -1887,6 +2064,27 @@
     return mergeCollectionsByKey(existing, imported, buildPosOrderMergeKey, sortPosOrders);
   }
 
+  function buildPosCounterClosureMergeKey(record) {
+    return (
+      normalizeText(record.id) ||
+      [
+        normalizeDateInput(record.orderDate),
+        normalizeBusinessAreaId(record.businessAreaId),
+        normalizeText(record.closedAt),
+        Number(record.totalAmount || 0).toFixed(2)
+      ].join("|")
+    );
+  }
+
+  function mergePosCounterClosures(existing, imported) {
+    return mergeCollectionsByKey(
+      existing,
+      imported,
+      buildPosCounterClosureMergeKey,
+      sortPosCounterClosures
+    );
+  }
+
   function mergeInventoryItems(existing, imported) {
     return mergeCatalogSeedWithStoredInventory([...(existing || []), ...(imported || [])]);
   }
@@ -1917,6 +2115,16 @@
     localStorage.setItem(POS_ORDER_STORAGE_KEY, JSON.stringify(state.posOrders));
     if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
       queueHostedWorkspaceSyncAfterPersist({ reason: "pos-orders" });
+    }
+  }
+
+  function persistPosCounterClosures() {
+    localStorage.setItem(
+      POS_COUNTER_CLOSURE_STORAGE_KEY,
+      JSON.stringify(state.posCounterClosures || [])
+    );
+    if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+      queueHostedWorkspaceSyncAfterPersist({ reason: "pos-counter-closures" });
     }
   }
 
@@ -2955,8 +3163,14 @@
     }
   }
 
-  function handlePosOrderSubmit(event) {
+  async function handlePosOrderSubmit(event) {
     event.preventDefault();
+
+    if (posTransactionInFlight) {
+      showToast("Please wait for the current POS save to finish.");
+      return;
+    }
+
     const submitMode = normalizeText(event.submitter?.dataset.posSubmit).toLowerCase();
 
     const orderDate = normalizeDateInput(state.posDraft.orderDate);
@@ -2973,7 +3187,20 @@
       return;
     }
 
+    const sessionReady = await ensureHostedPosTransactionReady("saving this POS order");
+
+    if (!sessionReady) {
+      return;
+    }
+
     const existingOrder = state.posOrders.find((order) => order.id === state.editingPosOrderId);
+    const snapshot = {
+      posOrders: clonePosRecords(state.posOrders),
+      posCounterClosures: clonePosRecords(state.posCounterClosures),
+      inventoryItems: clonePosRecords(state.inventoryItems),
+      sales: clonePosRecords(state.sales),
+      auditTrail: cloneAuditRecords(state.auditTrail)
+    };
 
     if (existingOrder) {
       applyInventoryMovementFromOrder(existingOrder, 1);
@@ -3007,20 +3234,28 @@
       state.posOrders = sortPosOrders([...state.posOrders, orderRecord]);
     }
 
+    posTransactionInFlight = true;
     persistInventoryItems();
     persistPosOrders();
     reconcilePosGeneratedSales({ persist: true });
 
-    if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
-      queueHostedWorkspaceSyncAfterPersist({
-        immediate: true,
-        force: true,
-        reason: existingOrder ? "pos-order-update" : "pos-order-save"
-      });
+    const syncConfirmed = await confirmHostedPosTransaction(
+      existingOrder ? "pos-order-update" : "pos-order-save",
+      "The POS order could not be saved online. Sign in again and retry."
+    );
+
+    if (!syncConfirmed) {
+      restorePosTransactionSnapshot(snapshot);
+      posTransactionInFlight = false;
+      render();
+      return;
     }
 
+    posTransactionInFlight = false;
     render();
-    showToast(existingOrder ? "POS order updated and Daily Sales re-synced." : "POS order saved and Daily Sales synced.");
+    showToast(
+      existingOrder ? "POS order updated and Daily Sales re-synced." : "POS order saved and Daily Sales synced."
+    );
 
     if (submitMode === "save-and-print") {
       printPosReceipt(orderRecord.id, { silent: true });
@@ -3064,6 +3299,259 @@
           updatedAt: new Date().toISOString()
         };
       })
+    );
+  }
+
+  function isHostedPosSyncMode() {
+    return typeof isHostedWorkspaceEnvironment === "function" && isHostedWorkspaceEnvironment();
+  }
+
+  async function ensureHostedPosTransactionReady(actionLabel) {
+    if (!isHostedPosSyncMode() || typeof ensureHostedWorkspaceServerSession !== "function") {
+      return true;
+    }
+
+    const sessionReady = await ensureHostedWorkspaceServerSession();
+
+    if (!sessionReady) {
+      showToast(`Sign in again before ${actionLabel} in the live workspace.`);
+      return false;
+    }
+
+    return true;
+  }
+
+  async function confirmHostedPosTransaction(reason, failureMessage) {
+    if (!isHostedPosSyncMode() || typeof flushHostedWorkspaceCriticalSync !== "function") {
+      return true;
+    }
+
+    const synced = await flushHostedWorkspaceCriticalSync({ reason });
+
+    if (!synced) {
+      showToast(failureMessage);
+    }
+
+    return synced;
+  }
+
+  function restorePosTransactionSnapshot(snapshot) {
+    state.posOrders = sortPosOrders(
+      (snapshot.posOrders || []).map(sanitizeStoredPosOrder).filter(Boolean)
+    );
+    state.posCounterClosures = sortPosCounterClosures(
+      (snapshot.posCounterClosures || []).map(sanitizeStoredPosCounterClosure).filter(Boolean)
+    );
+    state.inventoryItems = mergeCatalogSeedWithStoredInventory(
+      (snapshot.inventoryItems || []).map(sanitizeStoredInventoryItem).filter(Boolean)
+    );
+    state.sales = sortSales((snapshot.sales || []).map(sanitizeStoredSale).filter(Boolean));
+    state.auditTrail = sortAuditTrail(
+      (snapshot.auditTrail || []).map(sanitizeStoredAuditEntry).filter(Boolean)
+    );
+
+    if (typeof withHostedWorkspaceSyncSuppressed === "function") {
+      withHostedWorkspaceSyncSuppressed(() => {
+        persistInventoryItems();
+        persistPosOrders();
+        persistPosCounterClosures();
+        persistSales();
+        persistAuditTrail();
+      });
+      primeAuditSnapshots();
+      return;
+    }
+
+    persistInventoryItems();
+    persistPosOrders();
+    persistPosCounterClosures();
+    persistSales();
+    persistAuditTrail();
+    primeAuditSnapshots();
+  }
+
+  function buildPosCounterSummary(orderDate, businessAreaId = "") {
+    const normalizedDate = normalizeDateInput(orderDate);
+    const normalizedAreaId = normalizeBusinessAreaId(businessAreaId);
+    const paymentTotals = new Map();
+    let totalAmount = 0;
+    let itemCount = 0;
+    let orderCount = 0;
+
+    state.posOrders
+      .filter((order) => order.orderDate === normalizedDate)
+      .forEach((order) => {
+        const scopedAmount = normalizedAreaId
+          ? Number((buildPosOrderAreaTotals(order).get(normalizedAreaId) || 0).toFixed(2))
+          : Number(order.totalAmount || 0);
+
+        if (scopedAmount <= 0) {
+          return;
+        }
+
+        orderCount += 1;
+        totalAmount += scopedAmount;
+        itemCount += normalizedAreaId
+          ? order.items
+              .filter((item) => item.businessAreaId === normalizedAreaId)
+              .reduce((sum, item) => sum + item.quantity, 0)
+          : order.itemCount;
+        paymentTotals.set(
+          order.paymentMethod,
+          Number(((paymentTotals.get(order.paymentMethod) || 0) + scopedAmount).toFixed(2))
+        );
+      });
+
+    const paymentBreakdown = Array.from(paymentTotals.entries())
+      .map(([paymentMethod, amount]) => ({
+        paymentMethod,
+        amount: Number(amount.toFixed(2))
+      }))
+      .sort((left, right) => right.amount - left.amount || left.paymentMethod.localeCompare(right.paymentMethod));
+    const ledgerTotal = state.sales
+      .filter((record) => record.date === normalizedDate)
+      .filter((record) => !normalizedAreaId || record.businessAreaId === normalizedAreaId)
+      .reduce((sum, record) => sum + record.amount, 0);
+
+    return {
+      orderDate: normalizedDate,
+      businessAreaId: normalizedAreaId,
+      areaLabel: normalizedAreaId
+        ? getBusinessArea(normalizedAreaId).shortLabel
+        : "All POS Areas",
+      orderCount,
+      itemCount,
+      totalAmount: Number(totalAmount.toFixed(2)),
+      dailySalesLedgerTotal: Number(ledgerTotal.toFixed(2)),
+      cashSalesTotal: Number(
+        (
+          paymentBreakdown.find((entry) => normalizeText(entry.paymentMethod).toLowerCase() === "cash")?.amount || 0
+        ).toFixed(2)
+      ),
+      paymentBreakdown
+    };
+  }
+
+  function getLatestPosCounterClosureForScope(orderDate, businessAreaId = "") {
+    const normalizedDate = normalizeDateInput(orderDate);
+    const normalizedAreaId = normalizeBusinessAreaId(businessAreaId);
+
+    return (
+      state.posCounterClosures.find(
+        (record) =>
+          record.orderDate === normalizedDate &&
+          normalizeBusinessAreaId(record.businessAreaId) === normalizedAreaId
+      ) || null
+    );
+  }
+
+  function formatPosPaymentBreakdownInline(paymentBreakdown = []) {
+    if (!Array.isArray(paymentBreakdown) || paymentBreakdown.length === 0) {
+      return "No payment mix recorded yet.";
+    }
+
+    return paymentBreakdown
+      .map((entry) => `${entry.paymentMethod} ${formatCurrency(entry.amount)}`)
+      .join(" • ");
+  }
+
+  function describePosCloseoutVariance(summary, closure) {
+    if (!closure) {
+      return "No counter closeout has been saved for this day yet.";
+    }
+
+    const difference = Number((summary.totalAmount - Number(closure.totalAmount || 0)).toFixed(2));
+
+    if (difference === 0) {
+      return `Latest closeout matches the current counter total of ${formatCurrency(summary.totalAmount)}.`;
+    }
+
+    if (difference > 0) {
+      return `${formatCurrency(difference)} more has been added since the last closeout.`;
+    }
+
+    return `${formatCurrency(Math.abs(difference))} less is on the counter than the last closeout saved.`;
+  }
+
+  async function handleCloseCounter() {
+    if (posTransactionInFlight) {
+      showToast("Please wait for the current POS save to finish first.");
+      return;
+    }
+
+    const summary = buildPosCounterSummary(state.posDraft.orderDate, state.posDraft.businessAreaId);
+
+    if (!summary.orderDate || summary.orderCount === 0 || summary.totalAmount <= 0) {
+      showToast("Save at least one POS order for this day before closing the counter.");
+      return;
+    }
+
+    const sessionReady = await ensureHostedPosTransactionReady("closing the POS counter");
+
+    if (!sessionReady) {
+      return;
+    }
+
+    const noteInput = window.prompt(
+      `Closing ${summary.areaLabel} for ${formatDisplayDate(summary.orderDate)}.\nAdd an optional note for this closeout:`,
+      ""
+    );
+
+    if (noteInput === null) {
+      return;
+    }
+
+    const actor = getCurrentUserProfile();
+    const snapshot = {
+      posCounterClosures: clonePosRecords(state.posCounterClosures),
+      auditTrail: cloneAuditRecords(state.auditTrail)
+    };
+    const closureRecord = sanitizeStoredPosCounterClosure({
+      id: generateId(),
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      closedAt: new Date().toISOString(),
+      orderDate: summary.orderDate,
+      businessAreaId: summary.businessAreaId,
+      areaLabel: summary.areaLabel,
+      orderCount: summary.orderCount,
+      itemCount: summary.itemCount,
+      totalAmount: summary.totalAmount,
+      dailySalesLedgerTotal: summary.dailySalesLedgerTotal,
+      cashSalesTotal: summary.cashSalesTotal,
+      paymentBreakdown: summary.paymentBreakdown,
+      notes: normalizeText(noteInput),
+      closedByUserId: normalizeText(actor?.id || state.signedInUserId),
+      closedByName: normalizeText(actor?.fullName || actor?.username || "Workspace User")
+    });
+
+    if (!closureRecord) {
+      showToast("The counter closeout could not be prepared.");
+      return;
+    }
+
+    posTransactionInFlight = true;
+    state.posCounterClosures = sortPosCounterClosures([closureRecord, ...state.posCounterClosures]);
+    persistPosCounterClosures();
+
+    const syncConfirmed = await confirmHostedPosTransaction(
+      "pos-counter-close",
+      "The counter closeout could not be saved online. Sign in again and retry."
+    );
+
+    if (!syncConfirmed) {
+      restorePosTransactionSnapshot(snapshot);
+      posTransactionInFlight = false;
+      render();
+      return;
+    }
+
+    posTransactionInFlight = false;
+    render();
+    showToast(
+      `Counter closed for ${summary.areaLabel} on ${formatDisplayDate(summary.orderDate)} at ${formatCurrency(
+        summary.totalAmount
+      )}.`
     );
   }
 
@@ -3128,7 +3616,12 @@
     showToast(`Editing ${record.orderNumber}.`);
   }
 
-  function deletePosOrder(orderId) {
+  async function deletePosOrder(orderId) {
+    if (posTransactionInFlight) {
+      showToast("Please wait for the current POS save to finish.");
+      return;
+    }
+
     const record = state.posOrders.find((order) => order.id === orderId);
 
     if (!record) {
@@ -3144,16 +3637,44 @@
       return;
     }
 
+    const sessionReady = await ensureHostedPosTransactionReady("deleting this POS order");
+
+    if (!sessionReady) {
+      return;
+    }
+
+    const snapshot = {
+      posOrders: clonePosRecords(state.posOrders),
+      posCounterClosures: clonePosRecords(state.posCounterClosures),
+      inventoryItems: clonePosRecords(state.inventoryItems),
+      sales: clonePosRecords(state.sales),
+      auditTrail: cloneAuditRecords(state.auditTrail)
+    };
+
     applyInventoryMovementFromOrder(record, 1);
     state.posOrders = sortPosOrders(state.posOrders.filter((order) => order.id !== orderId));
+    posTransactionInFlight = true;
     persistInventoryItems();
     persistPosOrders();
     reconcilePosGeneratedSales({ persist: true });
+
+    const syncConfirmed = await confirmHostedPosTransaction(
+      "pos-order-delete",
+      "The POS order could not be deleted online. Sign in again and retry."
+    );
+
+    if (!syncConfirmed) {
+      restorePosTransactionSnapshot(snapshot);
+      posTransactionInFlight = false;
+      render();
+      return;
+    }
 
     if (state.editingPosOrderId === orderId) {
       resetPosDraft({ silent: true });
     }
 
+    posTransactionInFlight = false;
     render();
     showToast("POS order deleted and Daily Sales re-synced.");
   }
@@ -3771,6 +4292,16 @@
     const todaySales = state.posOrders
       .filter((order) => order.orderDate === todayKey)
       .reduce((sum, order) => sum + order.totalAmount, 0);
+    const activeOrderDate = normalizeDateInput(state.posDraft.orderDate) || todayKey;
+    const counterSummary = buildPosCounterSummary(activeOrderDate, state.posDraft.businessAreaId);
+    const latestCounterClosure = getLatestPosCounterClosureForScope(
+      activeOrderDate,
+      state.posDraft.businessAreaId
+    );
+    const counterCloseoutMessage = describePosCloseoutVariance(
+      counterSummary,
+      latestCounterClosure
+    );
     const cartTotal = state.posDraft.items.reduce((sum, item) => sum + item.totalAmount, 0);
     const currentAreaLabel = state.posDraft.businessAreaId
       ? getBusinessArea(state.posDraft.businessAreaId).shortLabel
@@ -3781,6 +4312,19 @@
       .join(", ");
     const cartItemCount = state.posDraft.items.reduce((sum, item) => sum + item.quantity, 0);
     const historyOpen = hasActivePosOrderFilters() || Boolean(state.editingPosOrderId);
+    const posActionDisabled = posTransactionInFlight ? "disabled" : "";
+    const posSaveLabel = posTransactionInFlight
+      ? state.editingPosOrderId
+        ? "Updating..."
+        : "Saving..."
+      : state.editingPosOrderId
+        ? "Update POS Order"
+        : "Save POS Order";
+    const posSavePrintLabel = posTransactionInFlight
+      ? "Saving..."
+      : state.editingPosOrderId
+        ? "Update & Print Receipt"
+        : "Save & Print Receipt";
 
     root.innerHTML = `
       <section class="section-card">
@@ -3792,6 +4336,9 @@
             )}</h3>
           </div>
           <div class="module-actions">
+            <button class="button button-primary" data-pos-action="close-counter" type="button" ${posActionDisabled}>
+              Close Counter
+            </button>
             <button class="button button-secondary" data-pos-action="export-csv" type="button">
               Export POS CSV
             </button>
@@ -3805,8 +4352,12 @@
 
         <div class="pos-counter-strip">
           <article class="stat-card">
-            <span>Today</span>
-            <strong>${formatCurrency(todaySales)}</strong>
+            <span>Counter Day</span>
+            <strong>${formatCurrency(counterSummary.totalAmount)}</strong>
+          </article>
+          <article class="stat-card">
+            <span>Daily Sales Ledger</span>
+            <strong>${formatCurrency(counterSummary.dailySalesLedgerTotal)}</strong>
           </article>
           <article class="stat-card">
             <span>Cart</span>
@@ -3823,7 +4374,9 @@
         </div>
 
         <p class="muted-text pos-serving-note">
-          Serve faster with one compact counter view: set area and payment once, scan or search, tap add, then save. Press <strong>/</strong> to jump to product search, or scan into the barcode box and press <strong>Enter</strong>.
+          Serve faster with one compact counter view: set area and payment once, scan or search, tap add, then save. Press <strong>/</strong> to jump to product search, or scan into the barcode box and press <strong>Enter</strong>. Current POS total for ${escapeHtml(
+            formatDisplayDate(activeOrderDate)
+          )} is ${escapeHtml(formatCurrency(counterSummary.totalAmount))}.
         </p>
 
         <form id="posOrderForm" novalidate>
@@ -4114,13 +4667,13 @@
               </details>
 
               <div class="form-actions pos-checkout-actions">
-                <button class="button button-primary" data-pos-submit="save" type="submit">
-                  ${escapeHtml(state.editingPosOrderId ? "Update POS Order" : "Save POS Order")}
+                <button class="button button-primary" data-pos-submit="save" type="submit" ${posActionDisabled}>
+                  ${escapeHtml(posSaveLabel)}
                 </button>
-                <button class="button button-secondary" data-pos-submit="save-and-print" type="submit">
-                  ${escapeHtml(state.editingPosOrderId ? "Update & Print Receipt" : "Save & Print Receipt")}
+                <button class="button button-secondary" data-pos-submit="save-and-print" type="submit" ${posActionDisabled}>
+                  ${escapeHtml(posSavePrintLabel)}
                 </button>
-                <button class="button button-secondary" data-pos-action="reset-draft" type="button">
+                <button class="button button-secondary" data-pos-action="reset-draft" type="button" ${posActionDisabled}>
                   New Order
                 </button>
               </div>
@@ -4174,6 +4727,40 @@
                   .join("")}
               </div>
             </article>
+
+            <article class="quick-panel-card">
+              <span class="kicker">Counter Closeout</span>
+              <strong>${escapeHtml(formatDisplayDate(activeOrderDate))} • ${escapeHtml(
+      counterSummary.areaLabel
+    )}</strong>
+              <p class="muted-text">
+                ${escapeHtml(
+                  `${counterSummary.orderCount} order${counterSummary.orderCount === 1 ? "" : "s"} • ${
+                    counterSummary.itemCount
+                  } item${counterSummary.itemCount === 1 ? "" : "s"} • Cash ${formatCurrency(
+                    counterSummary.cashSalesTotal
+                  )}`
+                )}
+              </p>
+              <p class="table-secondary">${escapeHtml(
+                formatPosPaymentBreakdownInline(counterSummary.paymentBreakdown)
+              )}</p>
+              <p class="table-secondary">${escapeHtml(counterCloseoutMessage)}</p>
+              ${
+                latestCounterClosure
+                  ? `<p class="table-secondary">Last closed ${escapeHtml(
+                      formatTimestampLabel(latestCounterClosure.closedAt)
+                    )}${latestCounterClosure.closedByName ? ` by ${escapeHtml(latestCounterClosure.closedByName)}` : ""}.</p>`
+                  : ""
+              }
+              <div class="row-actions">
+                <button class="button button-secondary" data-pos-action="close-counter" type="button" ${
+                  posActionDisabled || counterSummary.orderCount === 0 ? "disabled" : ""
+                }>
+                  ${escapeHtml(posTransactionInFlight ? "Closing..." : "Close Counter")}
+                </button>
+              </div>
+            </article>
           </div>
         </form>
       </section>
@@ -4191,7 +4778,7 @@
     } in view</strong>
               <span>POS sales ${formatCurrency(totalSales)} • Items sold ${escapeHtml(
       String(totalItemsSold)
-    )} • Today ${formatCurrency(todaySales)}</span>
+    )} • Today ${formatCurrency(todaySales)} • Counter day ${formatCurrency(counterSummary.totalAmount)}</span>
             </div>
           </summary>
 
@@ -4836,6 +5423,10 @@
     return JSON.parse(JSON.stringify(Array.isArray(records) ? records : []));
   }
 
+  function clonePosRecords(records) {
+    return JSON.parse(JSON.stringify(Array.isArray(records) ? records : []));
+  }
+
   function getAuditActorDescriptor() {
     const activeProfile = getCurrentUserProfile();
     const signedInProfile = state.userProfiles.find((item) => item.id === state.signedInUserId) || null;
@@ -4891,6 +5482,7 @@
       { stateKey: "maintenanceRecords", moduleKey: "maintenance", moduleLabel: "Maintenance", view: "maintenance", recordNoun: "maintenance record" },
       { stateKey: "userProfiles", moduleKey: "access", moduleLabel: "Access", view: "access", recordNoun: "user profile" },
       { stateKey: "posOrders", moduleKey: "pos", moduleLabel: "POS", view: "pos", recordNoun: "POS order" },
+      { stateKey: "posCounterClosures", moduleKey: "pos", moduleLabel: "POS", view: "pos", recordNoun: "counter closeout" },
       { stateKey: "inventoryItems", moduleKey: "inventory", moduleLabel: "Inventory", view: "inventory", recordNoun: "inventory item" }
     ];
   }
@@ -4918,6 +5510,7 @@
       maintenanceRecords: { get: () => persistMaintenanceRecords, set: (fn) => { persistMaintenanceRecords = fn; } },
       userProfiles: { get: () => persistUserProfiles, set: (fn) => { persistUserProfiles = fn; } },
       posOrders: { get: () => persistPosOrders, set: (fn) => { persistPosOrders = fn; } },
+      posCounterClosures: { get: () => persistPosCounterClosures, set: (fn) => { persistPosCounterClosures = fn; } },
       inventoryItems: { get: () => persistInventoryItems, set: (fn) => { persistInventoryItems = fn; } }
     };
   }
@@ -4966,6 +5559,8 @@
         return `${record.fullName} • ${record.role}`;
       case "posOrders":
         return `${record.orderNumber} • ${formatCurrency(record.totalAmount)}`;
+      case "posCounterClosures":
+        return `${formatDisplayDate(record.orderDate)} • ${formatCurrency(record.totalAmount)}`;
       case "inventoryItems":
         return `${record.name} • ${record.sku || "No SKU"}`;
       default:
@@ -5009,6 +5604,10 @@
         return record.active ? "Active profile" : "Inactive profile";
       case "posOrders":
         return `${record.paymentMethod} • ${getPosOrderAreaSummary(record)}`;
+      case "posCounterClosures":
+        return `${record.areaLabel || "All POS Areas"} • ${record.orderCount} order${
+          record.orderCount === 1 ? "" : "s"
+        }`;
       case "inventoryItems":
         return `${getBusinessArea(record.businessAreaId).shortLabel} • ${record.category}`;
       default:

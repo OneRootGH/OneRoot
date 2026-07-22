@@ -2409,6 +2409,65 @@ function queueHostedWorkspaceSyncAfterPersist(options = {}) {
   });
 }
 
+function cloneWorkspaceData(value) {
+  if (typeof structuredClone === "function") {
+    return structuredClone(value);
+  }
+
+  return JSON.parse(JSON.stringify(value));
+}
+
+async function waitForHostedWorkspaceSyncIdle(timeoutMs = 6000) {
+  const deadline = Date.now() + Math.max(Number(timeoutMs || 0), 500);
+
+  while (Date.now() < deadline) {
+    if (!hostedWorkspaceSyncState.uploadInFlight && !hostedWorkspaceSyncState.uploadQueued) {
+      return !hostedWorkspaceSyncState.hasPendingLocalChanges;
+    }
+
+    await new Promise((resolve) => {
+      window.setTimeout(resolve, 120);
+    });
+  }
+
+  return false;
+}
+
+async function flushHostedWorkspaceCriticalSync(options = {}) {
+  if (!isHostedWorkspaceEnvironment()) {
+    return true;
+  }
+
+  const sessionReady = await ensureHostedWorkspaceServerSession();
+
+  if (!sessionReady) {
+    return false;
+  }
+
+  await waitForHostedWorkspaceSyncIdle(2400);
+
+  const uploaded = await uploadHostedWorkspaceLiveSnapshot({
+    force: true,
+    reason: normalizeText(options.reason) || "critical-sync"
+  });
+  const idle = await waitForHostedWorkspaceSyncIdle(options.timeoutMs || 8000);
+  const localDigest = buildHostedWorkspaceSyncDigest(state);
+
+  if (!idle) {
+    return false;
+  }
+
+  if (hostedWorkspaceSyncState.mode === "auth-required" || hostedWorkspaceSyncState.mode === "sync-error") {
+    return false;
+  }
+
+  return (
+    uploaded === true ||
+    (!hostedWorkspaceSyncState.hasPendingLocalChanges &&
+      hostedWorkspaceSyncState.lastUploadedDigest === localDigest)
+  );
+}
+
 function installHostedWorkspaceSyncHooks() {
   if (
     hostedWorkspaceSyncState.hooksInstalled ||
@@ -20973,7 +21032,7 @@ function validateExpense(expense) {
   return errors;
 }
 
-function handleSalesSubmit(event) {
+async function handleSalesSubmit(event) {
   event.preventDefault();
 
   const formData = new FormData(elements.salesForm);
@@ -20991,6 +21050,18 @@ function handleSalesSubmit(event) {
     return;
   }
 
+  if (isHostedWorkspaceEnvironment()) {
+    const sessionReady = await ensureHostedWorkspaceServerSession();
+
+    if (!sessionReady) {
+      showToast("Sign in again before saving Daily Sales to the live workspace.");
+      return;
+    }
+  }
+
+  const previousSales = cloneWorkspaceData(state.sales);
+  const successMessage = state.editingSalesId ? "Daily sales updated." : "Daily sales saved.";
+
   if (state.editingSalesId) {
     state.sales = sortSales(
       state.sales.map((sale) =>
@@ -21003,7 +21074,6 @@ function handleSalesSubmit(event) {
           : sale
       )
     );
-    showToast("Daily sales updated.");
   } else {
     state.sales = sortSales([
       ...state.sales,
@@ -21014,12 +21084,29 @@ function handleSalesSubmit(event) {
         ...draft
       }
     ]);
-    showToast("Daily sales saved.");
   }
 
   persistSales();
+
+  if (isHostedWorkspaceEnvironment()) {
+    const syncConfirmed = await flushHostedWorkspaceCriticalSync({
+      reason: state.editingSalesId ? "sales-update" : "sales-create"
+    });
+
+    if (!syncConfirmed) {
+      state.sales = sortSales(previousSales.map((sale) => sanitizeStoredSale(sale)).filter(Boolean));
+      withHostedWorkspaceSyncSuppressed(() => {
+        persistSales();
+      });
+      render();
+      showToast("Daily sales could not be saved online. Sign in again and retry.");
+      return;
+    }
+  }
+
   resetSalesForm({ silent: true });
   render();
+  showToast(successMessage);
 }
 
 function validateSales(sale) {
@@ -21607,7 +21694,7 @@ function startEditingSale(saleId) {
   elements.salesForm.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
-function deleteSale(saleId) {
+async function deleteSale(saleId) {
   const sale = state.sales.find((item) => item.id === saleId);
 
   if (!sale) {
@@ -21625,8 +21712,34 @@ function deleteSale(saleId) {
     return;
   }
 
+  if (isHostedWorkspaceEnvironment()) {
+    const sessionReady = await ensureHostedWorkspaceServerSession();
+
+    if (!sessionReady) {
+      showToast("Sign in again before deleting Daily Sales from the live workspace.");
+      return;
+    }
+  }
+
+  const previousSales = cloneWorkspaceData(state.sales);
   state.sales = state.sales.filter((item) => item.id !== saleId);
   persistSales();
+
+  if (isHostedWorkspaceEnvironment()) {
+    const syncConfirmed = await flushHostedWorkspaceCriticalSync({
+      reason: "sales-delete"
+    });
+
+    if (!syncConfirmed) {
+      state.sales = sortSales(previousSales.map((item) => sanitizeStoredSale(item)).filter(Boolean));
+      withHostedWorkspaceSyncSuppressed(() => {
+        persistSales();
+      });
+      render();
+      showToast("Daily sales could not be deleted online. Sign in again and retry.");
+      return;
+    }
+  }
 
   if (state.editingSalesId === saleId) {
     resetSalesForm({ silent: true });
