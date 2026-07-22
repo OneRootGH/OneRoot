@@ -1648,6 +1648,13 @@ const DEMO_USER_PROFILES = [
   }
 ];
 
+function createEmptyAccessLoginDraft() {
+  return {
+    username: "",
+    password: ""
+  };
+}
+
 const state = {
   expenses: loadExpenses(),
   budgets: loadBudgets(),
@@ -1708,6 +1715,7 @@ const state = {
   reportFilters: createDefaultReportFilters(),
   agreementReadyFiles: [],
   payslipReadyFiles: [],
+  accessLoginDraft: createEmptyAccessLoginDraft(),
   currency: loadSettings().currency || "GHS",
   activeUserId: normalizeText(loadSettings().activeUserId),
   signedInUserId: normalizeText(loadAuthSession().userId),
@@ -2827,6 +2835,10 @@ function startHostedWorkspaceSyncPolling() {
       return;
     }
 
+    if (shouldPauseHostedWorkspaceLockRefresh()) {
+      return;
+    }
+
     void (async () => {
       await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
       const changed = await restoreHostedWorkspaceLiveSyncIfNeeded({ render: false });
@@ -3866,6 +3878,10 @@ function handleDynamicModuleClick(event) {
       signOutWorkspaceUser();
     }
 
+    if (accessActionTarget.dataset.accessAction === "clear-login") {
+      resetAccessLoginForm();
+    }
+
     return;
   }
 
@@ -3942,6 +3958,14 @@ function handleDynamicModuleSubmit(event) {
 
 function handleDynamicModuleInput(event) {
   const { id, value } = event.target;
+
+  if (id === "accessLoginUsername") {
+    state.accessLoginDraft.username = value;
+  }
+
+  if (id === "accessLoginPassword") {
+    state.accessLoginDraft.password = value;
+  }
 
   if (id === "globalSearchQuery") {
     state.searchFilters.query = value;
@@ -4428,6 +4452,10 @@ function handleStorageSync(event) {
 }
 
 async function handleWindowFocusSync() {
+  if (shouldPauseHostedWorkspaceLockRefresh()) {
+    return;
+  }
+
   refreshStateFromStorage({ keepView: true });
   await hydrateHostedWorkspaceAccessIfNeeded();
   await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
@@ -4568,6 +4596,10 @@ function getAuthenticatedUserProfile() {
 
 function isWorkspaceLocked() {
   return isWorkspaceLoginRequired() && !getAuthenticatedUserProfile();
+}
+
+function shouldPauseHostedWorkspaceLockRefresh() {
+  return isHostedWorkspaceEnvironment() && state.currentView === "access" && isWorkspaceLocked();
 }
 
 function reconcileAuthenticationSession(options = {}) {
@@ -16668,6 +16700,7 @@ function renderAccessPage() {
   }
 
   const editingRecord = state.userProfiles.find((item) => item.id === state.editingUserId) || null;
+  const loginDraft = state.accessLoginDraft || createEmptyAccessLoginDraft();
   const draft = createUserProfileFormDraft(editingRecord);
   const currentUser = getCurrentUserProfile();
   const authenticatedUser = getAuthenticatedUserProfile();
@@ -16702,6 +16735,7 @@ function renderAccessPage() {
                   name="accessLoginUsername"
                   type="text"
                   autocomplete="username"
+                  value="${escapeHtml(loginDraft.username)}"
                   placeholder="Enter username"
                   required
                 />
@@ -16714,6 +16748,7 @@ function renderAccessPage() {
                   name="accessLoginPassword"
                   type="password"
                   autocomplete="current-password"
+                  value="${escapeHtml(loginDraft.password)}"
                   placeholder="Enter password"
                   required
                 />
@@ -16728,7 +16763,9 @@ function renderAccessPage() {
 
             <div class="form-actions">
               <button class="button button-primary" type="submit">Sign In</button>
-              <button class="button button-secondary" type="reset">Clear</button>
+              <button class="button button-secondary" data-access-action="clear-login" type="button">
+                Clear
+              </button>
             </div>
           </form>
         </section>
@@ -17302,6 +17339,15 @@ function resetUserProfileForm(options = {}) {
   }
 }
 
+function resetAccessLoginForm(options = {}) {
+  state.accessLoginDraft = createEmptyAccessLoginDraft();
+
+  if (!options.silent) {
+    render();
+    showToast("Login form cleared.");
+  }
+}
+
 async function buildPasswordDigest(password) {
   const normalizedPassword = String(password || "");
 
@@ -17375,6 +17421,7 @@ async function handleAccessLoginSubmit(event) {
       });
     }
 
+    state.accessLoginDraft = createEmptyAccessLoginDraft();
     persistSettings();
     navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
     render();
@@ -17412,6 +17459,7 @@ async function handleAccessLoginSubmit(event) {
     render: false,
     uploadIfRemoteEmpty: true
   });
+  state.accessLoginDraft = createEmptyAccessLoginDraft();
   persistSettings();
   navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
   render();
@@ -17425,6 +17473,7 @@ async function handleAccessLoginSubmit(event) {
 function signOutWorkspaceUser(options = {}) {
   const signedInProfile = getAuthenticatedUserProfile();
   state.signedInUserId = "";
+  state.accessLoginDraft = createEmptyAccessLoginDraft();
   clearAuthSession();
   clearServerWorkspaceSession();
   navigateTo("access", { syncHash: true, showAccessToast: false });
