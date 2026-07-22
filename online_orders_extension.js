@@ -296,10 +296,13 @@
   }
 
   function buildOnlineOrdersRequestHeaders(baseHeaders = {}) {
-    const headers = { ...baseHeaders };
+    const headers =
+      typeof buildHostedWorkspaceSessionHeaders === "function"
+        ? buildHostedWorkspaceSessionHeaders(baseHeaders)
+        : { ...baseHeaders };
     const authorization = buildOnlineOrdersAuthHeader();
 
-    if (authorization) {
+    if (authorization && !normalizeText(headers.Authorization)) {
       headers.Authorization = authorization;
     }
 
@@ -350,6 +353,7 @@
     try {
       const response = await fetch(ADMIN_ORDERS_ENDPOINT, {
         cache: "no-store",
+        credentials: "same-origin",
         headers: buildOnlineOrdersRequestHeaders()
       });
       const payload = await response.json().catch(() => ({}));
@@ -1094,6 +1098,7 @@
     try {
       const response = await fetch(`${ADMIN_ORDERS_ENDPOINT}/${encodeURIComponent(orderId)}`, {
         method: "PATCH",
+        credentials: "same-origin",
         headers: buildOnlineOrdersRequestHeaders({
           "Content-Type": "application/json"
         }),
@@ -1307,6 +1312,9 @@
 
     try {
       localStorage.setItem(AUDIT_TRAIL_STORAGE_KEY, JSON.stringify(state.auditTrail));
+      if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+        queueHostedWorkspaceSyncAfterPersist({ reason: "audit-trail" });
+      }
     } catch (error) {
       console.error(error);
     }

@@ -1692,10 +1692,16 @@
 
   function persistPosOrders() {
     localStorage.setItem(POS_ORDER_STORAGE_KEY, JSON.stringify(state.posOrders));
+    if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+      queueHostedWorkspaceSyncAfterPersist({ reason: "pos-orders" });
+    }
   }
 
   function persistInventoryItems() {
     localStorage.setItem(INVENTORY_ITEM_STORAGE_KEY, JSON.stringify(state.inventoryItems));
+    if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+      queueHostedWorkspaceSyncAfterPersist({ reason: "inventory-items" });
+    }
   }
 
   function reconcilePosGeneratedSales(options = {}) {
@@ -4267,6 +4273,9 @@
 
   function persistAuditTrail() {
     localStorage.setItem(AUDIT_TRAIL_STORAGE_KEY, JSON.stringify(state.auditTrail || []));
+    if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+      queueHostedWorkspaceSyncAfterPersist({ reason: "audit-trail" });
+    }
   }
 
   function cloneAuditRecords(records) {

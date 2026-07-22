@@ -1735,7 +1735,7 @@ const hostedWorkspaceSyncState = {
   uploadTimer: null,
   uploadDelayMs: 400,
   pollTimer: null,
-  pollIntervalMs: 30000,
+  pollIntervalMs: 8000,
   eventSource: null,
   uploadInFlight: false,
   uploadQueued: false,
@@ -2353,6 +2353,18 @@ function isHostedWorkspaceSyncSuppressed() {
 
 function shouldUseHostedWorkspaceAuthoritativeMode() {
   return isHostedWorkspaceEnvironment();
+}
+
+function queueHostedWorkspaceSyncAfterPersist(options = {}) {
+  if (isHostedWorkspaceSyncSuppressed() || !isHostedWorkspaceEnvironment()) {
+    return;
+  }
+
+  scheduleHostedWorkspaceSyncUpload({
+    immediate: options.immediate === true,
+    force: options.force === true,
+    reason: normalizeText(options.reason) || "workspace-persist"
+  });
 }
 
 function installHostedWorkspaceSyncHooks() {
@@ -25733,6 +25745,7 @@ function sanitizeStoredUserProfile(record) {
 
 function persistExpenses() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.expenses));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "expenses" });
 }
 
 function persistSettings() {
@@ -25740,42 +25753,52 @@ function persistSettings() {
     SETTINGS_KEY,
     JSON.stringify({ currency: state.currency, activeUserId: state.activeUserId })
   );
+  queueHostedWorkspaceSyncAfterPersist({ reason: "settings" });
 }
 
 function persistBudgets() {
   localStorage.setItem(BUDGET_STORAGE_KEY, JSON.stringify(state.budgets));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "budgets" });
 }
 
 function persistSales() {
   localStorage.setItem(SALES_STORAGE_KEY, JSON.stringify(state.sales));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "sales" });
 }
 
 function persistRentals() {
   localStorage.setItem(RENTAL_STORAGE_KEY, JSON.stringify(state.rentals));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "apartments" });
 }
 
 function persistPettyCash() {
   localStorage.setItem(PETTY_CASH_STORAGE_KEY, JSON.stringify(state.pettyCash));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "petty-cash" });
 }
 
 function persistPettyCashBudgets() {
   localStorage.setItem(PETTY_CASH_BUDGET_STORAGE_KEY, JSON.stringify(state.pettyCashBudgets));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "petty-cash-budgets" });
 }
 
 function persistSalaryRecords() {
   localStorage.setItem(SALARY_STORAGE_KEY, JSON.stringify(state.salaryRecords));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "salary" });
 }
 
 function persistCashbookEntries() {
   localStorage.setItem(CASHBOOK_STORAGE_KEY, JSON.stringify(state.cashbookEntries));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "cashbook" });
 }
 
 function persistPurchaseOrders() {
   localStorage.setItem(PURCHASE_ORDER_STORAGE_KEY, JSON.stringify(state.purchaseOrders));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "purchase-orders" });
 }
 
 function persistLaundryTickets() {
   localStorage.setItem(LAUNDRY_TICKET_STORAGE_KEY, JSON.stringify(state.laundryTickets));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "laundry-tickets" });
 }
 
 function persistEquipmentRentalBookings() {
@@ -25783,6 +25806,7 @@ function persistEquipmentRentalBookings() {
     EQUIPMENT_RENTAL_STORAGE_KEY,
     JSON.stringify(state.equipmentRentalBookings)
   );
+  queueHostedWorkspaceSyncAfterPersist({ reason: "equipment-rentals" });
 }
 
 function persistSecurityDepositRecords() {
@@ -25790,10 +25814,12 @@ function persistSecurityDepositRecords() {
     SECURITY_DEPOSIT_STORAGE_KEY,
     JSON.stringify(state.securityDepositRecords)
   );
+  queueHostedWorkspaceSyncAfterPersist({ reason: "security-deposits" });
 }
 
 function persistLedgerEntries() {
   localStorage.setItem(LEDGER_STORAGE_KEY, JSON.stringify(state.ledgerEntries));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "ledgers" });
 }
 
 function persistMobileMoneyReconciliations() {
@@ -25801,30 +25827,37 @@ function persistMobileMoneyReconciliations() {
     MOBILE_MONEY_STORAGE_KEY,
     JSON.stringify(state.mobileMoneyReconciliations)
   );
+  queueHostedWorkspaceSyncAfterPersist({ reason: "mobile-money" });
 }
 
 function persistSuppliers() {
   localStorage.setItem(SUPPLIER_STORAGE_KEY, JSON.stringify(state.suppliers));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "suppliers" });
 }
 
 function persistAssetRecords() {
   localStorage.setItem(ASSET_STORAGE_KEY, JSON.stringify(state.assetRecords));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "assets" });
 }
 
 function persistForecastPlans() {
   localStorage.setItem(FORECAST_STORAGE_KEY, JSON.stringify(state.forecastPlans));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "forecast" });
 }
 
 function persistRecurringControls() {
   localStorage.setItem(RECURRING_STORAGE_KEY, JSON.stringify(state.recurringControls));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "recurring" });
 }
 
 function persistMaintenanceRecords() {
   localStorage.setItem(MAINTENANCE_STORAGE_KEY, JSON.stringify(state.maintenanceRecords));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "maintenance" });
 }
 
 function persistUserProfiles() {
   localStorage.setItem(USER_PROFILE_STORAGE_KEY, JSON.stringify(state.userProfiles));
+  queueHostedWorkspaceSyncAfterPersist({ reason: "access-profiles" });
 }
 
 function persistAllData() {
