@@ -1727,6 +1727,7 @@ const hostedWorkspaceSyncState = {
   pollIntervalMs: 30000,
   uploadInFlight: false,
   uploadQueued: false,
+  hasPendingLocalChanges: false,
   suppressDepth: 0,
   lastUploadedDigest: "",
   mode: "idle",
@@ -2237,6 +2238,10 @@ function isHostedWorkspaceSyncSuppressed() {
   return hostedWorkspaceSyncState.suppressDepth > 0;
 }
 
+function shouldUseHostedWorkspaceAuthoritativeMode() {
+  return isHostedWorkspaceEnvironment();
+}
+
 function installHostedWorkspaceSyncHooks() {
   if (
     hostedWorkspaceSyncState.hooksInstalled ||
@@ -2505,6 +2510,19 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
     const localDigestBefore = buildHostedWorkspaceSyncDigest(state);
     const remoteTotal = getWorkspaceRecordTotal(imported);
 
+    if (
+      hostedWorkspaceSyncState.hasPendingLocalChanges &&
+      !options.preferRemote &&
+      remoteDigest !== localDigestBefore
+    ) {
+      scheduleHostedWorkspaceSyncUpload({
+        immediate: true,
+        force: true,
+        reason: "pending-local-before-remote"
+      });
+      return false;
+    }
+
     if (remoteTotal === 0) {
       setHostedWorkspaceSyncStatus(
         "live-connected",
@@ -2526,9 +2544,15 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
 
     if (options.force === true || remoteDigest !== localDigestBefore) {
       withHostedWorkspaceSyncSuppressed(() => {
-        mergeHostedWorkspaceImport(imported);
+        if (shouldUseHostedWorkspaceAuthoritativeMode()) {
+          restoreWorkspaceFromImport(imported);
+        } else {
+          mergeHostedWorkspaceImport(imported);
+        }
         persistAllData();
       });
+
+      hostedWorkspaceSyncState.hasPendingLocalChanges = false;
 
       localStorage.setItem(
         HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY,
@@ -2567,6 +2591,8 @@ function scheduleHostedWorkspaceSyncUpload(options = {}) {
   if (isHostedWorkspaceSyncSuppressed() || !isHostedWorkspaceEnvironment()) {
     return;
   }
+
+  hostedWorkspaceSyncState.hasPendingLocalChanges = true;
 
   if (hostedWorkspaceSyncState.uploadTimer) {
     window.clearTimeout(hostedWorkspaceSyncState.uploadTimer);
@@ -2637,6 +2663,7 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
 
     if (!options.force && nextDigest === remoteDigest) {
       hostedWorkspaceSyncState.lastUploadedDigest = nextDigest;
+      hostedWorkspaceSyncState.hasPendingLocalChanges = false;
 
       if (remoteImported) {
         localStorage.setItem(
@@ -2673,6 +2700,7 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
 
     const savedSnapshot = sanitizeImportedBackup(await response.json());
     hostedWorkspaceSyncState.lastUploadedDigest = buildHostedWorkspaceSyncDigest(savedSnapshot);
+    hostedWorkspaceSyncState.hasPendingLocalChanges = false;
     localStorage.setItem(
       HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY,
       getHostedWorkspaceSnapshotRevision(savedSnapshot)
@@ -4345,6 +4373,18 @@ function registerServiceWorker() {
 }
 
 function refreshStateFromStorage(options = {}) {
+  if (isHostedWorkspaceEnvironment()) {
+    state.currency = loadSettings().currency || "GHS";
+    state.activeUserId = normalizeText(loadSettings().activeUserId);
+    state.signedInUserId = normalizeText(loadAuthSession().userId);
+
+    if (!options.keepView) {
+      state.currentView = loadPersistedView() || state.currentView;
+    }
+
+    return;
+  }
+
   state.expenses = loadExpenses();
   state.budgets = loadBudgets();
   state.sales = loadSales();
@@ -4419,12 +4459,17 @@ function persistAuthSession(userId, options = {}) {
       return;
     }
 
+    const existingSession = loadAuthSession();
+
     window.sessionStorage.setItem(
       AUTH_SESSION_STORAGE_KEY,
       JSON.stringify({
         userId: normalizeText(userId),
         username: normalizeText(options.username).toLowerCase(),
-        password: String(options.password || ""),
+        password:
+          options.password !== undefined
+            ? String(options.password || "")
+            : String(existingSession.password || ""),
         signedInAt: new Date().toISOString()
       })
     );
@@ -17325,7 +17370,8 @@ async function handleAccessLoginSubmit(event) {
       state.signedInUserId = profile.id;
       state.activeUserId = profile.id;
       persistAuthSession(profile.id, {
-        username: profile.username
+        username: profile.username,
+        password
       });
     }
 

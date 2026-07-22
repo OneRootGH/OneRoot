@@ -147,9 +147,15 @@
   state.sales = sortSales(
     state.sales.map((sale) => sanitizeStoredSale(sale)).filter(Boolean)
   );
-  state.inventoryItems = loadInventoryItems();
-  state.posOrders = loadPosOrders();
-  state.auditTrail = loadAuditTrail();
+  if (typeof isHostedWorkspaceEnvironment === "function" && isHostedWorkspaceEnvironment()) {
+    state.inventoryItems = Array.isArray(state.inventoryItems) ? state.inventoryItems : [];
+    state.posOrders = Array.isArray(state.posOrders) ? state.posOrders : [];
+    state.auditTrail = Array.isArray(state.auditTrail) ? state.auditTrail : [];
+  } else {
+    state.inventoryItems = loadInventoryItems();
+    state.posOrders = loadPosOrders();
+    state.auditTrail = loadAuditTrail();
+  }
   state.editingPosOrderId = null;
   state.editingInventoryItemId = null;
   state.posDraft = createEmptyPosDraft();
@@ -161,7 +167,9 @@
   document.body.addEventListener("focusin", trackModuleFocus);
   document.body.addEventListener("keydown", handleModuleKeydown);
 
-  reconcilePosGeneratedSales({ persist: true });
+  if (!(typeof isHostedWorkspaceEnvironment === "function" && isHostedWorkspaceEnvironment())) {
+    reconcilePosGeneratedSales({ persist: true });
+  }
   initializeAuditTrailHooks();
   primeAuditSnapshots();
 
@@ -211,6 +219,17 @@
     state.sales = sortSales(
       state.sales.map((sale) => sanitizeStoredSale(sale)).filter(Boolean)
     );
+
+    if (typeof isHostedWorkspaceEnvironment === "function" && isHostedWorkspaceEnvironment()) {
+      state.inventoryItems = Array.isArray(state.inventoryItems)
+        ? sortInventoryItems(state.inventoryItems)
+        : [];
+      state.posOrders = Array.isArray(state.posOrders) ? sortPosOrders(state.posOrders) : [];
+      state.auditTrail = Array.isArray(state.auditTrail) ? sortAuditTrail(state.auditTrail) : [];
+      primeAuditSnapshots();
+      return;
+    }
+
     state.inventoryItems = loadInventoryItems();
     state.posOrders = loadPosOrders();
     state.auditTrail = loadAuditTrail();
