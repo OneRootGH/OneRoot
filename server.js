@@ -141,6 +141,7 @@ const DATABASE_SSL_MODE = normalizeText(
   process.env.ONEROOT_DATABASE_SSL || process.env.DATABASE_SSL
 ).toLowerCase();
 const WORKSPACE_SNAPSHOT_PRIMARY_KEY = "primary";
+const DATABASE_OPERATION_TIMEOUT_MS = 4000;
 let databasePoolPromise = null;
 let databaseSchemaReadyPromise = null;
 const workspaceAuthProfileCache = {
@@ -193,6 +194,10 @@ async function getDatabasePool() {
       return new Pool({
         connectionString: DATABASE_URL,
         max: 5,
+        connectionTimeoutMillis: 3000,
+        idleTimeoutMillis: 10000,
+        query_timeout: 3000,
+        statement_timeout: 3000,
         ssl: getDatabaseSslConfig()
       });
     });
@@ -250,9 +255,18 @@ async function runWithDatabaseFallback(label, databaseOperation, fallbackOperati
   }
 
   try {
-    await ensureDatabaseSchema();
-    const pool = await getDatabasePool();
-    return await databaseOperation(pool);
+    return await Promise.race([
+      (async () => {
+        await ensureDatabaseSchema();
+        const pool = await getDatabasePool();
+        return databaseOperation(pool);
+      })(),
+      new Promise((_, reject) => {
+        setTimeout(() => {
+          reject(new Error(`${label} timed out after ${DATABASE_OPERATION_TIMEOUT_MS}ms.`));
+        }, DATABASE_OPERATION_TIMEOUT_MS);
+      })
+    ]);
   } catch (error) {
     console.error(`[oneroot-storage] ${label} failed, using file storage instead.`, error);
     return fallbackOperation();
