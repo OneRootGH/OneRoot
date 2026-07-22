@@ -418,6 +418,68 @@ function mergeOrderIntoList(orders, nextOrder) {
   );
 }
 
+function mergeOrderCollections(...collections) {
+  const merged = new Map();
+
+  collections.flat().forEach((order) => {
+    if (!order || typeof order !== "object") {
+      return;
+    }
+
+    const id = normalizeText(order.id);
+    const orderNumber = normalizeText(order.orderNumber).toUpperCase();
+    const key = id || orderNumber;
+
+    if (!key) {
+      return;
+    }
+
+    merged.set(key, order);
+  });
+
+  return sortOrdersForDisplay([...merged.values()]);
+}
+
+function sortOrdersForDisplay(orders) {
+  return [...(Array.isArray(orders) ? orders : [])].sort((left, right) =>
+    String(right.updatedAt || right.createdAt || "").localeCompare(
+      String(left.updatedAt || left.createdAt || "")
+    )
+  );
+}
+
+function readOrdersFromWorkspaceSnapshotPayload(payload) {
+  const workspace = getWorkspaceRoot(payload);
+  return Array.isArray(workspace.onlineOrders)
+    ? workspace.onlineOrders.filter((order) => order && typeof order === "object")
+    : [];
+}
+
+function readOrdersFromWorkspaceSnapshotFile() {
+  return readOrdersFromWorkspaceSnapshotPayload(readWorkspaceSnapshotFile());
+}
+
+function preserveWorkspaceOrderHistory(nextPayload, currentPayload) {
+  const nextRoot = nextPayload && typeof nextPayload === "object" ? nextPayload : {};
+  const nextWorkspace = getWorkspaceRoot(nextRoot);
+  const currentOrders = readOrdersFromWorkspaceSnapshotPayload(currentPayload);
+
+  if (Array.isArray(nextWorkspace.onlineOrders) || currentOrders.length === 0) {
+    return nextRoot;
+  }
+
+  const nextWorkspaceContainer =
+    nextRoot.workspace && typeof nextRoot.workspace === "object" ? nextRoot.workspace : nextWorkspace;
+
+  return {
+    ...nextRoot,
+    workspace: {
+      ...nextWorkspaceContainer,
+      onlineOrders: currentOrders
+    }
+  };
+}
+
 async function upsertOrderInDatabase(pool, order) {
   const payload = order && typeof order === "object" ? order : {};
 
@@ -451,7 +513,10 @@ async function upsertOrderInDatabase(pool, order) {
 }
 
 async function seedOrdersDatabaseFromFile(pool) {
-  const fallbackOrders = readOrdersFile();
+  const fallbackOrders = mergeOrderCollections(
+    readOrdersFile(),
+    readOrdersFromWorkspaceSnapshotFile()
+  );
 
   if (fallbackOrders.length === 0) {
     return [];
@@ -475,18 +540,41 @@ async function readOrdersStore() {
         return seedOrdersDatabaseFromFile(pool);
       }
 
-      const orders = result.rows.map((row) => row.payload).filter(Boolean);
+      const orders = sortOrdersForDisplay(result.rows.map((row) => row.payload).filter(Boolean));
       writeOrdersFile(orders);
       return orders;
     },
-    () => readOrdersFile()
+    () => mergeOrderCollections(readOrdersFile(), readOrdersFromWorkspaceSnapshotFile())
   );
+}
+
+async function syncOrderIntoWorkspaceSnapshotStore(order) {
+  const normalizedOrder = order && typeof order === "object" ? order : null;
+
+  if (!normalizedOrder) {
+    return null;
+  }
+
+  const currentSnapshot = await readWorkspaceSnapshotStore();
+  const workspaceRoot = getWorkspaceRoot(currentSnapshot);
+  const nextSnapshot = normalizeWorkspaceSnapshotPayload({
+    ...currentSnapshot,
+    exportedAt: new Date().toISOString(),
+    workspace: {
+      ...workspaceRoot,
+      onlineOrders: mergeOrderCollections(
+        readOrdersFromWorkspaceSnapshotPayload(currentSnapshot),
+        [normalizedOrder]
+      )
+    }
+  });
+
+  return writeWorkspaceSnapshotStore(nextSnapshot);
 }
 
 async function writeOrderStore(nextOrder) {
   const normalizedOrder = nextOrder && typeof nextOrder === "object" ? nextOrder : {};
-
-  return runWithDatabaseFallback(
+  const savedOrder = await runWithDatabaseFallback(
     "Orders database write",
     async (pool) => {
       await upsertOrderInDatabase(pool, normalizedOrder);
@@ -500,6 +588,14 @@ async function writeOrderStore(nextOrder) {
       return normalizedOrder;
     }
   );
+
+  try {
+    await syncOrderIntoWorkspaceSnapshotStore(savedOrder);
+  } catch (error) {
+    console.error("[oneroot-storage] Order snapshot mirror write failed.", error);
+  }
+
+  return savedOrder;
 }
 
 async function refreshWorkspaceSnapshotMirrorFromDatabase() {
@@ -582,7 +678,7 @@ async function findTrackedOrder(orderNumber, phone) {
       return result.rows[0].payload || null;
     },
     () =>
-      readOrdersFile().find(
+      mergeOrderCollections(readOrdersFile(), readOrdersFromWorkspaceSnapshotFile()).find(
         (order) =>
           normalizeText(order.orderNumber).toUpperCase() === normalizedNumber &&
           normalizePhone(order.customerPhoneNormalized || order.customerPhone) === normalizedPhone
@@ -595,7 +691,9 @@ async function readWorkspaceSnapshotStore() {
 }
 
 async function writeWorkspaceSnapshotStore(payload) {
-  const normalized = normalizeWorkspaceSnapshotPayload(payload);
+  const normalized = normalizeWorkspaceSnapshotPayload(
+    preserveWorkspaceOrderHistory(payload, readWorkspaceSnapshotFile())
+  );
   const savedSnapshot = await runWithDatabaseFallback(
     "Workspace database write",
     async (pool) => {
