@@ -565,17 +565,6 @@ async function findTrackedOrder(orderNumber, phone) {
 }
 
 async function readWorkspaceSnapshotStore() {
-  const mirroredSnapshot = readWorkspaceSnapshotFile();
-  const mirroredRecordCount = countWorkspaceBusinessRecords(mirroredSnapshot);
-  const mirroredProfiles = extractWorkspaceAccessProfiles(mirroredSnapshot);
-
-  if (mirroredRecordCount > 0 || mirroredProfiles.length > 0) {
-    refreshWorkspaceSnapshotMirrorFromDatabase().catch((error) => {
-      console.error("[oneroot-storage] Background workspace mirror refresh failed.", error);
-    });
-    return mirroredSnapshot;
-  }
-
   return refreshWorkspaceSnapshotMirrorFromDatabase();
 }
 
@@ -707,6 +696,52 @@ function parseBasicAuth(request) {
 
 function buildPasswordDigest(password) {
   return `sha256:${crypto.createHash("sha256").update(String(password || "")).digest("hex")}`;
+}
+
+function buildWorkspaceBootstrapProfile() {
+  const username = normalizeText(ADMIN_USER).toLowerCase();
+  const password = String(ADMIN_PASSWORD || "");
+
+  if (!username || !password) {
+    return null;
+  }
+
+  return {
+    id: "workspace-owner",
+    fullName: username === "phil" ? "Philip Boakye" : "Workspace Owner",
+    username,
+    role: "owner",
+    active: true,
+    loginEnabled: true,
+    passwordHash: buildPasswordDigest(password),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    notes: "Bootstrap online workspace owner profile"
+  };
+}
+
+async function resetWorkspaceAccessToBootstrapOwner() {
+  const currentSnapshot = await readWorkspaceSnapshotStore();
+  const workspaceRoot = getWorkspaceRoot(currentSnapshot);
+  const bootstrapProfile = buildWorkspaceBootstrapProfile();
+  const exportedAt = new Date().toISOString();
+  const nextSnapshot = normalizeWorkspaceSnapshotPayload({
+    ...currentSnapshot,
+    exportedAt,
+    settings: {
+      ...(currentSnapshot?.settings && typeof currentSnapshot.settings === "object"
+        ? currentSnapshot.settings
+        : {}),
+      activeUserId: normalizeText(bootstrapProfile?.id)
+    },
+    workspace: {
+      ...workspaceRoot,
+      userProfiles: bootstrapProfile ? [bootstrapProfile] : []
+    }
+  });
+
+  WORKSPACE_SESSIONS.clear();
+  return writeWorkspaceSnapshotStore(nextSnapshot);
 }
 
 function parseCookies(request) {
@@ -931,23 +966,23 @@ function loadWorkspaceAuthProfilesFromFiles() {
 }
 
 async function refreshWorkspaceAuthProfileCache() {
+  if (hasDatabaseConfig()) {
+    const snapshot = await refreshWorkspaceSnapshotMirrorFromDatabase();
+    const profiles = setWorkspaceAuthProfileCache(snapshot);
+
+    if (profiles.length > 0) {
+      return profiles;
+    }
+  }
+
   const fileProfiles = loadWorkspaceAuthProfilesFromFiles();
 
   if (fileProfiles.length > 0) {
-    refreshWorkspaceSnapshotMirrorFromDatabase().catch((error) => {
-      console.error("[oneroot-storage] Background auth mirror refresh failed.", error);
-    });
     return fileProfiles;
   }
 
-  const snapshot = await refreshWorkspaceSnapshotMirrorFromDatabase();
-  const profiles = setWorkspaceAuthProfileCache(snapshot);
-
-  if (profiles.length === 0) {
-    workspaceAuthProfileCache.profiles = [];
-  }
-
-  return profiles;
+  workspaceAuthProfileCache.profiles = [];
+  return [];
 }
 
 function loadWorkspaceAuthProfiles() {
@@ -1702,6 +1737,31 @@ async function handleApiRoute(request, response, pathname, url) {
         });
         return true;
       }
+    }
+  }
+
+  if (pathname === "/api/admin/workspace-access-reset" && request.method === "POST") {
+    if (!isAuthorizedAdminRequest(request)) {
+      sendUnauthorized(response);
+      return true;
+    }
+
+    try {
+      const snapshot = await resetWorkspaceAccessToBootstrapOwner();
+      sendJson(response, 200, {
+        ok: true,
+        mode: "bootstrap-owner",
+        exportedAt: normalizeText(snapshot.exportedAt),
+        recordCount: countWorkspaceBusinessRecords(snapshot),
+        profiles: extractWorkspaceAccessProfiles(snapshot)
+      });
+      return true;
+    } catch (error) {
+      sendJson(response, 500, {
+        ok: false,
+        errors: [error.message || "Unable to reset workspace access."]
+      });
+      return true;
     }
   }
 

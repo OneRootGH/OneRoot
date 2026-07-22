@@ -1756,6 +1756,7 @@ async function init() {
   decorateNavigationMenus();
   bindEvents();
   if (isHostedWorkspaceEnvironment()) {
+    resetHostedWorkspaceOnlineCache();
     await hydrateHostedWorkspaceAccessIfNeeded();
     await hydrateHostedWorkspaceSessionIfNeeded({ force: true });
   } else {
@@ -1919,6 +1920,59 @@ function needsHostedWorkspaceAccessHydration() {
     isHostedWorkspaceEnvironment() &&
     (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0 || isWorkspaceLocked())
   );
+}
+
+function resetHostedWorkspaceOnlineCache() {
+  if (!isHostedWorkspaceEnvironment()) {
+    return;
+  }
+
+  state.expenses = [];
+  state.budgets = [];
+  state.sales = [];
+  state.rentals = [];
+  state.pettyCash = [];
+  state.pettyCashBudgets = [];
+  state.salaryRecords = [];
+  state.cashbookEntries = [];
+  state.purchaseOrders = [];
+  state.laundryTickets = [];
+  state.equipmentRentalBookings = [];
+  state.securityDepositRecords = [];
+  state.ledgerEntries = [];
+  state.mobileMoneyReconciliations = [];
+  state.suppliers = [];
+  state.assetRecords = [];
+  state.forecastPlans = [];
+  state.recurringControls = [];
+  state.maintenanceRecords = [];
+  state.userProfiles = [];
+  state.activeUserId = "";
+
+  if ("posOrders" in state) {
+    state.posOrders = [];
+  }
+
+  if ("inventoryItems" in state) {
+    state.inventoryItems = [];
+  }
+
+  if ("auditTrail" in state) {
+    state.auditTrail = [];
+  }
+
+  if (typeof window === "undefined" || !window.localStorage) {
+    return;
+  }
+
+  [
+    ...LIVE_DATA_STORAGE_KEYS,
+    HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY,
+    HOSTED_WORKSPACE_ACCESS_FLAG_KEY,
+    HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY
+  ].forEach((key) => {
+    window.localStorage.removeItem(key);
+  });
 }
 
 function getHostedWorkspaceSnapshotRevision(imported) {
@@ -2112,10 +2166,7 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
         persistUserProfiles();
         clearAuthSession();
       } else if (importedProfiles.length > 0) {
-        state.userProfiles =
-          !Array.isArray(state.userProfiles) || state.userProfiles.length === 0 || isWorkspaceLocked()
-            ? importedProfiles
-            : mergeUserProfiles(state.userProfiles, importedProfiles);
+        state.userProfiles = importedProfiles;
 
         reconcileActiveUserProfile({ skipPersist: true });
         persistUserProfiles();
@@ -4901,10 +4952,10 @@ function renderChrome() {
   elements.sharedWorkspaceSyncBtn.disabled = false;
   elements.sharedWorkspaceSyncBtn.textContent =
     hostedWorkspaceSyncState.mode === "live-connected"
-      ? "Sync Shared Data"
+      ? "Refresh Online Data"
       : locked
-        ? "Sign In To Sync"
-        : "Reconnect Shared Data";
+        ? "Sign In Online"
+        : "Reconnect Online Data";
   elements.sharedWorkspaceSyncBtn.title = syncStatus.detail || syncStatus.actionHint;
 
   if (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0) {
