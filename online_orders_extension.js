@@ -23,6 +23,9 @@
   state.onlineOrders = [];
   state.onlineOrderFilters = createDefaultOnlineOrderFilters();
   state.onlineOrdersAuth = loadOnlineOrdersAuth();
+  if (state.onlineOrdersAuth?.username || state.onlineOrdersAuth?.password) {
+    clearOnlineOrdersAuth();
+  }
   state.onlineOrdersMeta = {
     loading: false,
     loaded: false,
@@ -198,16 +201,6 @@
   }
 
   function getEffectiveOnlineOrdersAuth() {
-    const savedUsername = normalizeText(state.onlineOrdersAuth?.username);
-    const savedPassword = String(state.onlineOrdersAuth?.password || "");
-
-    if (savedUsername && savedPassword) {
-      return {
-        username: savedUsername,
-        password: savedPassword
-      };
-    }
-
     return loadWorkspaceSessionOrdersAuth();
   }
 
@@ -227,14 +220,26 @@
   function getOnlineOrdersUsername() {
     const currentProfile = getSignedInWorkspaceProfile();
     return normalizeText(
-      state.onlineOrdersAuth?.username ||
-        currentProfile?.username ||
-        loadWorkspaceSessionOrdersAuth().username
+      currentProfile?.username || loadWorkspaceSessionOrdersAuth().username
     ).toLowerCase();
   }
 
   function canAttemptOnlineOrdersLoad() {
-    return Boolean(hasOnlineOrdersAuth() || getOnlineOrdersUsername());
+    return Boolean(getOnlineOrdersUsername());
+  }
+
+  async function tryRestoreOnlineOrdersWorkspaceSession() {
+    const workspaceAuth = loadWorkspaceSessionOrdersAuth();
+
+    if (
+      !workspaceAuth.username ||
+      !workspaceAuth.password ||
+      typeof establishServerWorkspaceSession !== "function"
+    ) {
+      return false;
+    }
+
+    return establishServerWorkspaceSession(workspaceAuth.username, workspaceAuth.password);
   }
 
   function persistOnlineOrdersAuth() {
@@ -328,7 +333,7 @@
       state.onlineOrdersMeta.loaded = false;
       state.onlineOrdersMeta.authRequired = true;
       state.onlineOrdersMeta.error =
-        "Sign in to the workspace first. If online orders need to reconnect, enter the same workspace password here.";
+        "Sign in to the workspace first to load online orders.";
       renderOnlineOrdersPage();
 
       if (options.toast) {
@@ -350,13 +355,19 @@
       const payload = await response.json().catch(() => ({}));
 
       if (response.status === 401) {
+        if (!options.restoredSession && (await tryRestoreOnlineOrdersWorkspaceSession())) {
+          await ensureOnlineOrdersLoaded({
+            ...options,
+            force: true,
+            restoredSession: true,
+            toast: false
+          });
+          return;
+        }
+
         state.onlineOrders = [];
         state.onlineOrdersMeta.authRequired = true;
-        throw new Error(
-          getOnlineOrdersUsername()
-            ? "The workspace password could not reconnect online orders. Enter the same password you used to sign in and try again."
-            : "Sign in to the workspace first, then reconnect online orders with the same password."
-        );
+        throw new Error("Online orders need a fresh workspace sign-in. Sign out and sign in again, then reopen Online Orders.");
       }
 
       if (!response.ok) {
@@ -461,7 +472,7 @@
       return;
     }
 
-    const showAuthForm =
+    const showAccessNotice =
       state.onlineOrdersMeta.authRequired ||
       (!state.onlineOrdersMeta.loaded &&
         !state.onlineOrdersMeta.loading &&
@@ -490,9 +501,9 @@
           Website orders are stored on the server so staff can confirm, prepare, complete, and follow up from one place.
         </p>
 
-        ${showAuthForm ? buildOnlineOrdersAuthMarkup() : ""}
+        ${showAccessNotice ? buildOnlineOrdersAccessMarkup() : ""}
         ${
-          state.onlineOrdersMeta.error && !showAuthForm
+          state.onlineOrdersMeta.error && !showAccessNotice
             ? `<div class="status-banner warning">${escapeHtml(state.onlineOrdersMeta.error)}</div>`
             : ""
         }
@@ -637,20 +648,19 @@
     `;
   }
 
-  function buildOnlineOrdersAuthMarkup() {
+  function buildOnlineOrdersAccessMarkup() {
     const currentProfile = getSignedInWorkspaceProfile();
-    const username = getOnlineOrdersUsername();
     const errorMessage = normalizeText(state.onlineOrdersMeta.error);
     const helperText = currentProfile
-      ? `Online orders use the same sign-in as the staff app. Enter the password for ${currentProfile.fullName} only when this browser needs to reconnect to the order server.`
-      : "Sign in to the workspace first, then use the same password here if online orders need to reconnect.";
+      ? `Online orders use the same workspace access as ${currentProfile.fullName}. If this browser session expires, sign out and sign in again to reconnect.`
+      : "Sign in to the workspace first, then reopen Online Orders.";
 
     return `
       <section class="section-card inset-card">
         <div class="section-heading compact">
           <div>
             <p class="kicker">Workspace Access</p>
-            <h3>Reconnect Online Orders</h3>
+            <h3>Online Orders Use Normal Sign-In</h3>
           </div>
         </div>
         <p class="muted-text">
@@ -661,57 +671,11 @@
             ? `<div class="status-banner warning">${escapeHtml(errorMessage)}</div>`
             : ""
         }
-        <form id="onlineOrdersAuthForm" novalidate>
-          <div class="mini-form-grid">
-            ${
-              currentProfile
-                ? `
-                  <label>
-                    <span>Signed-in Workspace User</span>
-                    <input
-                      id="onlineOrdersAuthUsername"
-                      name="onlineOrdersAuthUsername"
-                      type="text"
-                      value="${escapeHtml(username)}"
-                      autocomplete="username"
-                      readonly
-                    />
-                  </label>
-                `
-                : `
-                  <label>
-                    <span>Workspace Username</span>
-                    <input
-                      id="onlineOrdersAuthUsername"
-                      name="onlineOrdersAuthUsername"
-                      type="text"
-                      value="${escapeHtml(username)}"
-                      autocomplete="username"
-                      placeholder="Enter your workspace username"
-                      required
-                    />
-                  </label>
-                `
-            }
-            <label>
-              <span>Workspace Password</span>
-              <input
-                id="onlineOrdersAuthPassword"
-                name="onlineOrdersAuthPassword"
-                type="password"
-                autocomplete="current-password"
-                placeholder="Enter the same password you used to sign in"
-                required
-              />
-            </label>
-          </div>
-          <div class="form-actions">
-            <button class="button button-primary" type="submit">Use Workspace Password</button>
-            <button class="button button-ghost" data-online-orders-action="clear-auth" type="button">
-              Clear Saved Password
-            </button>
-          </div>
-        </form>
+        <div class="guide-list">
+          <p>1. Sign in to the workspace as normal.</p>
+          <p>2. Open <code>Online Orders</code>.</p>
+          <p>3. If access has expired, sign out and sign in again to refresh the server session.</p>
+        </div>
       </section>
     `;
   }
@@ -1078,18 +1042,6 @@
       return;
     }
 
-    if (action === "clear-auth") {
-      clearOnlineOrdersAuth();
-      state.onlineOrders = [];
-      state.onlineOrdersMeta.loaded = false;
-      state.onlineOrdersMeta.authRequired = true;
-      state.onlineOrdersMeta.error =
-        "Saved workspace password was cleared. If the current sign-in session is still active, online orders will reconnect automatically on refresh.";
-      renderOnlineOrdersPage();
-      showToast("Saved workspace password cleared.");
-      return;
-    }
-
     if (!orderId) {
       return;
     }
@@ -1135,32 +1087,10 @@
     }
 
     event.preventDefault();
-
-    const formData = new FormData(event.target);
-    const username = normalizeText(formData.get("onlineOrdersAuthUsername") || getOnlineOrdersUsername()).toLowerCase();
-    const password = String(formData.get("onlineOrdersAuthPassword") || "");
-
-    if (!username) {
-      showToast("Sign in to the workspace first.");
-      return;
-    }
-
-    if (!password) {
-      showToast("Enter the same password you used to sign in.");
-      return;
-    }
-
-    state.onlineOrdersAuth = { username, password };
-    persistOnlineOrdersAuth();
-    if (typeof establishServerWorkspaceSession === "function") {
-      await establishServerWorkspaceSession(username, password);
-    }
-    state.onlineOrdersMeta.authRequired = false;
-    state.onlineOrdersMeta.error = "";
-    void ensureOnlineOrdersLoaded({ force: true, toast: true });
+    showToast("Online orders now use the normal workspace sign-in. Sign out and sign in again if access needs to refresh.");
   }
 
-  async function updateOnlineOrder(orderId, payload) {
+  async function updateOnlineOrder(orderId, payload, options = {}) {
     try {
       const response = await fetch(`${ADMIN_ORDERS_ENDPOINT}/${encodeURIComponent(orderId)}`, {
         method: "PATCH",
@@ -1172,12 +1102,20 @@
       const result = await response.json().catch(() => ({}));
 
       if (response.status === 401) {
+        if (!options.restoredSession && (await tryRestoreOnlineOrdersWorkspaceSession())) {
+          await updateOnlineOrder(orderId, payload, {
+            ...options,
+            restoredSession: true
+          });
+          return;
+        }
+
         state.onlineOrders = [];
         state.onlineOrdersMeta.authRequired = true;
         state.onlineOrdersMeta.error =
-          "The workspace password could not reconnect online orders. Enter the same password you used to sign in and try again.";
+          "Online orders need a fresh workspace sign-in. Sign out and sign in again, then reopen Online Orders.";
         renderOnlineOrdersPage();
-        throw new Error("Online order access expired. Re-enter the same workspace password to continue.");
+        throw new Error("Online order access expired. Sign out and sign in again to continue.");
       }
 
       if (!response.ok || !result.ok || !result.order) {
