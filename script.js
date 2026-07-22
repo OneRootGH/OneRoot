@@ -2175,10 +2175,11 @@ async function ensureHostedWorkspaceServerSession() {
   const password = String(session.password || "");
 
   if (!username || !password) {
-    return !isWorkspaceLoginRequired();
+    return Boolean(state.signedInUserId) || !isWorkspaceLoginRequired();
   }
 
-  return establishServerWorkspaceSession(username, password);
+  const established = await establishServerWorkspaceSession(username, password);
+  return established || Boolean(state.signedInUserId) || !isWorkspaceLoginRequired();
 }
 
 async function fetchHostedWorkspaceLiveSnapshot() {
