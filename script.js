@@ -1730,6 +1730,7 @@ let toastTimeout = null;
 let deferredInstallPrompt = null;
 let startupToastMessage = "";
 const LOCAL_PREVIEW_REFRESH_FLAG = "oneroot-local-preview-refresh-v4";
+const HOSTED_WORKSPACE_REFRESH_FLAG = "oneroot-hosted-cache-refresh-v1";
 const hostedWorkspaceSyncState = {
   hooksInstalled: false,
   uploadTimer: null,
@@ -1758,6 +1759,12 @@ async function init() {
   decorateNavigationMenus();
   bindEvents();
   if (isHostedWorkspaceEnvironment()) {
+    const reloadedForFreshHostedData = await unregisterHostedWorkspaceCachingIfNeeded();
+
+    if (reloadedForFreshHostedData) {
+      return;
+    }
+
     resetHostedWorkspaceOnlineCache();
     await resetHostedWorkspaceAuthStateIfNeeded();
     await hydrateHostedWorkspaceAccessIfNeeded();
@@ -4588,9 +4595,9 @@ async function clearAppCaches() {
   }
 }
 
-async function unregisterLocalPreviewCaching() {
+async function unregisterServiceWorkerCaching(refreshFlagKey) {
   if (!("serviceWorker" in navigator)) {
-    return;
+    return false;
   }
 
   let hadRegistrations = false;
@@ -4607,21 +4614,35 @@ async function unregisterLocalPreviewCaching() {
   await clearAppCaches();
 
   if (!("sessionStorage" in window)) {
-    return;
+    return false;
   }
 
   const hasLocalPreviewCaching = hadRegistrations || hadController;
-  const alreadyRefreshed = window.sessionStorage.getItem(LOCAL_PREVIEW_REFRESH_FLAG) === "done";
+  const alreadyRefreshed = window.sessionStorage.getItem(refreshFlagKey) === "done";
 
   if (hasLocalPreviewCaching && !alreadyRefreshed) {
-    window.sessionStorage.setItem(LOCAL_PREVIEW_REFRESH_FLAG, "done");
+    window.sessionStorage.setItem(refreshFlagKey, "done");
     window.location.reload();
-    return;
+    return true;
   }
 
   if (!hasLocalPreviewCaching) {
-    window.sessionStorage.removeItem(LOCAL_PREVIEW_REFRESH_FLAG);
+    window.sessionStorage.removeItem(refreshFlagKey);
   }
+
+  return false;
+}
+
+async function unregisterLocalPreviewCaching() {
+  return unregisterServiceWorkerCaching(LOCAL_PREVIEW_REFRESH_FLAG);
+}
+
+async function unregisterHostedWorkspaceCachingIfNeeded() {
+  if (!isHostedWorkspaceEnvironment()) {
+    return false;
+  }
+
+  return unregisterServiceWorkerCaching(HOSTED_WORKSPACE_REFRESH_FLAG);
 }
 
 function registerServiceWorker() {
@@ -4629,8 +4650,12 @@ function registerServiceWorker() {
     return;
   }
 
+  if (isHostedWorkspaceEnvironment()) {
+    return;
+  }
+
   if (isLocalPreviewHost()) {
-    unregisterLocalPreviewCaching();
+    void unregisterLocalPreviewCaching();
     return;
   }
 

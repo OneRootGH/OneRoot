@@ -53,8 +53,16 @@ self.addEventListener("fetch", (event) => {
   }
 
   const requestUrl = new URL(event.request.url);
+  const isApiRequest =
+    requestUrl.origin === self.location.origin &&
+    requestUrl.pathname.startsWith("/api/");
   const isAppShellRequest =
     requestUrl.origin === self.location.origin && APP_SHELL_PATHS.has(requestUrl.pathname);
+
+  if (isApiRequest) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   if (event.request.mode === "navigate") {
     event.respondWith(
