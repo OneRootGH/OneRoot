@@ -1474,6 +1474,21 @@ td {
   color: var(--leaf-700);
 }
 
+.tag-service {
+  background: rgba(74, 111, 160, 0.14);
+  color: #2f5f97;
+}
+
+.tag-online {
+  background: rgba(201, 140, 57, 0.16);
+  color: #8b5a10;
+}
+
+.tag-apartment {
+  background: rgba(79, 117, 89, 0.16);
+  color: #2f5b36;
+}
+
 .tag-manual {
   background: rgba(33, 65, 49, 0.11);
   color: var(--leaf-700);

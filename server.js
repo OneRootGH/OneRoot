@@ -1286,6 +1286,7 @@ function createStoredOrder(payload, request) {
       orderNumber: createOrderNumber(),
       status: "new",
       paymentStatus: paymentMethod === "Cash On Delivery" || paymentMethod === "Pay On Pickup" ? "pending" : "awaiting-proof",
+      paidAt: "",
       createdAt: now,
       updatedAt: now,
       source: "website",
@@ -1350,6 +1351,12 @@ function updateStoredOrder(existingOrder, payload) {
 
   if (nextPaymentStatus) {
     nextOrder.paymentStatus = nextPaymentStatus;
+
+    if (nextPaymentStatus === "paid") {
+      nextOrder.paidAt = normalizeText(existingOrder.paidAt) || now;
+    } else if (nextPaymentStatus !== normalizeText(existingOrder.paymentStatus).toLowerCase()) {
+      nextOrder.paidAt = "";
+    }
   }
 
   if (internalNote) {
@@ -1368,6 +1375,7 @@ function buildPublicOrderView(order) {
     orderNumber: order.orderNumber,
     status: order.status,
     paymentStatus: order.paymentStatus,
+    paidAt: order.paidAt,
     createdAt: order.createdAt,
     updatedAt: order.updatedAt,
     customerName: order.customerName,

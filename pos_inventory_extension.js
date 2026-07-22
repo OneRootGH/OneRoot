@@ -8,8 +8,16 @@
   const INVENTORY_ITEM_STORAGE_KEY = "oneroot-expense-register:inventory-items:v1";
   const AUDIT_TRAIL_STORAGE_KEY = "oneroot-expense-register:audit-trail:v1";
   const POS_SYNC_SOURCE_TYPE = "pos-summary";
+  const ONLINE_ORDER_SYNC_SOURCE_TYPE = "online-order-payments";
+  const LAUNDRY_SYNC_SOURCE_TYPE = "laundry-payments";
+  const EQUIPMENT_SYNC_SOURCE_TYPE = "equipment-rental-payments";
+  const APARTMENT_SYNC_SOURCE_TYPE = "apartment-payments";
   const MANUAL_SALE_SOURCE_TYPE = "manual";
   const POS_SYNC_NOTE_PREFIX = "[POS Sync]";
+  const ONLINE_ORDER_SYNC_NOTE_PREFIX = "[Online Order Sync]";
+  const LAUNDRY_SYNC_NOTE_PREFIX = "[Laundry Sync]";
+  const EQUIPMENT_SYNC_NOTE_PREFIX = "[Equipment Sync]";
+  const APARTMENT_SYNC_NOTE_PREFIX = "[Apartment Sync]";
   const POS_CATALOG_WORKBOOK_PATH =
     "./outputs/oneroot-products-pos/OneRoot_Products_Cleaned.xlsx?v=20260718a";
   const ONEROOT_LOGO_PATH = new URL("./assets/oneroot-logo.png?v=20260719a", window.location.href).href;
@@ -119,14 +127,25 @@
         sale?.source ||
         (normalizeText(sale?.notes).startsWith(POS_SYNC_NOTE_PREFIX)
           ? POS_SYNC_SOURCE_TYPE
-          : MANUAL_SALE_SOURCE_TYPE)
+          : normalizeText(sale?.notes).startsWith(ONLINE_ORDER_SYNC_NOTE_PREFIX)
+            ? ONLINE_ORDER_SYNC_SOURCE_TYPE
+          : normalizeText(sale?.notes).startsWith(LAUNDRY_SYNC_NOTE_PREFIX)
+            ? LAUNDRY_SYNC_SOURCE_TYPE
+            : normalizeText(sale?.notes).startsWith(EQUIPMENT_SYNC_NOTE_PREFIX)
+              ? EQUIPMENT_SYNC_SOURCE_TYPE
+              : normalizeText(sale?.notes).startsWith(APARTMENT_SYNC_NOTE_PREFIX)
+                ? APARTMENT_SYNC_SOURCE_TYPE
+              : MANUAL_SALE_SOURCE_TYPE)
     );
+    const sourceConfig = getSaleSourceConfig(sourceType);
 
     return {
       ...sanitized,
       sourceType,
-      sourceLabel:
-        sourceType === POS_SYNC_SOURCE_TYPE ? "POS Sync" : "Manual Daily Sales",
+      sourceLabel: normalizeText(sale?.sourceLabel) || sourceConfig.label,
+      linkedGeneratedSalesKey:
+        normalizeText(sale?.linkedGeneratedSalesKey) ||
+        buildGeneratedSalesKey(sanitized.date, sanitized.businessAreaId, sourceType),
       linkedPosAreaDateKey:
         normalizeText(sale?.linkedPosAreaDateKey || sale?.posSyncKey) ||
         (sourceType === POS_SYNC_SOURCE_TYPE
@@ -579,7 +598,17 @@
     const averageSales = sales.length ? totalSales / sales.length : 0;
     const bestSales = [...sales].sort((left, right) => right.amount - left.amount)[0];
     const posSyncedCount = sales.filter(isPosSyncedSale).length;
-    const manualCount = sales.length - posSyncedCount;
+    const onlineOrderSyncedCount = sales.filter(isOnlineOrderSyncedSale).length;
+    const serviceSyncedCount = sales.filter(
+      (sale) => isLaundrySyncedSale(sale) || isEquipmentSyncedSale(sale)
+    ).length;
+    const apartmentSyncedCount = sales.filter(isApartmentSyncedSale).length;
+    const manualCount =
+      sales.length -
+      posSyncedCount -
+      onlineOrderSyncedCount -
+      serviceSyncedCount -
+      apartmentSyncedCount;
 
     elements.totalSalesValue.textContent = formatCurrency(totalSales);
     elements.salesEntriesValue.textContent = String(sales.length);
@@ -590,9 +619,11 @@
 
     elements.salesFootnote.textContent =
       sales.length === state.sales.length
-        ? `${posSyncedCount} POS-synced entr${posSyncedCount === 1 ? "y" : "ies"} and ${manualCount} manual entr${
-            manualCount === 1 ? "y" : "ies"
-          }. Use manual Daily Sales only for amounts not already captured in POS.`
+        ? `${posSyncedCount} POS-synced entr${posSyncedCount === 1 ? "y" : "ies"}, ${onlineOrderSyncedCount} online-order entr${
+            onlineOrderSyncedCount === 1 ? "y" : "ies"
+          }, ${serviceSyncedCount} service-synced entr${serviceSyncedCount === 1 ? "y" : "ies"}, ${apartmentSyncedCount} apartment-synced entr${
+            apartmentSyncedCount === 1 ? "y" : "ies"
+          }, and ${manualCount} manual entr${manualCount === 1 ? "y" : "ies"}. Use manual Daily Sales only for revenue not already captured in POS, online orders, laundry, equipment rentals, or apartment payments.`
         : `Showing ${sales.length} sales entr${sales.length === 1 ? "y" : "ies"} in the current filter view.`;
 
     renderSalesTable(sales);
@@ -612,13 +643,14 @@
 
     elements.salesTableBody.innerHTML = sales
       .map((sale) => {
-        const sourceLabel = sale.sourceLabel || "Manual Daily Sales";
-        const actionMarkup = isPosSyncedSale(sale)
+        const sourceConfig = getSaleSourceConfig(sale.sourceType);
+        const sourceLabel = sale.sourceLabel || sourceConfig.label;
+        const actionMarkup = isAutoSyncedSale(sale)
           ? `
               <button class="edit-btn" data-sales-action="open-pos" data-id="${escapeHtml(
                 sale.id
               )}" type="button">
-                Open POS
+                ${escapeHtml(sourceConfig.cta)}
               </button>
             `
           : `
@@ -640,7 +672,7 @@
             <td><span class="tag tag-area">${escapeHtml(
               getBusinessArea(sale.businessAreaId).shortLabel
             )}</span></td>
-            <td><span class="tag ${isPosSyncedSale(sale) ? "tag-pos" : "tag-manual"}">${escapeHtml(
+            <td><span class="tag ${escapeHtml(sourceConfig.className)}">${escapeHtml(
               sourceLabel
             )}</span></td>
             <td class="amount-cell">${formatCurrency(sale.amount)}</td>
@@ -664,10 +696,16 @@
     }
 
     if (target.dataset.salesAction === "open-pos") {
-      navigateTo("pos", { syncHash: true });
-      state.posFilters.area = "";
-      renderPosPage();
-      showToast("This sales total is managed automatically from POS orders.");
+      const sale = state.sales.find((item) => item.id === target.dataset.id);
+      const sourceConfig = getSaleSourceConfig(sale?.sourceType);
+      navigateTo(sourceConfig.view, { syncHash: true });
+      if (sourceConfig.view === "pos") {
+        state.posFilters.area = "";
+        renderPosPage();
+      } else {
+        render();
+      }
+      showToast(sourceConfig.lockedMessage);
       return;
     }
 
@@ -683,9 +721,10 @@
   startEditingSale = function patchedStartEditingSale(saleId) {
     const sale = state.sales.find((item) => item.id === saleId);
 
-    if (sale && isPosSyncedSale(sale)) {
-      navigateTo("pos", { syncHash: true });
-      showToast("This sales total is generated from POS. Edit the related POS orders instead.");
+    if (sale && isAutoSyncedSale(sale)) {
+      const sourceConfig = getSaleSourceConfig(sale.sourceType);
+      navigateTo(sourceConfig.view, { syncHash: true });
+      showToast(sourceConfig.lockedMessage);
       return;
     }
 
@@ -695,9 +734,10 @@
   deleteSale = function patchedDeleteSale(saleId) {
     const sale = state.sales.find((item) => item.id === saleId);
 
-    if (sale && isPosSyncedSale(sale)) {
-      navigateTo("pos", { syncHash: true });
-      showToast("POS-synced daily sales cannot be deleted here. Delete or edit the POS order instead.");
+    if (sale && isAutoSyncedSale(sale)) {
+      const sourceConfig = getSaleSourceConfig(sale.sourceType);
+      navigateTo(sourceConfig.view, { syncHash: true });
+      showToast(sourceConfig.lockedMessage);
       return;
     }
 
@@ -1042,11 +1082,194 @@
 
   function normalizeSaleSourceType(value) {
     const normalized = normalizeText(value).toLowerCase();
-    return normalized === POS_SYNC_SOURCE_TYPE ? POS_SYNC_SOURCE_TYPE : MANUAL_SALE_SOURCE_TYPE;
+    if (normalized === POS_SYNC_SOURCE_TYPE) {
+      return POS_SYNC_SOURCE_TYPE;
+    }
+
+    if (normalized === ONLINE_ORDER_SYNC_SOURCE_TYPE) {
+      return ONLINE_ORDER_SYNC_SOURCE_TYPE;
+    }
+
+    if (normalized === LAUNDRY_SYNC_SOURCE_TYPE) {
+      return LAUNDRY_SYNC_SOURCE_TYPE;
+    }
+
+    if (normalized === EQUIPMENT_SYNC_SOURCE_TYPE) {
+      return EQUIPMENT_SYNC_SOURCE_TYPE;
+    }
+
+    if (normalized === APARTMENT_SYNC_SOURCE_TYPE) {
+      return APARTMENT_SYNC_SOURCE_TYPE;
+    }
+
+    return MANUAL_SALE_SOURCE_TYPE;
   }
 
   function isPosSyncedSale(sale) {
     return normalizeSaleSourceType(sale?.sourceType) === POS_SYNC_SOURCE_TYPE;
+  }
+
+  function isOnlineOrderSyncedSale(sale) {
+    return normalizeSaleSourceType(sale?.sourceType) === ONLINE_ORDER_SYNC_SOURCE_TYPE;
+  }
+
+  function isLaundrySyncedSale(sale) {
+    return normalizeSaleSourceType(sale?.sourceType) === LAUNDRY_SYNC_SOURCE_TYPE;
+  }
+
+  function isEquipmentSyncedSale(sale) {
+    return normalizeSaleSourceType(sale?.sourceType) === EQUIPMENT_SYNC_SOURCE_TYPE;
+  }
+
+  function isApartmentSyncedSale(sale) {
+    return normalizeSaleSourceType(sale?.sourceType) === APARTMENT_SYNC_SOURCE_TYPE;
+  }
+
+  function isAutoSyncedSale(sale) {
+    return normalizeSaleSourceType(sale?.sourceType) !== MANUAL_SALE_SOURCE_TYPE;
+  }
+
+  function getSaleSourceConfig(sourceType) {
+    const normalized = normalizeSaleSourceType(sourceType);
+
+    if (normalized === POS_SYNC_SOURCE_TYPE) {
+      return {
+        label: "POS Sync",
+        className: "tag-pos",
+        cta: "Open POS",
+        view: "pos",
+        lockedMessage: "This sales total is managed automatically from POS orders."
+      };
+    }
+
+    if (normalized === ONLINE_ORDER_SYNC_SOURCE_TYPE) {
+      return {
+        label: "Online Order Sync",
+        className: "tag-online",
+        cta: "Open Online Orders",
+        view: "online-orders",
+        lockedMessage: "This sales total is generated from paid online orders. Update the website order instead."
+      };
+    }
+
+    if (normalized === LAUNDRY_SYNC_SOURCE_TYPE) {
+      return {
+        label: "Laundry Sync",
+        className: "tag-service",
+        cta: "Open Laundry",
+        view: "laundry",
+        lockedMessage: "This sales total is generated from laundry payments. Update the related laundry ticket instead."
+      };
+    }
+
+    if (normalized === EQUIPMENT_SYNC_SOURCE_TYPE) {
+      return {
+        label: "Equipment Sync",
+        className: "tag-service",
+        cta: "Open Rentals",
+        view: "equipment-rentals",
+        lockedMessage: "This sales total is generated from equipment rental payments. Update the related rental booking instead."
+      };
+    }
+
+    if (normalized === APARTMENT_SYNC_SOURCE_TYPE) {
+      return {
+        label: "Apartment Sync",
+        className: "tag-apartment",
+        cta: "Open Apartments",
+        view: "apartments",
+        lockedMessage: "This sales total is generated from apartment rent and bill payments. Update the related apartment record instead."
+      };
+    }
+
+    return {
+      label: "Manual Daily Sales",
+      className: "tag-manual",
+      cta: "Edit",
+      view: "sales",
+      lockedMessage: ""
+    };
+  }
+
+  function buildGeneratedSalesKey(date, businessAreaId, sourceType) {
+    return [
+      normalizeSaleSourceType(sourceType),
+      normalizeDateInput(date),
+      normalizeBusinessAreaId(businessAreaId)
+    ].join("|");
+  }
+
+  function getGeneratedSalesKeyFromSale(sale) {
+    return (
+      normalizeText(sale?.linkedGeneratedSalesKey) ||
+      buildGeneratedSalesKey(sale?.date, sale?.businessAreaId, sale?.sourceType)
+    );
+  }
+
+  function getLaundryPaymentDate(record) {
+    return normalizeDateInput(record?.paymentDate || record?.ticketDate);
+  }
+
+  function getEquipmentPaymentDate(record) {
+    return normalizeDateInput(record?.paymentDate || record?.bookingDate);
+  }
+
+  function getApartmentRentPaymentDate(record) {
+    return normalizeDateInput(
+      record?.rentPaymentDate || record?.rentCoverageStartDate || buildMonthDayDate(record?.month, 1)
+    );
+  }
+
+  function getApartmentBillPaymentDate(record) {
+    return normalizeDateInput(
+      record?.billPaymentDate ||
+        record?.billDueDate ||
+        buildMonthDayDate(record?.month, extractPreferredBillDay(record?.billDueDate))
+    );
+  }
+
+  function isOnlineOrdersLoadedForSync() {
+    return (
+      Array.isArray(state.onlineOrders) &&
+      state.onlineOrdersMeta &&
+      state.onlineOrdersMeta.loaded === true
+    );
+  }
+
+  function canReconcileGeneratedSalesSource(sourceType) {
+    const normalizedSourceType = normalizeSaleSourceType(sourceType);
+
+    if (normalizedSourceType === ONLINE_ORDER_SYNC_SOURCE_TYPE) {
+      return isOnlineOrdersLoadedForSync();
+    }
+
+    return normalizedSourceType !== MANUAL_SALE_SOURCE_TYPE;
+  }
+
+  function isPaidOnlineOrder(order) {
+    return normalizeText(order?.paymentStatus).toLowerCase() === "paid";
+  }
+
+  function getOnlineOrderPaidDate(order) {
+    return normalizeDateInput(order?.paidAt || order?.paymentDate || order?.updatedAt || order?.createdAt);
+  }
+
+  function buildOnlineOrderAreaTotals(order) {
+    const items = Array.isArray(order?.items) ? order.items : [];
+    const totals = new Map();
+
+    items.forEach((item) => {
+      const areaId = normalizeBusinessAreaId(item?.businessAreaId || order?.businessAreaId);
+      const lineTotal = parseOptionalAmount(item?.lineTotal || item?.totalAmount || item?.amount);
+
+      if (!areaId || lineTotal <= 0) {
+        return;
+      }
+
+      totals.set(areaId, Number(((totals.get(areaId) || 0) + lineTotal).toFixed(2)));
+    });
+
+    return totals;
   }
 
   function buildPosAreaDateKey(date, businessAreaId) {
@@ -1709,19 +1932,94 @@
 
     state.posOrders.forEach((order) => {
       Array.from(buildPosOrderAreaTotals(order).keys()).forEach((areaId) => {
-        keys.add(buildPosAreaDateKey(order.orderDate, areaId));
+        keys.add(buildGeneratedSalesKey(order.orderDate, areaId, POS_SYNC_SOURCE_TYPE));
       });
     });
 
+    state.laundryTickets
+      .filter((record) => Number(record.amountPaid || 0) > 0)
+      .forEach((record) => {
+        const paymentDate = getLaundryPaymentDate(record);
+        if (paymentDate) {
+          keys.add(
+            buildGeneratedSalesKey(
+              paymentDate,
+              record.businessAreaId || "laundry-services",
+              LAUNDRY_SYNC_SOURCE_TYPE
+            )
+          );
+        }
+      });
+
+    state.equipmentRentalBookings
+      .filter((record) => Number(record.amountPaid || 0) > 0)
+      .forEach((record) => {
+        const paymentDate = getEquipmentPaymentDate(record);
+        if (paymentDate) {
+          keys.add(
+            buildGeneratedSalesKey(
+              paymentDate,
+              record.businessAreaId || "water-equipment",
+              EQUIPMENT_SYNC_SOURCE_TYPE
+            )
+          );
+        }
+      });
+
+    state.rentals
+      .filter(
+        (record) => Number(record.rentPaid || 0) > 0 || Number(record.billAmountPaid || 0) > 0
+      )
+      .forEach((record) => {
+        const rentPaymentDate = getApartmentRentPaymentDate(record);
+        const billPaymentDate = getApartmentBillPaymentDate(record);
+
+        if (Number(record.rentPaid || 0) > 0 && rentPaymentDate) {
+          keys.add(
+            buildGeneratedSalesKey(
+              rentPaymentDate,
+              "rentals-apartments",
+              APARTMENT_SYNC_SOURCE_TYPE
+            )
+          );
+        }
+
+        if (Number(record.billAmountPaid || 0) > 0 && billPaymentDate) {
+          keys.add(
+            buildGeneratedSalesKey(
+              billPaymentDate,
+              "rentals-apartments",
+              APARTMENT_SYNC_SOURCE_TYPE
+            )
+          );
+        }
+      });
+
+    if (isOnlineOrdersLoadedForSync()) {
+      state.onlineOrders
+        .filter((order) => isPaidOnlineOrder(order) && Number(order.totalAmount || 0) > 0)
+        .forEach((order) => {
+          const paidDate = getOnlineOrderPaidDate(order);
+
+          if (!paidDate) {
+            return;
+          }
+
+          Array.from(buildOnlineOrderAreaTotals(order).keys()).forEach((areaId) => {
+            keys.add(buildGeneratedSalesKey(paidDate, areaId, ONLINE_ORDER_SYNC_SOURCE_TYPE));
+          });
+        });
+    }
+
     state.sales
-      .filter(isPosSyncedSale)
-      .forEach((sale) => keys.add(buildPosAreaDateKey(sale.date, sale.businessAreaId)));
+      .filter((sale) => isAutoSyncedSale(sale) && canReconcileGeneratedSalesSource(sale.sourceType))
+      .forEach((sale) => keys.add(getGeneratedSalesKeyFromSale(sale)));
 
     let changed = false;
 
     Array.from(keys).forEach((key) => {
-      const [date, businessAreaId] = key.split("|");
-      if (syncPosDailySalesRecord(date, businessAreaId)) {
+      const [sourceType, date, businessAreaId] = key.split("|");
+      if (syncGeneratedDailySalesRecord(date, businessAreaId, sourceType)) {
         changed = true;
       }
     });
@@ -1731,12 +2029,12 @@
     }
   }
 
-  function syncPosDailySalesRecord(date, businessAreaId) {
+  function buildPosGeneratedSalesPayload(date, businessAreaId) {
     const normalizedDate = normalizeDateInput(date);
     const normalizedAreaId = normalizeBusinessAreaId(businessAreaId);
 
     if (!normalizedDate || !normalizedAreaId) {
-      return false;
+      return null;
     }
 
     const matchingOrders = state.posOrders.filter((order) => {
@@ -1746,12 +2044,6 @@
 
       return buildPosOrderAreaTotals(order).has(normalizedAreaId);
     });
-    const existingSale = state.sales.find(
-      (sale) =>
-        isPosSyncedSale(sale) &&
-        sale.date === normalizedDate &&
-        sale.businessAreaId === normalizedAreaId
-    );
     const totalAmount = Number(
       matchingOrders
         .reduce((sum, order) => sum + (buildPosOrderAreaTotals(order).get(normalizedAreaId) || 0), 0)
@@ -1759,6 +2051,248 @@
     );
 
     if (matchingOrders.length === 0 || totalAmount <= 0) {
+      return null;
+    }
+
+    return {
+      amount: totalAmount,
+      notes: `${POS_SYNC_NOTE_PREFIX} ${matchingOrders.length} order${
+      matchingOrders.length === 1 ? "" : "s"
+    } captured in POS for ${getBusinessArea(normalizedAreaId).shortLabel}.`,
+      sourceLabel: "POS Sync",
+      linkedGeneratedSalesKey: buildGeneratedSalesKey(
+        normalizedDate,
+        normalizedAreaId,
+        POS_SYNC_SOURCE_TYPE
+      ),
+      linkedPosAreaDateKey: buildPosAreaDateKey(normalizedDate, normalizedAreaId)
+    };
+  }
+
+  function buildLaundryGeneratedSalesPayload(date, businessAreaId) {
+    const normalizedDate = normalizeDateInput(date);
+    const normalizedAreaId = normalizeBusinessAreaId(businessAreaId) || "laundry-services";
+
+    if (!normalizedDate || normalizedAreaId !== "laundry-services") {
+      return null;
+    }
+
+    const matchingTickets = state.laundryTickets.filter(
+      (record) =>
+        normalizeBusinessAreaId(record.businessAreaId || "laundry-services") === normalizedAreaId &&
+        getLaundryPaymentDate(record) === normalizedDate &&
+        Number(record.amountPaid || 0) > 0
+    );
+    const totalAmount = Number(
+      matchingTickets.reduce((sum, record) => sum + Number(record.amountPaid || 0), 0).toFixed(2)
+    );
+
+    if (matchingTickets.length === 0 || totalAmount <= 0) {
+      return null;
+    }
+
+    return {
+      amount: totalAmount,
+      notes: `${LAUNDRY_SYNC_NOTE_PREFIX} ${matchingTickets.length} paid ticket${
+        matchingTickets.length === 1 ? "" : "s"
+      } captured from Laundry Services.`,
+      sourceLabel: "Laundry Sync",
+      linkedGeneratedSalesKey: buildGeneratedSalesKey(
+        normalizedDate,
+        normalizedAreaId,
+        LAUNDRY_SYNC_SOURCE_TYPE
+      ),
+      linkedPosAreaDateKey: ""
+    };
+  }
+
+  function buildEquipmentGeneratedSalesPayload(date, businessAreaId) {
+    const normalizedDate = normalizeDateInput(date);
+    const normalizedAreaId = normalizeBusinessAreaId(businessAreaId) || "water-equipment";
+
+    if (!normalizedDate || normalizedAreaId !== "water-equipment") {
+      return null;
+    }
+
+    const matchingBookings = state.equipmentRentalBookings.filter(
+      (record) =>
+        normalizeBusinessAreaId(record.businessAreaId || "water-equipment") === normalizedAreaId &&
+        getEquipmentPaymentDate(record) === normalizedDate &&
+        Number(record.amountPaid || 0) > 0
+    );
+    const totalAmount = Number(
+      matchingBookings.reduce((sum, record) => sum + Number(record.amountPaid || 0), 0).toFixed(2)
+    );
+
+    if (matchingBookings.length === 0 || totalAmount <= 0) {
+      return null;
+    }
+
+    return {
+      amount: totalAmount,
+      notes: `${EQUIPMENT_SYNC_NOTE_PREFIX} ${matchingBookings.length} paid booking${
+        matchingBookings.length === 1 ? "" : "s"
+      } captured from Water & Equipment Rentals.`,
+      sourceLabel: "Equipment Sync",
+      linkedGeneratedSalesKey: buildGeneratedSalesKey(
+        normalizedDate,
+        normalizedAreaId,
+        EQUIPMENT_SYNC_SOURCE_TYPE
+      ),
+      linkedPosAreaDateKey: ""
+    };
+  }
+
+  function buildApartmentGeneratedSalesPayload(date, businessAreaId) {
+    const normalizedDate = normalizeDateInput(date);
+    const normalizedAreaId = normalizeBusinessAreaId(businessAreaId) || "rentals-apartments";
+
+    if (!normalizedDate || normalizedAreaId !== "rentals-apartments") {
+      return null;
+    }
+
+    const matchingRentPayments = state.rentals.filter(
+      (record) =>
+        Number(record.rentPaid || 0) > 0 &&
+        getApartmentRentPaymentDate(record) === normalizedDate
+    );
+    const matchingBillPayments = state.rentals.filter(
+      (record) =>
+        Number(record.billAmountPaid || 0) > 0 &&
+        getApartmentBillPaymentDate(record) === normalizedDate
+    );
+    const rentTotal = matchingRentPayments.reduce(
+      (sum, record) => sum + Number(record.rentPaid || 0),
+      0
+    );
+    const billTotal = matchingBillPayments.reduce(
+      (sum, record) => sum + Number(record.billAmountPaid || 0),
+      0
+    );
+    const totalAmount = Number((rentTotal + billTotal).toFixed(2));
+
+    if (totalAmount <= 0) {
+      return null;
+    }
+
+    const noteParts = [];
+
+    if (matchingRentPayments.length > 0) {
+      noteParts.push(
+        `${matchingRentPayments.length} rent payment${matchingRentPayments.length === 1 ? "" : "s"}`
+      );
+    }
+
+    if (matchingBillPayments.length > 0) {
+      noteParts.push(
+        `${matchingBillPayments.length} bill payment${matchingBillPayments.length === 1 ? "" : "s"}`
+      );
+    }
+
+    return {
+      amount: totalAmount,
+      notes: `${APARTMENT_SYNC_NOTE_PREFIX} ${noteParts.join(" and ")} captured from Rentals & Apartments.`,
+      sourceLabel: "Apartment Sync",
+      linkedGeneratedSalesKey: buildGeneratedSalesKey(
+        normalizedDate,
+        normalizedAreaId,
+        APARTMENT_SYNC_SOURCE_TYPE
+      ),
+      linkedPosAreaDateKey: ""
+    };
+  }
+
+  function buildOnlineOrderGeneratedSalesPayload(date, businessAreaId) {
+    const normalizedDate = normalizeDateInput(date);
+    const normalizedAreaId = normalizeBusinessAreaId(businessAreaId);
+
+    if (!normalizedDate || !normalizedAreaId || !isOnlineOrdersLoadedForSync()) {
+      return null;
+    }
+
+    const matchingOrders = state.onlineOrders.filter((order) => {
+      if (!isPaidOnlineOrder(order) || getOnlineOrderPaidDate(order) !== normalizedDate) {
+        return false;
+      }
+
+      return buildOnlineOrderAreaTotals(order).has(normalizedAreaId);
+    });
+    const totalAmount = Number(
+      matchingOrders
+        .reduce(
+          (sum, order) => sum + (buildOnlineOrderAreaTotals(order).get(normalizedAreaId) || 0),
+          0
+        )
+        .toFixed(2)
+    );
+
+    if (matchingOrders.length === 0 || totalAmount <= 0) {
+      return null;
+    }
+
+    return {
+      amount: totalAmount,
+      notes: `${ONLINE_ORDER_SYNC_NOTE_PREFIX} ${matchingOrders.length} paid order${
+        matchingOrders.length === 1 ? "" : "s"
+      } captured from OneRoot.shop for ${getBusinessArea(normalizedAreaId).shortLabel}.`,
+      sourceLabel: "Online Order Sync",
+      linkedGeneratedSalesKey: buildGeneratedSalesKey(
+        normalizedDate,
+        normalizedAreaId,
+        ONLINE_ORDER_SYNC_SOURCE_TYPE
+      ),
+      linkedPosAreaDateKey: ""
+    };
+  }
+
+  function buildGeneratedSalesPayload(date, businessAreaId, sourceType) {
+    const normalizedSourceType = normalizeSaleSourceType(sourceType);
+
+    if (normalizedSourceType === POS_SYNC_SOURCE_TYPE) {
+      return buildPosGeneratedSalesPayload(date, businessAreaId);
+    }
+
+    if (normalizedSourceType === ONLINE_ORDER_SYNC_SOURCE_TYPE) {
+      return buildOnlineOrderGeneratedSalesPayload(date, businessAreaId);
+    }
+
+    if (normalizedSourceType === LAUNDRY_SYNC_SOURCE_TYPE) {
+      return buildLaundryGeneratedSalesPayload(date, businessAreaId);
+    }
+
+    if (normalizedSourceType === EQUIPMENT_SYNC_SOURCE_TYPE) {
+      return buildEquipmentGeneratedSalesPayload(date, businessAreaId);
+    }
+
+    if (normalizedSourceType === APARTMENT_SYNC_SOURCE_TYPE) {
+      return buildApartmentGeneratedSalesPayload(date, businessAreaId);
+    }
+
+    return null;
+  }
+
+  function syncGeneratedDailySalesRecord(date, businessAreaId, sourceType) {
+    const normalizedDate = normalizeDateInput(date);
+    const normalizedAreaId = normalizeBusinessAreaId(businessAreaId);
+    const normalizedSourceType = normalizeSaleSourceType(sourceType);
+
+    if (!normalizedDate || !normalizedAreaId || normalizedSourceType === MANUAL_SALE_SOURCE_TYPE) {
+      return false;
+    }
+
+    const existingSale = state.sales.find(
+      (sale) =>
+        normalizeSaleSourceType(sale?.sourceType) === normalizedSourceType &&
+        sale.date === normalizedDate &&
+        sale.businessAreaId === normalizedAreaId
+    );
+    const nextPayload = buildGeneratedSalesPayload(
+      normalizedDate,
+      normalizedAreaId,
+      normalizedSourceType
+    );
+
+    if (!nextPayload || nextPayload.amount <= 0) {
       if (!existingSale) {
         return false;
       }
@@ -1767,15 +2301,15 @@
       return true;
     }
 
-    const notes = `${POS_SYNC_NOTE_PREFIX} ${matchingOrders.length} order${
-      matchingOrders.length === 1 ? "" : "s"
-    } captured in POS for ${getBusinessArea(normalizedAreaId).shortLabel}.`;
-
     if (existingSale) {
       const hasChanged =
-        existingSale.amount !== totalAmount ||
-        existingSale.notes !== notes ||
-        existingSale.linkedPosAreaDateKey !== buildPosAreaDateKey(normalizedDate, normalizedAreaId);
+        existingSale.amount !== nextPayload.amount ||
+        existingSale.notes !== nextPayload.notes ||
+        normalizeText(existingSale.sourceLabel) !== normalizeText(nextPayload.sourceLabel) ||
+        normalizeText(existingSale.linkedGeneratedSalesKey) !==
+          normalizeText(nextPayload.linkedGeneratedSalesKey) ||
+        normalizeText(existingSale.linkedPosAreaDateKey) !==
+          normalizeText(nextPayload.linkedPosAreaDateKey);
 
       if (!hasChanged) {
         return false;
@@ -1786,11 +2320,12 @@
           sale.id === existingSale.id
             ? {
                 ...sale,
-                amount: totalAmount,
-                notes,
-                sourceType: POS_SYNC_SOURCE_TYPE,
-                sourceLabel: "POS Sync",
-                linkedPosAreaDateKey: buildPosAreaDateKey(normalizedDate, normalizedAreaId),
+                amount: nextPayload.amount,
+                notes: nextPayload.notes,
+                sourceType: normalizedSourceType,
+                sourceLabel: nextPayload.sourceLabel,
+                linkedGeneratedSalesKey: nextPayload.linkedGeneratedSalesKey,
+                linkedPosAreaDateKey: nextPayload.linkedPosAreaDateKey,
                 updatedAt: new Date().toISOString()
               }
             : sale
@@ -1807,11 +2342,12 @@
         updatedAt: new Date().toISOString(),
         businessAreaId: normalizedAreaId,
         date: normalizedDate,
-        amount: totalAmount,
-        notes,
-        sourceType: POS_SYNC_SOURCE_TYPE,
-        sourceLabel: "POS Sync",
-        linkedPosAreaDateKey: buildPosAreaDateKey(normalizedDate, normalizedAreaId)
+        amount: nextPayload.amount,
+        notes: nextPayload.notes,
+        sourceType: normalizedSourceType,
+        sourceLabel: nextPayload.sourceLabel,
+        linkedGeneratedSalesKey: nextPayload.linkedGeneratedSalesKey,
+        linkedPosAreaDateKey: nextPayload.linkedPosAreaDateKey
       }
     ]);
 
@@ -5346,4 +5882,6 @@
       showToast(`Exported ${records.length} inventory item${records.length === 1 ? "" : "s"}.`);
     }
   }
+
+  window.reconcilePosGeneratedSales = reconcilePosGeneratedSales;
 })();

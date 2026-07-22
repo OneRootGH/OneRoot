@@ -36,6 +36,15 @@
   };
 
   render = function patchedRender() {
+    if (
+      supportsOrdersApi() &&
+      canAttemptOnlineOrdersLoad() &&
+      !state.onlineOrdersMeta.loaded &&
+      !state.onlineOrdersMeta.loading
+    ) {
+      void ensureOnlineOrdersLoaded();
+    }
+
     originalRender();
     renderOnlineOrdersPage();
   };
@@ -125,7 +134,7 @@
   document.body.addEventListener("input", handleOnlineOrdersInput);
   document.body.addEventListener("change", handleOnlineOrdersInput);
   window.addEventListener("focus", () => {
-    if (state.currentView === "online-orders") {
+    if (supportsOrdersApi() && canAttemptOnlineOrdersLoad()) {
       void ensureOnlineOrdersLoaded({ force: true });
     }
   });
@@ -380,7 +389,9 @@
         );
       }
 
-      state.onlineOrders = sortOnlineOrders(Array.isArray(payload.orders) ? payload.orders : []);
+      state.onlineOrders = sortOnlineOrders(
+        (Array.isArray(payload.orders) ? payload.orders : []).map(sanitizeOnlineOrder)
+      );
       state.onlineOrdersMeta.statuses = Array.isArray(payload.statuses)
         ? payload.statuses
         : state.onlineOrdersMeta.statuses;
@@ -389,6 +400,7 @@
       state.onlineOrdersMeta.lastLoadedAt = new Date().toISOString();
       state.onlineOrdersMeta.error = "";
       state.onlineOrdersMeta.authRequired = false;
+      reconcileOnlineOrderDailySales();
 
       if (options.toast) {
         showToast(`Online orders refreshed. ${state.onlineOrders.length} order${state.onlineOrders.length === 1 ? "" : "s"} loaded.`);
@@ -416,6 +428,48 @@
         String(left.updatedAt || left.createdAt || "")
       )
     );
+  }
+
+  function sanitizeOnlineOrder(order) {
+    const items = Array.isArray(order?.items)
+      ? order.items
+          .map((item) => ({
+            ...item,
+            businessAreaId: normalizeBusinessAreaId(item?.businessAreaId),
+            lineTotal: Number(
+              parseOptionalAmount(item?.lineTotal || item?.totalAmount || item?.amount).toFixed(2)
+            )
+          }))
+          .filter((item) => normalizeText(item.id || item.name))
+      : [];
+
+    return {
+      ...order,
+      status: normalizeText(order?.status).toLowerCase() || "new",
+      paymentStatus: normalizeText(order?.paymentStatus).toLowerCase() || "pending",
+      totalAmount: Number(parseOptionalAmount(order?.totalAmount).toFixed(2)),
+      paidAt: normalizeDateInput(order?.paidAt || order?.paymentDate),
+      items
+    };
+  }
+
+  function getOnlineOrderPaidDate(order) {
+    return normalizeDateInput(order?.paidAt || order?.paymentDate || order?.updatedAt || order?.createdAt);
+  }
+
+  function buildOnlineOrderPaymentSummary(order) {
+    if (normalizeText(order?.paymentStatus).toLowerCase() !== "paid") {
+      return "Daily Sales sync waits until this order is marked paid.";
+    }
+
+    const paidDate = getOnlineOrderPaidDate(order);
+    return paidDate ? `Paid on ${formatDisplayDate(paidDate)}` : "Paid and ready for Daily Sales sync.";
+  }
+
+  function reconcileOnlineOrderDailySales() {
+    if (typeof reconcilePosGeneratedSales === "function") {
+      reconcilePosGeneratedSales({ persist: true });
+    }
   }
 
   function getFilteredOnlineOrders() {
@@ -543,9 +597,9 @@
           <p class="module-meta">${escapeHtml(String(stats.cancelledCount))} cancelled.</p>
         </article>
         <article class="stat-card dashboard-metric-card">
-          <span>Captured Value</span>
-          <strong>${escapeHtml(formatCurrency(stats.totalAmount))}</strong>
-          <p class="module-meta">Numeric order totals in this view.</p>
+          <span>Paid Order Value</span>
+          <strong>${escapeHtml(formatCurrency(stats.paidAmount))}</strong>
+          <p class="module-meta">Orders already marked paid in this view.</p>
         </article>
         <article class="stat-card dashboard-metric-card">
           <span>Quote Requests</span>
@@ -742,6 +796,7 @@
         <td>
           <span class="table-primary">${escapeHtml(formatOnlineOrderAmount(order))}</span>
           <span class="table-secondary">${escapeHtml(order.paymentMethod || "No payment method")}</span>
+          <span class="table-secondary">${escapeHtml(buildOnlineOrderPaymentSummary(order))}</span>
         </td>
         <td>
           <span class="table-primary">${escapeHtml(order.deliveryMode || "Delivery")}</span>
@@ -831,6 +886,10 @@
 
         summary.totalAmount += Number(order.totalAmount || 0);
 
+        if (paymentStatus === "paid") {
+          summary.paidAmount += Number(order.totalAmount || 0);
+        }
+
         if (status === "new") {
           summary.newCount += 1;
         }
@@ -859,6 +918,7 @@
       },
       {
         totalAmount: 0,
+        paidAmount: 0,
         newCount: 0,
         activeCount: 0,
         completedCount: 0,
@@ -1127,11 +1187,12 @@
         throw new Error(Array.isArray(result.errors) ? result.errors[0] : "Order update failed.");
       }
 
-      const nextOrder = result.order;
+      const nextOrder = sanitizeOnlineOrder(result.order);
       state.onlineOrders = sortOnlineOrders(
         state.onlineOrders.map((order) => (order.id === nextOrder.id ? nextOrder : order))
       );
       state.onlineOrdersMeta.lastLoadedAt = new Date().toISOString();
+      reconcileOnlineOrderDailySales();
 
       appendOnlineOrderAuditEntry({
         action: "update",

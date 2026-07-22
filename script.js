@@ -6110,7 +6110,7 @@ function buildScopedMonthlyTrendRows(monthKeys, options = {}) {
           getPettyCashType(record.transactionTypeId).isExpense
       )
       .reduce((sum, record) => sum + record.amount, 0);
-    const revenue = salesCollected + rentCollected + billsRecovered;
+    const revenue = salesCollected;
     const spend = expenseTotal + salaryPaid + (includePettyInSpend ? pettyExpensePaid : 0);
 
     return {
@@ -6408,7 +6408,7 @@ function buildOverviewAreaPerformanceRows(monthKey, monthSalesEntries, monthExpe
       const salaryPaid = monthSalaryByArea.get(area.id) || 0;
       const pettyCashUsed = pettyCashByArea.get(area.id) || 0;
       const budget = budgetByArea.get(area.id) || 0;
-      const revenue = sales + rentCollected;
+      const revenue = sales;
       const spend = expenses + salaryPaid;
       const net = revenue - spend;
       const activityTotal = revenue + spend + budget;
@@ -6446,7 +6446,7 @@ function buildOverviewAreaPerformanceCards(areaRows, trendRows, monthKey) {
   const trendChart = buildComparisonChartCard({
     eyebrow: "Trend",
     title: "Last 6 Months Revenue vs Direct Spend",
-    note: "Daily sales, rent, and bills recovered are compared against direct expenses and salaries. Petty cash is tracked separately below.",
+    note: "Daily sales are compared against direct expenses and salaries. Apartment rent and bill payments now flow into Daily Sales automatically when captured.",
     rows: trendRows.map((row) => ({
       label: row.label,
       primary: row.revenue,
@@ -6823,7 +6823,7 @@ function renderRentalsPage() {
   elements.rentalAlertsValue.textContent = String(alerts.length);
   elements.rentalFootnote.textContent =
     rentals.length === state.rentals.length
-      ? "Track long-cycle rent, monthly bills, renewals, and tenant balances for each suite. Current balance uses the latest saved record per suite."
+      ? "Track long-cycle rent, monthly bills, renewals, and tenant balances for each suite. Saved rent and bill payments now sync into Daily Sales automatically. Current balance uses the latest saved record per suite."
       : `Showing ${rentals.length} apartment record${rentals.length === 1 ? "" : "s"} in the current filter view. Balance total uses the latest visible record per suite.`;
 
   renderRentalTable(rentals);
@@ -10203,7 +10203,7 @@ function buildAreaKpiRows(monthKey, areaFilter) {
           getPettyCashType(record.transactionTypeId).isExpense
       )
       .reduce((sum, record) => sum + record.amount, 0);
-    const revenue = salesCollected + rentCollected + billsRecovered;
+    const revenue = salesCollected;
     const spend = expenses + salaryPaid + pettyExpense;
 
     return {
@@ -10265,9 +10265,7 @@ function buildKpiSnapshot() {
   const depositRecords = state.securityDepositRecords.filter(
     (record) => areaFilter === "" || areaFilter === "rentals-apartments"
   );
-  const revenue =
-    monthSales.reduce((sum, record) => sum + record.amount, 0) +
-    monthRentals.reduce((sum, record) => sum + record.rentPaid + getBillsPaidAmount(record), 0);
+  const revenue = monthSales.reduce((sum, record) => sum + record.amount, 0);
   const spend =
     monthExpenses.reduce((sum, record) => sum + record.amount, 0) +
     monthSalaries.reduce((sum, record) => sum + record.amountPaid, 0) +
@@ -12248,6 +12246,9 @@ function createEmptyLaundryTicketDraft() {
     pieces: 1,
     amountDue: 0,
     amountPaid: 0,
+    paymentDate: "",
+    paymentMethod: "",
+    paymentReference: "",
     dueDate: "",
     readyDate: "",
     deliveryMode: "Walk-in",
@@ -12267,6 +12268,9 @@ function buildLaundryTicketDraftFromForm(formData) {
     pieces: Math.max(parsePositiveInteger(formData.get("laundryPieces")), 1),
     amountDue: parseOptionalAmount(formData.get("laundryAmountDue")),
     amountPaid: parseOptionalAmount(formData.get("laundryAmountPaid")),
+    paymentDate: normalizeDateInput(formData.get("laundryPaymentDate")),
+    paymentMethod: normalizeText(formData.get("laundryPaymentMethod")),
+    paymentReference: normalizeText(formData.get("laundryPaymentReference")),
     dueDate: normalizeDateInput(formData.get("laundryDueDate")),
     readyDate: normalizeDateInput(formData.get("laundryReadyDate")),
     deliveryMode: normalizeLaundryDeliveryMode(formData.get("laundryDeliveryMode")),
@@ -12438,6 +12442,15 @@ function renderLaundryPage() {
             <label><span>Amount Paid</span><input id="laundryAmountPaid" name="laundryAmountPaid" type="number" min="0" step="0.01" value="${escapeHtml(
               formatAmountInputValue(draft.amountPaid)
             )}" /></label>
+            <label><span>Payment Date</span><input id="laundryPaymentDate" name="laundryPaymentDate" type="date" value="${escapeHtml(
+              draft.paymentDate
+            )}" /></label>
+            <label><span>Payment Method</span><input id="laundryPaymentMethod" name="laundryPaymentMethod" type="text" value="${escapeHtml(
+              draft.paymentMethod
+            )}" placeholder="Cash, MoMo, Transfer" /></label>
+            <label><span>Payment Ref</span><input id="laundryPaymentReference" name="laundryPaymentReference" type="text" value="${escapeHtml(
+              draft.paymentReference
+            )}" placeholder="Receipt or transfer ref" /></label>
             <label><span>Due Date</span><input id="laundryDueDate" name="laundryDueDate" type="date" value="${escapeHtml(
               draft.dueDate
             )}" /></label>
@@ -12550,7 +12563,13 @@ function renderLaundryPage() {
                                   ? "alert-pill-on-track"
                                   : "alert-pill-due"
                           )}">${escapeHtml(record.status)}</span></td>
-                          <td>${formatCurrency(getLaundryBalance(record))}</td>
+                          <td><span class="table-primary">${formatCurrency(getLaundryBalance(record))}</span><span class="table-secondary">${escapeHtml(
+                            record.amountPaid > 0
+                              ? `Paid ${formatCurrency(record.amountPaid)}${
+                                  record.paymentDate ? ` on ${formatDisplayDate(record.paymentDate)}` : ""
+                                }`
+                              : "No payment captured yet"
+                          )}</span></td>
                           <td><span class="table-primary">${escapeHtml(formatOptionalDate(record.dueDate))}</span><span class="table-secondary">${escapeHtml(
                             record.readyDate ? `Ready ${formatDisplayDate(record.readyDate)}` : record.deliveryMode
                           )}</span></td>
@@ -12607,6 +12626,16 @@ function handleLaundryTicketSubmit(event) {
   }
 
   persistLaundryTickets();
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: true });
+  }
+  if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+    queueHostedWorkspaceSyncAfterPersist({
+      immediate: true,
+      force: true,
+      reason: state.editingLaundryTicketId ? "laundry-ticket-update" : "laundry-ticket-create"
+    });
+  }
   resetLaundryTicketForm({ silent: true });
   render();
 }
@@ -12639,6 +12668,16 @@ function deleteLaundryTicket(recordId) {
 
   state.laundryTickets = state.laundryTickets.filter((item) => item.id !== recordId);
   persistLaundryTickets();
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: true });
+  }
+  if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+    queueHostedWorkspaceSyncAfterPersist({
+      immediate: true,
+      force: true,
+      reason: "laundry-ticket-delete"
+    });
+  }
 
   if (state.editingLaundryTicketId === recordId) {
     resetLaundryTicketForm({ silent: true });
@@ -12672,6 +12711,9 @@ function createEmptyEquipmentRentalDraft() {
     customerPhone: "",
     rentalFee: 0,
     amountPaid: 0,
+    paymentDate: "",
+    paymentMethod: "",
+    paymentReference: "",
     depositAmount: 0,
     damageCharge: 0,
     outDate: "",
@@ -12694,6 +12736,9 @@ function buildEquipmentRentalDraftFromForm(formData) {
     customerPhone: normalizeText(formData.get("equipmentCustomerPhone")),
     rentalFee: parseOptionalAmount(formData.get("equipmentRentalFee")),
     amountPaid: parseOptionalAmount(formData.get("equipmentAmountPaid")),
+    paymentDate: normalizeDateInput(formData.get("equipmentPaymentDate")),
+    paymentMethod: normalizeText(formData.get("equipmentPaymentMethod")),
+    paymentReference: normalizeText(formData.get("equipmentPaymentReference")),
     depositAmount: parseOptionalAmount(formData.get("equipmentDepositAmount")),
     damageCharge: parseOptionalAmount(formData.get("equipmentDamageCharge")),
     outDate: normalizeDateInput(formData.get("equipmentOutDate")),
@@ -12843,6 +12888,15 @@ function renderEquipmentRentalsPage() {
             <label><span>Amount Paid</span><input id="equipmentAmountPaid" name="equipmentAmountPaid" type="number" min="0" step="0.01" value="${escapeHtml(
               formatAmountInputValue(draft.amountPaid)
             )}" /></label>
+            <label><span>Payment Date</span><input id="equipmentPaymentDate" name="equipmentPaymentDate" type="date" value="${escapeHtml(
+              draft.paymentDate
+            )}" /></label>
+            <label><span>Payment Method</span><input id="equipmentPaymentMethod" name="equipmentPaymentMethod" type="text" value="${escapeHtml(
+              draft.paymentMethod
+            )}" placeholder="Cash, MoMo, Transfer" /></label>
+            <label><span>Payment Ref</span><input id="equipmentPaymentReference" name="equipmentPaymentReference" type="text" value="${escapeHtml(
+              draft.paymentReference
+            )}" placeholder="Receipt or transfer ref" /></label>
             <label><span>Deposit Held</span><input id="equipmentDepositAmount" name="equipmentDepositAmount" type="number" min="0" step="0.01" value="${escapeHtml(
               formatAmountInputValue(draft.depositAmount)
             )}" /></label>
@@ -12974,7 +13028,13 @@ function renderEquipmentRentalsPage() {
                                 ? "alert-pill-overdue"
                                 : "alert-pill-due"
                           )}">${escapeHtml(record.status)}</span></td>
-                          <td>${formatCurrency(getEquipmentRentalBalance(record))}</td>
+                          <td><span class="table-primary">${formatCurrency(getEquipmentRentalBalance(record))}</span><span class="table-secondary">${escapeHtml(
+                            record.amountPaid > 0
+                              ? `Paid ${formatCurrency(record.amountPaid)}${
+                                  record.paymentDate ? ` on ${formatDisplayDate(record.paymentDate)}` : ""
+                                }`
+                              : "No payment captured yet"
+                          )}</span></td>
                           <td><span class="table-primary">${escapeHtml(formatOptionalDate(record.dueDate))}</span><span class="table-secondary">${escapeHtml(
                             record.returnDate ? `Returned ${formatDisplayDate(record.returnDate)}` : `Out ${formatOptionalDate(record.outDate)}`
                           )}</span></td>
@@ -13031,6 +13091,16 @@ function handleEquipmentRentalSubmit(event) {
   }
 
   persistEquipmentRentalBookings();
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: true });
+  }
+  if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+    queueHostedWorkspaceSyncAfterPersist({
+      immediate: true,
+      force: true,
+      reason: state.editingEquipmentRentalId ? "equipment-rental-update" : "equipment-rental-create"
+    });
+  }
   resetEquipmentRentalForm({ silent: true });
   render();
 }
@@ -13063,6 +13133,16 @@ function deleteEquipmentRental(recordId) {
 
   state.equipmentRentalBookings = state.equipmentRentalBookings.filter((item) => item.id !== recordId);
   persistEquipmentRentalBookings();
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: true });
+  }
+  if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+    queueHostedWorkspaceSyncAfterPersist({
+      immediate: true,
+      force: true,
+      reason: "equipment-rental-delete"
+    });
+  }
 
   if (state.editingEquipmentRentalId === recordId) {
     resetEquipmentRentalForm({ silent: true });
@@ -14472,7 +14552,7 @@ function buildWorkspaceReport() {
   const salesTotal = sales.reduce((sum, record) => sum + record.amount, 0);
   const rentCollected = rentals.reduce((sum, record) => sum + record.rentPaid, 0);
   const billsRecovered = rentals.reduce((sum, record) => sum + getBillsPaidAmount(record), 0);
-  const totalInflows = salesTotal + rentCollected + billsRecovered;
+  const totalInflows = salesTotal;
   const expenseTotal = expenses.reduce((sum, record) => sum + record.amount, 0);
   const salaryPaid = salaryRecords.reduce((sum, record) => sum + record.amountPaid, 0);
   const operatingSpend = expenseTotal + salaryPaid;
@@ -14721,7 +14801,7 @@ function buildReportAreaRows(context) {
       const pettyExpensePaid = pettyExpenseByArea.get(area.id) || 0;
       const budgeted = budgetByArea.get(area.id) || 0;
       const pettyBudgeted = pettyBudgetByArea.get(area.id) || 0;
-      const inflows = salesCollected + rentForArea + billsForArea;
+      const inflows = salesCollected;
       const operatingSpend = expenses + salaryPaid;
       const net = inflows - operatingSpend;
       const activity = inflows + operatingSpend + budgeted + pettyBudgeted;
@@ -14775,7 +14855,7 @@ function buildReportMonthlyRows(context) {
           getPettyCashType(record.transactionTypeId).isExpense
       )
       .reduce((sum, record) => sum + record.amount, 0);
-    const inflows = salesCollected + rentCollected + billsRecovered;
+    const inflows = salesCollected;
     const operatingSpend = expenseTotal + salaryPaid;
 
     return {
@@ -15204,7 +15284,7 @@ function renderReportsPage() {
               <p class="muted-text">${escapeHtml(
                 card.meta ||
                   (index === 0
-                    ? "Sales, rent, and bills recovered in the selected scope."
+                    ? "Daily sales in the selected scope, including synced apartment payments."
                     : card.label === "Budgeted Spend"
                       ? "Expense budgets plus petty cash budgets in the selected scope."
                       : "Calculated from records already saved in the workspace.")
@@ -15362,7 +15442,7 @@ function renderReportsPage() {
         </div>
 
         <div class="guide-list compact-guide-list">
-          <p>Inflows combine saved daily sales, apartment rent collected, and apartment bills recovered inside the selected reporting scope.</p>
+          <p>Inflows come from saved Daily Sales in the selected scope, while apartment rent and bill collections are shown separately for breakdown and follow-up.</p>
           <p>Operating spend combines normal expenses and salary paid. Petty cash expense-paid entries are shown in reports but not added again to spend so totals do not double-count synced expenses.</p>
           <p>Open follow-up values are current balances from apartments, payroll, suppliers, and maintenance, so they stay useful even when your report range is historical.</p>
         </div>
@@ -16552,7 +16632,7 @@ function getAreaActualsForMonth(monthKey, businessAreaId) {
           .filter((record) => record.month === month)
           .reduce((sum, record) => sum + record.rentPaid + getBillsPaidAmount(record), 0)
       : 0;
-  const revenue = Number((salesTotal + rentCollected).toFixed(2));
+  const revenue = Number(salesTotal.toFixed(2));
   const spend = Number((expenseTotal + salaryPaid).toFixed(2));
 
   return {
@@ -20978,6 +21058,16 @@ async function handleRentalSubmit(event) {
   }
 
   persistRentals();
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: true });
+  }
+  if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+    queueHostedWorkspaceSyncAfterPersist({
+      immediate: true,
+      force: true,
+      reason: state.editingRentalId ? "apartment-rental-update" : "apartment-rental-create"
+    });
+  }
   let toastMessage = state.editingRentalId ? "Rental record updated." : "Rental record saved.";
 
   if (!state.editingRentalId && shouldAutoGenerateTenancyAgreement(savedRecord, previousSuiteRecord)) {
@@ -21607,6 +21697,16 @@ function deleteRental(rentalId) {
 
   state.rentals = state.rentals.filter((item) => item.id !== rentalId);
   persistRentals();
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: true });
+  }
+  if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+    queueHostedWorkspaceSyncAfterPersist({
+      immediate: true,
+      force: true,
+      reason: "apartment-rental-delete"
+    });
+  }
 
   if (state.editingRentalId === rentalId) {
     resetRentalForm({ silent: true });
@@ -25482,6 +25582,9 @@ function sanitizeStoredLaundryTicket(record) {
     pieces: Math.max(parsePositiveInteger(record.pieces || record.quantity), 1),
     amountDue,
     amountPaid: parseOptionalAmount(record.amountPaid || record.paidAmount),
+    paymentDate: normalizeDateInput(record.paymentDate),
+    paymentMethod: normalizeText(record.paymentMethod),
+    paymentReference: normalizeText(record.paymentReference || record.reference),
     dueDate: normalizeDateInput(record.dueDate),
     readyDate: normalizeDateInput(record.readyDate),
     deliveryMode: normalizeLaundryDeliveryMode(record.deliveryMode || record.delivery),
@@ -25511,6 +25614,9 @@ function sanitizeStoredEquipmentRentalBooking(record) {
     customerPhone: normalizeText(record.customerPhone || record.phone),
     rentalFee,
     amountPaid: parseOptionalAmount(record.amountPaid || record.paidAmount),
+    paymentDate: normalizeDateInput(record.paymentDate),
+    paymentMethod: normalizeText(record.paymentMethod),
+    paymentReference: normalizeText(record.paymentReference || record.reference),
     depositAmount: parseOptionalAmount(record.depositAmount || record.depositHeld),
     damageCharge: parseOptionalAmount(record.damageCharge),
     outDate: normalizeDateInput(record.outDate),
