@@ -37,6 +37,12 @@ Optional public contact settings:
 - `ONEROOT_SUPPORT_EMAIL`
 - `ONEROOT_PICKUP_NOTE`
 
+Optional durable storage settings:
+
+- `ONEROOT_DATABASE_URL` or `ONEROOT_DATABASE_PRIVATE_URL`
+- `ONEROOT_DATABASE_CA_CERT`
+- `ONEROOT_DATABASE_SSL`
+
 ## What it includes
 
 - Multi-view app experience with sections for Overview, Expenses, Daily Sales, Apartments, Petty Cash, and Data Hub
@@ -58,6 +64,7 @@ Optional public contact settings:
 - Downloadable Excel workbook with dropdown lists for `Expenses`, `Budget_Planner`, `Daily_Sales`, `Apartments`, `Petty_Cash`, `Petty_Cash_Budget`, and `Lists`
 - Full app backup export and restore using `.json` files
 - Local browser storage so records stay available on the same device
+- Database-backed hosted workspace sync and online order storage when PostgreSQL is configured
 
 ## Business areas included
 
@@ -110,6 +117,17 @@ Recommended setup:
 4. Confirm the service listens on port `8080`.
 5. After the first deploy, add `OneRoot.shop` and `www.OneRoot.shop` in the App Platform domain settings, then update DNS to the App Platform ingress target.
 6. Add the public and admin environment variables in App Platform before going live.
+
+For durable hosted operations data and durable online orders:
+
+1. Create or attach a PostgreSQL database in App Platform.
+2. Prefer the private connection URL when the app and database are in the same VPC.
+3. Set `ONEROOT_DATABASE_URL` to the database connection string. If you are using App Platform bindable variables, use a value such as `${oneroot-db.DATABASE_PRIVATE_URL}`.
+4. Set `ONEROOT_DATABASE_CA_CERT` to the matching CA certificate bindable value such as `${oneroot-db.CA_CERT}` when TLS verification is enabled.
+5. Leave `ONEROOT_DATABASE_SSL` as `require` unless you intentionally disable TLS for a local or trusted internal setup.
+6. Redeploy the app. On first start, the server creates its tables automatically and seeds them from the current workspace snapshot and `data/orders.json` if the database is empty.
+
+The server still supports file storage locally, but production App Platform deployments should use PostgreSQL for persistent data.
 
 ## Excel workbook
 

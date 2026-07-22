@@ -45,6 +45,10 @@ const LIVE_DATA_STORAGE_KEYS = new Set([
   FORECAST_STORAGE_KEY,
   USER_PROFILE_STORAGE_KEY
 ]);
+const HOSTED_WORKSPACE_SYNC_TRIGGER_KEYS = new Set([
+  ...LIVE_DATA_STORAGE_KEYS,
+  SETTINGS_KEY
+]);
 const TENANCY_TEMPLATE_PATH = "./Tenancy_Agreement_Template.docx?v=20260712b";
 const UPLOADABLE_WORKBOOK_PATH =
   "./outputs/oneroot-essentials-register/OneRoot_Essentials_Operations_Register.xlsx?v=20260712b";
@@ -61,6 +65,9 @@ const HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY =
   "oneroot-expense-register:hosted-workspace-snapshot:v1";
 const HOSTED_WORKSPACE_ACCESS_FLAG_KEY =
   "oneroot-expense-register:hosted-workspace-access:v1";
+const HOSTED_WORKSPACE_LIVE_SYNC_PATH = "/api/workspace";
+const HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY =
+  "oneroot-expense-register:hosted-workspace-live:v1";
 
 const BUSINESS_AREAS = [
   {
@@ -1710,6 +1717,15 @@ let toastTimeout = null;
 let deferredInstallPrompt = null;
 let startupToastMessage = "";
 const LOCAL_PREVIEW_REFRESH_FLAG = "oneroot-local-preview-refresh-v4";
+const hostedWorkspaceSyncState = {
+  hooksInstalled: false,
+  uploadTimer: null,
+  uploadDelayMs: 1200,
+  uploadInFlight: false,
+  uploadQueued: false,
+  suppressDepth: 0,
+  lastUploadedDigest: ""
+};
 
 document.addEventListener("DOMContentLoaded", () => {
   void init();
@@ -1723,6 +1739,8 @@ async function init() {
   await hydrateHostedWorkspaceAccessIfNeeded();
   reconcileActiveUserProfile();
   reconcileAuthenticationSession({ skipPersist: true });
+  installHostedWorkspaceSyncHooks();
+  await restoreHostedWorkspaceLiveSyncIfNeeded({ render: false });
   populateCurrencyOptions();
   initializeBudgetPlanner();
   applyReportPreset(state.reportFilters.preset, { silent: true });
@@ -1949,6 +1967,438 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
     }
   } catch (error) {
     console.error(error);
+  }
+}
+
+function registerHostedWorkspaceSyncStorageKeys(keys = []) {
+  keys.forEach((key) => {
+    const normalizedKey = normalizeText(key);
+
+    if (normalizedKey) {
+      HOSTED_WORKSPACE_SYNC_TRIGGER_KEYS.add(normalizedKey);
+    }
+  });
+}
+
+function withHostedWorkspaceSyncSuppressed(callback) {
+  hostedWorkspaceSyncState.suppressDepth += 1;
+
+  try {
+    return callback();
+  } finally {
+    hostedWorkspaceSyncState.suppressDepth = Math.max(
+      0,
+      hostedWorkspaceSyncState.suppressDepth - 1
+    );
+  }
+}
+
+function isHostedWorkspaceSyncSuppressed() {
+  return hostedWorkspaceSyncState.suppressDepth > 0;
+}
+
+function installHostedWorkspaceSyncHooks() {
+  if (
+    hostedWorkspaceSyncState.hooksInstalled ||
+    typeof window === "undefined" ||
+    !window.localStorage
+  ) {
+    return;
+  }
+
+  const storagePrototype = Object.getPrototypeOf(window.localStorage);
+  const originalSetItem = storagePrototype?.setItem;
+
+  if (typeof originalSetItem !== "function") {
+    return;
+  }
+
+  storagePrototype.setItem = function patchedHostedWorkspaceSetItem(key, value) {
+    const result = originalSetItem.call(this, key, value);
+
+    if (
+      this === window.localStorage &&
+      isHostedWorkspaceEnvironment() &&
+      !isHostedWorkspaceSyncSuppressed() &&
+      HOSTED_WORKSPACE_SYNC_TRIGGER_KEYS.has(normalizeText(key))
+    ) {
+      scheduleHostedWorkspaceSyncUpload({ reason: `storage:${normalizeText(key)}` });
+    }
+
+    return result;
+  };
+
+  hostedWorkspaceSyncState.hooksInstalled = true;
+}
+
+function buildHostedWorkspaceSyncPayload(source = state, options = {}) {
+  const workspace = source && typeof source === "object" ? source : state;
+  const exportedAt = normalizeText(options.exportedAt) || new Date().toISOString();
+
+  return {
+    schemaVersion: 2,
+    app: "OneRoot Operations App",
+    exportedAt,
+    settings: {
+      currency: normalizeText(workspace.currency) || "GHS",
+      activeUserId:
+        options.includeActiveUserId === false ? "" : normalizeText(workspace.activeUserId)
+    },
+    workspace: {
+      expenses: Array.isArray(workspace.expenses) ? workspace.expenses : [],
+      budgets: Array.isArray(workspace.budgets) ? workspace.budgets : [],
+      sales: Array.isArray(workspace.sales) ? workspace.sales : [],
+      rentals: Array.isArray(workspace.rentals) ? workspace.rentals : [],
+      pettyCash: Array.isArray(workspace.pettyCash) ? workspace.pettyCash : [],
+      pettyCashBudgets: Array.isArray(workspace.pettyCashBudgets)
+        ? workspace.pettyCashBudgets
+        : [],
+      salaryRecords: Array.isArray(workspace.salaryRecords) ? workspace.salaryRecords : [],
+      cashbookEntries: Array.isArray(workspace.cashbookEntries)
+        ? workspace.cashbookEntries
+        : [],
+      purchaseOrders: Array.isArray(workspace.purchaseOrders) ? workspace.purchaseOrders : [],
+      laundryTickets: Array.isArray(workspace.laundryTickets) ? workspace.laundryTickets : [],
+      equipmentRentalBookings: Array.isArray(workspace.equipmentRentalBookings)
+        ? workspace.equipmentRentalBookings
+        : [],
+      securityDepositRecords: Array.isArray(workspace.securityDepositRecords)
+        ? workspace.securityDepositRecords
+        : [],
+      ledgerEntries: Array.isArray(workspace.ledgerEntries) ? workspace.ledgerEntries : [],
+      mobileMoneyReconciliations: Array.isArray(workspace.mobileMoneyReconciliations)
+        ? workspace.mobileMoneyReconciliations
+        : [],
+      suppliers: Array.isArray(workspace.suppliers) ? workspace.suppliers : [],
+      assetRecords: Array.isArray(workspace.assetRecords) ? workspace.assetRecords : [],
+      forecastPlans: Array.isArray(workspace.forecastPlans) ? workspace.forecastPlans : [],
+      recurringControls: Array.isArray(workspace.recurringControls)
+        ? workspace.recurringControls
+        : [],
+      maintenanceRecords: Array.isArray(workspace.maintenanceRecords)
+        ? workspace.maintenanceRecords
+        : [],
+      userProfiles: Array.isArray(workspace.userProfiles) ? workspace.userProfiles : []
+    }
+  };
+}
+
+function buildHostedWorkspaceSyncDigest(source = state) {
+  const payload = buildHostedWorkspaceSyncPayload(source, {
+    exportedAt: "digest",
+    includeActiveUserId: false
+  });
+
+  return JSON.stringify({
+    settings: {
+      currency: payload.settings.currency
+    },
+    workspace: payload.workspace
+  });
+}
+
+function mergeHostedWorkspaceImport(imported) {
+  const localActiveUserId = normalizeText(state.activeUserId);
+
+  state.expenses = mergeExpenses(state.expenses, imported.expenses || []);
+  state.budgets = mergeBudgets(state.budgets, imported.budgets || []);
+  state.sales = mergeSales(state.sales, imported.sales || []);
+  state.rentals = mergeRentals(state.rentals, imported.rentals || []);
+  state.pettyCash = mergePettyCashEntries(state.pettyCash, imported.pettyCash || []);
+  state.pettyCashBudgets = mergePettyCashBudgets(
+    state.pettyCashBudgets,
+    imported.pettyCashBudgets || []
+  );
+  state.salaryRecords = mergeSalaryRecords(state.salaryRecords, imported.salaryRecords || []);
+  state.cashbookEntries = mergeCashbookEntries(
+    state.cashbookEntries,
+    imported.cashbookEntries || []
+  );
+  state.purchaseOrders = mergePurchaseOrders(
+    state.purchaseOrders,
+    imported.purchaseOrders || []
+  );
+  state.laundryTickets = mergeLaundryTickets(
+    state.laundryTickets,
+    imported.laundryTickets || []
+  );
+  state.equipmentRentalBookings = mergeEquipmentRentalBookings(
+    state.equipmentRentalBookings,
+    imported.equipmentRentalBookings || []
+  );
+  state.securityDepositRecords = mergeSecurityDepositRecords(
+    state.securityDepositRecords,
+    imported.securityDepositRecords || []
+  );
+  state.ledgerEntries = mergeLedgerEntries(state.ledgerEntries, imported.ledgerEntries || []);
+  state.mobileMoneyReconciliations = mergeMobileMoneyReconciliations(
+    state.mobileMoneyReconciliations,
+    imported.mobileMoneyReconciliations || []
+  );
+  state.suppliers = mergeSupplierRecords(state.suppliers, imported.suppliers || []);
+  state.assetRecords = mergeAssetRecords(state.assetRecords, imported.assetRecords || []);
+  state.forecastPlans = mergeForecastPlans(
+    state.forecastPlans,
+    imported.forecastPlans || []
+  );
+  state.recurringControls = mergeRecurringControls(
+    state.recurringControls,
+    imported.recurringControls || []
+  );
+  state.maintenanceRecords = mergeMaintenanceRecords(
+    state.maintenanceRecords,
+    imported.maintenanceRecords || []
+  );
+  state.userProfiles = mergeUserProfiles(state.userProfiles, imported.userProfiles || []);
+  state.currency = normalizeText(imported.currency) || state.currency;
+  state.activeUserId = localActiveUserId || normalizeText(imported.activeUserId);
+
+  reconcilePettyCashExpenseLinks();
+  reconcileActiveUserProfile({ skipPersist: true });
+
+  if (typeof reconcilePosGeneratedSales === "function") {
+    reconcilePosGeneratedSales({ persist: false });
+  }
+
+  if (typeof primeAuditSnapshots === "function") {
+    primeAuditSnapshots();
+  }
+}
+
+async function ensureHostedWorkspaceServerSession() {
+  if (!isHostedWorkspaceEnvironment()) {
+    return false;
+  }
+
+  const session = loadAuthSession();
+  const username = normalizeText(session.username).toLowerCase();
+  const password = String(session.password || "");
+
+  if (!username || !password) {
+    return !isWorkspaceLoginRequired();
+  }
+
+  return establishServerWorkspaceSession(username, password);
+}
+
+async function fetchHostedWorkspaceLiveSnapshot() {
+  const response = await fetch(HOSTED_WORKSPACE_LIVE_SYNC_PATH, {
+    cache: "no-store",
+    credentials: "same-origin",
+    headers: {
+      Accept: "application/json"
+    }
+  });
+
+  if (response.status === 401) {
+    return null;
+  }
+
+  if (!response.ok) {
+    throw new Error(`Hosted workspace sync request failed with ${response.status}.`);
+  }
+
+  return sanitizeImportedBackup(await response.json());
+}
+
+function syncHostedWorkspaceUiAfterMerge() {
+  populateCurrencyOptions();
+  initializeBudgetPlanner();
+}
+
+async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
+  if (!isHostedWorkspaceEnvironment()) {
+    return false;
+  }
+
+  const sessionReady = await ensureHostedWorkspaceServerSession();
+
+  if (!sessionReady) {
+    return false;
+  }
+
+  try {
+    const imported = await fetchHostedWorkspaceLiveSnapshot();
+
+    if (!imported) {
+      return false;
+    }
+
+    const remoteDigest = buildHostedWorkspaceSyncDigest(imported);
+    const localDigestBefore = buildHostedWorkspaceSyncDigest(state);
+    const remoteTotal = getWorkspaceRecordTotal(imported);
+
+    if (remoteTotal === 0) {
+      if (getWorkspaceRecordTotal(state) > 0 && options.uploadIfRemoteEmpty !== false) {
+        scheduleHostedWorkspaceSyncUpload({
+          immediate: true,
+          force: true,
+          reason: "remote-empty"
+        });
+      }
+      return false;
+    }
+
+    if (options.force === true || remoteDigest !== localDigestBefore) {
+      withHostedWorkspaceSyncSuppressed(() => {
+        mergeHostedWorkspaceImport(imported);
+        persistAllData();
+      });
+
+      localStorage.setItem(
+        HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY,
+        getHostedWorkspaceSnapshotRevision(imported)
+      );
+      syncHostedWorkspaceUiAfterMerge();
+
+      if (options.render !== false) {
+        render();
+      }
+    }
+
+    const mergedDigest = buildHostedWorkspaceSyncDigest(state);
+    hostedWorkspaceSyncState.lastUploadedDigest = mergedDigest;
+
+    if (mergedDigest !== remoteDigest && options.uploadAfterMerge !== false) {
+      scheduleHostedWorkspaceSyncUpload({
+        immediate: true,
+        force: true,
+        reason: "post-merge"
+      });
+    }
+
+    return mergedDigest !== localDigestBefore;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+function scheduleHostedWorkspaceSyncUpload(options = {}) {
+  if (isHostedWorkspaceSyncSuppressed() || !isHostedWorkspaceEnvironment()) {
+    return;
+  }
+
+  if (hostedWorkspaceSyncState.uploadTimer) {
+    window.clearTimeout(hostedWorkspaceSyncState.uploadTimer);
+    hostedWorkspaceSyncState.uploadTimer = null;
+  }
+
+  if (options.immediate) {
+    void uploadHostedWorkspaceLiveSnapshot(options);
+    return;
+  }
+
+  hostedWorkspaceSyncState.uploadTimer = window.setTimeout(() => {
+    hostedWorkspaceSyncState.uploadTimer = null;
+    void uploadHostedWorkspaceLiveSnapshot(options);
+  }, hostedWorkspaceSyncState.uploadDelayMs);
+}
+
+async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
+  if (!isHostedWorkspaceEnvironment()) {
+    return false;
+  }
+
+  if (hostedWorkspaceSyncState.uploadInFlight) {
+    hostedWorkspaceSyncState.uploadQueued = true;
+    return false;
+  }
+
+  hostedWorkspaceSyncState.uploadInFlight = true;
+
+  try {
+    const sessionReady = await ensureHostedWorkspaceServerSession();
+
+    if (!sessionReady) {
+      return false;
+    }
+
+    if (getWorkspaceRecordTotal(state) === 0 && options.allowEmpty !== true) {
+      return false;
+    }
+
+    let remoteDigest = "";
+    let remoteImported = null;
+
+    try {
+      remoteImported = await fetchHostedWorkspaceLiveSnapshot();
+    } catch (error) {
+      console.error(error);
+    }
+
+    if (remoteImported) {
+      remoteDigest = buildHostedWorkspaceSyncDigest(remoteImported);
+
+      if (getWorkspaceRecordTotal(remoteImported) > 0) {
+        const localDigestBeforeMerge = buildHostedWorkspaceSyncDigest(state);
+
+        if (remoteDigest !== localDigestBeforeMerge) {
+          withHostedWorkspaceSyncSuppressed(() => {
+            mergeHostedWorkspaceImport(remoteImported);
+            persistAllData();
+          });
+          syncHostedWorkspaceUiAfterMerge();
+          render();
+        }
+      }
+    }
+
+    const nextDigest = buildHostedWorkspaceSyncDigest(state);
+
+    if (!options.force && nextDigest === remoteDigest) {
+      hostedWorkspaceSyncState.lastUploadedDigest = nextDigest;
+
+      if (remoteImported) {
+        localStorage.setItem(
+          HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY,
+          getHostedWorkspaceSnapshotRevision(remoteImported)
+        );
+      }
+
+      return false;
+    }
+
+    const payload = buildHostedWorkspaceSyncPayload(state);
+    const response = await fetch(HOSTED_WORKSPACE_LIVE_SYNC_PATH, {
+      method: "PUT",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+
+    if (response.status === 401) {
+      return false;
+    }
+
+    if (!response.ok) {
+      throw new Error(`Hosted workspace upload failed with ${response.status}.`);
+    }
+
+    const savedSnapshot = sanitizeImportedBackup(await response.json());
+    hostedWorkspaceSyncState.lastUploadedDigest = buildHostedWorkspaceSyncDigest(savedSnapshot);
+    localStorage.setItem(
+      HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY,
+      getHostedWorkspaceSnapshotRevision(savedSnapshot)
+    );
+    return true;
+  } catch (error) {
+    console.error(error);
+    return false;
+  } finally {
+    hostedWorkspaceSyncState.uploadInFlight = false;
+
+    if (hostedWorkspaceSyncState.uploadQueued) {
+      hostedWorkspaceSyncState.uploadQueued = false;
+      scheduleHostedWorkspaceSyncUpload({
+        immediate: true,
+        force: true,
+        reason: "queued"
+      });
+    }
   }
 }
 
@@ -3519,8 +3969,9 @@ function handleStorageSync(event) {
   render();
 }
 
-function handleWindowFocusSync() {
+async function handleWindowFocusSync() {
   refreshStateFromStorage({ keepView: true });
+  await restoreHostedWorkspaceLiveSyncIfNeeded({ render: false });
   render();
 }
 
@@ -16374,6 +16825,11 @@ async function handleAccessLoginSubmit(event) {
     password
   });
   await establishServerWorkspaceSession(profile.username, password);
+  await restoreHostedWorkspaceLiveSyncIfNeeded({
+    force: true,
+    render: false,
+    uploadIfRemoteEmpty: true
+  });
   persistSettings();
   navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
   render();

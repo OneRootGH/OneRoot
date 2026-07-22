@@ -9,7 +9,14 @@ const ROOT_DIR = __dirname;
 const WEBSITE_DIR = path.join(ROOT_DIR, "website");
 const DATA_DIR = path.join(ROOT_DIR, "data");
 const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
+const LIVE_WORKSPACE_FILE = path.join(DATA_DIR, "live-workspace.json");
 const WORKSPACE_AUTH_FILES = [
+  LIVE_WORKSPACE_FILE,
+  path.join(ROOT_DIR, "outputs", "oneroot-hosted-workspace-latest.json"),
+  path.join(ROOT_DIR, "data", "public", "oneroot-hosted-workspace-seed.json")
+];
+const WORKSPACE_SNAPSHOT_FILES = [
+  LIVE_WORKSPACE_FILE,
   path.join(ROOT_DIR, "outputs", "oneroot-hosted-workspace-latest.json"),
   path.join(ROOT_DIR, "data", "public", "oneroot-hosted-workspace-seed.json")
 ];
@@ -122,6 +129,22 @@ const ADMIN_USER = normalizeText(process.env.ONEROOT_ADMIN_USER);
 const ADMIN_PASSWORD = normalizeText(process.env.ONEROOT_ADMIN_PASSWORD);
 const ADMIN_AUTH_ENABLED = Boolean(ADMIN_USER && ADMIN_PASSWORD);
 const HOST = normalizeText(process.env.HOST) || (process.env.PORT ? "0.0.0.0" : "127.0.0.1");
+const DATABASE_URL =
+  normalizeText(process.env.ONEROOT_DATABASE_PRIVATE_URL) ||
+  normalizeText(process.env.DATABASE_PRIVATE_URL) ||
+  normalizeText(process.env.ONEROOT_DATABASE_URL) ||
+  normalizeText(process.env.DATABASE_URL);
+const DATABASE_CA_CERT =
+  String(process.env.ONEROOT_DATABASE_CA_CERT || process.env.DATABASE_CA_CERT || "").trim();
+const DATABASE_SSL_MODE = normalizeText(
+  process.env.ONEROOT_DATABASE_SSL || process.env.DATABASE_SSL
+).toLowerCase();
+const WORKSPACE_SNAPSHOT_PRIMARY_KEY = "primary";
+let databasePoolPromise = null;
+let databaseSchemaReadyPromise = null;
+const workspaceAuthProfileCache = {
+  profiles: []
+};
 
 function normalizeText(value) {
   return String(value || "")
@@ -131,6 +154,108 @@ function normalizeText(value) {
 
 function normalizePhone(value) {
   return normalizeText(value).replace(/[^\d+]/g, "");
+}
+
+function hasDatabaseConfig() {
+  return Boolean(DATABASE_URL);
+}
+
+function shouldUseDatabaseSsl() {
+  return hasDatabaseConfig() && !["0", "false", "off", "disable"].includes(DATABASE_SSL_MODE);
+}
+
+function getDatabaseSslConfig() {
+  if (!shouldUseDatabaseSsl()) {
+    return undefined;
+  }
+
+  if (DATABASE_CA_CERT) {
+    return {
+      rejectUnauthorized: true,
+      ca: DATABASE_CA_CERT.replace(/\\n/g, "\n")
+    };
+  }
+
+  return {
+    rejectUnauthorized: false
+  };
+}
+
+async function getDatabasePool() {
+  if (!hasDatabaseConfig()) {
+    return null;
+  }
+
+  if (!databasePoolPromise) {
+    databasePoolPromise = Promise.resolve().then(() => {
+      const { Pool } = require("pg");
+      return new Pool({
+        connectionString: DATABASE_URL,
+        max: 5,
+        ssl: getDatabaseSslConfig()
+      });
+    });
+  }
+
+  return databasePoolPromise;
+}
+
+async function ensureDatabaseSchema() {
+  if (!hasDatabaseConfig()) {
+    return false;
+  }
+
+  if (!databaseSchemaReadyPromise) {
+    databaseSchemaReadyPromise = (async () => {
+      const pool = await getDatabasePool();
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS oneroot_workspace_snapshots (
+          workspace_key TEXT PRIMARY KEY,
+          payload JSONB NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+        )
+      `);
+
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS oneroot_orders (
+          id TEXT PRIMARY KEY,
+          order_number TEXT UNIQUE NOT NULL,
+          customer_phone_normalized TEXT NOT NULL,
+          payload JSONB NOT NULL,
+          created_at TIMESTAMPTZ NOT NULL,
+          updated_at TIMESTAMPTZ NOT NULL
+        )
+      `);
+
+      await pool.query(`
+        CREATE INDEX IF NOT EXISTS oneroot_orders_lookup_idx
+        ON oneroot_orders (order_number, customer_phone_normalized)
+      `);
+
+      return true;
+    })().catch((error) => {
+      databaseSchemaReadyPromise = null;
+      throw error;
+    });
+  }
+
+  return databaseSchemaReadyPromise;
+}
+
+async function runWithDatabaseFallback(label, databaseOperation, fallbackOperation) {
+  if (!hasDatabaseConfig()) {
+    return fallbackOperation();
+  }
+
+  try {
+    await ensureDatabaseSchema();
+    const pool = await getDatabasePool();
+    return await databaseOperation(pool);
+  } catch (error) {
+    console.error(`[oneroot-storage] ${label} failed, using file storage instead.`, error);
+    return fallbackOperation();
+  }
 }
 
 function ensureOrdersStore() {
@@ -154,15 +279,270 @@ function writeJsonFile(filePath, value) {
   fs.writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
 }
 
-function readOrders() {
+function readOrdersFile() {
   ensureOrdersStore();
   const parsed = readJsonFile(ORDERS_FILE, []);
   return Array.isArray(parsed) ? parsed : [];
 }
 
-function writeOrders(orders) {
+function writeOrdersFile(orders) {
   ensureOrdersStore();
   writeJsonFile(ORDERS_FILE, orders);
+}
+
+function ensureWorkspaceStore() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+}
+
+function getWorkspaceRoot(payload) {
+  if (!payload || typeof payload !== "object") {
+    return {};
+  }
+
+  return payload.workspace && typeof payload.workspace === "object" ? payload.workspace : payload;
+}
+
+function normalizeWorkspaceSnapshotPayload(payload) {
+  const root = payload && typeof payload === "object" ? payload : {};
+  const settings = root.settings && typeof root.settings === "object" ? root.settings : {};
+
+  return {
+    schemaVersion: Number.isFinite(Number(root.schemaVersion)) ? Number(root.schemaVersion) : 2,
+    app: normalizeText(root.app) || "OneRoot Operations App",
+    exportedAt: normalizeText(root.exportedAt) || new Date().toISOString(),
+    settings: {
+      currency: normalizeText(settings.currency) || "GHS",
+      activeUserId: normalizeText(settings.activeUserId)
+    },
+    workspace: getWorkspaceRoot(root)
+  };
+}
+
+function readWorkspaceSnapshotFile() {
+  ensureWorkspaceStore();
+
+  for (const filePath of WORKSPACE_SNAPSHOT_FILES) {
+    const parsed = readJsonFile(filePath, null);
+
+    if (parsed && typeof parsed === "object") {
+      const snapshot = normalizeWorkspaceSnapshotPayload(parsed);
+      setWorkspaceAuthProfileCache(snapshot);
+      return snapshot;
+    }
+  }
+
+  return normalizeWorkspaceSnapshotPayload(null);
+}
+
+function writeWorkspaceSnapshotFile(payload) {
+  ensureWorkspaceStore();
+  const normalized = normalizeWorkspaceSnapshotPayload(payload);
+  writeJsonFile(LIVE_WORKSPACE_FILE, normalized);
+  setWorkspaceAuthProfileCache(normalized);
+  return normalized;
+}
+
+function mergeOrderIntoList(orders, nextOrder) {
+  return [nextOrder, ...(Array.isArray(orders) ? orders : []).filter((order) => order.id !== nextOrder.id)].sort(
+    (left, right) => String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""))
+  );
+}
+
+async function upsertOrderInDatabase(pool, order) {
+  const payload = order && typeof order === "object" ? order : {};
+
+  await pool.query(
+    `
+      INSERT INTO oneroot_orders (
+        id,
+        order_number,
+        customer_phone_normalized,
+        payload,
+        created_at,
+        updated_at
+      )
+      VALUES ($1, $2, $3, $4::jsonb, $5::timestamptz, $6::timestamptz)
+      ON CONFLICT (id) DO UPDATE SET
+        order_number = EXCLUDED.order_number,
+        customer_phone_normalized = EXCLUDED.customer_phone_normalized,
+        payload = EXCLUDED.payload,
+        created_at = EXCLUDED.created_at,
+        updated_at = EXCLUDED.updated_at
+    `,
+    [
+      normalizeText(payload.id) || crypto.randomUUID(),
+      normalizeText(payload.orderNumber).toUpperCase(),
+      normalizePhone(payload.customerPhoneNormalized || payload.customerPhone),
+      JSON.stringify(payload),
+      normalizeText(payload.createdAt) || new Date().toISOString(),
+      normalizeText(payload.updatedAt) || normalizeText(payload.createdAt) || new Date().toISOString()
+    ]
+  );
+}
+
+async function seedOrdersDatabaseFromFile(pool) {
+  const fallbackOrders = readOrdersFile();
+
+  if (fallbackOrders.length === 0) {
+    return [];
+  }
+
+  await Promise.all(fallbackOrders.map((order) => upsertOrderInDatabase(pool, order)));
+  return fallbackOrders;
+}
+
+async function readOrdersStore() {
+  return runWithDatabaseFallback(
+    "Orders database read",
+    async (pool) => {
+      const result = await pool.query(`
+        SELECT payload
+        FROM oneroot_orders
+        ORDER BY updated_at DESC, created_at DESC
+      `);
+
+      if (result.rows.length === 0) {
+        return seedOrdersDatabaseFromFile(pool);
+      }
+
+      const orders = result.rows.map((row) => row.payload).filter(Boolean);
+      writeOrdersFile(orders);
+      return orders;
+    },
+    () => readOrdersFile()
+  );
+}
+
+async function writeOrderStore(nextOrder) {
+  const normalizedOrder = nextOrder && typeof nextOrder === "object" ? nextOrder : {};
+
+  return runWithDatabaseFallback(
+    "Orders database write",
+    async (pool) => {
+      await upsertOrderInDatabase(pool, normalizedOrder);
+      const orders = await readOrdersStore();
+      writeOrdersFile(orders);
+      return normalizedOrder;
+    },
+    () => {
+      const nextOrders = mergeOrderIntoList(readOrdersFile(), normalizedOrder);
+      writeOrdersFile(nextOrders);
+      return normalizedOrder;
+    }
+  );
+}
+
+async function findTrackedOrder(orderNumber, phone) {
+  const normalizedNumber = normalizeText(orderNumber).toUpperCase();
+  const normalizedPhone = normalizePhone(phone);
+
+  if (!normalizedNumber || !normalizedPhone) {
+    return null;
+  }
+
+  return runWithDatabaseFallback(
+    "Tracked order lookup",
+    async (pool) => {
+      const result = await pool.query(
+        `
+          SELECT payload
+          FROM oneroot_orders
+          WHERE order_number = $1
+            AND customer_phone_normalized = $2
+          ORDER BY updated_at DESC
+          LIMIT 1
+        `,
+        [normalizedNumber, normalizedPhone]
+      );
+
+      if (result.rows.length === 0) {
+        const seededOrders = await seedOrdersDatabaseFromFile(pool);
+        return (
+          seededOrders.find(
+            (order) =>
+              normalizeText(order.orderNumber).toUpperCase() === normalizedNumber &&
+              normalizePhone(order.customerPhoneNormalized || order.customerPhone) === normalizedPhone
+          ) || null
+        );
+      }
+
+      return result.rows[0].payload || null;
+    },
+    () =>
+      readOrdersFile().find(
+        (order) =>
+          normalizeText(order.orderNumber).toUpperCase() === normalizedNumber &&
+          normalizePhone(order.customerPhoneNormalized || order.customerPhone) === normalizedPhone
+      ) || null
+  );
+}
+
+async function readWorkspaceSnapshotStore() {
+  return runWithDatabaseFallback(
+    "Workspace database read",
+    async (pool) => {
+      const result = await pool.query(
+        `
+          SELECT payload
+          FROM oneroot_workspace_snapshots
+          WHERE workspace_key = $1
+          LIMIT 1
+        `,
+        [WORKSPACE_SNAPSHOT_PRIMARY_KEY]
+      );
+
+      if (result.rows.length === 0) {
+        const fallbackSnapshot = readWorkspaceSnapshotFile();
+        const normalizedFallback = normalizeWorkspaceSnapshotPayload(fallbackSnapshot);
+
+        await pool.query(
+          `
+            INSERT INTO oneroot_workspace_snapshots (workspace_key, payload, updated_at)
+            VALUES ($1, $2::jsonb, NOW())
+            ON CONFLICT (workspace_key) DO UPDATE SET
+              payload = EXCLUDED.payload,
+              updated_at = NOW()
+          `,
+          [WORKSPACE_SNAPSHOT_PRIMARY_KEY, JSON.stringify(normalizedFallback)]
+        );
+
+        writeWorkspaceSnapshotFile(normalizedFallback);
+        setWorkspaceAuthProfileCache(normalizedFallback);
+        return normalizedFallback;
+      }
+
+      const snapshot = normalizeWorkspaceSnapshotPayload(result.rows[0].payload);
+      writeWorkspaceSnapshotFile(snapshot);
+      setWorkspaceAuthProfileCache(snapshot);
+      return snapshot;
+    },
+    () => readWorkspaceSnapshotFile()
+  );
+}
+
+async function writeWorkspaceSnapshotStore(payload) {
+  const normalized = normalizeWorkspaceSnapshotPayload(payload);
+
+  return runWithDatabaseFallback(
+    "Workspace database write",
+    async (pool) => {
+      await pool.query(
+        `
+          INSERT INTO oneroot_workspace_snapshots (workspace_key, payload, updated_at)
+          VALUES ($1, $2::jsonb, NOW())
+          ON CONFLICT (workspace_key) DO UPDATE SET
+            payload = EXCLUDED.payload,
+            updated_at = NOW()
+        `,
+        [WORKSPACE_SNAPSHOT_PRIMARY_KEY, JSON.stringify(normalized)]
+      );
+
+      writeWorkspaceSnapshotFile(normalized);
+      setWorkspaceAuthProfileCache(normalized);
+      return normalized;
+    },
+    () => writeWorkspaceSnapshotFile(normalized)
+  );
 }
 
 function createOrderNumber() {
@@ -384,19 +764,72 @@ function sanitizeWorkspaceAuthProfile(record) {
   };
 }
 
-function loadWorkspaceAuthProfiles() {
+function extractWorkspaceAuthProfiles(payload) {
+  const workspaceRoot = getWorkspaceRoot(payload);
+  return Array.isArray(workspaceRoot?.userProfiles)
+    ? workspaceRoot.userProfiles.map(sanitizeWorkspaceAuthProfile).filter(Boolean)
+    : [];
+}
+
+function setWorkspaceAuthProfileCache(payload) {
+  const profiles = extractWorkspaceAuthProfiles(payload);
+  workspaceAuthProfileCache.profiles = profiles;
+  return profiles;
+}
+
+function loadWorkspaceAuthProfilesFromFiles() {
   for (const filePath of WORKSPACE_AUTH_FILES) {
     const parsed = readJsonFile(filePath, null);
-    const profiles = Array.isArray(parsed?.userProfiles)
-      ? parsed.userProfiles.map(sanitizeWorkspaceAuthProfile).filter(Boolean)
-      : [];
+    const profiles = extractWorkspaceAuthProfiles(parsed);
 
     if (profiles.length > 0) {
+      workspaceAuthProfileCache.profiles = profiles;
       return profiles;
     }
   }
 
+  workspaceAuthProfileCache.profiles = [];
   return [];
+}
+
+async function refreshWorkspaceAuthProfileCache() {
+  const profiles = await runWithDatabaseFallback(
+    "Workspace auth profile refresh",
+    async (pool) => {
+      const result = await pool.query(
+        `
+          SELECT payload
+          FROM oneroot_workspace_snapshots
+          WHERE workspace_key = $1
+          LIMIT 1
+        `,
+        [WORKSPACE_SNAPSHOT_PRIMARY_KEY]
+      );
+
+      if (result.rows.length === 0) {
+        return loadWorkspaceAuthProfilesFromFiles();
+      }
+
+      const snapshot = normalizeWorkspaceSnapshotPayload(result.rows[0].payload);
+      writeWorkspaceSnapshotFile(snapshot);
+      return setWorkspaceAuthProfileCache(snapshot);
+    },
+    () => loadWorkspaceAuthProfilesFromFiles()
+  );
+
+  if (profiles.length === 0) {
+    workspaceAuthProfileCache.profiles = [];
+  }
+
+  return profiles;
+}
+
+function loadWorkspaceAuthProfiles() {
+  if (Array.isArray(workspaceAuthProfileCache.profiles) && workspaceAuthProfileCache.profiles.length > 0) {
+    return workspaceAuthProfileCache.profiles;
+  }
+
+  return loadWorkspaceAuthProfilesFromFiles();
 }
 
 function findWorkspaceProfileByCredentials(auth, options = {}) {
@@ -436,6 +869,31 @@ function isAuthorizedWorkspaceOrderSession(request) {
         (item) => item.username === session.username && item.role === session.role
       )
   );
+}
+
+function isAuthorizedWorkspaceSession(request) {
+  const session = getWorkspaceSession(request);
+
+  return Boolean(
+    session &&
+      loadWorkspaceAuthProfiles().some(
+        (item) => item.username === session.username && item.role === session.role
+      )
+  );
+}
+
+function isAuthorizedWorkspaceRequest(request) {
+  if (isAuthorizedWorkspaceSession(request)) {
+    return true;
+  }
+
+  const auth = parseBasicAuth(request);
+
+  if (auth && findWorkspaceProfileByCredentials(auth)) {
+    return true;
+  }
+
+  return loadWorkspaceAuthProfiles().length === 0;
 }
 
 function isAuthorizedAdminRequest(request) {
@@ -698,21 +1156,6 @@ function updateStoredOrder(existingOrder, payload) {
   return { order: nextOrder };
 }
 
-function getTrackedOrder(orderNumber, phone) {
-  const normalizedNumber = normalizeText(orderNumber).toUpperCase();
-  const normalizedPhone = normalizePhone(phone);
-
-  if (!normalizedNumber || !normalizedPhone) {
-    return null;
-  }
-
-  return readOrders().find(
-    (order) =>
-      normalizeText(order.orderNumber).toUpperCase() === normalizedNumber &&
-      normalizePhone(order.customerPhoneNormalized || order.customerPhone) === normalizedPhone
-  );
-}
-
 function buildPublicOrderView(order) {
   if (!order) {
     return null;
@@ -821,7 +1264,8 @@ async function handleApiRoute(request, response, pathname, url) {
     sendJson(response, 200, {
       ok: true,
       service: "OneRoot Shop and Operations Server",
-      timestamp: new Date().toISOString()
+      timestamp: new Date().toISOString(),
+      storageMode: hasDatabaseConfig() ? "database-with-file-fallback" : "file"
     });
     return true;
   }
@@ -846,9 +1290,7 @@ async function handleApiRoute(request, response, pathname, url) {
         return true;
       }
 
-      const orders = readOrders();
-      orders.unshift(order);
-      writeOrders(orders);
+      await writeOrderStore(order);
       sendJson(response, 201, {
         ok: true,
         orderNumber: order.orderNumber,
@@ -868,7 +1310,7 @@ async function handleApiRoute(request, response, pathname, url) {
   }
 
   if (pathname === "/api/orders/track" && request.method === "GET") {
-    const order = getTrackedOrder(
+    const order = await findTrackedOrder(
       url.searchParams.get("orderNumber"),
       url.searchParams.get("phone")
     );
@@ -891,6 +1333,7 @@ async function handleApiRoute(request, response, pathname, url) {
   if (pathname === "/api/workspace-session") {
     if (request.method === "POST") {
       try {
+        await refreshWorkspaceAuthProfileCache();
         const body = await readRequestBody(request);
         const profile = findWorkspaceProfileByCredentials(body);
 
@@ -939,6 +1382,36 @@ async function handleApiRoute(request, response, pathname, url) {
     }
   }
 
+  if (pathname === "/api/workspace") {
+    if (!isAuthorizedWorkspaceRequest(request)) {
+      sendJson(response, 401, {
+        ok: false,
+        error: "Workspace sign-in is required."
+      });
+      return true;
+    }
+
+    if (request.method === "GET") {
+      sendJson(response, 200, await readWorkspaceSnapshotStore());
+      return true;
+    }
+
+    if (request.method === "PUT") {
+      try {
+        const body = await readRequestBody(request);
+        const snapshot = await writeWorkspaceSnapshotStore(body);
+        sendJson(response, 200, snapshot);
+        return true;
+      } catch (error) {
+        sendJson(response, 400, {
+          ok: false,
+          errors: [error.message || "Unable to save the shared workspace snapshot."]
+        });
+        return true;
+      }
+    }
+  }
+
   if (pathname === "/api/admin/orders") {
     if (!isAuthorizedAdminRequest(request)) {
       sendUnauthorized(response);
@@ -946,7 +1419,7 @@ async function handleApiRoute(request, response, pathname, url) {
     }
 
     if (request.method === "GET") {
-      const orders = readOrders().sort((left, right) =>
+      const orders = (await readOrdersStore()).sort((left, right) =>
         String(right.updatedAt || "").localeCompare(String(left.updatedAt || ""))
       );
       sendJson(response, 200, {
@@ -969,7 +1442,7 @@ async function handleApiRoute(request, response, pathname, url) {
     if (request.method === "PATCH") {
       try {
         const body = await readRequestBody(request);
-        const orders = readOrders();
+        const orders = await readOrdersStore();
         const existingOrder = orders.find((item) => item.id === orderId || item.orderNumber === orderId);
 
         if (!existingOrder) {
@@ -987,8 +1460,7 @@ async function handleApiRoute(request, response, pathname, url) {
           return true;
         }
 
-        const nextOrders = orders.map((item) => (item.id === existingOrder.id ? order : item));
-        writeOrders(nextOrders);
+        await writeOrderStore(order);
         sendJson(response, 200, { ok: true, order });
         return true;
       } catch (error) {
@@ -1033,18 +1505,30 @@ async function handleRequest(request, response) {
   sendText(response, 404, "Not found.");
 }
 
-ensureOrdersStore();
+async function startServer() {
+  ensureOrdersStore();
+  await refreshWorkspaceAuthProfileCache();
 
-const server = http.createServer((request, response) => {
-  handleRequest(request, response).catch((error) => {
-    console.error(error);
-    sendJson(response, 500, {
-      ok: false,
-      errors: ["Internal server error."]
+  const server = http.createServer((request, response) => {
+    handleRequest(request, response).catch((error) => {
+      console.error(error);
+      sendJson(response, 500, {
+        ok: false,
+        errors: ["Internal server error."]
+      });
     });
   });
-});
 
-server.listen(PORT, HOST, () => {
-  console.log(`OneRoot server running on http://${HOST}:${PORT}`);
+  server.listen(PORT, HOST, () => {
+    console.log(
+      `OneRoot server running on http://${HOST}:${PORT} using ${
+        hasDatabaseConfig() ? "database-backed" : "file-based"
+      } storage.`
+    );
+  });
+}
+
+startServer().catch((error) => {
+  console.error(error);
+  process.exit(1);
 });

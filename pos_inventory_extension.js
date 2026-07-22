@@ -38,6 +38,12 @@
   const originalHandleBackupImportFile = handleBackupImportFile;
   const originalSanitizeImportedBackup = sanitizeImportedBackup;
   const originalGetWorkspaceRecordTotal = getWorkspaceRecordTotal;
+  const originalBuildHostedWorkspaceSyncPayload =
+    typeof buildHostedWorkspaceSyncPayload === "function"
+      ? buildHostedWorkspaceSyncPayload
+      : null;
+  const originalMergeHostedWorkspaceImport =
+    typeof mergeHostedWorkspaceImport === "function" ? mergeHostedWorkspaceImport : null;
   const originalHandleDynamicModuleClick = handleDynamicModuleClick;
   const originalHandleDynamicModuleSubmit = handleDynamicModuleSubmit;
   const originalHandleDynamicModuleInput = handleDynamicModuleInput;
@@ -53,6 +59,53 @@
   extendViewMeta();
   extendRolePresets();
   extendStorageKeys();
+
+  if (typeof originalBuildHostedWorkspaceSyncPayload === "function") {
+    buildHostedWorkspaceSyncPayload = function patchedBuildHostedWorkspaceSyncPayload(
+      source = state,
+      options = {}
+    ) {
+      const payload = originalBuildHostedWorkspaceSyncPayload(source, options);
+      const workspace = source && typeof source === "object" ? source : state;
+
+      payload.workspace.posOrders = Array.isArray(workspace.posOrders) ? workspace.posOrders : [];
+      payload.workspace.inventoryItems = Array.isArray(workspace.inventoryItems)
+        ? workspace.inventoryItems
+        : [];
+      payload.workspace.auditTrail = Array.isArray(workspace.auditTrail)
+        ? workspace.auditTrail
+        : [];
+
+      return payload;
+    };
+  }
+
+  if (typeof originalMergeHostedWorkspaceImport === "function") {
+    mergeHostedWorkspaceImport = function patchedMergeHostedWorkspaceImport(imported) {
+      const nextImported = imported && typeof imported === "object" ? imported : {};
+      const result = originalMergeHostedWorkspaceImport(nextImported);
+
+      state.posOrders = mergePosOrders(state.posOrders, nextImported.posOrders || []);
+      state.inventoryItems = mergeInventoryItems(
+        state.inventoryItems,
+        nextImported.inventoryItems || []
+      );
+      state.auditTrail = mergeAuditTrailEntries(
+        state.auditTrail,
+        nextImported.auditTrail || []
+      );
+
+      if (typeof reconcilePosGeneratedSales === "function") {
+        reconcilePosGeneratedSales({ persist: false });
+      }
+
+      if (typeof primeAuditSnapshots === "function") {
+        primeAuditSnapshots();
+      }
+
+      return result;
+    };
+  }
 
   sanitizeStoredSale = function patchedSanitizeStoredSale(sale) {
     const sanitized = originalSanitizeStoredSale(sale);
@@ -958,6 +1011,14 @@
     LIVE_DATA_STORAGE_KEYS.add(POS_ORDER_STORAGE_KEY);
     LIVE_DATA_STORAGE_KEYS.add(INVENTORY_ITEM_STORAGE_KEY);
     LIVE_DATA_STORAGE_KEYS.add(AUDIT_TRAIL_STORAGE_KEY);
+
+    if (typeof registerHostedWorkspaceSyncStorageKeys === "function") {
+      registerHostedWorkspaceSyncStorageKeys([
+        POS_ORDER_STORAGE_KEY,
+        INVENTORY_ITEM_STORAGE_KEY,
+        AUDIT_TRAIL_STORAGE_KEY
+      ]);
+    }
   }
 
   function normalizeSaleSourceType(value) {
@@ -1564,6 +1625,50 @@
 
       return normalizeText(left.name).localeCompare(normalizeText(right.name));
     });
+  }
+
+  function buildPosOrderMergeKey(order) {
+    return (
+      normalizeText(order.orderNumber) ||
+      normalizeText(order.id) ||
+      [
+        normalizeDateInput(order.orderDate),
+        getPosOrderPrimaryAreaId(order),
+        Number(order.totalAmount || 0).toFixed(2),
+        normalizeText(order.customerPhone),
+        normalizeText(order.customerName).toLowerCase()
+      ].join("|")
+    );
+  }
+
+  function mergePosOrders(existing, imported) {
+    return mergeCollectionsByKey(existing, imported, buildPosOrderMergeKey, sortPosOrders);
+  }
+
+  function mergeInventoryItems(existing, imported) {
+    return mergeCatalogSeedWithStoredInventory([...(existing || []), ...(imported || [])]);
+  }
+
+  function buildAuditTrailMergeKey(record) {
+    return (
+      normalizeText(record.id) ||
+      [
+        normalizeText(record.timestamp),
+        normalizeText(record.moduleKey).toLowerCase(),
+        normalizeText(record.action).toLowerCase(),
+        normalizeText(record.recordId),
+        normalizeText(record.title).toLowerCase()
+      ].join("|")
+    );
+  }
+
+  function mergeAuditTrailEntries(existing, imported) {
+    return mergeCollectionsByKey(
+      existing,
+      imported,
+      buildAuditTrailMergeKey,
+      sortAuditTrail
+    ).slice(0, AUDIT_TRAIL_LIMIT);
   }
 
   function persistPosOrders() {
