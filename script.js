@@ -3575,6 +3575,44 @@ function clearAuthSession() {
   }
 }
 
+async function establishServerWorkspaceSession(username, password) {
+  if (typeof fetch !== "function") {
+    return false;
+  }
+
+  try {
+    const response = await fetch("/api/workspace-session", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      credentials: "same-origin",
+      body: JSON.stringify({
+        username: normalizeText(username).toLowerCase(),
+        password: String(password || "")
+      })
+    });
+
+    return response.ok;
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
+}
+
+function clearServerWorkspaceSession() {
+  if (typeof fetch !== "function") {
+    return;
+  }
+
+  fetch("/api/workspace-session", {
+    method: "DELETE",
+    credentials: "same-origin"
+  }).catch((error) => {
+    console.error(error);
+  });
+}
+
 function getUserLoginMode(profile) {
   return profile && (profile.loginEnabled === true || normalizeText(profile.passwordHash))
     ? "password-required"
@@ -16335,6 +16373,7 @@ async function handleAccessLoginSubmit(event) {
     username: profile.username,
     password
   });
+  await establishServerWorkspaceSession(profile.username, password);
   persistSettings();
   navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
   render();
@@ -16345,6 +16384,7 @@ function signOutWorkspaceUser(options = {}) {
   const signedInProfile = getAuthenticatedUserProfile();
   state.signedInUserId = "";
   clearAuthSession();
+  clearServerWorkspaceSession();
   navigateTo("access", { syncHash: true, showAccessToast: false });
   render();
 

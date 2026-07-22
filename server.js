@@ -23,6 +23,9 @@ const ONLINE_ORDER_ALLOWED_ROLES = new Set([
   "sales-stock-operator",
   "cashier"
 ]);
+const WORKSPACE_SESSION_COOKIE = "oneroot_workspace_session";
+const WORKSPACE_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
+const WORKSPACE_SESSIONS = new Map();
 const ORDER_STATUSES = [
   "new",
   "confirmed",
@@ -171,21 +174,29 @@ function getMimeType(filePath) {
   return WEBSITE_STATIC_MIME_TYPES[path.extname(filePath).toLowerCase()] || "application/octet-stream";
 }
 
-function sendJson(response, statusCode, payload) {
+function sendJson(response, statusCode, payload, extraHeaders = {}) {
   const body = JSON.stringify(payload, null, 2);
   response.writeHead(statusCode, {
     "Cache-Control": "no-store",
     "Content-Length": Buffer.byteLength(body),
-    "Content-Type": "application/json; charset=utf-8"
+    "Content-Type": "application/json; charset=utf-8",
+    ...extraHeaders
   });
   response.end(body);
 }
 
-function sendText(response, statusCode, body, contentType = "text/plain; charset=utf-8") {
+function sendText(
+  response,
+  statusCode,
+  body,
+  contentType = "text/plain; charset=utf-8",
+  extraHeaders = {}
+) {
   response.writeHead(statusCode, {
     "Cache-Control": "no-store",
     "Content-Length": Buffer.byteLength(body),
-    "Content-Type": contentType
+    "Content-Type": contentType,
+    ...extraHeaders
   });
   response.end(body);
 }
@@ -257,6 +268,88 @@ function buildPasswordDigest(password) {
   return `sha256:${crypto.createHash("sha256").update(String(password || "")).digest("hex")}`;
 }
 
+function parseCookies(request) {
+  const header = String(request.headers.cookie || "");
+
+  return header.split(";").reduce((cookies, item) => {
+    const [rawName, ...rawValue] = item.split("=");
+    const name = normalizeText(rawName);
+
+    if (!name) {
+      return cookies;
+    }
+
+    cookies[name] = decodeURIComponent(rawValue.join("=") || "");
+    return cookies;
+  }, {});
+}
+
+function pruneWorkspaceSessions() {
+  const now = Date.now();
+
+  for (const [token, session] of WORKSPACE_SESSIONS.entries()) {
+    if (!session || session.expiresAt <= now) {
+      WORKSPACE_SESSIONS.delete(token);
+    }
+  }
+}
+
+function buildWorkspaceSessionCookie(request, token, maxAgeSeconds = Math.floor(WORKSPACE_SESSION_TTL_MS / 1000)) {
+  const cookieParts = [
+    `${WORKSPACE_SESSION_COOKIE}=${encodeURIComponent(token)}`,
+    "Path=/",
+    "HttpOnly",
+    "SameSite=Lax",
+    `Max-Age=${maxAgeSeconds}`
+  ];
+  const forwardedProto = normalizeText(request.headers["x-forwarded-proto"]).toLowerCase();
+
+  if (forwardedProto === "https") {
+    cookieParts.push("Secure");
+  }
+
+  return cookieParts.join("; ");
+}
+
+function createWorkspaceSession(profile) {
+  pruneWorkspaceSessions();
+  const token = crypto.randomBytes(24).toString("hex");
+  WORKSPACE_SESSIONS.set(token, {
+    username: profile.username,
+    role: profile.role,
+    fullName: profile.fullName,
+    expiresAt: Date.now() + WORKSPACE_SESSION_TTL_MS
+  });
+  return token;
+}
+
+function clearWorkspaceSession(request) {
+  pruneWorkspaceSessions();
+  const token = parseCookies(request)[WORKSPACE_SESSION_COOKIE];
+
+  if (token) {
+    WORKSPACE_SESSIONS.delete(token);
+  }
+}
+
+function getWorkspaceSession(request) {
+  pruneWorkspaceSessions();
+  const token = parseCookies(request)[WORKSPACE_SESSION_COOKIE];
+
+  if (!token) {
+    return null;
+  }
+
+  const session = WORKSPACE_SESSIONS.get(token);
+
+  if (!session) {
+    return null;
+  }
+
+  session.expiresAt = Date.now() + WORKSPACE_SESSION_TTL_MS;
+  return session;
+}
+
 function sanitizeWorkspaceAuthProfile(record) {
   const fullName = normalizeText(record?.fullName || record?.name);
   const username = normalizeText(record?.username || record?.user).toLowerCase();
@@ -306,25 +399,50 @@ function loadWorkspaceAuthProfiles() {
   return [];
 }
 
-function isAuthorizedWorkspaceOrderUser(auth) {
+function findWorkspaceProfileByCredentials(auth, options = {}) {
   const username = normalizeText(auth?.username).toLowerCase();
   const password = String(auth?.password || "");
+  const allowedRoles = options.allowedRoles instanceof Set ? options.allowedRoles : null;
 
   if (!username || !password) {
-    return false;
+    return null;
   }
 
-  const profile = loadWorkspaceAuthProfiles().find(
-    (item) =>
-      item.username === username &&
-      ONLINE_ORDER_ALLOWED_ROLES.has(item.role) &&
-      item.passwordHash === buildPasswordDigest(password)
+  return (
+    loadWorkspaceAuthProfiles().find(
+      (item) =>
+        item.username === username &&
+        (!allowedRoles || allowedRoles.has(item.role)) &&
+        item.passwordHash === buildPasswordDigest(password)
+    ) || null
   );
+}
 
-  return Boolean(profile);
+function isAuthorizedWorkspaceOrderUser(auth) {
+  return Boolean(
+    findWorkspaceProfileByCredentials(auth, {
+      allowedRoles: ONLINE_ORDER_ALLOWED_ROLES
+    })
+  );
+}
+
+function isAuthorizedWorkspaceOrderSession(request) {
+  const session = getWorkspaceSession(request);
+
+  return Boolean(
+    session &&
+      ONLINE_ORDER_ALLOWED_ROLES.has(session.role) &&
+      loadWorkspaceAuthProfiles().some(
+        (item) => item.username === session.username && item.role === session.role
+      )
+  );
 }
 
 function isAuthorizedAdminRequest(request) {
+  if (isAuthorizedWorkspaceOrderSession(request)) {
+    return true;
+  }
+
   const auth = parseBasicAuth(request);
 
   if (auth && ADMIN_AUTH_ENABLED && auth.username === ADMIN_USER && auth.password === ADMIN_PASSWORD) {
@@ -768,6 +886,57 @@ async function handleApiRoute(request, response, pathname, url) {
       order: buildPublicOrderView(order)
     });
     return true;
+  }
+
+  if (pathname === "/api/workspace-session") {
+    if (request.method === "POST") {
+      try {
+        const body = await readRequestBody(request);
+        const profile = findWorkspaceProfileByCredentials(body);
+
+        if (!profile) {
+          sendUnauthorized(response);
+          return true;
+        }
+
+        const token = createWorkspaceSession(profile);
+        sendJson(
+          response,
+          200,
+          {
+            ok: true,
+            username: profile.username,
+            fullName: profile.fullName,
+            role: profile.role
+          },
+          {
+            "Set-Cookie": buildWorkspaceSessionCookie(request, token)
+          }
+        );
+        return true;
+      } catch (error) {
+        sendJson(response, 400, {
+          ok: false,
+          errors: [error.message || "Unable to start the workspace session."]
+        });
+        return true;
+      }
+    }
+
+    if (request.method === "DELETE") {
+      clearWorkspaceSession(request);
+      sendJson(
+        response,
+        200,
+        {
+          ok: true
+        },
+        {
+          "Set-Cookie": buildWorkspaceSessionCookie(request, "", 0)
+        }
+      );
+      return true;
+    }
   }
 
   if (pathname === "/api/admin/orders") {
