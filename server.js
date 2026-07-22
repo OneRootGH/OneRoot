@@ -9,8 +9,20 @@ const ROOT_DIR = __dirname;
 const WEBSITE_DIR = path.join(ROOT_DIR, "website");
 const DATA_DIR = path.join(ROOT_DIR, "data");
 const ORDERS_FILE = path.join(DATA_DIR, "orders.json");
+const WORKSPACE_AUTH_FILES = [
+  path.join(ROOT_DIR, "outputs", "oneroot-hosted-workspace-latest.json"),
+  path.join(ROOT_DIR, "data", "public", "oneroot-hosted-workspace-seed.json")
+];
 const SERVICE_OFFERS_FILE = path.join(WEBSITE_DIR, "service_offers.json");
 const PRODUCT_CATALOG_FILE = path.join(ROOT_DIR, "oneroot_product_catalog.js");
+const ONLINE_ORDER_ALLOWED_ROLES = new Set([
+  "owner",
+  "admin",
+  "finance",
+  "operations",
+  "sales-stock-operator",
+  "cashier"
+]);
 const ORDER_STATUSES = [
   "new",
   "confirmed",
@@ -241,13 +253,90 @@ function parseBasicAuth(request) {
   }
 }
 
+function buildPasswordDigest(password) {
+  return `sha256:${crypto.createHash("sha256").update(String(password || "")).digest("hex")}`;
+}
+
+function sanitizeWorkspaceAuthProfile(record) {
+  const fullName = normalizeText(record?.fullName || record?.name);
+  const username = normalizeText(record?.username || record?.user).toLowerCase();
+  const role = normalizeText(record?.role).toLowerCase();
+  const passwordHash = normalizeText(
+    record?.passwordHash || record?.passwordDigest || record?.passwordToken || record?.password_signature
+  );
+  const active = Boolean(
+    record?.active === true ||
+      record?.active === "true" ||
+      record?.active === 1 ||
+      record?.active === "1" ||
+      record?.active === undefined
+  );
+  const loginEnabled = Boolean(
+    record?.loginEnabled === true ||
+      record?.loginEnabled === "true" ||
+      record?.loginEnabled === 1 ||
+      record?.loginEnabled === "1" ||
+      passwordHash
+  );
+
+  if (!fullName || !username || !role || !passwordHash || !active || !loginEnabled) {
+    return null;
+  }
+
+  return {
+    fullName,
+    username,
+    role,
+    passwordHash
+  };
+}
+
+function loadWorkspaceAuthProfiles() {
+  for (const filePath of WORKSPACE_AUTH_FILES) {
+    const parsed = readJsonFile(filePath, null);
+    const profiles = Array.isArray(parsed?.userProfiles)
+      ? parsed.userProfiles.map(sanitizeWorkspaceAuthProfile).filter(Boolean)
+      : [];
+
+    if (profiles.length > 0) {
+      return profiles;
+    }
+  }
+
+  return [];
+}
+
+function isAuthorizedWorkspaceOrderUser(auth) {
+  const username = normalizeText(auth?.username).toLowerCase();
+  const password = String(auth?.password || "");
+
+  if (!username || !password) {
+    return false;
+  }
+
+  const profile = loadWorkspaceAuthProfiles().find(
+    (item) =>
+      item.username === username &&
+      ONLINE_ORDER_ALLOWED_ROLES.has(item.role) &&
+      item.passwordHash === buildPasswordDigest(password)
+  );
+
+  return Boolean(profile);
+}
+
 function isAuthorizedAdminRequest(request) {
-  if (!ADMIN_AUTH_ENABLED) {
+  const auth = parseBasicAuth(request);
+
+  if (auth && ADMIN_AUTH_ENABLED && auth.username === ADMIN_USER && auth.password === ADMIN_PASSWORD) {
     return true;
   }
 
-  const auth = parseBasicAuth(request);
-  return Boolean(auth && auth.username === ADMIN_USER && auth.password === ADMIN_PASSWORD);
+  if (auth && isAuthorizedWorkspaceOrderUser(auth)) {
+    return true;
+  }
+
+  const hasWorkspaceProfiles = loadWorkspaceAuthProfiles().length > 0;
+  return !ADMIN_AUTH_ENABLED && !hasWorkspaceProfiles;
 }
 
 function assertSafeChildPath(baseDir, targetPath) {

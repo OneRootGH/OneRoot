@@ -21,6 +21,7 @@ const FORECAST_STORAGE_KEY = "oneroot-expense-register:forecast:v1";
 const USER_PROFILE_STORAGE_KEY = "oneroot-expense-register:users:v1";
 const VIEW_STORAGE_KEY = "oneroot-expense-register:view:v2";
 const AUTH_SESSION_STORAGE_KEY = "oneroot-expense-register:auth-session:v1";
+const ONLINE_ORDERS_AUTH_STORAGE_KEY = "oneroot-expense-register:online-orders-auth:v1";
 const LIVE_DATA_STORAGE_KEYS = new Set([
   STORAGE_KEY,
   SETTINGS_KEY,
@@ -3541,7 +3542,7 @@ function loadAuthSession() {
   }
 }
 
-function persistAuthSession(userId) {
+function persistAuthSession(userId, options = {}) {
   try {
     if (!("sessionStorage" in window)) {
       return;
@@ -3551,6 +3552,8 @@ function persistAuthSession(userId) {
       AUTH_SESSION_STORAGE_KEY,
       JSON.stringify({
         userId: normalizeText(userId),
+        username: normalizeText(options.username).toLowerCase(),
+        password: String(options.password || ""),
         signedInAt: new Date().toISOString()
       })
     );
@@ -3566,6 +3569,7 @@ function clearAuthSession() {
     }
 
     window.sessionStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+    window.sessionStorage.removeItem(ONLINE_ORDERS_AUTH_STORAGE_KEY);
   } catch (error) {
     console.error(error);
   }
@@ -16327,7 +16331,10 @@ async function handleAccessLoginSubmit(event) {
 
   state.signedInUserId = profile.id;
   state.activeUserId = profile.id;
-  persistAuthSession(profile.id);
+  persistAuthSession(profile.id, {
+    username: profile.username,
+    password
+  });
   persistSettings();
   navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
   render();

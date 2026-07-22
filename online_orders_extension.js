@@ -180,6 +180,37 @@
     }
   }
 
+  function loadWorkspaceSessionOrdersAuth() {
+    try {
+      if (typeof loadAuthSession !== "function") {
+        return { username: "", password: "" };
+      }
+
+      const session = loadAuthSession() || {};
+      return {
+        username: normalizeText(session.username).toLowerCase(),
+        password: String(session.password || "")
+      };
+    } catch (error) {
+      console.error(error);
+      return { username: "", password: "" };
+    }
+  }
+
+  function getEffectiveOnlineOrdersAuth() {
+    const savedUsername = normalizeText(state.onlineOrdersAuth?.username);
+    const savedPassword = String(state.onlineOrdersAuth?.password || "");
+
+    if (savedUsername && savedPassword) {
+      return {
+        username: savedUsername,
+        password: savedPassword
+      };
+    }
+
+    return loadWorkspaceSessionOrdersAuth();
+  }
+
   function persistOnlineOrdersAuth() {
     try {
       if (!("sessionStorage" in window)) {
@@ -213,15 +244,14 @@
   }
 
   function hasOnlineOrdersAuth() {
-    return Boolean(
-      normalizeText(state.onlineOrdersAuth?.username) &&
-        String(state.onlineOrdersAuth?.password || "")
-    );
+    const auth = getEffectiveOnlineOrdersAuth();
+    return Boolean(auth.username && auth.password);
   }
 
   function buildOnlineOrdersAuthHeader() {
-    const username = normalizeText(state.onlineOrdersAuth?.username);
-    const password = String(state.onlineOrdersAuth?.password || "");
+    const auth = getEffectiveOnlineOrdersAuth();
+    const username = normalizeText(auth.username);
+    const password = String(auth.password || "");
 
     if (!username || !password) {
       return "";
@@ -574,8 +604,13 @@
   }
 
   function buildOnlineOrdersAuthMarkup() {
-    const username = normalizeText(state.onlineOrdersAuth?.username);
+    const workspaceAuth = loadWorkspaceSessionOrdersAuth();
+    const username = normalizeText(state.onlineOrdersAuth?.username) || workspaceAuth.username;
     const errorMessage = normalizeText(state.onlineOrdersMeta.error);
+    const helperText =
+      workspaceAuth.username && workspaceAuth.password
+        ? "Your signed-in workspace username and password are used automatically when they are allowed for online orders. Use this form only if you need to override them."
+        : "Enter the same username and password you use to sign in to the workspace, unless your hosted server uses a different order access login.";
 
     return `
       <section class="section-card inset-card">
@@ -586,7 +621,7 @@
           </div>
         </div>
         <p class="muted-text">
-          The Staff App now opens directly. Enter the protected OneRoot.shop order desk username and password here whenever you need server order access.
+          ${escapeHtml(helperText)}
         </p>
         ${
           errorMessage
@@ -998,9 +1033,9 @@
       state.onlineOrdersMeta.loaded = false;
       state.onlineOrdersMeta.authRequired = true;
       state.onlineOrdersMeta.error =
-        "Order desk access cleared. Enter the username and password again when you need online orders.";
+        "Saved manual order access was cleared. If your workspace sign-in is allowed for online orders, it will be used automatically the next time you refresh.";
       renderOnlineOrdersPage();
-      showToast("Saved online order access cleared.");
+      showToast("Saved manual online order access cleared.");
       return;
     }
 
