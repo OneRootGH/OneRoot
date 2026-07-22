@@ -2266,6 +2266,23 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
     const nextWorkspaceToken = normalizeText(payload?.token) || persistedWorkspaceToken;
 
     if (!session) {
+      const recoveredSession = getStoredHostedWorkspaceSessionProfile();
+
+      if (recoveredSession) {
+        state.signedInUserId = recoveredSession.userId;
+        state.activeUserId = recoveredSession.userId;
+        persistAuthSession(recoveredSession.userId, {
+          username: recoveredSession.username,
+          basicAuthToken: persistedBasicAuthToken,
+          workspaceToken: nextWorkspaceToken
+        });
+        setHostedWorkspaceSyncStatus(
+          "auth-required",
+          "Reconnecting this device to the live shared workspace. Your menus stay open while online access retries."
+        );
+        return recoveredSession;
+      }
+
       if (payload?.loginRequired) {
         state.signedInUserId = "";
         closeHostedWorkspaceEventStream();
@@ -4127,9 +4144,6 @@ function handleDynamicModuleSubmit(event) {
     handleUserProfileSubmit(event);
   }
 
-  if (event.target.id === "accessLoginForm") {
-    handleAccessLoginSubmit(event);
-  }
 }
 
 function handleDynamicModuleInput(event) {
@@ -4667,6 +4681,30 @@ function getHostedWorkspaceBasicAuthToken() {
   return normalizeText(loadAuthSession().basicAuthToken);
 }
 
+function getStoredHostedWorkspaceSessionProfile(options = {}) {
+  const savedSession = loadAuthSession();
+  const savedUserId = normalizeText(options.userId || savedSession.userId || state.signedInUserId);
+  const savedUsername = normalizeText(options.username || savedSession.username).toLowerCase();
+  const matchedProfile =
+    state.userProfiles.find(
+      (profile) =>
+        isPasswordLoginEnabledForProfile(profile) &&
+        ((savedUserId && normalizeText(profile.id) === savedUserId) ||
+          (savedUsername && normalizeText(profile.username).toLowerCase() === savedUsername))
+    ) || null;
+
+  if (!matchedProfile) {
+    return null;
+  }
+
+  return {
+    userId: matchedProfile.id,
+    username: matchedProfile.username,
+    fullName: matchedProfile.fullName,
+    role: matchedProfile.role
+  };
+}
+
 function findHostedWorkspaceProfileBySession(session = {}) {
   const sessionUserId = normalizeText(session.userId);
   const sessionUsername = normalizeText(session.username).toLowerCase();
@@ -4913,6 +4951,21 @@ function reconcileAuthenticationSession(options = {}) {
   return signedInProfile;
 }
 
+function bindAccessLoginForm() {
+  if (!elements.accessViewRoot) {
+    return;
+  }
+
+  const loginForm = elements.accessViewRoot.querySelector("#accessLoginForm");
+
+  if (!loginForm || loginForm.dataset.bound === "true") {
+    return;
+  }
+
+  loginForm.addEventListener("submit", handleAccessLoginSubmit);
+  loginForm.dataset.bound = "true";
+}
+
 function getCurrentUserProfile() {
   if (isWorkspaceLoginRequired()) {
     return getAuthenticatedUserProfile();
@@ -5055,13 +5108,14 @@ function renderChrome() {
   const currentUser = getCurrentUserProfile();
   const hostedSyncAvailable = isHostedWorkspaceEnvironment();
   const syncStatus = getHostedWorkspaceSyncStatusMeta();
+  const hideAccessBannerActions = locked && state.currentView === "access";
   elements.currentViewEyebrow.textContent = meta.eyebrow;
   elements.currentViewTitle.textContent = meta.title;
   elements.currentViewSummary.textContent = meta.summary;
   elements.exportActiveWorkbookBtn.textContent = getWorkbookExportMeta(state.currentView).label;
   elements.exportActiveWorkbookBtn.disabled = locked;
   elements.printReportBtn.disabled = locked;
-  elements.sharedWorkspaceSyncBtn.hidden = !hostedSyncAvailable;
+  elements.sharedWorkspaceSyncBtn.hidden = !hostedSyncAvailable || hideAccessBannerActions;
   elements.sharedWorkspaceSyncBtn.disabled = false;
   elements.sharedWorkspaceSyncBtn.textContent =
     hostedWorkspaceSyncState.mode === "live-connected"
@@ -5070,11 +5124,12 @@ function renderChrome() {
         ? "Sign In Online"
         : "Reconnect Online Data";
   elements.sharedWorkspaceSyncBtn.title = syncStatus.detail || syncStatus.actionHint;
+  elements.workspaceAuthBtn.hidden = hideAccessBannerActions;
 
   if (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0) {
     elements.workspaceAuthBtn.textContent = "Access Setup";
   } else if (locked) {
-    elements.workspaceAuthBtn.textContent = "Sign In";
+    elements.workspaceAuthBtn.textContent = "Access";
   } else if (isWorkspaceLoginRequired()) {
     elements.workspaceAuthBtn.textContent = `Sign Out ${currentUser?.fullName?.split(" ")[0] || ""}`.trim();
   } else {
@@ -17129,6 +17184,7 @@ function renderAccessPage() {
         </aside>
       </section>
     `;
+    bindAccessLoginForm();
     return;
   }
 
@@ -17477,6 +17533,7 @@ function renderAccessPage() {
       </div>
     </section>
   `;
+  bindAccessLoginForm();
 }
 
 async function handleUserProfileSubmit(event) {
