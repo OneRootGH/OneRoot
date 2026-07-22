@@ -4,7 +4,7 @@
   "exportedAt": "2026-07-21T22:55:18.699Z",
   "settings": {
     "currency": "GHS",
-    "activeUserId": "17ce6f22-484f-477f-b6ee-f3b1086ec141"
+    "activeUserId": "workspace-owner"
   },
   "workspace": {
     "expenses": [
@@ -3711,30 +3711,17 @@
     ],
     "userProfiles": [
       {
-        "id": "27e96477-1287-48da-b863-fd8ec19b0e6d",
-        "createdAt": "2026-07-21T20:39:49.473Z",
-        "updatedAt": "2026-07-21T20:51:29.848Z",
-        "fullName": "Emmanuella Sekyere",
-        "username": "nuella",
-        "role": "sales-stock-operator",
-        "phone": "0241508687",
-        "active": true,
-        "loginEnabled": true,
-        "passwordHash": "sha256:2c0eed0bd49c00ebef1293ced2f33eea8add3069e844e3a633697654980a3564",
-        "notes": ""
-      },
-      {
-        "id": "17ce6f22-484f-477f-b6ee-f3b1086ec141",
-        "createdAt": "2026-07-14T22:49:32.284Z",
-        "updatedAt": "2026-07-14T22:49:32.284Z",
+        "id": "workspace-owner",
+        "createdAt": "2026-07-22T17:12:46.611Z",
+        "updatedAt": "2026-07-22T17:12:46.611Z",
         "fullName": "Philip Boakye",
         "username": "phil",
         "role": "owner",
         "phone": "0244620860",
         "active": true,
         "loginEnabled": true,
-        "passwordHash": "sha256:7a3ecde75f34a187d99a8ca14587be1b1779f275f7f7ea67bd0e3c55aea38603",
-        "notes": ""
+        "passwordHash": "sha256:0ddec74673dc7c043bac1f7d0762bd6f1ed6c62e972186e0c1b1be3e7b762388",
+        "notes": "Bootstrap online workspace owner profile"
       }
     ],
     "posOrders": [],
