@@ -68,6 +68,7 @@ const HOSTED_WORKSPACE_ACCESS_FLAG_KEY =
 const HOSTED_WORKSPACE_LIVE_SYNC_PATH = "/api/workspace";
 const HOSTED_WORKSPACE_ACCESS_PATH = "/api/workspace-access";
 const HOSTED_WORKSPACE_SESSION_PATH = "/api/workspace-session";
+const HOSTED_WORKSPACE_EVENTS_PATH = "/api/workspace-events";
 const HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY =
   "oneroot-expense-register:hosted-workspace-live:v1";
 
@@ -1730,9 +1731,10 @@ const LOCAL_PREVIEW_REFRESH_FLAG = "oneroot-local-preview-refresh-v4";
 const hostedWorkspaceSyncState = {
   hooksInstalled: false,
   uploadTimer: null,
-  uploadDelayMs: 1200,
+  uploadDelayMs: 400,
   pollTimer: null,
   pollIntervalMs: 30000,
+  eventSource: null,
   uploadInFlight: false,
   uploadQueued: false,
   hasPendingLocalChanges: false,
@@ -1764,6 +1766,7 @@ async function init() {
   reconcileAuthenticationSession({ skipPersist: true });
   installHostedWorkspaceSyncHooks();
   await restoreHostedWorkspaceLiveSyncIfNeeded({ render: false });
+  startHostedWorkspaceEventStream();
   startHostedWorkspaceSyncPolling();
   populateCurrencyOptions();
   initializeBudgetPlanner();
@@ -2188,6 +2191,7 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
     if (!session) {
       if (payload?.loginRequired) {
         state.signedInUserId = "";
+        closeHostedWorkspaceEventStream();
         clearAuthSession();
       }
       return null;
@@ -2211,6 +2215,8 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
         persistSettings();
       }
     }
+
+    startHostedWorkspaceEventStream();
 
     return session;
   } catch (error) {
@@ -2489,6 +2495,71 @@ async function fetchHostedWorkspaceLiveSnapshot() {
     }
   );
   return imported;
+}
+
+async function handleHostedWorkspaceEventSync() {
+  if (shouldPauseHostedWorkspaceLockRefresh()) {
+    return;
+  }
+
+  await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
+  const changed = await restoreHostedWorkspaceLiveSyncIfNeeded({
+    preferRemote: true,
+    render: false,
+    uploadAfterMerge: false
+  });
+
+  if (changed) {
+    render();
+  }
+}
+
+function closeHostedWorkspaceEventStream() {
+  if (hostedWorkspaceSyncState.eventSource) {
+    hostedWorkspaceSyncState.eventSource.close();
+    hostedWorkspaceSyncState.eventSource = null;
+  }
+}
+
+function startHostedWorkspaceEventStream() {
+  if (
+    !isHostedWorkspaceEnvironment() ||
+    typeof EventSource !== "function" ||
+    isWorkspaceLocked() ||
+    shouldPauseHostedWorkspaceLockRefresh()
+  ) {
+    closeHostedWorkspaceEventStream();
+    return;
+  }
+
+  if (hostedWorkspaceSyncState.eventSource) {
+    return;
+  }
+
+  try {
+    const eventSource = new EventSource(HOSTED_WORKSPACE_EVENTS_PATH);
+    hostedWorkspaceSyncState.eventSource = eventSource;
+
+    eventSource.addEventListener("workspace", () => {
+      void handleHostedWorkspaceEventSync();
+    });
+
+    eventSource.onerror = () => {
+      if (hostedWorkspaceSyncState.eventSource !== eventSource) {
+        return;
+      }
+
+      if (eventSource.readyState === EventSource.CLOSED) {
+        hostedWorkspaceSyncState.eventSource = null;
+
+        window.setTimeout(() => {
+          startHostedWorkspaceEventStream();
+        }, 2500);
+      }
+    };
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function syncHostedWorkspaceUiAfterMerge() {
@@ -17423,6 +17494,7 @@ async function handleAccessLoginSubmit(event) {
 
     state.accessLoginDraft = createEmptyAccessLoginDraft();
     persistSettings();
+    startHostedWorkspaceEventStream();
     navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
     render();
     showToast(
@@ -17461,6 +17533,7 @@ async function handleAccessLoginSubmit(event) {
   });
   state.accessLoginDraft = createEmptyAccessLoginDraft();
   persistSettings();
+  startHostedWorkspaceEventStream();
   navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
   render();
   showToast(
@@ -17474,6 +17547,7 @@ function signOutWorkspaceUser(options = {}) {
   const signedInProfile = getAuthenticatedUserProfile();
   state.signedInUserId = "";
   state.accessLoginDraft = createEmptyAccessLoginDraft();
+  closeHostedWorkspaceEventStream();
   clearAuthSession();
   clearServerWorkspaceSession();
   navigateTo("access", { syncHash: true, showAccessToast: false });

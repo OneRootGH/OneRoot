@@ -33,6 +33,7 @@ const ONLINE_ORDER_ALLOWED_ROLES = new Set([
 const WORKSPACE_SESSION_COOKIE = "oneroot_workspace_session";
 const WORKSPACE_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
 const WORKSPACE_SESSIONS = new Map();
+const WORKSPACE_EVENT_CLIENTS = new Set();
 const ORDER_STATUSES = [
   "new",
   "confirmed",
@@ -330,6 +331,37 @@ function countWorkspaceBusinessRecords(payload) {
   }, 0);
 }
 
+function createWorkspaceEventPayload(payload) {
+  const snapshot = normalizeWorkspaceSnapshotPayload(payload);
+
+  return {
+    type: "workspace-updated",
+    exportedAt: normalizeText(snapshot.exportedAt) || new Date().toISOString(),
+    recordCount: countWorkspaceBusinessRecords(snapshot)
+  };
+}
+
+function broadcastWorkspaceSnapshotUpdate(payload) {
+  if (WORKSPACE_EVENT_CLIENTS.size === 0) {
+    return;
+  }
+
+  const message = `event: workspace\ndata: ${JSON.stringify(createWorkspaceEventPayload(payload))}\n\n`;
+
+  for (const client of Array.from(WORKSPACE_EVENT_CLIENTS)) {
+    try {
+      client.response.write(message);
+    } catch (error) {
+      console.error("[oneroot-storage] Workspace event stream write failed.", error);
+      WORKSPACE_EVENT_CLIENTS.delete(client);
+
+      if (client.keepAliveTimer) {
+        clearInterval(client.keepAliveTimer);
+      }
+    }
+  }
+}
+
 function readWorkspaceSnapshotFile() {
   ensureWorkspaceStore();
 
@@ -549,8 +581,7 @@ async function readWorkspaceSnapshotStore() {
 
 async function writeWorkspaceSnapshotStore(payload) {
   const normalized = normalizeWorkspaceSnapshotPayload(payload);
-
-  return runWithDatabaseFallback(
+  const savedSnapshot = await runWithDatabaseFallback(
     "Workspace database write",
     async (pool) => {
       await pool.query(
@@ -570,6 +601,9 @@ async function writeWorkspaceSnapshotStore(payload) {
     },
     () => writeWorkspaceSnapshotFile(normalized)
   );
+
+  broadcastWorkspaceSnapshotUpdate(savedSnapshot);
+  return savedSnapshot;
 }
 
 function createOrderNumber() {
@@ -1491,6 +1525,59 @@ async function handleApiRoute(request, response, pathname, url) {
       });
       return true;
     }
+  }
+
+  if (pathname === "/api/workspace-events" && request.method === "GET") {
+    if (!isAuthorizedWorkspaceRequest(request)) {
+      sendJson(response, 401, {
+        ok: false,
+        error: "Workspace sign-in is required."
+      });
+      return true;
+    }
+
+    const keepAliveTimer = setInterval(() => {
+      try {
+        response.write(": keep-alive\n\n");
+      } catch (error) {
+        console.error("[oneroot-storage] Workspace keep-alive failed.", error);
+      }
+    }, 25000);
+
+    const client = {
+      response,
+      keepAliveTimer
+    };
+
+    const cleanup = () => {
+      WORKSPACE_EVENT_CLIENTS.delete(client);
+      clearInterval(keepAliveTimer);
+    };
+
+    request.on("close", cleanup);
+    response.on("close", cleanup);
+
+    response.writeHead(200, {
+      "Cache-Control": "no-store",
+      Connection: "keep-alive",
+      "Content-Type": "text/event-stream; charset=utf-8",
+      "X-Accel-Buffering": "no"
+    });
+    response.write(": connected\n\n");
+    WORKSPACE_EVENT_CLIENTS.add(client);
+
+    try {
+      response.write(
+        `event: workspace\ndata: ${JSON.stringify(
+          createWorkspaceEventPayload(await readWorkspaceSnapshotStore())
+        )}\n\n`
+      );
+    } catch (error) {
+      cleanup();
+      console.error("[oneroot-storage] Workspace event stream init failed.", error);
+    }
+
+    return true;
   }
 
   if (pathname === "/api/workspace") {
