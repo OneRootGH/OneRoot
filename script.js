@@ -22,7 +22,7 @@ const USER_PROFILE_STORAGE_KEY = "oneroot-expense-register:users:v1";
 const VIEW_STORAGE_KEY = "oneroot-expense-register:view:v2";
 const AUTH_SESSION_STORAGE_KEY = "oneroot-expense-register:auth-session:v1";
 const AUTH_SIGN_OUT_FLAG_KEY = "oneroot-expense-register:auth-signed-out:v1";
-const AUTH_RESET_MIGRATION_KEY = "oneroot-expense-register:auth-reset:20260722a";
+const AUTH_RESET_MIGRATION_KEY = "oneroot-expense-register:auth-reset:20260722b";
 const ONLINE_ORDERS_AUTH_STORAGE_KEY = "oneroot-expense-register:online-orders-auth:v1";
 const LIVE_DATA_STORAGE_KEYS = new Set([
   STORAGE_KEY,
@@ -1758,6 +1758,7 @@ async function init() {
   captureElements();
   decorateNavigationMenus();
   bindEvents();
+  syncHostedWorkspaceBarrierControls();
   if (isHostedWorkspaceEnvironment()) {
     const reloadedForFreshHostedData = await unregisterHostedWorkspaceCachingIfNeeded();
 
@@ -1795,6 +1796,22 @@ async function init() {
   registerServiceWorker();
 }
 
+function syncHostedWorkspaceBarrierControls() {
+  if (!elements.restoreHostedSnapshotBtn) {
+    return;
+  }
+
+  const hosted = isHostedWorkspaceEnvironment();
+  elements.restoreHostedSnapshotBtn.classList.toggle("hidden", hosted);
+  elements.restoreHostedSnapshotBtn.disabled = hosted;
+
+  if (hosted) {
+    elements.restoreHostedSnapshotBtn.title = "Hosted operations now sync directly online.";
+  } else {
+    elements.restoreHostedSnapshotBtn.removeAttribute("title");
+  }
+}
+
 function isHostedWorkspaceEnvironment() {
   const hostname = normalizeText(window.location.hostname).toLowerCase();
   return hostname !== "" && !["127.0.0.1", "localhost", "::1"].includes(hostname);
@@ -1823,78 +1840,57 @@ function setHostedWorkspaceSyncStatus(mode, detail = "", options = {}) {
 }
 
 function getHostedWorkspaceSyncStatusMeta() {
-  const loginRequired = isWorkspaceLoginRequired();
   const recordLabel = formatHostedWorkspaceRecordLabel(
     hostedWorkspaceSyncState.lastRecordTotal
   );
   const liveSyncLabel = normalizeDateInput(hostedWorkspaceSyncState.lastLiveSyncAt)
     ? formatDisplayDate(normalizeDateInput(hostedWorkspaceSyncState.lastLiveSyncAt))
     : "";
-  const snapshotLabel = normalizeDateInput(hostedWorkspaceSyncState.lastSnapshotAt)
-    ? formatDisplayDate(normalizeDateInput(hostedWorkspaceSyncState.lastSnapshotAt))
-    : "";
 
   switch (hostedWorkspaceSyncState.mode) {
     case "live-connected":
       return {
-        title: "Live Workspace Connected",
+        title: "Online Sync Active",
         detail:
           hostedWorkspaceSyncState.detail ||
-          `This device is connected to the live shared workspace with ${recordLabel}.`,
+          `This device is connected to the online workspace with ${recordLabel}.`,
         recordLabel,
         liveSyncLabel,
-        snapshotLabel,
-        actionHint: "Use Refresh Shared Data to pull the latest records from other devices."
+        modeLabel: "Automatic",
+        actionHint: "Entries save online automatically and appear on other signed-in devices."
       };
     case "auth-required":
       return {
         title: "Sign In Required",
         detail:
           hostedWorkspaceSyncState.detail ||
-          (loginRequired
-            ? "This device is waiting for a live workspace sign-in before it can open shared records."
-            : "This device is waiting for live shared access to become available."),
+          "Sign in to open the online workspace on this device.",
         recordLabel,
         liveSyncLabel,
-        snapshotLabel,
-        actionHint: loginRequired
-          ? "Sign in on this device, then it will connect directly to the shared workspace."
-          : "Use Refresh Shared Data to compare this device with the live shared workspace."
+        modeLabel: "Sign in first",
+        actionHint: "Use the same workspace username and password on each device."
       };
     case "sync-error":
       return {
-        title: "Shared Workspace Error",
+        title: "Sync Needs Attention",
         detail:
           hostedWorkspaceSyncState.detail ||
-          "The live shared workspace could not be reached right now. The uploaded snapshot is still available on this device.",
+          "The online workspace could not be reached right now.",
         recordLabel,
         liveSyncLabel,
-        snapshotLabel,
-        actionHint: "Try Refresh Shared Data again after confirming the hosted app is reachable."
-      };
-    case "snapshot-only":
-      return {
-        title: "Uploaded Snapshot Loaded",
-        detail:
-          hostedWorkspaceSyncState.detail ||
-          `This device loaded ${recordLabel} from the uploaded snapshot. Sign in to compare it with the live shared workspace.`,
-        recordLabel,
-        liveSyncLabel,
-        snapshotLabel,
-        actionHint: loginRequired
-          ? "Sign in and use Refresh Shared Data to load newer live records when available."
-          : "Use Refresh Shared Data to compare this device with the live shared workspace."
+        modeLabel: "Needs retry",
+        actionHint: "Check the connection, then use Sync Now or sign in again if needed."
       };
     default:
       return {
-        title: "Sync Status Pending",
+        title: "Online Sync Starting",
         detail:
           hostedWorkspaceSyncState.detail ||
-          "This device has not checked the live shared workspace yet.",
+          "This device is preparing the online workspace connection.",
         recordLabel,
         liveSyncLabel,
-        snapshotLabel,
-        actionHint: "Use Refresh Shared Data to check the shared workspace."
+        modeLabel: "Connecting",
+        actionHint: "The app will sync online automatically after it connects."
       };
   }
 }
@@ -2237,8 +2233,8 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
       setHostedWorkspaceSyncStatus(
         payload.loginRequired ? "auth-required" : "live-connected",
         payload.loginRequired
-          ? `Live shared workspace available with ${formatHostedWorkspaceRecordLabel(payload.recordCount || 0)}. Sign in to continue.`
-          : `Live shared workspace available with ${formatHostedWorkspaceRecordLabel(payload.recordCount || 0)}.`,
+          ? `Online workspace available with ${formatHostedWorkspaceRecordLabel(payload.recordCount || 0)}. Sign in to continue.`
+          : `Online workspace available with ${formatHostedWorkspaceRecordLabel(payload.recordCount || 0)}.`,
         {
           recordTotal: payload.recordCount || 0,
           liveSyncAt: payload.exportedAt || ""
@@ -2640,7 +2636,7 @@ async function ensureHostedWorkspaceServerSession() {
   if (!isHostedWorkspaceEnvironment()) {
     setHostedWorkspaceSyncStatus(
       "sync-error",
-      "Live shared workspace checks only run on the hosted app."
+      "Online workspace checks only run on the hosted app."
     );
     return false;
   }
@@ -2652,7 +2648,7 @@ async function ensureHostedWorkspaceServerSession() {
     if (isHostedWorkspaceSignOutSuspended()) {
       setHostedWorkspaceSyncStatus(
         "auth-required",
-        "This device is signed out. Sign in again to reconnect it to the live shared workspace."
+        "This device is signed out. Sign in again to reconnect it to the online workspace."
       );
       return false;
     }
@@ -2670,10 +2666,10 @@ async function ensureHostedWorkspaceServerSession() {
     clearAuthSession();
 
     setHostedWorkspaceSyncStatus(
-      isWorkspaceLoginRequired() ? "auth-required" : "snapshot-only",
+      isWorkspaceLoginRequired() ? "auth-required" : "live-connected",
       isWorkspaceLoginRequired()
-        ? "This device needs a live workspace sign-in before it can compare with shared records."
-        : "Using the hosted workspace when live shared access becomes available."
+        ? "This device needs an online workspace sign-in before it can continue."
+        : "Online workspace available. Sync will continue automatically."
     );
     return !isWorkspaceLoginRequired();
   }
@@ -2689,7 +2685,7 @@ async function ensureHostedWorkspaceServerSession() {
     clearAuthSession();
     setHostedWorkspaceSyncStatus(
       "auth-required",
-      "The saved workspace sign-in on this device expired. Sign out and sign in again to reconnect live shared records."
+      "The saved workspace sign-in on this device expired. Sign in again to reconnect online records."
     );
   }
 
@@ -2711,7 +2707,7 @@ async function fetchHostedWorkspaceLiveSnapshot() {
     closeHostedWorkspaceEventStream();
     setHostedWorkspaceSyncStatus(
       "auth-required",
-      "This device could not open the live shared workspace. Sign out and sign in again, then refresh shared data."
+      "This device could not open the online workspace. Sign in again, then use Sync Now."
     );
     return null;
   }
@@ -2724,7 +2720,7 @@ async function fetchHostedWorkspaceLiveSnapshot() {
   const totalRecords = getWorkspaceRecordTotal(imported);
   setHostedWorkspaceSyncStatus(
     "live-connected",
-    `Live shared workspace connected with ${formatHostedWorkspaceRecordLabel(totalRecords)}.`,
+    `Online workspace connected with ${formatHostedWorkspaceRecordLabel(totalRecords)}.`,
     {
       recordTotal: totalRecords,
       liveSyncAt: imported.exportedAt || new Date().toISOString()
@@ -2846,7 +2842,7 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
     if (remoteTotal === 0) {
       setHostedWorkspaceSyncStatus(
         "live-connected",
-        "The live shared workspace is connected, but it does not contain records yet.",
+        "The online workspace is connected, but it does not contain records yet.",
         {
           recordTotal: 0,
           liveSyncAt: imported.exportedAt || new Date().toISOString()
@@ -2901,7 +2897,7 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
     console.error(error);
     setHostedWorkspaceSyncStatus(
       "sync-error",
-      error.message || "The live shared workspace could not be refreshed right now."
+      error.message || "The online workspace could not be refreshed right now."
     );
     return false;
   }
@@ -3009,7 +3005,7 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
     if (response.status === 401) {
       setHostedWorkspaceSyncStatus(
         "auth-required",
-        "This device could not upload to the live shared workspace. Sign out and sign in again, then try again."
+        "This device could not save to the online workspace. Sign in again, then try again."
       );
       return false;
     }
@@ -3027,7 +3023,7 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
     );
     setHostedWorkspaceSyncStatus(
       "live-connected",
-      `This device uploaded ${formatHostedWorkspaceRecordLabel(getWorkspaceRecordTotal(savedSnapshot))} to the live shared workspace.`,
+      `This device saved ${formatHostedWorkspaceRecordLabel(getWorkspaceRecordTotal(savedSnapshot))} to the online workspace.`,
       {
         recordTotal: getWorkspaceRecordTotal(savedSnapshot),
         liveSyncAt: savedSnapshot.exportedAt || new Date().toISOString()
@@ -3038,7 +3034,7 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
     console.error(error);
     setHostedWorkspaceSyncStatus(
       "sync-error",
-      error.message || "This device could not upload to the live shared workspace right now."
+      error.message || "This device could not save to the online workspace right now."
     );
     return false;
   } finally {
@@ -3073,30 +3069,17 @@ async function handleRefreshHostedWorkspaceSync() {
 
   if (hostedWorkspaceSyncState.mode === "live-connected") {
     showToast(
-      refreshed
-        ? "Live shared workspace refreshed on this device."
-        : "Live shared workspace checked. This device is already up to date."
+      refreshed ? "Online workspace synced on this device." : "This device is already up to date."
     );
     return;
   }
 
   if (hostedWorkspaceSyncState.mode === "auth-required") {
-    showToast(
-      isWorkspaceLocked()
-        ? "Sign in first, then refresh the live shared workspace."
-        : "This device needs a fresh workspace sign-in. Sign out and sign in again, then refresh shared data."
-    );
+    showToast("Sign in first to connect this device to the online workspace.");
     return;
   }
 
-  if (hostedWorkspaceSyncState.mode === "snapshot-only") {
-    showToast("This device is still showing the uploaded snapshot. Sign in to check live shared records.");
-    return;
-  }
-
-  showToast(
-    hostedWorkspaceSyncState.detail || "The live shared workspace could not be refreshed right now."
-  );
+  showToast(hostedWorkspaceSyncState.detail || "The online workspace could not be synced right now.");
 }
 
 async function handlePushHostedWorkspaceSync() {
@@ -3109,7 +3092,7 @@ async function handlePushHostedWorkspaceSync() {
   await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
 
   if (isWorkspaceLocked()) {
-    showToast("Sign in first before uploading this device to the live shared workspace.");
+    showToast("Sign in first before saving this device to the online workspace.");
     return;
   }
 
@@ -3117,7 +3100,7 @@ async function handlePushHostedWorkspaceSync() {
   render();
 
   if (uploaded) {
-    showToast("This device uploaded its latest records to the live shared workspace.");
+    showToast("This device saved its latest records to the online workspace.");
     return;
   }
 
@@ -3129,7 +3112,7 @@ async function handlePushHostedWorkspaceSync() {
   }
 
   showToast(
-    hostedWorkspaceSyncState.detail || "This device could not upload to the live shared workspace right now."
+    hostedWorkspaceSyncState.detail || "This device could not save to the online workspace right now."
   );
 }
 
@@ -4800,9 +4783,12 @@ function loadAuthSession() {
       return {};
     }
 
-    const raw =
-      ("sessionStorage" in window && window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY)) ||
-      ("localStorage" in window && window.localStorage.getItem(AUTH_SESSION_STORAGE_KEY));
+    const raw = isHostedWorkspaceEnvironment()
+      ? "sessionStorage" in window
+        ? window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY)
+        : ""
+      : ("sessionStorage" in window && window.sessionStorage.getItem(AUTH_SESSION_STORAGE_KEY)) ||
+        ("localStorage" in window && window.localStorage.getItem(AUTH_SESSION_STORAGE_KEY));
     return raw ? JSON.parse(raw) : {};
   } catch (error) {
     console.error(error);
@@ -4947,7 +4933,11 @@ function persistAuthSession(userId, options = {}) {
     }
 
     if ("localStorage" in window) {
-      window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, serializedSession);
+      if (isHostedWorkspaceEnvironment()) {
+        window.localStorage.removeItem(AUTH_SESSION_STORAGE_KEY);
+      } else {
+        window.localStorage.setItem(AUTH_SESSION_STORAGE_KEY, serializedSession);
+      }
     }
   } catch (error) {
     console.error(error);
@@ -5094,7 +5084,8 @@ function reconcileAuthenticationSession(options = {}) {
     const storedSession = loadAuthSession();
     const storedUsername = normalizeText(storedSession.username).toLowerCase();
     const canRecoverHostedSession =
-      !isHostedWorkspaceEnvironment() || storedSession.serverAuthenticated === true;
+      !isHostedWorkspaceEnvironment() ||
+      (storedSession.serverAuthenticated === true && normalizeText(storedSession.workspaceToken));
     const recoveredProfile =
       storedUsername &&
       canRecoverHostedSession &&
@@ -17423,38 +17414,35 @@ function renderAccessPage() {
             </div>
           </section>
 
-          <section class="section-card">
-            <div class="section-heading compact">
-              <div>
-                <p class="kicker">Shared Workspace</p>
-                <h3>${escapeHtml(syncStatus.title)}</h3>
-              </div>
-            </div>
-            <div class="mini-stat-grid">
-              <article class="stat-card">
-                <span>Snapshot Records</span>
-                <strong>${escapeHtml(syncStatus.recordLabel)}</strong>
-              </article>
-              <article class="stat-card">
-                <span>Live Sync</span>
-                <strong>${escapeHtml(syncStatus.liveSyncLabel || "Pending")}</strong>
-              </article>
-              <article class="stat-card">
-                <span>Snapshot Date</span>
-                <strong>${escapeHtml(syncStatus.snapshotLabel || "Unknown")}</strong>
-              </article>
-            </div>
-            <p class="muted-text">${escapeHtml(syncStatus.detail)}</p>
-            <p class="muted-text">${escapeHtml(syncStatus.actionHint)}</p>
-            <div class="form-actions">
-              <button class="button button-secondary" data-global-action="refresh-workspace-sync" type="button">
-                Refresh Shared Data
-              </button>
-              <button class="button button-ghost" data-global-action="push-workspace-sync" type="button">
-                Upload This Device
-              </button>
-            </div>
-          </section>
+	          <section class="section-card">
+	            <div class="section-heading compact">
+	              <div>
+	                <p class="kicker">Online Workspace</p>
+	                <h3>${escapeHtml(syncStatus.title)}</h3>
+	              </div>
+	            </div>
+	            <div class="mini-stat-grid">
+	              <article class="stat-card">
+	                <span>Records Online</span>
+	                <strong>${escapeHtml(syncStatus.recordLabel)}</strong>
+	              </article>
+	              <article class="stat-card">
+	                <span>Last Sync</span>
+	                <strong>${escapeHtml(syncStatus.liveSyncLabel || "Waiting")}</strong>
+	              </article>
+	              <article class="stat-card">
+	                <span>Save Mode</span>
+	                <strong>${escapeHtml(syncStatus.modeLabel || "Automatic")}</strong>
+	              </article>
+	            </div>
+	            <p class="muted-text">${escapeHtml(syncStatus.detail)}</p>
+	            <p class="muted-text">${escapeHtml(syncStatus.actionHint)}</p>
+	            <div class="form-actions">
+	              <button class="button button-secondary" data-global-action="refresh-workspace-sync" type="button">
+	                Sync Now
+	              </button>
+	            </div>
+	          </section>
         </aside>
       </section>
     `;
@@ -17619,36 +17607,33 @@ function renderAccessPage() {
       </section>
 
       <aside class="sidebar-column">
-        <section class="section-card">
-          <div class="section-heading compact">
-            <div>
-              <p class="kicker">Shared Workspace</p>
-              <h3>${escapeHtml(syncStatus.title)}</h3>
-            </div>
-          </div>
-          <div class="form-actions">
-            <button class="button button-secondary" data-global-action="refresh-workspace-sync" type="button">
-              Refresh Shared Data
-            </button>
-            <button class="button button-ghost" data-global-action="push-workspace-sync" type="button">
-              Upload This Device
-            </button>
-          </div>
-          <div class="mini-stat-grid">
-            <article class="stat-card">
-              <span>Snapshot Records</span>
-              <strong>${escapeHtml(syncStatus.recordLabel)}</strong>
-            </article>
-            <article class="stat-card">
-              <span>Live Sync</span>
-              <strong>${escapeHtml(syncStatus.liveSyncLabel || "Pending")}</strong>
-            </article>
-            <article class="stat-card">
-              <span>Snapshot Date</span>
-              <strong>${escapeHtml(syncStatus.snapshotLabel || "Unknown")}</strong>
-            </article>
-          </div>
-          <p class="muted-text">${escapeHtml(syncStatus.detail)}</p>
+	        <section class="section-card">
+	          <div class="section-heading compact">
+	            <div>
+	              <p class="kicker">Online Workspace</p>
+	              <h3>${escapeHtml(syncStatus.title)}</h3>
+	            </div>
+	          </div>
+	          <div class="form-actions">
+	            <button class="button button-secondary" data-global-action="refresh-workspace-sync" type="button">
+	              Sync Now
+	            </button>
+	          </div>
+	          <div class="mini-stat-grid">
+	            <article class="stat-card">
+	              <span>Records Online</span>
+	              <strong>${escapeHtml(syncStatus.recordLabel)}</strong>
+	            </article>
+	            <article class="stat-card">
+	              <span>Last Sync</span>
+	              <strong>${escapeHtml(syncStatus.liveSyncLabel || "Waiting")}</strong>
+	            </article>
+	            <article class="stat-card">
+	              <span>Save Mode</span>
+	              <strong>${escapeHtml(syncStatus.modeLabel || "Automatic")}</strong>
+	            </article>
+	          </div>
+	          <p class="muted-text">${escapeHtml(syncStatus.detail)}</p>
           <p class="muted-text">${escapeHtml(syncStatus.actionHint)}</p>
         </section>
 
@@ -18066,10 +18051,10 @@ async function handleAccessLoginSubmit(event) {
     persistSettings();
     startHostedWorkspaceEventStream();
     navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
-    render();
-    showToast(
-      `Signed in as ${profile?.fullName || username}. The live shared workspace is now connected.`
-    );
+  render();
+  showToast(
+      `Signed in as ${profile?.fullName || username}. The online workspace is now connected.`
+  );
     return;
   }
 
@@ -18114,8 +18099,8 @@ async function handleAccessLoginSubmit(event) {
   render();
   showToast(
     Boolean(serverSessionEstablished) || hostedWorkspaceSyncState.mode === "live-connected"
-      ? `Signed in as ${profile.fullName}. Live shared workspace connected.`
-      : `Signed in as ${profile.fullName}. If another device is missing, use Refresh Shared Data or sign in again there first.`
+      ? `Signed in as ${profile.fullName}. Online workspace connected.`
+      : `Signed in as ${profile.fullName}. If another device is missing, use Sync Now or sign in again there first.`
   );
 }
 
@@ -18132,7 +18117,7 @@ async function signOutWorkspaceUser(options = {}) {
   navigateTo("access", { syncHash: true, showAccessToast: false });
   setHostedWorkspaceSyncStatus(
     "auth-required",
-    "This device is signed out. Sign in again to reconnect it to the live shared workspace."
+    "This device is signed out. Sign in again to reconnect it to the online workspace."
   );
   render();
   await clearServerWorkspaceSession({ sessionToken: workspaceToken });
@@ -24205,6 +24190,11 @@ async function handleBackupImportFile(event) {
 }
 
 async function handleRestoreHostedSnapshot() {
+  if (isHostedWorkspaceEnvironment()) {
+    showToast("Hosted operations now sync directly online. Restoring the uploaded snapshot has been removed.");
+    return;
+  }
+
   try {
     const imported = await fetchHostedWorkspaceSnapshot();
     const totalRecords = getWorkspaceRecordTotal(imported);

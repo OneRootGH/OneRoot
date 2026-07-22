@@ -725,8 +725,8 @@
     const currentProfile = getSignedInWorkspaceProfile();
     const errorMessage = normalizeText(state.onlineOrdersMeta.error);
     const helperText = currentProfile
-      ? `Online orders use the same workspace access as ${currentProfile.fullName}. If this browser session expires, sign out and sign in again to reconnect.`
-      : "Sign in to the workspace first, then reopen Online Orders.";
+      ? `Online orders use the same workspace access as ${currentProfile.fullName}. Once this device is signed in, the order desk opens directly.`
+      : "Sign in to the workspace first, then open Online Orders.";
 
     return `
       <section class="section-card inset-card">
@@ -747,7 +747,7 @@
         <div class="guide-list">
           <p>1. Sign in to the workspace as normal.</p>
           <p>2. Open <code>Online Orders</code>.</p>
-          <p>3. If access has expired, sign out and sign in again to refresh the server session.</p>
+          <p>3. If the browser session expires later, open <code>Access</code> and sign in again.</p>
         </div>
       </section>
     `;
