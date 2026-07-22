@@ -1724,7 +1724,12 @@ const hostedWorkspaceSyncState = {
   uploadInFlight: false,
   uploadQueued: false,
   suppressDepth: 0,
-  lastUploadedDigest: ""
+  lastUploadedDigest: "",
+  mode: "idle",
+  detail: "",
+  lastRecordTotal: 0,
+  lastLiveSyncAt: "",
+  lastSnapshotAt: ""
 };
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -1760,6 +1765,105 @@ async function init() {
 function isHostedWorkspaceEnvironment() {
   const hostname = normalizeText(window.location.hostname).toLowerCase();
   return hostname !== "" && !["127.0.0.1", "localhost", "::1"].includes(hostname);
+}
+
+function formatHostedWorkspaceRecordLabel(totalRecords) {
+  const count = Math.max(Number(totalRecords || 0), 0);
+  return `${count} record${count === 1 ? "" : "s"}`;
+}
+
+function setHostedWorkspaceSyncStatus(mode, detail = "", options = {}) {
+  hostedWorkspaceSyncState.mode = normalizeText(mode) || hostedWorkspaceSyncState.mode || "idle";
+  hostedWorkspaceSyncState.detail = normalizeText(detail);
+
+  if (options.recordTotal !== undefined) {
+    hostedWorkspaceSyncState.lastRecordTotal = Math.max(Number(options.recordTotal || 0), 0);
+  }
+
+  if (options.liveSyncAt !== undefined) {
+    hostedWorkspaceSyncState.lastLiveSyncAt = normalizeText(options.liveSyncAt);
+  }
+
+  if (options.snapshotAt !== undefined) {
+    hostedWorkspaceSyncState.lastSnapshotAt = normalizeText(options.snapshotAt);
+  }
+}
+
+function getHostedWorkspaceSyncStatusMeta() {
+  const loginRequired = isWorkspaceLoginRequired();
+  const recordLabel = formatHostedWorkspaceRecordLabel(
+    hostedWorkspaceSyncState.lastRecordTotal
+  );
+  const liveSyncLabel = normalizeDateInput(hostedWorkspaceSyncState.lastLiveSyncAt)
+    ? formatDisplayDate(normalizeDateInput(hostedWorkspaceSyncState.lastLiveSyncAt))
+    : "";
+  const snapshotLabel = normalizeDateInput(hostedWorkspaceSyncState.lastSnapshotAt)
+    ? formatDisplayDate(normalizeDateInput(hostedWorkspaceSyncState.lastSnapshotAt))
+    : "";
+
+  switch (hostedWorkspaceSyncState.mode) {
+    case "live-connected":
+      return {
+        title: "Live Workspace Connected",
+        detail:
+          hostedWorkspaceSyncState.detail ||
+          `This device is connected to the live shared workspace with ${recordLabel}.`,
+        recordLabel,
+        liveSyncLabel,
+        snapshotLabel,
+        actionHint: "Use Refresh Shared Data to pull the latest records from other devices."
+      };
+    case "auth-required":
+      return {
+        title: "Snapshot Only",
+        detail:
+          hostedWorkspaceSyncState.detail ||
+          (loginRequired
+            ? "This device is showing the uploaded snapshot only. Sign out and sign in again to reconnect live shared records."
+            : "This device is showing the uploaded snapshot until live shared access is available."),
+        recordLabel,
+        liveSyncLabel,
+        snapshotLabel,
+        actionHint: loginRequired
+          ? "If entries from another PC are missing, sign out and sign in again on that device, then refresh shared data."
+          : "Use Refresh Shared Data to compare this device with the live shared workspace."
+      };
+    case "sync-error":
+      return {
+        title: "Shared Workspace Error",
+        detail:
+          hostedWorkspaceSyncState.detail ||
+          "The live shared workspace could not be reached right now. The uploaded snapshot is still available on this device.",
+        recordLabel,
+        liveSyncLabel,
+        snapshotLabel,
+        actionHint: "Try Refresh Shared Data again after confirming the hosted app is reachable."
+      };
+    case "snapshot-only":
+      return {
+        title: "Uploaded Snapshot Loaded",
+        detail:
+          hostedWorkspaceSyncState.detail ||
+          `This device loaded ${recordLabel} from the uploaded snapshot. Sign in to compare it with the live shared workspace.`,
+        recordLabel,
+        liveSyncLabel,
+        snapshotLabel,
+        actionHint: loginRequired
+          ? "Sign in and use Refresh Shared Data to load newer live records when available."
+          : "Use Refresh Shared Data to compare this device with the live shared workspace."
+      };
+    default:
+      return {
+        title: "Sync Status Pending",
+        detail:
+          hostedWorkspaceSyncState.detail ||
+          "This device has not checked the live shared workspace yet.",
+        recordLabel,
+        liveSyncLabel,
+        snapshotLabel,
+        actionHint: "Use Refresh Shared Data to check the shared workspace."
+      };
+  }
 }
 
 function getHostedWorkspaceBusinessRecordTotal(workspace = state) {
@@ -1899,6 +2003,15 @@ async function restoreHostedWorkspaceSnapshotIfNeeded() {
       return;
     }
 
+    setHostedWorkspaceSyncStatus(
+      "snapshot-only",
+      `This device loaded ${formatHostedWorkspaceRecordLabel(totalRecords)} from the uploaded snapshot.`,
+      {
+        recordTotal: totalRecords,
+        snapshotAt: imported.exportedAt || ""
+      }
+    );
+
     if (!shouldRestoreHostedWorkspaceSnapshot(imported)) {
       return;
     }
@@ -1909,10 +2022,14 @@ async function restoreHostedWorkspaceSnapshotIfNeeded() {
     localStorage.setItem(HOSTED_WORKSPACE_SNAPSHOT_FLAG_KEY, nextSnapshotFlag);
     startupToastMessage =
       localTotal === 0
-        ? `Uploaded online snapshot loaded with ${totalRecords} record${totalRecords === 1 ? "" : "s"}.`
-        : `Uploaded online snapshot synced with ${totalRecords} record${totalRecords === 1 ? "" : "s"}.`;
+        ? `Uploaded snapshot loaded on this device with ${formatHostedWorkspaceRecordLabel(totalRecords)}. Sign in to compare it with live shared records.`
+        : `Uploaded snapshot refreshed on this device with ${formatHostedWorkspaceRecordLabel(totalRecords)}. Sign in to compare it with live shared records.`;
   } catch (error) {
     console.error(error);
+    setHostedWorkspaceSyncStatus(
+      "sync-error",
+      "The uploaded snapshot could not be loaded on this device right now."
+    );
   }
 }
 
@@ -2167,6 +2284,10 @@ function mergeHostedWorkspaceImport(imported) {
 
 async function ensureHostedWorkspaceServerSession() {
   if (!isHostedWorkspaceEnvironment()) {
+    setHostedWorkspaceSyncStatus(
+      "sync-error",
+      "Live shared workspace checks only run on the hosted app."
+    );
     return false;
   }
 
@@ -2175,10 +2296,24 @@ async function ensureHostedWorkspaceServerSession() {
   const password = String(session.password || "");
 
   if (!username || !password) {
+    setHostedWorkspaceSyncStatus(
+      isWorkspaceLoginRequired() ? "auth-required" : "snapshot-only",
+      isWorkspaceLoginRequired()
+        ? "This device needs a fresh workspace sign-in before it can compare with live shared records."
+        : "Using the uploaded snapshot until live shared access is available."
+    );
     return Boolean(state.signedInUserId) || !isWorkspaceLoginRequired();
   }
 
   const established = await establishServerWorkspaceSession(username, password);
+
+  if (!established) {
+    setHostedWorkspaceSyncStatus(
+      "auth-required",
+      "The saved workspace sign-in on this device expired. Sign out and sign in again to reconnect live shared records."
+    );
+  }
+
   return established || Boolean(state.signedInUserId) || !isWorkspaceLoginRequired();
 }
 
@@ -2192,6 +2327,10 @@ async function fetchHostedWorkspaceLiveSnapshot() {
   });
 
   if (response.status === 401) {
+    setHostedWorkspaceSyncStatus(
+      "auth-required",
+      "This device could not open the live shared workspace. Sign out and sign in again, then refresh shared data."
+    );
     return null;
   }
 
@@ -2199,7 +2338,17 @@ async function fetchHostedWorkspaceLiveSnapshot() {
     throw new Error(`Hosted workspace sync request failed with ${response.status}.`);
   }
 
-  return sanitizeImportedBackup(await response.json());
+  const imported = sanitizeImportedBackup(await response.json());
+  const totalRecords = getWorkspaceRecordTotal(imported);
+  setHostedWorkspaceSyncStatus(
+    "live-connected",
+    `Live shared workspace connected with ${formatHostedWorkspaceRecordLabel(totalRecords)}.`,
+    {
+      recordTotal: totalRecords,
+      liveSyncAt: imported.exportedAt || new Date().toISOString()
+    }
+  );
+  return imported;
 }
 
 function syncHostedWorkspaceUiAfterMerge() {
@@ -2230,6 +2379,14 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
     const remoteTotal = getWorkspaceRecordTotal(imported);
 
     if (remoteTotal === 0) {
+      setHostedWorkspaceSyncStatus(
+        "live-connected",
+        "The live shared workspace is connected, but it does not contain records yet.",
+        {
+          recordTotal: 0,
+          liveSyncAt: imported.exportedAt || new Date().toISOString()
+        }
+      );
       if (getWorkspaceRecordTotal(state) > 0 && options.uploadIfRemoteEmpty !== false) {
         scheduleHostedWorkspaceSyncUpload({
           immediate: true,
@@ -2271,6 +2428,10 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
     return mergedDigest !== localDigestBefore;
   } catch (error) {
     console.error(error);
+    setHostedWorkspaceSyncStatus(
+      "sync-error",
+      error.message || "The live shared workspace could not be refreshed right now."
+    );
     return false;
   }
 }
@@ -2372,6 +2533,10 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
     });
 
     if (response.status === 401) {
+      setHostedWorkspaceSyncStatus(
+        "auth-required",
+        "This device could not upload to the live shared workspace. Sign out and sign in again, then try again."
+      );
       return false;
     }
 
@@ -2385,9 +2550,21 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
       HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY,
       getHostedWorkspaceSnapshotRevision(savedSnapshot)
     );
+    setHostedWorkspaceSyncStatus(
+      "live-connected",
+      `This device uploaded ${formatHostedWorkspaceRecordLabel(getWorkspaceRecordTotal(savedSnapshot))} to the live shared workspace.`,
+      {
+        recordTotal: getWorkspaceRecordTotal(savedSnapshot),
+        liveSyncAt: savedSnapshot.exportedAt || new Date().toISOString()
+      }
+    );
     return true;
   } catch (error) {
     console.error(error);
+    setHostedWorkspaceSyncStatus(
+      "sync-error",
+      error.message || "This device could not upload to the live shared workspace right now."
+    );
     return false;
   } finally {
     hostedWorkspaceSyncState.uploadInFlight = false;
@@ -2401,6 +2578,78 @@ async function uploadHostedWorkspaceLiveSnapshot(options = {}) {
       });
     }
   }
+}
+
+async function handleRefreshHostedWorkspaceSync() {
+  if (!isHostedWorkspaceEnvironment()) {
+    showToast("Shared workspace refresh is only available on the hosted app.");
+    return;
+  }
+
+  const refreshed = await restoreHostedWorkspaceLiveSyncIfNeeded({
+    force: true,
+    render: false,
+    uploadIfRemoteEmpty: true
+  });
+  render();
+
+  if (hostedWorkspaceSyncState.mode === "live-connected") {
+    showToast(
+      refreshed
+        ? "Live shared workspace refreshed on this device."
+        : "Live shared workspace checked. This device is already up to date."
+    );
+    return;
+  }
+
+  if (hostedWorkspaceSyncState.mode === "auth-required") {
+    showToast(
+      isWorkspaceLocked()
+        ? "Sign in first, then refresh the live shared workspace."
+        : "This device needs a fresh workspace sign-in. Sign out and sign in again, then refresh shared data."
+    );
+    return;
+  }
+
+  if (hostedWorkspaceSyncState.mode === "snapshot-only") {
+    showToast("This device is still showing the uploaded snapshot. Sign in to check live shared records.");
+    return;
+  }
+
+  showToast(
+    hostedWorkspaceSyncState.detail || "The live shared workspace could not be refreshed right now."
+  );
+}
+
+async function handlePushHostedWorkspaceSync() {
+  if (!isHostedWorkspaceEnvironment()) {
+    showToast("Shared workspace upload is only available on the hosted app.");
+    return;
+  }
+
+  if (isWorkspaceLocked()) {
+    showToast("Sign in first before uploading this device to the live shared workspace.");
+    return;
+  }
+
+  const uploaded = await uploadHostedWorkspaceLiveSnapshot({ force: true });
+  render();
+
+  if (uploaded) {
+    showToast("This device uploaded its latest records to the live shared workspace.");
+    return;
+  }
+
+  if (hostedWorkspaceSyncState.mode === "auth-required") {
+    showToast(
+      "This device needs a fresh workspace sign-in before it can upload. Sign out and sign in again, then retry."
+    );
+    return;
+  }
+
+  showToast(
+    hostedWorkspaceSyncState.detail || "This device could not upload to the live shared workspace right now."
+  );
 }
 
 function decorateNavigationMenus() {
@@ -3033,6 +3282,14 @@ function handleDynamicModuleClick(event) {
   if (globalActionTarget) {
     if (globalActionTarget.dataset.globalAction === "export-view-csv") {
       exportCurrentView();
+    }
+
+    if (globalActionTarget.dataset.globalAction === "refresh-workspace-sync") {
+      void handleRefreshHostedWorkspaceSync();
+    }
+
+    if (globalActionTarget.dataset.globalAction === "push-workspace-sync") {
+      void handlePushHostedWorkspaceSync();
     }
 
     return;
@@ -16202,6 +16459,7 @@ function renderAccessPage() {
   const locked = isWorkspaceLocked();
   const currentRoleConfig = getRolePreset(draft.role);
   const showQuickSwitch = !loginRequired;
+  const syncStatus = getHostedWorkspaceSyncStatusMeta();
 
   if (locked) {
     elements.accessViewRoot.innerHTML = `
@@ -16299,6 +16557,39 @@ function renderAccessPage() {
                       )
                       .join("")
               }
+            </div>
+          </section>
+
+          <section class="section-card">
+            <div class="section-heading compact">
+              <div>
+                <p class="kicker">Shared Workspace</p>
+                <h3>${escapeHtml(syncStatus.title)}</h3>
+              </div>
+            </div>
+            <div class="mini-stat-grid">
+              <article class="stat-card">
+                <span>Snapshot Records</span>
+                <strong>${escapeHtml(syncStatus.recordLabel)}</strong>
+              </article>
+              <article class="stat-card">
+                <span>Live Sync</span>
+                <strong>${escapeHtml(syncStatus.liveSyncLabel || "Pending")}</strong>
+              </article>
+              <article class="stat-card">
+                <span>Snapshot Date</span>
+                <strong>${escapeHtml(syncStatus.snapshotLabel || "Unknown")}</strong>
+              </article>
+            </div>
+            <p class="muted-text">${escapeHtml(syncStatus.detail)}</p>
+            <p class="muted-text">${escapeHtml(syncStatus.actionHint)}</p>
+            <div class="form-actions">
+              <button class="button button-secondary" data-global-action="refresh-workspace-sync" type="button">
+                Refresh Shared Data
+              </button>
+              <button class="button button-ghost" data-global-action="push-workspace-sync" type="button">
+                Upload This Device
+              </button>
             </div>
           </section>
         </aside>
@@ -16464,6 +16755,39 @@ function renderAccessPage() {
       </section>
 
       <aside class="sidebar-column">
+        <section class="section-card">
+          <div class="section-heading compact">
+            <div>
+              <p class="kicker">Shared Workspace</p>
+              <h3>${escapeHtml(syncStatus.title)}</h3>
+            </div>
+          </div>
+          <div class="form-actions">
+            <button class="button button-secondary" data-global-action="refresh-workspace-sync" type="button">
+              Refresh Shared Data
+            </button>
+            <button class="button button-ghost" data-global-action="push-workspace-sync" type="button">
+              Upload This Device
+            </button>
+          </div>
+          <div class="mini-stat-grid">
+            <article class="stat-card">
+              <span>Snapshot Records</span>
+              <strong>${escapeHtml(syncStatus.recordLabel)}</strong>
+            </article>
+            <article class="stat-card">
+              <span>Live Sync</span>
+              <strong>${escapeHtml(syncStatus.liveSyncLabel || "Pending")}</strong>
+            </article>
+            <article class="stat-card">
+              <span>Snapshot Date</span>
+              <strong>${escapeHtml(syncStatus.snapshotLabel || "Unknown")}</strong>
+            </article>
+          </div>
+          <p class="muted-text">${escapeHtml(syncStatus.detail)}</p>
+          <p class="muted-text">${escapeHtml(syncStatus.actionHint)}</p>
+        </section>
+
         <section class="section-card">
           <div class="section-heading compact">
             <div>
@@ -16825,7 +17149,7 @@ async function handleAccessLoginSubmit(event) {
     username: profile.username,
     password
   });
-  await establishServerWorkspaceSession(profile.username, password);
+  const serverSessionEstablished = await establishServerWorkspaceSession(profile.username, password);
   await restoreHostedWorkspaceLiveSyncIfNeeded({
     force: true,
     render: false,
@@ -16834,7 +17158,11 @@ async function handleAccessLoginSubmit(event) {
   persistSettings();
   navigateTo(getFirstAccessibleView("overview"), { syncHash: true, showAccessToast: false });
   render();
-  showToast(`Signed in as ${profile.fullName}.`);
+  showToast(
+    serverSessionEstablished || hostedWorkspaceSyncState.mode === "live-connected"
+      ? `Signed in as ${profile.fullName}. Live shared workspace connected.`
+      : `Signed in as ${profile.fullName}. If another device is missing, use Refresh Shared Data or sign in again there first.`
+  );
 }
 
 function signOutWorkspaceUser(options = {}) {
