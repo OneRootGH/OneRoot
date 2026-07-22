@@ -32,7 +32,19 @@ const ONLINE_ORDER_ALLOWED_ROLES = new Set([
 ]);
 const WORKSPACE_SESSION_COOKIE = "oneroot_workspace_session";
 const WORKSPACE_SESSION_TTL_MS = 12 * 60 * 60 * 1000;
-const WORKSPACE_SESSIONS = new Map();
+const WORKSPACE_SESSION_SECRET =
+  normalizeText(process.env.ONEROOT_SESSION_SECRET) ||
+  crypto
+    .createHash("sha256")
+    .update(
+      [
+        normalizeText(process.env.ONEROOT_ADMIN_USER),
+        normalizeText(process.env.ONEROOT_ADMIN_PASSWORD),
+        normalizeText(process.env.ONEROOT_DATABASE_URL || process.env.DATABASE_URL),
+        "oneroot-workspace-session"
+      ].join("|")
+    )
+    .digest("hex");
 const WORKSPACE_EVENT_CLIENTS = new Set();
 const ORDER_STATUSES = [
   "new",
@@ -754,7 +766,6 @@ async function resetWorkspaceAccessToBootstrapOwner() {
     }
   });
 
-  WORKSPACE_SESSIONS.clear();
   return writeWorkspaceSnapshotStore(nextSnapshot);
 }
 
@@ -772,16 +783,6 @@ function parseCookies(request) {
     cookies[name] = decodeURIComponent(rawValue.join("=") || "");
     return cookies;
   }, {});
-}
-
-function pruneWorkspaceSessions() {
-  const now = Date.now();
-
-  for (const [token, session] of WORKSPACE_SESSIONS.entries()) {
-    if (!session || session.expiresAt <= now) {
-      WORKSPACE_SESSIONS.delete(token);
-    }
-  }
 }
 
 function getWorkspaceSessionTokenFromRequest(request) {
@@ -817,6 +818,20 @@ function getWorkspaceSessionTokenFromRequest(request) {
   return "";
 }
 
+function signWorkspaceSessionToken(encodedPayload) {
+  return crypto.createHmac("sha256", WORKSPACE_SESSION_SECRET).update(encodedPayload).digest("base64url");
+}
+
+function decodeWorkspaceSessionPayload(encodedPayload) {
+  try {
+    const json = Buffer.from(encodedPayload, "base64url").toString("utf8");
+    const payload = JSON.parse(json);
+    return payload && typeof payload === "object" ? payload : null;
+  } catch (error) {
+    return null;
+  }
+}
+
 function buildWorkspaceSessionCookie(request, token, maxAgeSeconds = Math.floor(WORKSPACE_SESSION_TTL_MS / 1000)) {
   const cookieParts = [
     `${WORKSPACE_SESSION_COOKIE}=${encodeURIComponent(token)}`,
@@ -835,43 +850,56 @@ function buildWorkspaceSessionCookie(request, token, maxAgeSeconds = Math.floor(
 }
 
 function createWorkspaceSession(profile) {
-  pruneWorkspaceSessions();
-  const token = crypto.randomBytes(24).toString("hex");
-  WORKSPACE_SESSIONS.set(token, {
+  const payload = {
     userId: normalizeText(profile.id || profile.username),
-    username: profile.username,
-    role: profile.role,
-    fullName: profile.fullName,
-    expiresAt: Date.now() + WORKSPACE_SESSION_TTL_MS
-  });
-  return token;
+    username: normalizeText(profile.username).toLowerCase(),
+    role: normalizeText(profile.role).toLowerCase(),
+    fullName: normalizeText(profile.fullName),
+    exp: Date.now() + WORKSPACE_SESSION_TTL_MS
+  };
+  const encodedPayload = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
+  return `${encodedPayload}.${signWorkspaceSessionToken(encodedPayload)}`;
 }
 
 function clearWorkspaceSession(request) {
-  pruneWorkspaceSessions();
-  const token = getWorkspaceSessionTokenFromRequest(request);
-
-  if (token) {
-    WORKSPACE_SESSIONS.delete(token);
-  }
+  return Boolean(getWorkspaceSessionTokenFromRequest(request));
 }
 
 function getWorkspaceSession(request) {
-  pruneWorkspaceSessions();
   const token = getWorkspaceSessionTokenFromRequest(request);
 
   if (!token) {
     return null;
   }
 
-  const session = WORKSPACE_SESSIONS.get(token);
+  const [encodedPayload, signature] = token.split(".");
 
-  if (!session) {
+  if (!encodedPayload || !signature) {
     return null;
   }
 
-  session.expiresAt = Date.now() + WORKSPACE_SESSION_TTL_MS;
-  return session;
+  const expectedSignature = signWorkspaceSessionToken(encodedPayload);
+
+  if (
+    Buffer.byteLength(signature) !== Buffer.byteLength(expectedSignature) ||
+    !crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature))
+  ) {
+    return null;
+  }
+
+  const payload = decodeWorkspaceSessionPayload(encodedPayload);
+
+  if (!payload || Number(payload.exp || 0) <= Date.now()) {
+    return null;
+  }
+
+  return {
+    userId: normalizeText(payload.userId || payload.username),
+    username: normalizeText(payload.username).toLowerCase(),
+    role: normalizeText(payload.role).toLowerCase(),
+    fullName: normalizeText(payload.fullName),
+    expiresAt: Number(payload.exp || 0)
+  };
 }
 
 function sanitizeWorkspaceAuthProfile(record) {
@@ -1540,7 +1568,10 @@ async function handleApiRoute(request, response, pathname, url) {
         const profile = findWorkspaceProfileByCredentials(body);
 
         if (!profile) {
-          sendUnauthorized(response);
+          sendJson(response, 401, {
+            ok: false,
+            error: "The username or password is not correct."
+          });
           return true;
         }
 
@@ -1551,6 +1582,7 @@ async function handleApiRoute(request, response, pathname, url) {
           {
             ok: true,
             token,
+            userId: normalizeText(profile.id || profile.username),
             username: profile.username,
             fullName: profile.fullName,
             role: profile.role
