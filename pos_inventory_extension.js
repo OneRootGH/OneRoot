@@ -2474,6 +2474,15 @@
     persistInventoryItems();
     persistPosOrders();
     reconcilePosGeneratedSales({ persist: true });
+
+    if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+      queueHostedWorkspaceSyncAfterPersist({
+        immediate: true,
+        force: true,
+        reason: existingOrder ? "pos-order-update" : "pos-order-save"
+      });
+    }
+
     render();
     showToast(existingOrder ? "POS order updated and Daily Sales re-synced." : "POS order saved and Daily Sales synced.");
 
@@ -2956,6 +2965,15 @@
     }
 
     persistInventoryItems();
+
+    if (typeof queueHostedWorkspaceSyncAfterPersist === "function") {
+      queueHostedWorkspaceSyncAfterPersist({
+        immediate: true,
+        force: true,
+        reason: existing ? "inventory-item-update" : "inventory-item-create"
+      });
+    }
+
     render();
     resetInventoryDraft({
       silent: true,

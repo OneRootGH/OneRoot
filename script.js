@@ -2045,32 +2045,64 @@ async function fetchHostedWorkspaceSnapshot() {
   return sanitizeImportedBackup(await response.json());
 }
 
-function restoreWorkspaceFromImport(imported) {
-  state.expenses = imported.expenses;
-  state.budgets = imported.budgets;
-  state.sales = imported.sales;
-  state.rentals = imported.rentals;
-  state.pettyCash = imported.pettyCash;
-  state.pettyCashBudgets = imported.pettyCashBudgets;
-  state.salaryRecords = imported.salaryRecords;
-  state.cashbookEntries = imported.cashbookEntries;
-  state.purchaseOrders = imported.purchaseOrders;
-  state.laundryTickets = imported.laundryTickets;
-  state.equipmentRentalBookings = imported.equipmentRentalBookings;
-  state.securityDepositRecords = imported.securityDepositRecords;
-  state.ledgerEntries = imported.ledgerEntries;
-  state.mobileMoneyReconciliations = imported.mobileMoneyReconciliations;
-  state.suppliers = imported.suppliers;
-  state.assetRecords = imported.assetRecords;
-  state.forecastPlans = imported.forecastPlans;
-  state.recurringControls = imported.recurringControls;
-  state.maintenanceRecords = imported.maintenanceRecords;
-  state.userProfiles = imported.userProfiles;
-  state.posOrders = imported.posOrders || [];
-  state.inventoryItems = imported.inventoryItems || [];
-  state.auditTrail = imported.auditTrail || [];
-  state.currency = imported.currency;
-  state.activeUserId = imported.activeUserId;
+function restoreWorkspaceFromImport(imported, options = {}) {
+  const nextImported = imported && typeof imported === "object" ? imported : {};
+  const preserveMissingCollections = options.preserveMissingCollections === true;
+  const resolveImportedCollection = (key, fallbackValue = []) => {
+    if (Array.isArray(nextImported[key])) {
+      return nextImported[key];
+    }
+
+    if (preserveMissingCollections) {
+      return Array.isArray(fallbackValue) ? fallbackValue : [];
+    }
+
+    return [];
+  };
+
+  state.expenses = resolveImportedCollection("expenses", state.expenses);
+  state.budgets = resolveImportedCollection("budgets", state.budgets);
+  state.sales = resolveImportedCollection("sales", state.sales);
+  state.rentals = resolveImportedCollection("rentals", state.rentals);
+  state.pettyCash = resolveImportedCollection("pettyCash", state.pettyCash);
+  state.pettyCashBudgets = resolveImportedCollection(
+    "pettyCashBudgets",
+    state.pettyCashBudgets
+  );
+  state.salaryRecords = resolveImportedCollection("salaryRecords", state.salaryRecords);
+  state.cashbookEntries = resolveImportedCollection("cashbookEntries", state.cashbookEntries);
+  state.purchaseOrders = resolveImportedCollection("purchaseOrders", state.purchaseOrders);
+  state.laundryTickets = resolveImportedCollection("laundryTickets", state.laundryTickets);
+  state.equipmentRentalBookings = resolveImportedCollection(
+    "equipmentRentalBookings",
+    state.equipmentRentalBookings
+  );
+  state.securityDepositRecords = resolveImportedCollection(
+    "securityDepositRecords",
+    state.securityDepositRecords
+  );
+  state.ledgerEntries = resolveImportedCollection("ledgerEntries", state.ledgerEntries);
+  state.mobileMoneyReconciliations = resolveImportedCollection(
+    "mobileMoneyReconciliations",
+    state.mobileMoneyReconciliations
+  );
+  state.suppliers = resolveImportedCollection("suppliers", state.suppliers);
+  state.assetRecords = resolveImportedCollection("assetRecords", state.assetRecords);
+  state.forecastPlans = resolveImportedCollection("forecastPlans", state.forecastPlans);
+  state.recurringControls = resolveImportedCollection(
+    "recurringControls",
+    state.recurringControls
+  );
+  state.maintenanceRecords = resolveImportedCollection(
+    "maintenanceRecords",
+    state.maintenanceRecords
+  );
+  state.userProfiles = resolveImportedCollection("userProfiles", state.userProfiles);
+  state.posOrders = resolveImportedCollection("posOrders", state.posOrders);
+  state.inventoryItems = resolveImportedCollection("inventoryItems", state.inventoryItems);
+  state.auditTrail = resolveImportedCollection("auditTrail", state.auditTrail);
+  state.currency = normalizeText(nextImported.currency) || state.currency;
+  state.activeUserId = normalizeText(nextImported.activeUserId) || state.activeUserId;
   state.editingExpenseId = null;
   state.editingSalesId = null;
   state.editingRentalId = null;
@@ -2734,15 +2766,13 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
     const localDigestBefore = buildHostedWorkspaceSyncDigest(state);
     const remoteTotal = getWorkspaceRecordTotal(imported);
 
-    if (
-      hostedWorkspaceSyncState.hasPendingLocalChanges &&
-      !options.preferRemote &&
-      remoteDigest !== localDigestBefore
-    ) {
+    if (hostedWorkspaceSyncState.hasPendingLocalChanges && remoteDigest !== localDigestBefore) {
       scheduleHostedWorkspaceSyncUpload({
         immediate: true,
         force: true,
-        reason: "pending-local-before-remote"
+        reason: options.preferRemote
+          ? "pending-local-before-remote-event"
+          : "pending-local-before-remote"
       });
       return false;
     }
@@ -2769,7 +2799,7 @@ async function restoreHostedWorkspaceLiveSyncIfNeeded(options = {}) {
     if (options.force === true || remoteDigest !== localDigestBefore) {
       withHostedWorkspaceSyncSuppressed(() => {
         if (shouldUseHostedWorkspaceAuthoritativeMode()) {
-          restoreWorkspaceFromImport(imported);
+          restoreWorkspaceFromImport(imported, { preserveMissingCollections: true });
         } else {
           mergeHostedWorkspaceImport(imported);
         }
