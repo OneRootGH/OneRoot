@@ -2885,6 +2885,7 @@ function captureElements() {
     "currencySelect",
     "printReportBtn",
     "exportActiveWorkbookBtn",
+    "sharedWorkspaceSyncBtn",
     "workspaceAuthBtn",
     "kpiViewRoot",
     "reportsViewRoot",
@@ -3221,6 +3222,7 @@ function bindEvents() {
   elements.currencySelect.addEventListener("change", handleCurrencyChange);
   elements.printReportBtn.addEventListener("click", handlePrintReport);
   elements.exportActiveWorkbookBtn.addEventListener("click", handleExportActiveWorkbook);
+  elements.sharedWorkspaceSyncBtn.addEventListener("click", handleRefreshHostedWorkspaceSync);
   elements.workspaceAuthBtn.addEventListener("click", handleWorkspaceAuthAction);
   elements.exportCsvBtn.addEventListener("click", exportCurrentView);
   elements.exportWorkbookBtn.addEventListener("click", handleExportFullWorkbook);
@@ -4535,12 +4537,23 @@ function renderChrome() {
   const meta = VIEW_META[state.currentView] || VIEW_META.overview;
   const locked = isWorkspaceLocked();
   const currentUser = getCurrentUserProfile();
+  const hostedSyncAvailable = isHostedWorkspaceEnvironment();
+  const syncStatus = getHostedWorkspaceSyncStatusMeta();
   elements.currentViewEyebrow.textContent = meta.eyebrow;
   elements.currentViewTitle.textContent = meta.title;
   elements.currentViewSummary.textContent = meta.summary;
   elements.exportActiveWorkbookBtn.textContent = getWorkbookExportMeta(state.currentView).label;
   elements.exportActiveWorkbookBtn.disabled = locked;
   elements.printReportBtn.disabled = locked;
+  elements.sharedWorkspaceSyncBtn.hidden = !hostedSyncAvailable;
+  elements.sharedWorkspaceSyncBtn.disabled = false;
+  elements.sharedWorkspaceSyncBtn.textContent =
+    hostedWorkspaceSyncState.mode === "live-connected"
+      ? "Sync Shared Data"
+      : locked
+        ? "Sign In To Sync"
+        : "Reconnect Shared Data";
+  elements.sharedWorkspaceSyncBtn.title = syncStatus.detail || syncStatus.actionHint;
 
   if (!Array.isArray(state.userProfiles) || state.userProfiles.length === 0) {
     elements.workspaceAuthBtn.textContent = "Access Setup";
