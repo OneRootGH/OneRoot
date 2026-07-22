@@ -1537,18 +1537,33 @@ async function handleApiRoute(request, response, pathname, url) {
     if (request.method === "GET") {
       await refreshWorkspaceAuthProfileCache();
       const session = getWorkspaceSession(request);
+      const auth = parseBasicAuth(request);
+      const credentialProfile = auth ? findWorkspaceProfileByCredentials(auth) : null;
+      let refreshedToken = "";
       const validSession =
         session &&
         loadWorkspaceAuthProfiles().some(
           (item) => item.username === session.username && item.role === session.role
         )
           ? session
+          : credentialProfile
+            ? {
+                userId: normalizeText(credentialProfile.id || credentialProfile.username),
+                username: credentialProfile.username,
+                fullName: credentialProfile.fullName,
+                role: credentialProfile.role
+              }
           : null;
+
+      if (!session && credentialProfile) {
+        refreshedToken = createWorkspaceSession(credentialProfile);
+      }
 
       sendJson(response, 200, {
         ok: true,
         authenticated: Boolean(validSession),
         loginRequired: loadWorkspaceAuthProfiles().length > 0,
+        token: refreshedToken || undefined,
         session: validSession
           ? {
               userId: normalizeText(validSession.userId),
@@ -1557,7 +1572,7 @@ async function handleApiRoute(request, response, pathname, url) {
               role: validSession.role
             }
           : null
-      });
+      }, refreshedToken ? { "Set-Cookie": buildWorkspaceSessionCookie(request, refreshedToken) } : {});
       return true;
     }
 

@@ -2166,7 +2166,23 @@ async function hydrateHostedWorkspaceAccessIfNeeded() {
         persistUserProfiles();
         clearAuthSession();
       } else if (importedProfiles.length > 0) {
+        const savedSession = loadAuthSession();
+        const savedSessionUsername = normalizeText(savedSession.username).toLowerCase();
         state.userProfiles = importedProfiles;
+
+        if (savedSessionUsername) {
+          const matchedSignedInProfile =
+            state.userProfiles.find(
+              (profile) => normalizeText(profile.username).toLowerCase() === savedSessionUsername
+            ) || null;
+
+          if (matchedSignedInProfile) {
+            state.signedInUserId = matchedSignedInProfile.id;
+            persistAuthSession(matchedSignedInProfile.id, {
+              username: matchedSignedInProfile.username
+            });
+          }
+        }
 
         reconcileActiveUserProfile({ skipPersist: true });
         persistUserProfiles();
@@ -2241,10 +2257,13 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
   }
 
   try {
+    const persistedBasicAuthToken =
+      normalizeText(options.basicAuthToken) || getHostedWorkspaceBasicAuthToken();
     const persistedWorkspaceToken =
       normalizeText(options.sessionToken) || getHostedWorkspaceSessionToken();
     const payload = await fetchHostedWorkspaceSessionState(options);
     const session = payload && payload.authenticated ? payload.session : null;
+    const nextWorkspaceToken = normalizeText(payload?.token) || persistedWorkspaceToken;
 
     if (!session) {
       if (payload?.loginRequired) {
@@ -2256,12 +2275,7 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
     }
 
     const username = normalizeText(session.username).toLowerCase();
-    let matchedProfile =
-      state.userProfiles.find(
-        (profile) =>
-          normalizeText(profile.id) === normalizeText(session.userId) ||
-          normalizeText(profile.username).toLowerCase() === username
-      ) || null;
+    let matchedProfile = findHostedWorkspaceProfileBySession(session);
 
     if (!matchedProfile) {
       matchedProfile = sanitizeStoredUserProfile({
@@ -2286,7 +2300,8 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
       state.activeUserId = resolvedUserId;
       persistAuthSession(resolvedUserId, {
         username,
-        workspaceToken: persistedWorkspaceToken
+        basicAuthToken: persistedBasicAuthToken,
+        workspaceToken: nextWorkspaceToken
       });
 
       if (!options.skipPersist) {
@@ -2512,9 +2527,10 @@ async function ensureHostedWorkspaceServerSession() {
   }
 
   const session = loadAuthSession();
+  const basicAuthToken = normalizeText(session.basicAuthToken);
   const sessionToken = normalizeText(session.workspaceToken);
 
-  if (!sessionToken) {
+  if (!sessionToken && !basicAuthToken) {
     if (isWorkspaceLoginRequired() && !state.signedInUserId) {
       await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
     }
@@ -2531,7 +2547,8 @@ async function ensureHostedWorkspaceServerSession() {
   const established = await hydrateHostedWorkspaceSessionIfNeeded({
     force: true,
     skipPersist: true,
-    sessionToken
+    sessionToken,
+    basicAuthToken
   });
 
   if (!established) {
@@ -4646,18 +4663,58 @@ function getHostedWorkspaceSessionToken() {
   return normalizeText(loadAuthSession().workspaceToken);
 }
 
-function buildHostedWorkspaceSessionHeaders(headers = {}, options = {}) {
-  const sessionToken = normalizeText(options.sessionToken) || getHostedWorkspaceSessionToken();
+function getHostedWorkspaceBasicAuthToken() {
+  return normalizeText(loadAuthSession().basicAuthToken);
+}
 
-  if (!sessionToken) {
-    return { ...headers };
+function findHostedWorkspaceProfileBySession(session = {}) {
+  const sessionUserId = normalizeText(session.userId);
+  const sessionUsername = normalizeText(session.username).toLowerCase();
+
+  return (
+    state.userProfiles.find(
+      (profile) =>
+        isPasswordLoginEnabledForProfile(profile) &&
+        ((sessionUserId && normalizeText(profile.id) === sessionUserId) ||
+          (sessionUsername && normalizeText(profile.username).toLowerCase() === sessionUsername))
+    ) || null
+  );
+}
+
+function buildBasicAuthToken(username, password) {
+  const credential = `${normalizeText(username).toLowerCase()}:${String(password || "")}`;
+
+  try {
+    if (typeof window !== "undefined" && typeof window.btoa === "function") {
+      return window.btoa(credential);
+    }
+  } catch (error) {
+    console.error(error);
   }
 
-  return {
-    ...headers,
-    "X-Workspace-Session": sessionToken,
-    Authorization: `Bearer ${sessionToken}`
-  };
+  return "";
+}
+
+function buildHostedWorkspaceSessionHeaders(headers = {}, options = {}) {
+  const basicAuthToken =
+    normalizeText(options.basicAuthToken) || getHostedWorkspaceBasicAuthToken();
+  const sessionToken = normalizeText(options.sessionToken) || getHostedWorkspaceSessionToken();
+  const nextHeaders = { ...headers };
+
+  if (sessionToken) {
+    nextHeaders["X-Workspace-Session"] = sessionToken;
+  }
+
+  if (basicAuthToken) {
+    nextHeaders.Authorization = `Basic ${basicAuthToken}`;
+    return nextHeaders;
+  }
+
+  if (sessionToken) {
+    nextHeaders.Authorization = `Bearer ${sessionToken}`;
+  }
+
+  return nextHeaders;
 }
 
 function persistAuthSession(userId, options = {}) {
@@ -4673,6 +4730,10 @@ function persistAuthSession(userId, options = {}) {
         options.username !== undefined
           ? normalizeText(options.username).toLowerCase()
           : normalizeText(existingSession.username).toLowerCase(),
+      basicAuthToken:
+        options.basicAuthToken !== undefined
+          ? normalizeText(options.basicAuthToken)
+          : normalizeText(existingSession.basicAuthToken),
       workspaceToken:
         options.workspaceToken !== undefined
           ? normalizeText(options.workspaceToken)
@@ -4810,7 +4871,27 @@ function reconcileAuthenticationSession(options = {}) {
     return null;
   }
 
-  const signedInProfile = getAuthenticatedUserProfile();
+  let signedInProfile = getAuthenticatedUserProfile();
+
+  if (!signedInProfile) {
+    const storedSession = loadAuthSession();
+    const storedUsername = normalizeText(storedSession.username).toLowerCase();
+    const recoveredProfile =
+      storedUsername &&
+      state.userProfiles.find(
+        (profile) =>
+          isPasswordLoginEnabledForProfile(profile) &&
+          normalizeText(profile.username).toLowerCase() === storedUsername
+      );
+
+    if (recoveredProfile) {
+      state.signedInUserId = recoveredProfile.id;
+      persistAuthSession(recoveredProfile.id, {
+        username: recoveredProfile.username
+      });
+      signedInProfile = recoveredProfile;
+    }
+  }
 
   if (!signedInProfile) {
     if (state.signedInUserId) {
@@ -17591,6 +17672,7 @@ async function handleAccessLoginSubmit(event) {
 
   if (isHostedWorkspaceEnvironment()) {
     await hydrateHostedWorkspaceAccessIfNeeded();
+    const basicAuthToken = buildBasicAuthToken(username, password);
     const workspaceSession = await establishServerWorkspaceSession(username, password);
 
     if (!workspaceSession) {
@@ -17617,7 +17699,14 @@ async function handleAccessLoginSubmit(event) {
     state.activeUserId = resolvedUserId;
     persistAuthSession(resolvedUserId, {
       username: normalizeText(workspaceSession.username) || username,
+      basicAuthToken,
       workspaceToken: normalizeText(workspaceSession.token)
+    });
+    await hydrateHostedWorkspaceSessionIfNeeded({
+      force: true,
+      skipPersist: true,
+      sessionToken: normalizeText(workspaceSession.token),
+      basicAuthToken
     });
 
     await restoreHostedWorkspaceLiveSyncIfNeeded({
@@ -17638,6 +17727,7 @@ async function handleAccessLoginSubmit(event) {
       state.activeUserId = profile.id;
       persistAuthSession(profile.id, {
         username: profile.username,
+        basicAuthToken,
         workspaceToken: normalizeText(workspaceSession.token)
       });
     }
@@ -17672,11 +17762,13 @@ async function handleAccessLoginSubmit(event) {
   state.signedInUserId = profile.id;
   state.activeUserId = profile.id;
   persistAuthSession(profile.id, {
-    username: profile.username
+    username: profile.username,
+    basicAuthToken: buildBasicAuthToken(profile.username, password)
   });
   const serverSessionEstablished = await establishServerWorkspaceSession(profile.username, password);
   persistAuthSession(profile.id, {
     username: profile.username,
+    basicAuthToken: buildBasicAuthToken(profile.username, password),
     workspaceToken: normalizeText(serverSessionEstablished?.token)
   });
   await restoreHostedWorkspaceLiveSyncIfNeeded({
