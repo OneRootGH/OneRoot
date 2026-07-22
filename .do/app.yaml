@@ -3,6 +3,10 @@ region: nyc
 alerts:
   - rule: DEPLOYMENT_FAILED
   - rule: DOMAIN_FAILED
+databases:
+  - engine: PG
+    name: oneroot-db
+    version: "16"
 services:
   - name: web
     git:
@@ -41,13 +45,11 @@ services:
         scope: RUN_TIME
         type: SECRET
       - key: ONEROOT_DATABASE_URL
-        value: REPLACE_WITH_DATABASE_PRIVATE_URL_OR_BINDABLE
+        value: ${oneroot-db.DATABASE_PRIVATE_URL}
         scope: RUN_TIME
-        type: SECRET
       - key: ONEROOT_DATABASE_CA_CERT
-        value: REPLACE_WITH_DATABASE_CA_CERT_OR_BINDABLE
+        value: ${oneroot-db.CA_CERT}
         scope: RUN_TIME
-        type: SECRET
       - key: ONEROOT_DATABASE_SSL
         value: require
         scope: RUN_TIME
