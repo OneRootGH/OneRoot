@@ -153,9 +153,10 @@ const DATABASE_SSL_MODE = normalizeText(
   process.env.ONEROOT_DATABASE_SSL || process.env.DATABASE_SSL
 ).toLowerCase();
 const WORKSPACE_SNAPSHOT_PRIMARY_KEY = "primary";
-const DATABASE_OPERATION_TIMEOUT_MS = 4000;
+const DATABASE_OPERATION_TIMEOUT_MS = 12000;
 let databasePoolPromise = null;
 let databaseSchemaReadyPromise = null;
+let workspaceSnapshotCache = null;
 const workspaceAuthProfileCache = {
   profiles: []
 };
@@ -345,6 +346,19 @@ function normalizeWorkspaceSnapshotPayload(payload) {
   };
 }
 
+function setWorkspaceSnapshotCache(payload) {
+  const snapshot = normalizeWorkspaceSnapshotPayload(payload);
+  workspaceSnapshotCache = snapshot;
+  setWorkspaceAuthProfileCache(snapshot);
+  return snapshot;
+}
+
+function getWorkspaceSnapshotCache() {
+  return workspaceSnapshotCache && typeof workspaceSnapshotCache === "object"
+    ? normalizeWorkspaceSnapshotPayload(workspaceSnapshotCache)
+    : null;
+}
+
 function countWorkspaceBusinessRecords(payload) {
   const workspace = getWorkspaceRoot(payload);
 
@@ -391,25 +405,44 @@ function broadcastWorkspaceSnapshotUpdate(payload) {
 function readWorkspaceSnapshotFile() {
   ensureWorkspaceStore();
 
-  for (const filePath of WORKSPACE_SNAPSHOT_FILES) {
+  const snapshotFiles = hasDatabaseConfig() ? [LIVE_WORKSPACE_FILE] : WORKSPACE_SNAPSHOT_FILES;
+
+  for (const filePath of snapshotFiles) {
     const parsed = readJsonFile(filePath, null);
 
     if (parsed && typeof parsed === "object") {
-      const snapshot = normalizeWorkspaceSnapshotPayload(parsed);
-      setWorkspaceAuthProfileCache(snapshot);
-      return snapshot;
+      return setWorkspaceSnapshotCache(parsed);
     }
   }
 
-  return normalizeWorkspaceSnapshotPayload(null);
+  const cachedSnapshot = getWorkspaceSnapshotCache();
+
+  if (cachedSnapshot) {
+    return cachedSnapshot;
+  }
+
+  return setWorkspaceSnapshotCache(null);
 }
 
 function writeWorkspaceSnapshotFile(payload) {
   ensureWorkspaceStore();
   const normalized = normalizeWorkspaceSnapshotPayload(payload);
   writeJsonFile(LIVE_WORKSPACE_FILE, normalized);
-  setWorkspaceAuthProfileCache(normalized);
-  return normalized;
+  return setWorkspaceSnapshotCache(normalized);
+}
+
+function getWorkspaceSnapshotFallback() {
+  const cachedSnapshot = getWorkspaceSnapshotCache();
+
+  if (
+    cachedSnapshot &&
+    (countWorkspaceBusinessRecords(cachedSnapshot) > 0 ||
+      extractWorkspaceAccessProfiles(cachedSnapshot).length > 0)
+  ) {
+    return cachedSnapshot;
+  }
+
+  return readWorkspaceSnapshotFile();
 }
 
 function mergeOrderIntoList(orders, nextOrder) {
@@ -627,17 +660,13 @@ async function refreshWorkspaceSnapshotMirrorFromDatabase() {
           [WORKSPACE_SNAPSHOT_PRIMARY_KEY, JSON.stringify(normalizedFallback)]
         );
 
-        writeWorkspaceSnapshotFile(normalizedFallback);
-        setWorkspaceAuthProfileCache(normalizedFallback);
-        return normalizedFallback;
+        return writeWorkspaceSnapshotFile(normalizedFallback);
       }
 
       const snapshot = normalizeWorkspaceSnapshotPayload(result.rows[0].payload);
-      writeWorkspaceSnapshotFile(snapshot);
-      setWorkspaceAuthProfileCache(snapshot);
-      return snapshot;
+      return writeWorkspaceSnapshotFile(snapshot);
     },
-    () => readWorkspaceSnapshotFile()
+    () => getWorkspaceSnapshotFallback()
   );
 }
 
@@ -692,7 +721,7 @@ async function readWorkspaceSnapshotStore() {
 
 async function writeWorkspaceSnapshotStore(payload) {
   const normalized = normalizeWorkspaceSnapshotPayload(
-    preserveWorkspaceOrderHistory(payload, readWorkspaceSnapshotFile())
+    preserveWorkspaceOrderHistory(payload, getWorkspaceSnapshotFallback())
   );
   const savedSnapshot = await runWithDatabaseFallback(
     "Workspace database write",
@@ -708,9 +737,7 @@ async function writeWorkspaceSnapshotStore(payload) {
         [WORKSPACE_SNAPSHOT_PRIMARY_KEY, JSON.stringify(normalized)]
       );
 
-      writeWorkspaceSnapshotFile(normalized);
-      setWorkspaceAuthProfileCache(normalized);
-      return normalized;
+      return writeWorkspaceSnapshotFile(normalized);
     },
     () => writeWorkspaceSnapshotFile(normalized)
   );
@@ -1966,6 +1993,13 @@ async function handleRequest(request, response) {
 
 async function startServer() {
   ensureOrdersStore();
+  readWorkspaceSnapshotFile();
+
+  try {
+    await refreshWorkspaceSnapshotMirrorFromDatabase();
+  } catch (error) {
+    console.error("Background workspace snapshot warmup failed.", error);
+  }
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {
