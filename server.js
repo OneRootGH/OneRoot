@@ -1507,7 +1507,6 @@ async function handleRequest(request, response) {
 
 async function startServer() {
   ensureOrdersStore();
-  await refreshWorkspaceAuthProfileCache();
 
   const server = http.createServer((request, response) => {
     handleRequest(request, response).catch((error) => {
@@ -1525,6 +1524,10 @@ async function startServer() {
         hasDatabaseConfig() ? "database-backed" : "file-based"
       } storage.`
     );
+  });
+
+  refreshWorkspaceAuthProfileCache().catch((error) => {
+    console.error("Background workspace auth refresh failed.", error);
   });
 }
 
