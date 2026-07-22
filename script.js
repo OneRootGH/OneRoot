@@ -21,6 +21,7 @@ const FORECAST_STORAGE_KEY = "oneroot-expense-register:forecast:v1";
 const USER_PROFILE_STORAGE_KEY = "oneroot-expense-register:users:v1";
 const VIEW_STORAGE_KEY = "oneroot-expense-register:view:v2";
 const AUTH_SESSION_STORAGE_KEY = "oneroot-expense-register:auth-session:v1";
+const AUTH_SIGN_OUT_FLAG_KEY = "oneroot-expense-register:auth-signed-out:v1";
 const ONLINE_ORDERS_AUTH_STORAGE_KEY = "oneroot-expense-register:online-orders-auth:v1";
 const LIVE_DATA_STORAGE_KEYS = new Set([
   STORAGE_KEY,
@@ -2257,32 +2258,18 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
   }
 
   try {
-    const persistedBasicAuthToken =
-      normalizeText(options.basicAuthToken) || getHostedWorkspaceBasicAuthToken();
     const persistedWorkspaceToken =
       normalizeText(options.sessionToken) || getHostedWorkspaceSessionToken();
+
+    if (!persistedWorkspaceToken && isHostedWorkspaceSignOutSuspended()) {
+      return null;
+    }
+
     const payload = await fetchHostedWorkspaceSessionState(options);
     const session = payload && payload.authenticated ? payload.session : null;
     const nextWorkspaceToken = normalizeText(payload?.token) || persistedWorkspaceToken;
 
     if (!session) {
-      const recoveredSession = getStoredHostedWorkspaceSessionProfile();
-
-      if (recoveredSession) {
-        state.signedInUserId = recoveredSession.userId;
-        state.activeUserId = recoveredSession.userId;
-        persistAuthSession(recoveredSession.userId, {
-          username: recoveredSession.username,
-          basicAuthToken: persistedBasicAuthToken,
-          workspaceToken: nextWorkspaceToken
-        });
-        setHostedWorkspaceSyncStatus(
-          "auth-required",
-          "Reconnecting this device to the live shared workspace. Your menus stay open while online access retries."
-        );
-        return recoveredSession;
-      }
-
       if (payload?.loginRequired) {
         state.signedInUserId = "";
         closeHostedWorkspaceEventStream();
@@ -2315,9 +2302,9 @@ async function hydrateHostedWorkspaceSessionIfNeeded(options = {}) {
     if (resolvedUserId) {
       state.signedInUserId = resolvedUserId;
       state.activeUserId = resolvedUserId;
+      setHostedWorkspaceSignOutSuspended(false);
       persistAuthSession(resolvedUserId, {
         username,
-        basicAuthToken: persistedBasicAuthToken,
         workspaceToken: nextWorkspaceToken
       });
 
@@ -2544,10 +2531,17 @@ async function ensureHostedWorkspaceServerSession() {
   }
 
   const session = loadAuthSession();
-  const basicAuthToken = normalizeText(session.basicAuthToken);
   const sessionToken = normalizeText(session.workspaceToken);
 
-  if (!sessionToken && !basicAuthToken) {
+  if (!sessionToken) {
+    if (isHostedWorkspaceSignOutSuspended()) {
+      setHostedWorkspaceSyncStatus(
+        "auth-required",
+        "This device is signed out. Sign in again to reconnect it to the live shared workspace."
+      );
+      return false;
+    }
+
     if (isWorkspaceLoginRequired() && !state.signedInUserId) {
       await hydrateHostedWorkspaceSessionIfNeeded({ force: true, skipPersist: true });
     }
@@ -2564,8 +2558,7 @@ async function ensureHostedWorkspaceServerSession() {
   const established = await hydrateHostedWorkspaceSessionIfNeeded({
     force: true,
     skipPersist: true,
-    sessionToken,
-    basicAuthToken
+    sessionToken
   });
 
   if (!established) {
@@ -4068,7 +4061,7 @@ function handleDynamicModuleClick(event) {
     }
 
     if (accessActionTarget.dataset.accessAction === "logout") {
-      signOutWorkspaceUser();
+      void signOutWorkspaceUser();
     }
 
     if (accessActionTarget.dataset.accessAction === "clear-login") {
@@ -4677,32 +4670,48 @@ function getHostedWorkspaceSessionToken() {
   return normalizeText(loadAuthSession().workspaceToken);
 }
 
-function getHostedWorkspaceBasicAuthToken() {
-  return normalizeText(loadAuthSession().basicAuthToken);
+function isHostedWorkspaceSignOutSuspended() {
+  try {
+    if (typeof window === "undefined") {
+      return false;
+    }
+
+    return (
+      ("sessionStorage" in window &&
+        normalizeText(window.sessionStorage.getItem(AUTH_SIGN_OUT_FLAG_KEY))) ||
+      ("localStorage" in window &&
+        normalizeText(window.localStorage.getItem(AUTH_SIGN_OUT_FLAG_KEY)))
+    ) === "true";
+  } catch (error) {
+    console.error(error);
+    return false;
+  }
 }
 
-function getStoredHostedWorkspaceSessionProfile(options = {}) {
-  const savedSession = loadAuthSession();
-  const savedUserId = normalizeText(options.userId || savedSession.userId || state.signedInUserId);
-  const savedUsername = normalizeText(options.username || savedSession.username).toLowerCase();
-  const matchedProfile =
-    state.userProfiles.find(
-      (profile) =>
-        isPasswordLoginEnabledForProfile(profile) &&
-        ((savedUserId && normalizeText(profile.id) === savedUserId) ||
-          (savedUsername && normalizeText(profile.username).toLowerCase() === savedUsername))
-    ) || null;
+function setHostedWorkspaceSignOutSuspended(suspended) {
+  try {
+    if (typeof window === "undefined") {
+      return;
+    }
 
-  if (!matchedProfile) {
-    return null;
+    if ("sessionStorage" in window) {
+      if (suspended) {
+        window.sessionStorage.setItem(AUTH_SIGN_OUT_FLAG_KEY, "true");
+      } else {
+        window.sessionStorage.removeItem(AUTH_SIGN_OUT_FLAG_KEY);
+      }
+    }
+
+    if ("localStorage" in window) {
+      if (suspended) {
+        window.localStorage.setItem(AUTH_SIGN_OUT_FLAG_KEY, "true");
+      } else {
+        window.localStorage.removeItem(AUTH_SIGN_OUT_FLAG_KEY);
+      }
+    }
+  } catch (error) {
+    console.error(error);
   }
-
-  return {
-    userId: matchedProfile.id,
-    username: matchedProfile.username,
-    fullName: matchedProfile.fullName,
-    role: matchedProfile.role
-  };
 }
 
 function findHostedWorkspaceProfileBySession(session = {}) {
@@ -4719,23 +4728,8 @@ function findHostedWorkspaceProfileBySession(session = {}) {
   );
 }
 
-function buildBasicAuthToken(username, password) {
-  const credential = `${normalizeText(username).toLowerCase()}:${String(password || "")}`;
-
-  try {
-    if (typeof window !== "undefined" && typeof window.btoa === "function") {
-      return window.btoa(credential);
-    }
-  } catch (error) {
-    console.error(error);
-  }
-
-  return "";
-}
-
 function buildHostedWorkspaceSessionHeaders(headers = {}, options = {}) {
-  const basicAuthToken =
-    normalizeText(options.basicAuthToken) || getHostedWorkspaceBasicAuthToken();
+  const basicAuthToken = normalizeText(options.basicAuthToken);
   const sessionToken = normalizeText(options.sessionToken) || getHostedWorkspaceSessionToken();
   const nextHeaders = { ...headers };
 
@@ -4768,10 +4762,6 @@ function persistAuthSession(userId, options = {}) {
         options.username !== undefined
           ? normalizeText(options.username).toLowerCase()
           : normalizeText(existingSession.username).toLowerCase(),
-      basicAuthToken:
-        options.basicAuthToken !== undefined
-          ? normalizeText(options.basicAuthToken)
-          : normalizeText(existingSession.basicAuthToken),
       workspaceToken:
         options.workspaceToken !== undefined
           ? normalizeText(options.workspaceToken)
@@ -4840,18 +4830,22 @@ async function establishServerWorkspaceSession(username, password) {
   }
 }
 
-function clearServerWorkspaceSession(options = {}) {
+async function clearServerWorkspaceSession(options = {}) {
   if (typeof fetch !== "function") {
-    return;
+    return false;
   }
 
-  fetch("/api/workspace-session", {
-    method: "DELETE",
-    credentials: "same-origin",
-    headers: buildHostedWorkspaceSessionHeaders({}, options)
-  }).catch((error) => {
+  try {
+    const response = await fetch("/api/workspace-session", {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: buildHostedWorkspaceSessionHeaders({}, options)
+    });
+    return response.ok;
+  } catch (error) {
     console.error(error);
-  });
+    return false;
+  }
 }
 
 function getUserLoginMode(profile) {
@@ -17729,7 +17723,6 @@ async function handleAccessLoginSubmit(event) {
 
   if (isHostedWorkspaceEnvironment()) {
     await hydrateHostedWorkspaceAccessIfNeeded();
-    const basicAuthToken = buildBasicAuthToken(username, password);
     const workspaceSession = await establishServerWorkspaceSession(username, password);
 
     if (!workspaceSession) {
@@ -17754,16 +17747,15 @@ async function handleAccessLoginSubmit(event) {
 
     state.signedInUserId = resolvedUserId;
     state.activeUserId = resolvedUserId;
+    setHostedWorkspaceSignOutSuspended(false);
     persistAuthSession(resolvedUserId, {
       username: normalizeText(workspaceSession.username) || username,
-      basicAuthToken,
       workspaceToken: normalizeText(workspaceSession.token)
     });
     await hydrateHostedWorkspaceSessionIfNeeded({
       force: true,
       skipPersist: true,
-      sessionToken: normalizeText(workspaceSession.token),
-      basicAuthToken
+      sessionToken: normalizeText(workspaceSession.token)
     });
 
     await restoreHostedWorkspaceLiveSyncIfNeeded({
@@ -17784,7 +17776,6 @@ async function handleAccessLoginSubmit(event) {
       state.activeUserId = profile.id;
       persistAuthSession(profile.id, {
         username: profile.username,
-        basicAuthToken,
         workspaceToken: normalizeText(workspaceSession.token)
       });
     }
@@ -17818,14 +17809,13 @@ async function handleAccessLoginSubmit(event) {
 
   state.signedInUserId = profile.id;
   state.activeUserId = profile.id;
+  setHostedWorkspaceSignOutSuspended(false);
   persistAuthSession(profile.id, {
-    username: profile.username,
-    basicAuthToken: buildBasicAuthToken(profile.username, password)
+    username: profile.username
   });
   const serverSessionEstablished = await establishServerWorkspaceSession(profile.username, password);
   persistAuthSession(profile.id, {
     username: profile.username,
-    basicAuthToken: buildBasicAuthToken(profile.username, password),
     workspaceToken: normalizeText(serverSessionEstablished?.token)
   });
   await restoreHostedWorkspaceLiveSyncIfNeeded({
@@ -17845,16 +17835,23 @@ async function handleAccessLoginSubmit(event) {
   );
 }
 
-function signOutWorkspaceUser(options = {}) {
+async function signOutWorkspaceUser(options = {}) {
   const signedInProfile = getAuthenticatedUserProfile();
   const workspaceToken = getHostedWorkspaceSessionToken();
+  setHostedWorkspaceSignOutSuspended(true);
   state.signedInUserId = "";
+  state.activeUserId = "";
   state.accessLoginDraft = createEmptyAccessLoginDraft();
   closeHostedWorkspaceEventStream();
   clearAuthSession();
-  clearServerWorkspaceSession({ sessionToken: workspaceToken });
+  persistSettings();
   navigateTo("access", { syncHash: true, showAccessToast: false });
+  setHostedWorkspaceSyncStatus(
+    "auth-required",
+    "This device is signed out. Sign in again to reconnect it to the live shared workspace."
+  );
   render();
+  await clearServerWorkspaceSession({ sessionToken: workspaceToken });
 
   if (options.showToast !== false) {
     showToast(
@@ -17870,7 +17867,7 @@ function handleWorkspaceAuthAction() {
   }
 
   if (isWorkspaceLoginRequired() && !isWorkspaceLocked()) {
-    signOutWorkspaceUser();
+    void signOutWorkspaceUser();
     return;
   }
 
