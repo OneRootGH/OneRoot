@@ -444,6 +444,49 @@ async function writeOrderStore(nextOrder) {
   );
 }
 
+async function refreshWorkspaceSnapshotMirrorFromDatabase() {
+  return runWithDatabaseFallback(
+    "Workspace database read",
+    async (pool) => {
+      const result = await pool.query(
+        `
+          SELECT payload
+          FROM oneroot_workspace_snapshots
+          WHERE workspace_key = $1
+          LIMIT 1
+        `,
+        [WORKSPACE_SNAPSHOT_PRIMARY_KEY]
+      );
+
+      if (result.rows.length === 0) {
+        const fallbackSnapshot = readWorkspaceSnapshotFile();
+        const normalizedFallback = normalizeWorkspaceSnapshotPayload(fallbackSnapshot);
+
+        await pool.query(
+          `
+            INSERT INTO oneroot_workspace_snapshots (workspace_key, payload, updated_at)
+            VALUES ($1, $2::jsonb, NOW())
+            ON CONFLICT (workspace_key) DO UPDATE SET
+              payload = EXCLUDED.payload,
+              updated_at = NOW()
+          `,
+          [WORKSPACE_SNAPSHOT_PRIMARY_KEY, JSON.stringify(normalizedFallback)]
+        );
+
+        writeWorkspaceSnapshotFile(normalizedFallback);
+        setWorkspaceAuthProfileCache(normalizedFallback);
+        return normalizedFallback;
+      }
+
+      const snapshot = normalizeWorkspaceSnapshotPayload(result.rows[0].payload);
+      writeWorkspaceSnapshotFile(snapshot);
+      setWorkspaceAuthProfileCache(snapshot);
+      return snapshot;
+    },
+    () => readWorkspaceSnapshotFile()
+  );
+}
+
 async function findTrackedOrder(orderNumber, phone) {
   const normalizedNumber = normalizeText(orderNumber).toUpperCase();
   const normalizedPhone = normalizePhone(phone);
@@ -490,46 +533,18 @@ async function findTrackedOrder(orderNumber, phone) {
 }
 
 async function readWorkspaceSnapshotStore() {
-  return runWithDatabaseFallback(
-    "Workspace database read",
-    async (pool) => {
-      const result = await pool.query(
-        `
-          SELECT payload
-          FROM oneroot_workspace_snapshots
-          WHERE workspace_key = $1
-          LIMIT 1
-        `,
-        [WORKSPACE_SNAPSHOT_PRIMARY_KEY]
-      );
+  const mirroredSnapshot = readWorkspaceSnapshotFile();
+  const mirroredRecordCount = countWorkspaceBusinessRecords(mirroredSnapshot);
+  const mirroredProfiles = extractWorkspaceAccessProfiles(mirroredSnapshot);
 
-      if (result.rows.length === 0) {
-        const fallbackSnapshot = readWorkspaceSnapshotFile();
-        const normalizedFallback = normalizeWorkspaceSnapshotPayload(fallbackSnapshot);
+  if (mirroredRecordCount > 0 || mirroredProfiles.length > 0) {
+    refreshWorkspaceSnapshotMirrorFromDatabase().catch((error) => {
+      console.error("[oneroot-storage] Background workspace mirror refresh failed.", error);
+    });
+    return mirroredSnapshot;
+  }
 
-        await pool.query(
-          `
-            INSERT INTO oneroot_workspace_snapshots (workspace_key, payload, updated_at)
-            VALUES ($1, $2::jsonb, NOW())
-            ON CONFLICT (workspace_key) DO UPDATE SET
-              payload = EXCLUDED.payload,
-              updated_at = NOW()
-          `,
-          [WORKSPACE_SNAPSHOT_PRIMARY_KEY, JSON.stringify(normalizedFallback)]
-        );
-
-        writeWorkspaceSnapshotFile(normalizedFallback);
-        setWorkspaceAuthProfileCache(normalizedFallback);
-        return normalizedFallback;
-      }
-
-      const snapshot = normalizeWorkspaceSnapshotPayload(result.rows[0].payload);
-      writeWorkspaceSnapshotFile(snapshot);
-      setWorkspaceAuthProfileCache(snapshot);
-      return snapshot;
-    },
-    () => readWorkspaceSnapshotFile()
-  );
+  return refreshWorkspaceSnapshotMirrorFromDatabase();
 }
 
 async function writeWorkspaceSnapshotStore(payload) {
@@ -849,29 +864,17 @@ function loadWorkspaceAuthProfilesFromFiles() {
 }
 
 async function refreshWorkspaceAuthProfileCache() {
-  const profiles = await runWithDatabaseFallback(
-    "Workspace auth profile refresh",
-    async (pool) => {
-      const result = await pool.query(
-        `
-          SELECT payload
-          FROM oneroot_workspace_snapshots
-          WHERE workspace_key = $1
-          LIMIT 1
-        `,
-        [WORKSPACE_SNAPSHOT_PRIMARY_KEY]
-      );
+  const fileProfiles = loadWorkspaceAuthProfilesFromFiles();
 
-      if (result.rows.length === 0) {
-        return loadWorkspaceAuthProfilesFromFiles();
-      }
+  if (fileProfiles.length > 0) {
+    refreshWorkspaceSnapshotMirrorFromDatabase().catch((error) => {
+      console.error("[oneroot-storage] Background auth mirror refresh failed.", error);
+    });
+    return fileProfiles;
+  }
 
-      const snapshot = normalizeWorkspaceSnapshotPayload(result.rows[0].payload);
-      writeWorkspaceSnapshotFile(snapshot);
-      return setWorkspaceAuthProfileCache(snapshot);
-    },
-    () => loadWorkspaceAuthProfilesFromFiles()
-  );
+  const snapshot = await refreshWorkspaceSnapshotMirrorFromDatabase();
+  const profiles = setWorkspaceAuthProfileCache(snapshot);
 
   if (profiles.length === 0) {
     workspaceAuthProfileCache.profiles = [];
