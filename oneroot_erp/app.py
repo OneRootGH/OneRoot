@@ -5,6 +5,7 @@ import csv
 import hashlib
 import html
 import json
+import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
 from functools import wraps
@@ -16,6 +17,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from sqlalchemy import create_engine, desc, or_, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
 from .config import AppConfig, load_config
@@ -45,6 +47,42 @@ TENANCY_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "Tenancy_Agreem
 TENANCY_PROPERTY_LOCATION = "Medie New City (Parks and Gardens), Accra, Ghana"
 TENANCY_PLACEHOLDER_LINE = "_______________________________"
 APARTMENT_ACTIVE_STATUSES = {"Occupied", "Reserved"}
+DATABASE_BOOT_RETRIES = 8
+DATABASE_BOOT_DELAY_SECONDS = 5
+
+
+def build_database_engine(database_url: str):
+    engine_options: dict[str, Any] = {"future": True}
+    if database_url.startswith("postgresql+psycopg://"):
+        engine_options.update(
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_timeout=30,
+            connect_args={"connect_timeout": 10},
+        )
+    return create_engine(database_url, **engine_options)
+
+
+def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
+    retries = DATABASE_BOOT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
+    last_error: OperationalError | None = None
+
+    for attempt in range(1, retries + 1):
+        try:
+            Base.metadata.create_all(engine)
+            with session_factory() as bootstrap_session:
+                bootstrap_database(bootstrap_session, app_config)
+            session_factory.remove()
+            return
+        except OperationalError as error:
+            session_factory.remove()
+            last_error = error
+            if attempt >= retries:
+                raise
+            time.sleep(DATABASE_BOOT_DELAY_SECONDS)
+
+    if last_error:
+        raise last_error
 
 
 def inventory_category_map(products: list[Product] | None = None) -> dict[str, list[str]]:
@@ -1412,14 +1450,11 @@ def is_orderable_area(area_id: str) -> bool:
 
 def create_app(config: AppConfig | None = None) -> Flask:
     app_config = config or load_config()
-    engine = create_engine(app_config.database_url, future=True)
+    engine = build_database_engine(app_config.database_url)
     SessionLocal = scoped_session(
         sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
     )
-    Base.metadata.create_all(engine)
-    with SessionLocal() as bootstrap_session:
-        bootstrap_database(bootstrap_session, app_config)
-    SessionLocal.remove()
+    initialize_database(engine, SessionLocal, app_config)
 
     app = Flask(
         __name__,
