@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>{{ page_title }} | OneRoot Essentials</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+  </head>
+  <body class="document-body">
+    <header class="document-toolbar">
+      <div>
+        <p class="eyebrow">{{ document_label }}</p>
+        <h1>{{ document_title }}</h1>
+        {% if document_subtitle %}
+          <p class="muted">{{ document_subtitle }}</p>
+        {% endif %}
+      </div>
+      <div class="toolbar">
+        {% if back_url %}
+          <a class="button subtle" href="{{ back_url }}">Back</a>
+        {% endif %}
+        {% block extra_actions %}{% endblock %}
+        <button class="button primary" type="button" onclick="window.print()">Print</button>
+      </div>
+    </header>
+
+    <main class="document-shell">
+      <section class="document-sheet">
+        <div class="document-brand">
+          <img src="{{ url_for('static', filename='oneroot-mark.svg') }}" alt="OneRoot" class="document-mark">
+          <div>
+            <p class="eyebrow">OneRoot Essentials</p>
+            <h2>{{ document_title }}</h2>
+            {% if document_subtitle %}
+              <p class="muted">{{ document_subtitle }}</p>
+            {% endif %}
+          </div>
+        </div>
+        {% block document_body %}{% endblock %}
+      </section>
+    </main>
+  </body>
+</html>

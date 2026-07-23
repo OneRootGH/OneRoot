@@ -1,0 +1,182 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Items In View</span>
+      <strong>{{ products|length }}</strong>
+      <small>Current filtered product list</small>
+    </article>
+    <article class="metric-card">
+      <span>Active Items</span>
+      <strong>{{ active_count }}</strong>
+      <small>Available to sell or use</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Low Stock</span>
+      <strong>{{ low_stock_count }}</strong>
+      <small>Filtered items at or below minimum</small>
+    </article>
+    <article class="metric-card">
+      <span>Tracked Stock Value</span>
+      <strong>{{ stock_value|currency }}</strong>
+      <small>{{ service_count }} service item{% if service_count != 1 %}s{% endif %} in view</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Stock</p>
+          <h3>Inventory</h3>
+        </div>
+        <div class="toolbar">
+          <form method="get" class="search-row inventory-filter-row">
+            <input type="search" name="q" placeholder="Search products" value="{{ search }}">
+            <select name="area">
+              <option value="">All Areas</option>
+              {% for value, label in business_area_options %}
+                <option value="{{ value }}" {% if area_filter == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+            <select name="category">
+              <option value="">All Categories</option>
+              {% for group in inventory_category_groups %}
+                <optgroup label="{{ group.short }}">
+                  {% for category in group.categories %}
+                    <option value="{{ category }}" {% if category_filter == category %}selected{% endif %}>{{ category }}</option>
+                  {% endfor %}
+                </optgroup>
+              {% endfor %}
+            </select>
+            <button class="button subtle" type="submit">Search</button>
+          </form>
+          <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter) }}">Export CSV</a>
+        </div>
+      </div>
+      <div class="table-wrap tall">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Area</th>
+              <th>SKU</th>
+              <th>Stock</th>
+              <th>Price</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in products %}
+              <tr>
+                <td>{{ item.name }}</td>
+                <td>{{ business_area_short.get(item.business_area_id, item.business_area_id) }}</td>
+                <td>{{ item.sku or '—' }}</td>
+                <td>{{ item.quantity_on_hand }}</td>
+                <td>{{ item.sales_price|currency }}</td>
+                <td>
+                  <div class="row-actions">
+                    <a class="table-link" href="{{ url_for('inventory', edit=item.id, q=search) }}">Edit</a>
+                    <form method="post" action="{{ url_for('inventory_delete', product_id=item.id) }}" onsubmit="return confirm('Delete this inventory item?');">
+                      <input type="hidden" name="q" value="{{ search }}">
+                      <input type="hidden" name="area" value="{{ area_filter }}">
+                      <input type="hidden" name="category" value="{{ category_filter }}">
+                      <button class="text-button danger-text" type="submit">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6">No inventory items found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Editor</p>
+          <h3>{{ "Edit Item" if editing_product else "New Item" }}</h3>
+        </div>
+      </div>
+      <form method="post" class="form-grid single">
+        <input type="hidden" name="id" value="{{ editing_product.id if editing_product else '' }}">
+        <label><span>Name</span><input type="text" name="name" value="{{ editing_product.name if editing_product else '' }}" required></label>
+        <label><span>Business Area</span>
+          <select name="business_area_id" id="inventory-business-area" required>
+            <option value="">Select Business Area</option>
+            {% for value, label in business_area_options %}
+              <option value="{{ value }}" {% if editing_product and editing_product.business_area_id == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label><span>Category</span>
+          <select name="category" id="inventory-category" data-current="{{ editing_product.category if editing_product else '' }}">
+            <option value="">Select Category</option>
+          </select>
+        </label>
+        <label><span>SKU</span><input type="text" name="sku" value="{{ editing_product.sku if editing_product else '' }}"></label>
+        <label><span>Barcode</span><input type="text" name="barcode" value="{{ editing_product.barcode if editing_product else '' }}"></label>
+        <label><span>Item Type</span>
+          <select name="item_type">
+            <option value="stock" {% if not editing_product or editing_product.item_type == 'stock' %}selected{% endif %}>Stock</option>
+            <option value="service" {% if editing_product and editing_product.item_type == 'service' %}selected{% endif %}>Service</option>
+          </select>
+        </label>
+        <label><span>Quantity On Hand</span><input type="number" step="0.01" name="quantity_on_hand" value="{{ editing_product.quantity_on_hand if editing_product else 0 }}"></label>
+        <label><span>Min Stock Level</span><input type="number" step="1" name="min_stock_level" value="{{ editing_product.min_stock_level if editing_product else 5 }}"></label>
+        <label><span>Sales Price</span><input type="number" step="0.01" name="sales_price" value="{{ editing_product.sales_price if editing_product else 0 }}"></label>
+        <label><span>Cost Price</span><input type="number" step="0.01" name="cost_price" value="{{ editing_product.cost_price if editing_product else 0 }}"></label>
+        <label class="checkbox-row"><input type="checkbox" name="track_inventory" {% if not editing_product or editing_product.track_inventory %}checked{% endif %}><span>Track inventory</span></label>
+        <label class="checkbox-row"><input type="checkbox" name="active" {% if not editing_product or editing_product.active %}checked{% endif %}><span>Active</span></label>
+        <label><span>Notes</span><textarea name="notes" rows="4">{{ editing_product.notes if editing_product else '' }}</textarea></label>
+        <div class="form-actions">
+          <button class="button primary" type="submit">Save Item</button>
+          {% if editing_product %}
+            <a class="button subtle" href="{{ url_for('inventory', q=search, area=area_filter, category=category_filter) }}">Cancel</a>
+          {% endif %}
+        </div>
+      </form>
+    </article>
+  </section>
+{% endblock %}
+{% block scripts %}
+  <script>
+    (function () {
+      const areaSelect = document.getElementById("inventory-business-area");
+      const categorySelect = document.getElementById("inventory-category");
+      const categoryMap = {{ inventory_category_map|tojson }};
+      if (!areaSelect || !categorySelect) {
+        return;
+      }
+      const currentValue = categorySelect.dataset.current || "";
+
+      function renderCategories() {
+        const areaId = areaSelect.value || "";
+        const options = areaId && categoryMap[areaId] ? categoryMap[areaId] : [];
+        const selectedValue = categorySelect.value || currentValue;
+        categorySelect.innerHTML = '<option value="">Select Category</option>';
+        options.forEach((category) => {
+          const option = document.createElement("option");
+          option.value = category;
+          option.textContent = category;
+          if (category === selectedValue) {
+            option.selected = true;
+          }
+          categorySelect.appendChild(option);
+        });
+        if (selectedValue && !options.includes(selectedValue)) {
+          const customOption = document.createElement("option");
+          customOption.value = selectedValue;
+          customOption.textContent = selectedValue;
+          customOption.selected = true;
+          categorySelect.appendChild(customOption);
+        }
+      }
+
+      areaSelect.addEventListener("change", renderCategories);
+      renderCategories();
+    })();
+  </script>
+{% endblock %}

@@ -1,0 +1,322 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Property Workspace</p>
+        <h3>Apartment Control Center</h3>
+      </div>
+      <div class="toolbar">
+        <a class="button subtle" href="{{ url_for('module_export', module_key='apartments', q=search, month=month_filter, status=status_filter, alert=alert_filter) }}">Export CSV</a>
+        <a class="button subtle" href="{{ url_for('apartment_report_print', q=search, month=month_filter, status=status_filter, alert=alert_filter) }}" target="_blank" rel="noopener">Print Report</a>
+        <a class="button subtle" href="{{ url_for('module_list', module_key='security_deposit_records') }}">Deposits & Charges</a>
+        <a class="button subtle" href="{{ url_for('module_list', module_key='maintenance_records') }}">Maintenance</a>
+        <a class="button primary" href="{{ url_for('module_form', module_key='apartments') }}">New Apartment Entry</a>
+      </div>
+    </div>
+    <form method="get" class="form-grid apartment-filter-grid">
+      <label>
+        <span>Search</span>
+        <input type="search" name="q" value="{{ search }}" placeholder="Search suite, tenant, phone, ID, notes">
+      </label>
+      <label>
+        <span>Month</span>
+        <input type="month" name="month" value="{{ month_filter }}">
+      </label>
+      <label>
+        <span>Occupancy</span>
+        <select name="status">
+          <option value="">All Occupancy States</option>
+          {% for label in occupancy_options %}
+            <option value="{{ label }}" {% if status_filter == label %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Alert</span>
+        <select name="alert">
+          {% for value, label in alert_options %}
+            <option value="{{ value }}" {% if alert_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="form-actions span-2">
+        <button class="button primary" type="submit">Apply Filters</button>
+        <a class="button subtle" href="{{ url_for('module_list', module_key='apartments') }}">Reset</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Occupied Suites</span>
+      <strong>{{ occupied_count }}</strong>
+      <small>Latest occupied suite profiles in view</small>
+    </article>
+    <article class="metric-card">
+      <span>Vacant Suites</span>
+      <strong>{{ vacant_count }}</strong>
+      <small>Vacant or ready-to-fill suites in view</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Overdue Suites</span>
+      <strong>{{ overdue_count }}</strong>
+      <small>Suites needing rent or bills follow-up now</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Total Outstanding</span>
+      <strong>{{ total_outstanding|currency }}</strong>
+      <small>Open rent, bills, arrears, and late fees</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Due Soon</span>
+      <strong>{{ due_soon_count }}</strong>
+      <small>Suites with upcoming due dates</small>
+    </article>
+    <article class="metric-card">
+      <span>Credit Balance</span>
+      <strong>{{ total_credit|currency }}</strong>
+      <small>Advance or excess payment held</small>
+    </article>
+    <article class="metric-card">
+      <span>Rent Collected</span>
+      <strong>{{ total_rent_collected|currency }}</strong>
+      <small>Filtered rent payments captured</small>
+    </article>
+    <article class="metric-card">
+      <span>Bills Collected</span>
+      <strong>{{ total_bills_collected|currency }}</strong>
+      <small>Filtered bills payments captured</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Occupancy Mix</h3>
+        </div>
+      </div>
+      {% if occupancy_chart %}
+        <div class="chart-stack">
+          {% for row in occupancy_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|int }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Occupancy data will appear here when apartment records are saved.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Top Outstanding Suites</h3>
+        </div>
+      </div>
+      {% if outstanding_chart %}
+        <div class="chart-stack">
+          {% for row in outstanding_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Outstanding suites will appear here when balances are open.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Current Suite View</p>
+          <h3>Latest Apartment Summary</h3>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Suite</th>
+              <th>Tenant</th>
+              <th>Cycle</th>
+              <th>Rent</th>
+              <th>Bills</th>
+              <th>Balance</th>
+              <th>Alert</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in suite_profiles %}
+              <tr>
+                <td>
+                  <strong>{{ item.suite }}</strong>
+                  <span class="table-secondary">{{ item.month or 'Latest' }}{% if item.rentCoverageLabel %} · {{ item.rentCoverageLabel }}{% endif %}</span>
+                </td>
+                <td>
+                  {{ item.tenant }}
+                  <span class="table-secondary">{% if item.tenantPhone %}{{ item.tenantPhone }}{% else %}No phone saved{% endif %}</span>
+                </td>
+                <td>
+                  {{ item.rentCycleLabel }}
+                  <span class="table-secondary">{{ item.occupancyStatus }}</span>
+                </td>
+                <td>
+                  {{ item.rentDue|currency }}
+                  <span class="table-secondary">Paid {{ item.rentPaid|currency }}</span>
+                </td>
+                <td>
+                  {{ item.billsDue|currency }}
+                  <span class="table-secondary">Paid {{ item.billsPaid|currency }}</span>
+                </td>
+                <td>
+                  <span class="{% if item.outstanding > 0 %}negative-text{% endif %}">{{ item.outstanding|currency }}</span>
+                  {% if item.creditBalance > 0 %}
+                    <span class="table-secondary">Credit {{ item.creditBalance|currency }}</span>
+                  {% endif %}
+                </td>
+                <td>
+                  <strong>{{ item.alertLabel }}</strong>
+                  <span class="table-secondary">{% if item.nextRentDueDate %}Rent {{ item.nextRentDueDate }}{% elif item.billDueDate %}Bills {{ item.billDueDate }}{% else %}No due date saved{% endif %}</span>
+                </td>
+                <td>
+                  <div class="row-actions">
+                    <a class="table-link" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open</a>
+                    <a class="table-link" href="{{ url_for('apartment_statement', record_id=item.id) }}" target="_blank" rel="noopener">Statement</a>
+                    <a class="table-link" href="{{ url_for('apartment_agreement', record_id=item.id) }}" target="_blank" rel="noopener">Agreement</a>
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8">No apartment records matched the current filter.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Action Queue</p>
+          <h3>What Needs Follow-Up</h3>
+        </div>
+      </div>
+      <ul class="stack-list compact">
+        {% for item in due_watch %}
+          <li>
+            <strong>{{ item.suite }} · {{ item.tenant }}</strong>
+            <span>{{ item.alertLabel }} · {{ item.outstanding|currency }} open</span>
+            <span>{% if item.nextRentDueDate %}Next rent due {{ item.nextRentDueDate }}{% elif item.billDueDate %}Bills due {{ item.billDueDate }}{% else %}No due date saved{% endif %}</span>
+          </li>
+        {% else %}
+          <li><span>No overdue or due-soon suites are in this view right now.</span></li>
+        {% endfor %}
+      </ul>
+
+      <div class="dashboard-subsection">
+        <p class="eyebrow">Bills Balance Chart</p>
+        {% if bills_chart %}
+          <div class="chart-stack">
+            {% for row in bills_chart %}
+              <div class="chart-row">
+                <div class="chart-row-header">
+                  <strong>{{ row.chartLabel }}</strong>
+                  <span>{{ row.chartValue|currency }}</span>
+                </div>
+                <div class="chart-track">
+                  <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted">Bills balance will appear here when unpaid bills exist.</p>
+        {% endif %}
+      </div>
+    </article>
+  </section>
+
+  <article class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Monthly History</p>
+        <h3>Apartment Entries</h3>
+      </div>
+    </div>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>Month</th>
+            <th>Suite</th>
+            <th>Tenant</th>
+            <th>Occupancy</th>
+            <th>Rent Due / Paid</th>
+            <th>Bills Due / Paid</th>
+            <th>Outstanding</th>
+            <th>Alert</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in history_rows %}
+            <tr>
+              <td>{{ item.month or '—' }}</td>
+              <td>{{ item.suite }}</td>
+              <td>{{ item.tenant }}</td>
+              <td>{{ item.occupancyStatus }}</td>
+              <td>{{ item.rentDue|currency }} / {{ item.rentPaid|currency }}</td>
+              <td>{{ item.billsDue|currency }} / {{ item.billsPaid|currency }}</td>
+              <td class="{% if item.outstanding > 0 %}negative-text{% endif %}">{{ item.outstanding|currency }}</td>
+              <td>{{ item.alertLabel }}</td>
+              <td>{{ item.updatedAt }}</td>
+              <td>
+                <div class="row-actions">
+                  <a class="table-link" href="{{ url_for('apartment_receipt', record_id=item.id) }}" target="_blank" rel="noopener">Receipt</a>
+                  <a class="table-link" href="{{ url_for('apartment_statement', record_id=item.id) }}" target="_blank" rel="noopener">Statement</a>
+                  <a class="table-link" href="{{ url_for('apartment_bill_notice', record_id=item.id) }}" target="_blank" rel="noopener">Bill Notice</a>
+                  <a class="table-link" href="{{ url_for('apartment_agreement', record_id=item.id) }}" target="_blank" rel="noopener">Agreement</a>
+                  <a class="table-link" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Edit</a>
+                  <form method="post" action="{{ url_for('module_delete', module_key='apartments', record_id=item.id) }}" onsubmit="return confirm('Delete this apartment record?');">
+                    <input type="hidden" name="q" value="{{ search }}">
+                    <input type="hidden" name="month" value="{{ month_filter }}">
+                    <input type="hidden" name="status" value="{{ status_filter }}">
+                    <input type="hidden" name="alert" value="{{ alert_filter }}">
+                    <button class="text-button danger-text" type="submit">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="10">No apartment history rows are available for this filter yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+{% endblock %}

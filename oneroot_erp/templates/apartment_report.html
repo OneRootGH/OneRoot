@@ -1,0 +1,126 @@
+{% extends "document_base.html" %}
+{% set document_label = "Apartment Report" %}
+{% set document_title = "OneRoot Apartment Report" %}
+{% set document_subtitle = "Generated " ~ (generated_on|pretty_date) %}
+{% block document_body %}
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Occupied Suites</span>
+      <strong>{{ occupied_count }}</strong>
+      <small>Visible after current filters</small>
+    </article>
+    <article class="mini-card">
+      <span>Vacant Suites</span>
+      <strong>{{ vacant_count }}</strong>
+      <small>Visible after current filters</small>
+    </article>
+    <article class="mini-card">
+      <span>Outstanding</span>
+      <strong>{{ total_outstanding|currency }}</strong>
+      <small>Open rent, bills, and arrears</small>
+    </article>
+    <article class="mini-card">
+      <span>Collected</span>
+      <strong>{{ total_rent_collected|currency }}</strong>
+      <small>Bills {{ total_bills_collected|currency }}</small>
+    </article>
+  </section>
+
+  <section class="document-copy">
+    <p>
+      Filter scope:
+      search <strong>{{ search or 'All records' }}</strong>,
+      month <strong>{{ month_filter or 'All months' }}</strong>,
+      occupancy <strong>{{ status_filter or 'All occupancy states' }}</strong>,
+      alert <strong>{{ alert_filter or 'All alerts' }}</strong>.
+    </p>
+  </section>
+
+  <h3>Follow-Up Queue</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Suite</th>
+          <th>Tenant</th>
+          <th>Alert</th>
+          <th>Outstanding</th>
+          <th>Next Due</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in due_watch %}
+          <tr>
+            <td>{{ item.suite }}</td>
+            <td>{{ item.tenant }}</td>
+            <td>{{ item.alertLabel }}</td>
+            <td>{{ item.outstanding|currency }}</td>
+            <td>{{ item.nextRentDueDate|pretty_date or item.billDueDate|pretty_date or 'Not saved' }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="5">No follow-up alerts are currently visible in this report.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Latest Suite Summary</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Suite</th>
+          <th>Tenant</th>
+          <th>Occupancy</th>
+          <th>Rent</th>
+          <th>Bills</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in suite_profiles %}
+          <tr>
+            <td>{{ item.suite }}</td>
+            <td>{{ item.tenant }}</td>
+            <td>{{ item.occupancyStatus }}</td>
+            <td>{{ item.rentPaid|currency }} / {{ item.rentDue|currency }}</td>
+            <td>{{ item.billsPaid|currency }} / {{ item.billsDue|currency }}</td>
+            <td>{{ item.outstanding|currency }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">No suite profiles matched this report scope.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <h3>Monthly History</h3>
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Suite</th>
+          <th>Tenant</th>
+          <th>Rent Due / Paid</th>
+          <th>Bills Due / Paid</th>
+          <th>Outstanding</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in history_rows %}
+          <tr>
+            <td>{{ item.month or '—' }}</td>
+            <td>{{ item.suite }}</td>
+            <td>{{ item.tenant }}</td>
+            <td>{{ item.rentDue|currency }} / {{ item.rentPaid|currency }}</td>
+            <td>{{ item.billsDue|currency }} / {{ item.billsPaid|currency }}</td>
+            <td>{{ item.outstanding|currency }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="6">No apartment history rows matched this report scope.</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endblock %}

@@ -1,0 +1,241 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Filters</p>
+        <h3>Operating Report Scope</h3>
+      </div>
+      <a class="button subtle" href="{{ url_for('reports_export', month=month_filter, area=area_filter) }}">Export Report CSV</a>
+    </div>
+    <form class="form-grid">
+      <label>
+        <span>Month</span>
+        <input type="month" name="month" value="{{ month_filter }}">
+      </label>
+      <label>
+        <span>Business Area</span>
+        <select name="area">
+          <option value="">All Business Areas</option>
+          {% for value, label in business_area_options %}
+            <option value="{{ value }}" {% if area_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Apply Report Filter</button>
+        <a class="button subtle" href="{{ url_for('reports_page') }}">Reset</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Sales</span>
+      <strong>{{ sales_total|currency }}</strong>
+      <small>Income in the selected report scope</small>
+    </article>
+    <article class="metric-card">
+      <span>Expenses</span>
+      <strong>{{ expenses_total|currency }}</strong>
+      <small>Direct operating spend captured</small>
+    </article>
+    <article class="metric-card">
+      <span>Salaries</span>
+      <strong>{{ salary_total|currency }}</strong>
+      <small>Salary records in the selected month</small>
+    </article>
+    <article class="metric-card {% if net_total < 0 %}warning{% endif %}">
+      <span>Net Position</span>
+      <strong>{{ net_total|currency }}</strong>
+      <small>Sales minus expenses and salaries</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Petty Cash</span>
+      <strong>{{ petty_cash_total|currency }}</strong>
+      <small>Captured petty cash movement</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Supplier Balance</span>
+      <strong>{{ supplier_balance|currency }}</strong>
+      <small>Outstanding supplier follow-up</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Apartment Exposure</span>
+      <strong>{{ apartment_exposure|currency }}</strong>
+      <small>Open rent and bills still outstanding</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Online Open Balance</span>
+      <strong>{{ online_open_balance|currency }}</strong>
+      <small>Customer website orders not fully paid</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Sales By Business Area</h3>
+        </div>
+      </div>
+      {% if report_sales_chart %}
+        <div class="chart-stack">
+          {% for area in report_sales_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ area.chartLabel }}</strong>
+                <span>{{ area.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No sales are available in the selected report scope yet.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Net Position By Area</h3>
+        </div>
+      </div>
+      {% if report_net_chart %}
+        <div class="chart-stack">
+          {% for area in report_net_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ area.chartLabel }}</strong>
+                <span class="{% if area.chartNegative %}negative-text{% endif %}">{{ area.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill {% if area.chartNegative %}negative{% endif %}" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Net position by area will appear when activity exists in this report scope.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Area Performance</p>
+          <h3>Business Area Scorecard</h3>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Sales</th>
+              <th>Expenses</th>
+              <th>Salaries</th>
+              <th>Supplier Balance</th>
+              <th>Net</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in area_rows %}
+              <tr>
+                <td>{{ row.areaLabel }}</td>
+                <td>{{ row.salesTotal|currency }}</td>
+                <td>{{ row.expenseTotal|currency }}</td>
+                <td>{{ row.salaryTotal|currency }}</td>
+                <td>{{ row.supplierBalance|currency }}</td>
+                <td class="{% if row.netTotal < 0 %}negative-text{% endif %}">{{ row.netTotal|currency }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6">No report rows are available for this filter yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Attention Queue</p>
+          <h3>Low Stock & Recurring Watch</h3>
+        </div>
+      </div>
+      <div class="dashboard-subsection">
+        <p class="eyebrow">Recurring Controls</p>
+        <ul class="stack-list compact">
+          {% for record in recurring_alerts %}
+            <li>
+              <strong>{{ record.title }}</strong>
+              <span>{{ record.payload.get('nextDueDate', '') }} · {{ record.status }}</span>
+            </li>
+          {% else %}
+            <li><span>No recurring items are due soon right now.</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+      <div class="dashboard-subsection">
+        <p class="eyebrow">Low Stock</p>
+        <ul class="stack-list compact">
+          {% for item in low_stock_items %}
+            <li>
+              <strong>{{ item.name }}</strong>
+              <span>{{ business_area_short.get(item.business_area_id, item.business_area_id) }} · {{ item.quantity_on_hand }} left</span>
+            </li>
+          {% else %}
+            <li><span>No low stock items are flagged right now.</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+    </article>
+  </section>
+
+  <article class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Audit Snapshot</p>
+        <h3>Latest Recorded Activity</h3>
+      </div>
+      <a class="button subtle" href="{{ url_for('audit_page') }}">Open Full Audit Trail</a>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Module</th>
+            <th>Action</th>
+            <th>Title</th>
+            <th>Actor</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in recent_audits %}
+            <tr>
+              <td>{{ item.created_at }}</td>
+              <td>{{ item.module_label }}</td>
+              <td>{{ item.action }}</td>
+              <td>{{ item.title }}</td>
+              <td>{{ item.actor_name }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="5">No audit activity has been recorded yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+{% endblock %}

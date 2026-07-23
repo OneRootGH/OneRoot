@@ -1,0 +1,96 @@
+{% extends "document_base.html" %}
+{% set document_label = "Tenant Statement" %}
+{% set document_title = "OneRoot Tenant Statement" %}
+{% set document_subtitle = source.get('suite') ~ " · Generated " ~ (generated_on|pretty_date) %}
+{% block document_body %}
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Tenant</span>
+      <strong>{{ source.get('tenantName') or profile.tenant }}</strong>
+      <small>{{ source.get('tenantPhone') or 'No phone saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Cycle & Coverage</span>
+      <strong>{{ profile.rentCycleLabel }}</strong>
+      <small>{{ profile.rentCoverageLabel or 'Coverage not saved yet' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Statement Totals</span>
+      <strong>Rent {{ totals.rentPaid|currency }}</strong>
+      <small>Bills {{ totals.billsPaid|currency }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Current Balance</span>
+      <strong>{{ totals.balance|currency }}</strong>
+      <small>Credit applied {{ totals.creditApplied|currency }}</small>
+    </article>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Month</th>
+          <th>Status</th>
+          <th>Rent Due</th>
+          <th>Rent Paid</th>
+          <th>Bills Due</th>
+          <th>Bills Paid</th>
+          <th>Credit Applied</th>
+          <th>Arrears + Late Fee</th>
+          <th>Balance</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in statement_rows %}
+          <tr>
+            <td>{{ row.month or '—' }}</td>
+            <td>{{ row.occupancyStatus }}</td>
+            <td>{{ row.rentDue|currency }}</td>
+            <td>{{ row.rentPaid|currency }}</td>
+            <td>{{ row.billsDue|currency }}</td>
+            <td>{{ row.billsPaid|currency }}</td>
+            <td>{{ row.creditApplied|currency }}</td>
+            <td>{{ (row.openingArrears + row.lateFee)|currency }}</td>
+            <td>{{ row.runningBalance|currency }}</td>
+          </tr>
+        {% else %}
+          <tr><td colspan="9">No statement rows are available for this tenant yet.</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>Total</th>
+          <th>—</th>
+          <th>{{ totals.rentDue|currency }}</th>
+          <th>{{ totals.rentPaid|currency }}</th>
+          <th>{{ totals.billsDue|currency }}</th>
+          <th>{{ totals.billsPaid|currency }}</th>
+          <th>{{ totals.creditApplied|currency }}</th>
+          <th>—</th>
+          <th>{{ totals.balance|currency }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <section class="card-grid two document-detail-grid">
+    <article class="mini-card">
+      <span>Due Dates</span>
+      <strong>Rent {{ source.get('nextRentDueDate')|pretty_date or 'Not set' }}</strong>
+      <small>Bills {{ source.get('billDueDate')|pretty_date or 'Not set' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Held Deposit</span>
+      <strong>{{ profile.securityDepositHeld|currency }}</strong>
+      <small>Renewal {{ profile.renewalDate|pretty_date or 'Not set' }} · {{ profile.renewalStatus }}</small>
+    </article>
+  </section>
+
+  {% if source.get('notes') %}
+    <section class="document-note">
+      <strong>Notes</strong>
+      <p>{{ source.get('notes') }}</p>
+    </section>
+  {% endif %}
+{% endblock %}

@@ -1,0 +1,243 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card pos-workbench">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Counter Sales</p>
+        <h3>Fast POS Checkout</h3>
+      </div>
+      <div class="toolbar">
+        <a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a>
+        <button class="button subtle" type="button" id="pos-closeout">Close Counter</button>
+      </div>
+    </div>
+
+    <section class="pos-counter-strip">
+      <article class="mini-card">
+        <span class="eyebrow">Counter Day</span>
+        <strong id="pos-counter-total">{{ counter_summary.totalAmount|currency }}</strong>
+      </article>
+      <article class="mini-card">
+        <span class="eyebrow">Daily Sales Ledger</span>
+        <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
+      </article>
+      <article class="mini-card">
+        <span class="eyebrow">Cart</span>
+        <strong data-pos-total>GH₵0.00</strong>
+      </article>
+      <article class="mini-card">
+        <span class="eyebrow">Items</span>
+        <strong id="pos-cart-item-count">0</strong>
+      </article>
+      <article class="mini-card">
+        <span class="eyebrow">Serving Area</span>
+        <strong id="pos-area-label">{{ counter_summary.areaLabel }}</strong>
+      </article>
+      <article class="mini-card pos-wide-card">
+        <span class="eyebrow">Payment Mix</span>
+        <strong id="pos-payment-mix">
+          {% if counter_summary.paymentMix %}
+            {% for label, amount in counter_summary.paymentMix.items() %}
+              {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
+            {% endfor %}
+          {% else %}
+            No payment mix recorded yet.
+          {% endif %}
+        </strong>
+      </article>
+    </section>
+
+    <p class="muted pos-serving-note">
+      Serve faster from one screen: choose date, area, and payment at the top, type or scan the item, tap add, then save.
+      Press <strong>/</strong> to jump to product search. Use the barcode box for scanners or quick code entry.
+    </p>
+
+    <div class="pos-layout pos-layout-enhanced">
+      <div class="pos-main-panel">
+        <section class="card pos-fastlane-card">
+          <div class="card-header compact">
+            <div>
+              <p class="eyebrow">Cashier Fastlane</p>
+              <h3>Browse, Search, And Add</h3>
+            </div>
+            <span class="status-chip" id="pos-result-count">Loading products...</span>
+          </div>
+          <div class="pos-quick-grid">
+            <label>
+              <span>Order Date</span>
+              <input type="date" id="pos-order-date" value="{{ today_iso }}">
+            </label>
+            <label>
+              <span>Serving Area</span>
+              <select id="pos-area-filter">
+                <option value="">All POS Areas</option>
+                {% for value, label in business_area_options %}
+                  <option value="{{ value }}">{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              <span>Scan Barcode / SKU</span>
+              <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
+            </label>
+            <label class="pos-search-wide">
+              <span>Search Products</span>
+              <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" autocomplete="off">
+            </label>
+          </div>
+          <div class="pos-payment-quick">
+            <div>
+              <p class="eyebrow">Payment</p>
+              <div class="pos-chip-row" id="pos-payment-buttons">
+                {% for method in payment_methods %}
+                  <button class="pos-chip {% if loop.first %}is-active{% endif %}" type="button" data-payment-method="{{ method }}">{{ method }}</button>
+                {% endfor %}
+              </div>
+            </div>
+            <label class="pos-payment-select">
+              <span>Payment Dropdown</span>
+              <select id="pos-payment-method">
+                {% for method in payment_methods %}
+                  <option value="{{ method }}">{{ method }}</option>
+                {% endfor %}
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section class="card pos-browser-card">
+          <div class="card-header compact">
+            <div>
+              <p class="eyebrow">Product Shelf</p>
+              <h3>Category Picks</h3>
+            </div>
+            <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
+          </div>
+          <div class="pos-chip-row pos-category-row" id="pos-category-buttons">
+            <button class="pos-chip is-active" type="button" data-category="">All Items</button>
+            {% for category in pos_categories %}
+              <button class="pos-chip" type="button" data-category="{{ category.name }}">{{ category.name }} <span>{{ category.count }}</span></button>
+            {% endfor %}
+          </div>
+          <div id="pos-results" class="result-grid pos-results-grid">
+            {% for product in top_products %}
+              <button class="result-card pos-result-card" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product.track_inventory, "sku": product.sku, "barcode": product.barcode}|tojson }}'>
+                <strong>{{ product.name }}</strong>
+                <span>{{ business_area_short.get(product.business_area_id, product.business_area_id) }}{% if product.category %} · {{ product.category }}{% endif %}</span>
+                <span>{{ product.sales_price|currency }}</span>
+                <small>{% if product.track_inventory %}Stock {{ product.quantity_on_hand|round(0, 'floor')|int }}{% else %}Service Item{% endif %}</small>
+              </button>
+            {% endfor %}
+          </div>
+        </section>
+      </div>
+
+      <aside class="card pos-cart-panel pos-cart-panel-enhanced">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Current Sale</p>
+            <h3>Live Cart</h3>
+          </div>
+          <strong class="pos-cart-grand-total" data-pos-total>GH₵0.00</strong>
+        </div>
+
+        <section class="summary-grid pos-summary-grid">
+          <article class="mini-card">
+            <span>Items</span>
+            <strong id="pos-cart-item-count-duplicate">0</strong>
+            <small>Running quantity in cart</small>
+          </article>
+          <article class="mini-card">
+            <span>Payment</span>
+            <strong id="pos-payment-label">{{ payment_methods[0] if payment_methods else 'Cash' }}</strong>
+            <small>Change at the top anytime</small>
+          </article>
+        </section>
+
+        <details class="muted-box pos-customer-box">
+          <summary>Customer details and note (optional)</summary>
+          <div class="form-grid single">
+            <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Only if needed"></label>
+            <label><span>Customer Phone</span><input type="text" id="pos-customer-phone" placeholder="Optional contact"></label>
+            <label><span>Notes</span><textarea id="pos-notes" rows="3" placeholder="Optional counter note"></textarea></label>
+          </div>
+        </details>
+
+        <div class="cart-box pos-cart-box">
+          <div class="card-header compact">
+            <h4>Cart Lines</h4>
+            <span class="muted">Adjust quantity here</span>
+          </div>
+          <div id="pos-cart-lines" class="stack-list compact"></div>
+        </div>
+
+        <section class="mini-card pos-last-receipt-card">
+          <span class="eyebrow">Receipt</span>
+          <strong id="pos-last-order-number">No sale saved yet</strong>
+          <small id="pos-closeout-meta">
+            {% if counter_summary.lastCloseout %}
+              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}.
+            {% else %}
+              No closeout has been saved for this counter day yet.
+            {% endif %}
+          </small>
+          <div class="form-actions">
+            <a class="button subtle is-disabled" href="#" id="pos-last-receipt" target="_blank" rel="noopener">Print Last Receipt</a>
+          </div>
+        </section>
+
+        <div class="form-actions pos-action-bar">
+          <button class="button subtle" type="button" id="pos-clear">Clear Cart</button>
+          <button class="button primary" type="button" id="pos-save">Save Sale</button>
+        </div>
+        <div id="pos-status" class="muted"></div>
+      </aside>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Counter History</p>
+        <h3>Recent POS Orders</h3>
+      </div>
+      <p class="muted">
+        Current POS total for <strong id="pos-summary-date">{{ counter_summary.orderDate }}</strong> is
+        <strong id="pos-summary-total">{{ counter_summary.totalAmount|currency }}</strong>.
+      </p>
+    </div>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>Order</th>
+            <th>Date</th>
+            <th>Customer</th>
+            <th>Items</th>
+            <th>Payment</th>
+            <th>Total</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="pos-history-body">
+          {% for order in recent_orders %}
+            <tr>
+              <td>{{ order.order_number }}</td>
+              <td>{{ order.order_date }}</td>
+              <td>{{ order.customer_name or 'Walk-in' }}</td>
+              <td>{{ order.item_count }}</td>
+              <td>{{ order.payment_method }}</td>
+              <td>{{ order.total_amount|currency }}</td>
+              <td><a class="table-link" href="{{ url_for('pos_receipt', order_id=order.id) }}" target="_blank" rel="noopener">Receipt</a></td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7">No POS orders saved yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
+{% block scripts %}
+  <script src="{{ url_for('static', filename='app.js') }}"></script>
+{% endblock %}

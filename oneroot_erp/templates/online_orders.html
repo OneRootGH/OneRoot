@@ -1,0 +1,226 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span class="eyebrow">Orders</span>
+      <strong>{{ orders|length }}</strong>
+      <span class="muted">Visible after filters</span>
+    </article>
+    <article class="metric-card">
+      <span class="eyebrow">Open Value</span>
+      <strong>{{ total_open|currency }}</strong>
+      <span class="muted">Not fully paid yet</span>
+    </article>
+    <article class="metric-card">
+      <span class="eyebrow">Paid Value</span>
+      <strong>{{ total_paid|currency }}</strong>
+      <span class="muted">Already posted to sales</span>
+    </article>
+    <article class="metric-card warning">
+      <span class="eyebrow">Flow</span>
+      <strong>Server-First</strong>
+      <span class="muted">Orders save directly to the shared database</span>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Desk Filters</p>
+        <h3>Review Online Orders</h3>
+      </div>
+      <a class="button subtle" href="{{ url_for('online_orders_export', q=query_text, status=status_filter, payment=payment_filter) }}">Export CSV</a>
+    </div>
+    <form class="form-grid">
+      <label>
+        <span>Search</span>
+        <input type="search" name="q" value="{{ query_text }}" placeholder="Order number, customer, phone">
+      </label>
+      <label>
+        <span>Status</span>
+        <select name="status">
+          <option value="">All statuses</option>
+          {% for option in status_options %}
+            <option value="{{ option }}" {% if status_filter == option %}selected{% endif %}>{{ option|replace('-', ' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Payment</span>
+        <select name="payment">
+          <option value="">All payments</option>
+          {% for option in payment_status_options %}
+            <option value="{{ option }}" {% if payment_filter == option %}selected{% endif %}>{{ option|replace('-', ' ')|title }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Apply Filters</button>
+        <a class="button subtle" href="{{ url_for('online_orders_desk') }}">Clear</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="split-grid wide-right">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Order Queue</p>
+          <h3>Latest Orders</h3>
+        </div>
+      </div>
+      <div class="table-wrap tall">
+        <table>
+          <thead>
+            <tr>
+              <th>Order</th>
+              <th>Customer</th>
+              <th>Status</th>
+              <th>Payment</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for order in orders %}
+              <tr class="{% if selected_order and selected_order.id == order.id %}row-active{% endif %}">
+                <td>
+                  <a class="table-link" href="{{ url_for('online_orders_desk', order_id=order.id, q=query_text, status=status_filter, payment=payment_filter) }}">
+                    {{ order.orderNumber }}
+                  </a>
+                  <div class="muted">{{ order.updatedAt[:16]|replace('T', ' ') }}</div>
+                </td>
+                <td>
+                  {{ order.customerName or "Walk-in / Website" }}
+                  <div class="muted">{{ order.customerPhone }}</div>
+                </td>
+                <td><span class="status-chip status-{{ order.status|replace(' ', '-') }}">{{ order.status|replace('-', ' ')|title }}</span></td>
+                <td><span class="status-chip status-{{ order.paymentStatus|replace(' ', '-') }}">{{ order.paymentStatus|replace('-', ' ')|title }}</span></td>
+                <td>{{ order.totalAmount|currency }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No online orders are available yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      {% if selected_order %}
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Selected Order</p>
+            <h3>{{ selected_order.orderNumber }}</h3>
+          </div>
+          <div class="status-stack">
+            <span class="status-chip status-{{ selected_order.status|replace(' ', '-') }}">{{ selected_order.status|replace('-', ' ')|title }}</span>
+            <span class="status-chip status-{{ selected_order.paymentStatus|replace(' ', '-') }}">Payment {{ selected_order.paymentStatus|replace('-', ' ')|title }}</span>
+          </div>
+        </div>
+
+        <div class="card-grid two">
+          <article class="mini-card">
+            <strong>{{ selected_order.customerName or "Customer" }}</strong>
+            <span class="muted">{{ selected_order.customerPhone }}</span>
+            <span class="muted">{{ selected_order.customerEmail }}</span>
+          </article>
+          <article class="mini-card">
+            <strong>{{ selected_order.businessAreaSummary or "OneRoot Order" }}</strong>
+            <span class="muted">{{ selected_order.deliveryMode or "Delivery" }}</span>
+            <span class="muted">{{ selected_order.preferredDate }} {{ selected_order.preferredTime }}</span>
+          </article>
+        </div>
+
+        <form method="post" action="{{ url_for('online_order_update', record_id=selected_order.id) }}" class="form-grid order-desk-form">
+          <input type="hidden" name="q" value="{{ query_text }}">
+          <input type="hidden" name="status_filter" value="{{ status_filter }}">
+          <input type="hidden" name="payment_filter" value="{{ payment_filter }}">
+
+          <label>
+            <span>Order Status</span>
+            <select name="status">
+              {% for option in status_options %}
+                <option value="{{ option }}" {% if selected_order.status == option %}selected{% endif %}>{{ option|replace('-', ' ')|title }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Payment Status</span>
+            <select name="payment_status">
+              {% for option in payment_status_options %}
+                <option value="{{ option }}" {% if selected_order.paymentStatus == option %}selected{% endif %}>{{ option|replace('-', ' ')|title }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Confirmed Order Total</span>
+            <input type="number" min="0" step="0.01" name="quoted_total" value="{{ '%.2f'|format(selected_order.totalAmount) }}">
+          </label>
+          <label>
+            <span>Amount Paid</span>
+            <input type="number" min="0" step="0.01" name="paid_amount" value="{{ '%.2f'|format(selected_order.paidAmount) }}">
+          </label>
+          <label>
+            <span>Payment Date</span>
+            <input type="date" name="payment_date" value="{{ selected_order.paymentDate[:10] if selected_order.paymentDate else '' }}">
+          </label>
+          <label>
+            <span>Staff Notes</span>
+            <input type="text" name="staff_notes" value="{{ selected_order.staffNotes }}" placeholder="Internal handling note">
+          </label>
+          <label class="span-2">
+            <span>Update Note</span>
+            <textarea name="history_note" rows="3" placeholder="What changed for this order?"></textarea>
+          </label>
+          <div class="form-actions span-2">
+            <button class="button primary" type="submit">Save Order Update</button>
+          </div>
+        </form>
+
+        <section class="card-grid two order-desk-sections">
+          <article class="mini-card">
+            <p class="eyebrow">Items</p>
+            <ul class="stack-list compact">
+              {% for item in selected_order["items"] %}
+                <li>
+                  <strong>{{ item.name }}</strong>
+                  <span class="muted">
+                    {{ item.quantity }} ×
+                    {% if item.unitPrice > 0 %}
+                      {{ item.unitPrice|currency }}
+                    {% else %}
+                      Quote
+                    {% endif %}
+                    · {{ business_area_short.get(item.businessAreaId, item.businessAreaId) }}
+                  </span>
+                </li>
+              {% endfor %}
+            </ul>
+          </article>
+          <article class="mini-card">
+            <p class="eyebrow">Status History</p>
+            <ul class="stack-list compact">
+              {% for event in selected_order["statusHistory"]|reverse %}
+                <li>
+                  <strong>{{ event.status|replace('-', ' ')|title }}</strong>
+                  <span class="muted">{{ event.at[:16]|replace('T', ' ') }}</span>
+                  <span>{{ event.note }}</span>
+                </li>
+              {% else %}
+                <li><span class="muted">No history recorded yet.</span></li>
+              {% endfor %}
+            </ul>
+          </article>
+        </section>
+      {% else %}
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Selected Order</p>
+            <h3>No Order Selected</h3>
+          </div>
+        </div>
+        <p class="muted">Choose an online order from the queue to review details, update payment, and sync it into daily sales.</p>
+      {% endif %}
+    </article>
+  </section>
+{% endblock %}

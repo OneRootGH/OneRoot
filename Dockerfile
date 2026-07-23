@@ -1,16 +1,17 @@
-FROM node:20-alpine
+FROM python:3.12-slim
 
 WORKDIR /app
 
-COPY package*.json ./
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV PORT=8080
 
-RUN npm install --omit=dev
+COPY requirements.txt ./
+
+RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-ENV NODE_ENV=production
-ENV PORT=8080
-
 EXPOSE 8080
 
-CMD ["node", "server.js"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8080", "wsgi:app"]

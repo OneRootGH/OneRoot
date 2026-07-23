@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% macro render_field(field, payload) -%}
+  <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
+    <span>{{ field.label }}</span>
+    {% if field.field_type == 'textarea' %}
+      <textarea name="{{ field.name }}" rows="{{ field.rows }}">{{ payload.get(field.name, '') }}</textarea>
+    {% elif field.field_type == 'select' %}
+      <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
+        <option value="">Select {{ field.label }}</option>
+        {% for value, label in field.options %}
+          <option value="{{ value }}" {% if payload.get(field.name, '') == value %}selected{% endif %}>{{ label }}</option>
+        {% endfor %}
+      </select>
+    {% else %}
+      <input
+        type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
+        {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
+        name="{{ field.name }}"
+        step="{{ field.step if field.field_type == 'number' else '' }}"
+        value="{{ payload.get(field.name, '') }}"
+        {% if field.required %}required{% endif %}
+      >
+    {% endif %}
+  </label>
+{%- endmacro %}
+{% block content %}
+  <section class="split-grid wide-right">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Property Form</p>
+          <h3>Apartment Monthly Capture</h3>
+        </div>
+        <div class="toolbar">
+          <a class="button subtle" href="{{ url_for('module_list', module_key='apartments') }}">Back to Apartments</a>
+          {% if record %}
+            <a class="button subtle" href="{{ url_for('module_list', module_key='security_deposit_records') }}">Deposits & Charges</a>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="stack-list compact apartment-help-list">
+        <li>
+          <strong>Retrospective entry</strong>
+          <span>Fill the amounts that were actually due and actually paid for that month. Use the payment date and references if payment already happened.</span>
+        </li>
+        <li>
+          <strong>Prospective entry</strong>
+          <span>Fill the next due amounts, due dates, and expected cycle details even if payment has not yet happened. Leave payment date and references blank until paid.</span>
+        </li>
+      </div>
+
+      <form method="post" class="apartment-form-stack">
+        {% for section in section_fields %}
+          <section class="form-section">
+            <div class="card-header compact">
+              <div>
+                <p class="eyebrow">Apartment Module</p>
+                <h3>{{ section.title }}</h3>
+              </div>
+            </div>
+            <p class="muted section-note">{{ section.description }}</p>
+            <div class="form-grid">
+              {% for field in section.fields %}
+                {{ render_field(field, payload) }}
+              {% endfor %}
+            </div>
+          </section>
+        {% endfor %}
+        <div class="form-actions">
+          <button class="button primary" type="submit">Save Apartment Record</button>
+        </div>
+      </form>
+    </article>
+
+    <aside class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Live Summary</p>
+          <h3>{% if apartment_summary %}Current Apartment Position{% else %}What This Form Tracks{% endif %}</h3>
+        </div>
+      </div>
+
+      {% if apartment_summary %}
+        <section class="summary-grid">
+          <article class="mini-card">
+            <span>Suite</span>
+            <strong>{{ apartment_summary.suite }}</strong>
+            <small>{{ apartment_summary.month or 'Latest entry' }}</small>
+          </article>
+          <article class="mini-card">
+            <span>Tenant</span>
+            <strong>{{ apartment_summary.tenant }}</strong>
+            <small>{{ apartment_summary.occupancyStatus }}</small>
+          </article>
+          <article class="mini-card">
+            <span>Rent Balance</span>
+            <strong>{{ apartment_summary.rentBalance|currency }}</strong>
+            <small>Due {{ apartment_summary.rentDue|currency }} · Paid {{ apartment_summary.rentPaid|currency }}</small>
+          </article>
+          <article class="mini-card">
+            <span>Bills Balance</span>
+            <strong>{{ apartment_summary.billsBalance|currency }}</strong>
+            <small>Due {{ apartment_summary.billsDue|currency }} · Paid {{ apartment_summary.billsPaid|currency }}</small>
+          </article>
+          <article class="mini-card">
+            <span>Total Outstanding</span>
+            <strong>{{ apartment_summary.outstanding|currency }}</strong>
+            <small>{{ apartment_summary.alertLabel }}</small>
+          </article>
+          <article class="mini-card">
+            <span>Credit Balance</span>
+            <strong>{{ apartment_summary.creditBalance|currency }}</strong>
+            <small>Advance or excess payment held</small>
+          </article>
+        </section>
+
+        <div class="dashboard-subsection">
+          <p class="eyebrow">Coverage & Due Dates</p>
+          <ul class="stack-list compact">
+            <li>
+              <strong>Rent Cycle</strong>
+              <span>{{ apartment_summary.rentCycleLabel }}{% if apartment_summary.rentCoverageLabel %} · {{ apartment_summary.rentCoverageLabel }}{% endif %}</span>
+            </li>
+            <li>
+              <strong>Next Due Dates</strong>
+              <span>Rent {{ apartment_summary.nextRentDueDate or 'Not set' }} · Bills {{ apartment_summary.billDueDate or 'Not set' }}</span>
+            </li>
+            <li>
+              <strong>Follow-Up</strong>
+              <span>Inspection {{ apartment_summary.nextInspectionDate or 'Not set' }} · Review {{ apartment_summary.rentReviewDate or 'Not set' }} · Renewal {{ apartment_summary.renewalDate or 'Not set' }} · {{ apartment_summary.renewalStatus }}</span>
+            </li>
+          </ul>
+        </div>
+
+        <div class="dashboard-subsection">
+          <p class="eyebrow">Monthly Bill Breakdown</p>
+          <ul class="stack-list compact">
+            <li><strong>Water</strong><span>{{ apartment_summary.waterBill|currency }}</span></li>
+            <li><strong>Toilet</strong><span>{{ apartment_summary.toiletBill|currency }}</span></li>
+            <li><strong>Sweeping / Gutter</strong><span>{{ apartment_summary.sweepingBill|currency }}</span></li>
+            <li><strong>Waste Management</strong><span>{{ apartment_summary.wasteBill|currency }}</span></li>
+            {% for item in apartment_summary.customCharges %}
+              <li><strong>{{ item.label }}</strong><span>{{ item.amount|currency }}</span></li>
+            {% endfor %}
+          </ul>
+        </div>
+
+        <div class="dashboard-subsection">
+          <p class="eyebrow">Documents</p>
+          <div class="toolbar">
+            <a class="button subtle" href="{{ url_for('apartment_receipt', record_id=record.id) }}" target="_blank" rel="noopener">Receipt</a>
+            <a class="button subtle" href="{{ url_for('apartment_statement', record_id=record.id) }}" target="_blank" rel="noopener">Statement</a>
+            <a class="button subtle" href="{{ url_for('apartment_bill_notice', record_id=record.id) }}" target="_blank" rel="noopener">Bill Notice</a>
+            <a class="button subtle" href="{{ url_for('apartment_agreement', record_id=record.id) }}" target="_blank" rel="noopener">Agreement</a>
+            {% if apartment_summary.agreementReady %}
+              <a class="button primary" href="{{ url_for('apartment_agreement_docx', record_id=record.id) }}">Download Agreement DOCX</a>
+            {% endif %}
+          </div>
+        </div>
+      {% else %}
+        <ul class="stack-list compact">
+          <li>
+            <strong>Tenant profile</strong>
+            <span>Tenant contacts, emergency details, guarantor, ID, and number of occupants.</span>
+          </li>
+          <li>
+            <strong>Rent controls</strong>
+            <span>Lease dates, rent cycle, due amount, payment date, coverage period, arrears, late fee, and advance balance.</span>
+          </li>
+          <li>
+            <strong>Monthly bills</strong>
+            <span>Water, toilet, sweeping / gutter cleaning, waste management, plus two custom charge lines for any extra monthly property charge.</span>
+          </li>
+          <li>
+            <strong>Alerts & follow-up</strong>
+            <span>Next due dates, inspection, renewal, and notice tracking for every suite.</span>
+          </li>
+          <li>
+            <strong>Documents after save</strong>
+            <span>Once you save the apartment record, you can open the receipt, tenant statement, bill notice, and tenancy agreement from this sidebar.</span>
+          </li>
+        </ul>
+      {% endif %}
+
+      {% if payload %}
+        <details class="card muted-box">
+          <summary>Preserved raw record data</summary>
+          <pre>{{ payload|tojson(indent=2) }}</pre>
+        </details>
+      {% endif %}
+    </aside>
+  </section>
+{% endblock %}

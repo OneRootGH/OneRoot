@@ -1,0 +1,58 @@
+{% extends "document_base.html" %}
+{% set document_label = "Monthly Bill Notice" %}
+{% set document_title = "OneRoot Monthly Bill Notice" %}
+{% set document_subtitle = profile.suite ~ " · " ~ (profile.month or "Current Month") %}
+{% block document_body %}
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Tenant</span>
+      <strong>{{ source.get('tenantName') or profile.tenant }}</strong>
+      <small>{{ source.get('tenantPhone') or 'No phone saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Bills Due</span>
+      <strong>{{ profile.billsDue|currency }}</strong>
+      <small>Paid {{ profile.billsPaid|currency }} · Balance {{ profile.billsBalance|currency }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Bill Due Date</span>
+      <strong>{{ profile.billDueDate|pretty_date or 'Not set' }}</strong>
+      <small>Next rent due {{ profile.nextRentDueDate|pretty_date or 'Not set' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Payment Channel</span>
+      <strong>{{ payment_channel }}</strong>
+      <small>{{ source.get('billPaymentMethod') or 'No bill payment method saved yet' }}</small>
+    </article>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Bill Item</th>
+          <th>Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in bill_items if item.amount > 0 %}
+          <tr><td>{{ item.label }}</td><td>{{ item.amount|currency }}</td></tr>
+        {% else %}
+          <tr><td colspan="2">No monthly bill items have been saved for this record yet.</td></tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><th>Total Bills Due</th><th>{{ profile.billsDue|currency }}</th></tr>
+        <tr><th>Bills Paid</th><th>{{ profile.billsPaid|currency }}</th></tr>
+        <tr><th>Balance To Pay</th><th>{{ profile.billsBalance|currency }}</th></tr>
+      </tfoot>
+    </table>
+  </div>
+
+  {% if profile.notes %}
+    <section class="document-note">
+      <strong>Notes</strong>
+      <p>{{ profile.notes }}</p>
+    </section>
+  {% endif %}
+{% endblock %}

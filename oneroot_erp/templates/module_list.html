@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% block content %}
+  <article class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }}</h3>
+      </div>
+      <div class="toolbar">
+        <form method="get" class="search-row">
+          <input type="search" name="q" placeholder="Search {{ definition.label|lower }}" value="{{ search }}">
+          <button class="button subtle" type="submit">Search</button>
+        </form>
+        <a class="button subtle" href="{{ url_for('module_export', module_key=definition.key, q=search) }}">Export CSV</a>
+        {% if definition.editable %}
+          <a class="button primary" href="{{ url_for('module_form', module_key=definition.key) }}">New Record</a>
+        {% endif %}
+      </div>
+    </div>
+    <p class="muted list-summary">{{ records|length }} {{ definition.label }} record{% if records|length != 1 %}s{% endif %} in view.</p>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Title</th>
+            <th>Area</th>
+            <th>Status</th>
+            <th>Month / Date</th>
+            <th>Amount</th>
+            <th>Updated</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for record in records %}
+            <tr>
+              <td>{{ record.title }}</td>
+              <td>{{ business_area_short.get(record.business_area_id, business_area_labels.get(record.business_area_id, record.business_area_id or '—')) }}</td>
+              <td>{{ record.status or '—' }}</td>
+              <td>{{ record.month or record.record_date or '—' }}</td>
+              <td>{{ record.amount|currency }}</td>
+              <td>{{ record.updated_at }}</td>
+              <td>
+                {% if definition.editable %}
+                  <div class="row-actions">
+                    <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit</a>
+                    <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=record.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
+                      <input type="hidden" name="q" value="{{ search }}">
+                      <button class="text-button danger-text" type="submit">Delete</button>
+                    </form>
+                  </div>
+                {% else %}
+                  <span class="muted">View only</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7">No records yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+{% endblock %}

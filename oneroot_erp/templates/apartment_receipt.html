@@ -1,0 +1,79 @@
+{% extends "document_base.html" %}
+{% set document_label = "Apartment Receipt" %}
+{% set document_title = "OneRoot Apartment Receipt" %}
+{% set document_subtitle = profile.suite ~ " · " ~ (profile.month or "Current Month") %}
+{% block document_body %}
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Tenant</span>
+      <strong>{{ source.get('tenantName') or profile.tenant }}</strong>
+      <small>{{ source.get('tenantPhone') or 'No phone saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Receipt Total</span>
+      <strong>{{ receipt_total|currency }}</strong>
+      <small>Rent {{ profile.rentPaid|currency }} · Bills {{ profile.billsPaid|currency }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Rent Payment</span>
+      <strong>{{ source.get('rentPaymentMethod') or 'Not saved' }}</strong>
+      <small>{{ source.get('rentPaymentDate')|pretty_date or 'No payment date saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Bills Payment</span>
+      <strong>{{ source.get('billPaymentMethod') or 'Not saved' }}</strong>
+      <small>{{ source.get('billPaymentDate')|pretty_date or 'No bill payment date saved' }}</small>
+    </article>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Charge / Receipt Item</th>
+          <th>Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Rent Due</td><td>{{ profile.rentDue|currency }}</td></tr>
+        <tr><td>Rent Paid</td><td>{{ profile.rentPaid|currency }}</td></tr>
+        {% for item in bill_items if item.amount > 0 %}
+          <tr><td>{{ item.label }}</td><td>{{ item.amount|currency }}</td></tr>
+        {% endfor %}
+        <tr><td>Total Bills Due</td><td>{{ profile.billsDue|currency }}</td></tr>
+        <tr><td>Bills Paid</td><td>{{ profile.billsPaid|currency }}</td></tr>
+        <tr><td>Arrears Brought Forward</td><td>{{ profile.arrearsBroughtForward|currency }}</td></tr>
+        <tr><td>Late Fee</td><td>{{ profile.lateFee|currency }}</td></tr>
+        {% if profile.creditBroughtForward > 0 %}
+          <tr><td>Credit Applied</td><td>{{ profile.creditBroughtForward|currency }}</td></tr>
+        {% endif %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>Balance Remaining</th>
+          <th>{{ profile.outstanding|currency }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <section class="card-grid two document-detail-grid">
+    <article class="mini-card">
+      <span>References</span>
+      <strong>{{ source.get('rentPaymentReference') or 'No rent ref saved' }}</strong>
+      <small>Bill ref: {{ source.get('billPaymentReference') or 'No bill ref saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Received By</span>
+      <strong>{{ source.get('rentReceivedBy') or 'Not saved' }}</strong>
+      <small>Bill receiver: {{ source.get('billReceivedBy') or 'Not saved' }}</small>
+    </article>
+  </section>
+
+  {% if profile.notes %}
+    <section class="document-note">
+      <strong>Notes</strong>
+      <p>{{ profile.notes }}</p>
+    </section>
+  {% endif %}
+{% endblock %}

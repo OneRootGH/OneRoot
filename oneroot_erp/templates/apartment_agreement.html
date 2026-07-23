@@ -1,0 +1,116 @@
+{% extends "document_base.html" %}
+{% set document_label = "Tenancy Agreement" %}
+{% set document_title = "OneRoot Tenancy Agreement" %}
+{% set document_subtitle = source.get('suite') ~ " · " ~ (source.get('tenantName') or "Tenant not yet saved") %}
+{% block extra_actions %}
+  {% if agreement_ready and template_ready %}
+    <a class="button subtle" href="{{ docx_url }}">Download DOCX</a>
+  {% endif %}
+{% endblock %}
+{% block document_body %}
+  {% if not agreement_ready %}
+    <section class="flash warning">
+      Capture the tenant name and a confirmed rent payment first, then download the final tenancy agreement DOCX.
+      You can still print this page as a working draft.
+    </section>
+  {% endif %}
+
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Suite</span>
+      <strong>{{ source.get('suite') }}</strong>
+      <small>{{ property_location }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Tenant</span>
+      <strong>{{ source.get('tenantName') or 'Not saved yet' }}</strong>
+      <small>{{ source.get('tenantPhone') or 'No phone saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Lease Term</span>
+      <strong>
+        {% if cycle_months == 12 %}
+          12 Months
+        {% elif cycle_months == 6 %}
+          6 Months
+        {% elif cycle_months > 0 %}
+          {{ cycle_months }} Months
+        {% else %}
+          Custom Term
+        {% endif %}
+      </strong>
+      <small>{{ commencement_date|pretty_date(True) or 'Commencement not saved' }} to {{ expiry_date|pretty_date(True) or 'Expiry not saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Rent Plan</span>
+      <strong>{{ source.get('rentCycleAmount')|currency }}</strong>
+      <small>Paid {{ source.get('rentPaid')|currency }} via {{ source.get('rentPaymentMethod') or 'Not saved' }}</small>
+    </article>
+  </section>
+
+  <section class="document-copy">
+    <h3>1. Parties</h3>
+    <p>
+      This tenancy agreement is prepared for <strong>{{ owner_name }}</strong> operating under OneRoot Essentials as landlord / manager,
+      and <strong>{{ source.get('tenantName') or '_______________________________' }}</strong> as tenant for the use of
+      <strong>{{ source.get('suite') }}</strong> located at <strong>{{ property_location }}</strong>.
+    </p>
+
+    <h3>2. Premises And Term</h3>
+    <p>
+      The tenancy covers {{ source.get('suite') }} and runs from
+      <strong>{{ commencement_date|pretty_date(True) or '_______________________________' }}</strong>
+      to <strong>{{ expiry_date|pretty_date(True) or '_______________________________' }}</strong>.
+      Where the term is renewed, the next renewal review date is
+      <strong>{{ source.get('renewalDate')|pretty_date(True) or 'not yet saved' }}</strong>.
+    </p>
+
+    <h3>3. Rent And Payment</h3>
+    <p>
+      The agreed rent for the current cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>,
+      with <strong>{{ source.get('rentPaid')|currency }}</strong> recorded as paid.
+      Payment method: <strong>{{ source.get('rentPaymentMethod') or '_______________________________' }}</strong>.
+      Payment reference: <strong>{{ source.get('rentPaymentReference') or '_______________________________' }}</strong>.
+      Received by: <strong>{{ source.get('rentReceivedBy') or '_______________________________' }}</strong>.
+    </p>
+
+    <h3>4. Monthly Bills And Service Charges</h3>
+    <p>
+      Monthly bills currently on record total <strong>{{ profile.billsDue|currency }}</strong> and include water
+      ({{ profile.waterBill|currency }}), toilet ({{ profile.toiletBill|currency }}),
+      sweeping / gutter cleaning ({{ profile.sweepingBill|currency }}), waste management ({{ profile.wasteBill|currency }}),
+      and any custom charges saved in the apartment profile.
+      Payment channel currently used: <strong>{{ payment_channel }}</strong>.
+    </p>
+
+    <h3>5. Tenant Identification And Contacts</h3>
+    <p>
+      Tenant address: <strong>{{ source.get('tenantAddress') or '_______________________________' }}</strong>.
+      Ghana Card / ID: <strong>{{ source.get('tenantIdNumber') or '_______________________________' }}</strong>.
+      Emergency contact: <strong>{{ source.get('emergencyContactName') or 'Not saved' }}</strong>
+      {% if source.get('emergencyContactPhone') %}({{ source.get('emergencyContactPhone') }}){% endif %}.
+      Guarantor: <strong>{{ source.get('guarantorName') or 'Not saved' }}</strong>
+      {% if source.get('guarantorPhone') %}({{ source.get('guarantorPhone') }}){% endif %}.
+    </p>
+
+    <h3>6. Deposit, Condition, And Housekeeping</h3>
+    <p>
+      Security deposit currently held: <strong>{{ profile.securityDepositHeld|currency }}</strong>.
+      The tenant is expected to keep the premises in good condition and comply with agreed housekeeping, sanitation,
+      and waste-management arrangements for the property.
+    </p>
+
+    <h3>7. Sign-Off</h3>
+    <p>
+      This agreement becomes fully effective from <strong>{{ commencement_date|pretty_date(True) or 'the agreed commencement date' }}</strong>
+      once payment is confirmed and the landlord / manager and tenant sign the final copy.
+    </p>
+  </section>
+
+  {% if source.get('notes') %}
+    <section class="document-note">
+      <strong>Saved Notes</strong>
+      <p>{{ source.get('notes') }}</p>
+    </section>
+  {% endif %}
+{% endblock %}

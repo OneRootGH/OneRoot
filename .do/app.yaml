@@ -18,17 +18,14 @@ services:
     instance_count: 1
     instance_size_slug: basic-xxs
     envs:
-      - key: NODE_ENV
-        value: production
-        scope: RUN_TIME
       - key: ONEROOT_PUBLIC_DOMAIN
         value: OneRoot.shop
         scope: RUN_TIME
       - key: ONEROOT_SUPPORT_PHONE
-        value: 0547038092
+        value: 0246497301
         scope: RUN_TIME
       - key: ONEROOT_WHATSAPP_NUMBER
-        value: 233547038092
+        value: 0242847065
         scope: RUN_TIME
       - key: ONEROOT_SUPPORT_EMAIL
         value: orders@oneroot.shop

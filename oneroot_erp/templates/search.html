@@ -1,0 +1,148 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Workspace Search</p>
+        <h3>Find Records Across the Whole App</h3>
+      </div>
+    </div>
+    <form method="get" class="search-row">
+      <input type="search" name="q" value="{{ query_text }}" placeholder="Search names, order numbers, phone numbers, SKU, notes">
+      <button class="button primary" type="submit">Search</button>
+      <a class="button subtle" href="{{ url_for('search_page') }}">Clear</a>
+    </form>
+  </section>
+
+  {% if query_text %}
+    <section class="card-grid four">
+      <article class="metric-card">
+        <span>Records</span>
+        <strong>{{ module_results|length }}</strong>
+        <small>Module entries matched</small>
+      </article>
+      <article class="metric-card">
+        <span>Inventory</span>
+        <strong>{{ product_results|length }}</strong>
+        <small>Products matched</small>
+      </article>
+      <article class="metric-card">
+        <span>POS Orders</span>
+        <strong>{{ pos_results|length }}</strong>
+        <small>Counter sales matched</small>
+      </article>
+      <article class="metric-card">
+        <span>Audit</span>
+        <strong>{{ audit_results|length }}</strong>
+        <small>Activity history matched</small>
+      </article>
+    </section>
+
+    <section class="split-grid">
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Module Records</p>
+            <h3>Saved App Entries</h3>
+          </div>
+        </div>
+        <ul class="stack-list">
+          {% for item in module_results %}
+            <li>
+              <a class="table-link" href="{{ item.target }}">{{ item.title }}</a>
+              <span>{{ item.moduleLabel }}{% if item.reference %} · {{ item.reference }}{% endif %}</span>
+              <span>{{ item.status or 'No status' }} · {{ item.amount|currency }} · {{ item.updatedAt }}</span>
+            </li>
+          {% else %}
+            <li><span>No module records matched this search.</span></li>
+          {% endfor %}
+        </ul>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Inventory Matches</p>
+            <h3>Products & Services</h3>
+          </div>
+        </div>
+        <ul class="stack-list">
+          {% for item in product_results %}
+            <li>
+              <a class="table-link" href="{{ item.target }}">{{ item.name }}</a>
+              <span>{{ item.area }} · {{ item.category or 'No category' }}</span>
+              <span>Stock {{ item.stock }}</span>
+            </li>
+          {% else %}
+            <li><span>No inventory items matched this search.</span></li>
+          {% endfor %}
+        </ul>
+      </article>
+    </section>
+
+    <section class="split-grid">
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">POS Matches</p>
+            <h3>Counter Orders</h3>
+          </div>
+        </div>
+        <ul class="stack-list">
+          {% for item in pos_results %}
+            <li>
+              <a class="table-link" href="{{ item.target }}">{{ item.orderNumber }}</a>
+              <span>{{ item.customer or 'Walk-in / no customer name' }} · {{ item.paymentMethod }}</span>
+              <span>{{ item.orderDate }} · {{ item.totalAmount|currency }}</span>
+            </li>
+          {% else %}
+            <li><span>No POS orders matched this search.</span></li>
+          {% endfor %}
+        </ul>
+      </article>
+
+      <article class="card">
+        <div class="card-header">
+          <div>
+            <p class="eyebrow">Audit Matches</p>
+            <h3>Activity History</h3>
+          </div>
+        </div>
+        <ul class="stack-list">
+          {% for item in audit_results %}
+            <li>
+              <strong>{{ item.title }}</strong>
+              <span>{{ item.module_label }} · {{ item.action }} · {{ item.actor_name }}</span>
+              <span>{{ item.created_at }}</span>
+            </li>
+          {% else %}
+            <li><span>No audit entries matched this search.</span></li>
+          {% endfor %}
+        </ul>
+      </article>
+    </section>
+  {% else %}
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">How To Use</p>
+          <h3>Search Everything From One Place</h3>
+        </div>
+      </div>
+      <ul class="stack-list">
+        <li>
+          <strong>Search records</strong>
+          <span>Find expenses, sales, apartment entries, petty cash, suppliers, maintenance, and other module records.</span>
+        </li>
+        <li>
+          <strong>Search stock</strong>
+          <span>Find inventory items by name, SKU, barcode, or category.</span>
+        </li>
+        <li>
+          <strong>Search sales history</strong>
+          <span>Find POS orders and audit events without opening each menu one by one.</span>
+        </li>
+      </ul>
+    </article>
+  {% endif %}
+{% endblock %}

@@ -4,10 +4,11 @@ An installable offline-ready web app for managing OneRoot expenses, daily sales,
 
 ## Public website and local server
 
-This project now runs as one Node-based web server with two main routes:
+This project now runs as one Python Flask web server with one shared SQL database and three main routes:
 
 - Public website: `/`
-- Staff operations app: `/operations/`
+- Staff operations app: `/app/`
+- Staff alias: `/operations/`
 - Customer order tracking: `/track-order.html`
 
 To run it locally:
@@ -15,12 +16,13 @@ To run it locally:
 1. Start the server from the project folder:
 
    ```bash
-   node server.js
+   python3 wsgi.py
    ```
 
 2. Open:
    - `http://127.0.0.1:8124/` for the customer storefront
-   - `http://127.0.0.1:8124/operations/` for the staff operations app
+   - `http://127.0.0.1:8124/app/` for the staff operations app
+   - `http://127.0.0.1:8124/operations/` as a staff shortcut
 
 If you want the staff app protected, set these environment variables before starting the server:
 
@@ -37,18 +39,18 @@ Optional public contact settings:
 - `ONEROOT_SUPPORT_EMAIL`
 - `ONEROOT_PICKUP_NOTE`
 
-Optional durable storage settings:
+Database settings:
 
-- `ONEROOT_DATABASE_URL` or `ONEROOT_DATABASE_PRIVATE_URL`
-- `ONEROOT_DATABASE_CA_CERT`
-- `ONEROOT_DATABASE_SSL`
+- `ONEROOT_APP_DATABASE_URL`
+- `ONEROOT_DATABASE_URL`
+- `ONEROOT_DATABASE_PRIVATE_URL`
 
 ## What it includes
 
-- Multi-view app experience with sections for Overview, Expenses, Daily Sales, Apartments, Petty Cash, and Data Hub
+- Multi-view server-first app with dashboard, reports, global search, POS, inventory, finance, property, services, people, procurement, online orders, and audit screens
 - Public OneRoot storefront for online ordering across groceries, drinks, kitchen requests, water support, laundry, apartments, and service requests
 - Customer order tracking page using order number plus phone number
-- Staff-side `Online Orders` desk in the operations app for refresh, filtering, status updates, payment follow-up, CSV export, and customer update copy
+- Staff-side `Online Orders` desk in the operations app for review, pricing, payment follow-up, fulfillment updates, and paid-order sales sync
 - Expense capture by business area, vendor, expense type, payment method, receipt status, amount, and notes
 - Daily sales capture by business area without any unit or offering field
 - Apartment rental management with suite dropdowns, occupancy status, tenant profile fields, rent cycle setup, rent coverage dates, renewal dates, and payment references
@@ -59,12 +61,12 @@ Optional durable storage settings:
 - Petty cash budget tracking by month and business area so you can see total petty cash budgeted, used, and remaining
 - Automatic expense sync for petty cash entries saved as `Expense Paid`
 - Monthly budget tracking for expense categories by business area
-- Expense CSV import and filtered expense CSV export
-- Excel & Backup Center in `Data Hub` for workbook access, workbook import, backup export, and backup restore
+- Filtered CSV export from live module pages including sales, inventory, and online orders
+- Direct workbook download from the staff app plus full JSON backup export
 - Downloadable Excel workbook with dropdown lists for `Expenses`, `Budget_Planner`, `Daily_Sales`, `Apartments`, `Petty_Cash`, `Petty_Cash_Budget`, and `Lists`
-- Full app backup export and restore using `.json` files
-- Local browser storage so records stay available on the same device
-- Database-backed hosted workspace sync and online order storage when PostgreSQL is configured
+- Full app backup export as `.json`
+- Server-first SQL storage so records save into one shared database instead of per-browser snapshots
+- PostgreSQL-ready hosting on DigitalOcean App Platform
 
 ## Business areas included
 
@@ -79,10 +81,10 @@ Optional durable storage settings:
 
 ## How to use it
 
-1. Start the local server with `node server.js`.
+1. Start the local server with `python3 wsgi.py`.
 2. Open the public website when customers need to place orders online.
-3. Open `/operations/` when staff need the operations workspace.
-4. Move through the staff app using the left navigation or the top-level workspace buttons.
+3. Open `/app/` or `/operations/` when staff need the operations workspace.
+4. Move through the staff app using the left navigation, the top search box, and the dedicated `Reports` and `Global Search` pages.
 5. Record normal spending in `Expenses`.
 6. Record one total daily amount per business area in `Daily Sales`.
 7. Record rent and apartment bill payments in `Apartments`, including due dates, coverage, arrears, and custom bills.
@@ -91,8 +93,10 @@ Optional durable storage settings:
 10. When you save a new tenant with confirmed rent payment details, the app automatically downloads a tenancy agreement. For existing tenants, use the `Agreement` button after their payment details have been saved.
 11. Use `Petty Cash` for float movements and small cash spending.
 12. Set monthly petty cash budgets in `Petty Cash` to know the total budgeted and remaining by area.
-13. Use `Online Orders` in the staff app to review customer website orders and move them through confirmation, preparation, ready, or completed stages.
-14. Use `Data Hub` to download the uploadable Excel workbook, merge a completed workbook back into the app, import expense CSV files, export filtered expense data, or restore a full app backup.
+13. Use `Reports` for a month-and-area operating summary covering sales, expenses, salaries, petty cash, supplier balances, apartment exposure, and low-stock or recurring follow-up.
+14. Use `Global Search` to find records, products, POS orders, and audit entries from one page.
+15. Use `Online Orders` in the staff app to review customer website orders and move them through confirmation, preparation, ready, or completed stages.
+16. Use the workbook download button or the `Excel Workbook` menu item when you need the uploadable Excel workbook, and use the backup export button when you want a full JSON backup.
 
 ## Installable app files
 
@@ -100,7 +104,7 @@ Optional durable storage settings:
 - [service-worker.js](/Users/philipboakye/Documents/OneRoot Expense Register/service-worker.js)
 - [icon.svg](/Users/philipboakye/Documents/OneRoot Expense Register/icon.svg)
 - [Tenancy_Agreement_Template.docx](/Users/philipboakye/Documents/OneRoot Expense Register/Tenancy_Agreement_Template.docx)
-- [server.js](/Users/philipboakye/Documents/OneRoot Expense Register/server.js)
+- [wsgi.py](/Users/philipboakye/Documents/OneRoot Expense Register/wsgi.py)
 - [website/index.html](/Users/philipboakye/Documents/OneRoot Expense Register/website/index.html)
 - [website/track-order.html](/Users/philipboakye/Documents/OneRoot Expense Register/website/track-order.html)
 - [website/app.js](/Users/philipboakye/Documents/OneRoot Expense Register/website/app.js)
@@ -127,11 +131,11 @@ For durable hosted operations data and durable online orders:
 5. Leave `ONEROOT_DATABASE_SSL` as `require` unless you intentionally disable TLS for a local or trusted internal setup.
 6. Redeploy the app. On first start, the server creates its tables automatically and seeds them from the current workspace snapshot and `data/orders.json` if the database is empty.
 
-The server still supports file storage locally, but production App Platform deployments should use PostgreSQL for persistent data.
+Production App Platform deployments should use PostgreSQL for persistent multi-device data.
 
 ## Excel workbook
 
-Use the workbook when you want spreadsheet entry with dropdown selections. Inside the app, the workbook is available from the left sidebar and the `Data Hub` workbook center. You can also import a completed workbook back into the app, and it will merge into the existing workspace instead of replacing it:
+Use the workbook when you want spreadsheet entry with dropdown selections. In the rebuilt app, the workbook is available from the left sidebar and the top bar download button:
 
 [OneRoot_Essentials_Operations_Register.xlsx](/Users/philipboakye/Documents/OneRoot Expense Register/outputs/oneroot-essentials-register/OneRoot_Essentials_Operations_Register.xlsx)
 
@@ -149,11 +153,10 @@ Workbook sheets:
 
 ## App backup
 
-Use `Data Hub` to:
+Use the backup export button in the rebuilt app to:
 
 - Export a full app backup as `.json`
-- Restore a previous app backup into the browser on the same or another device
-- Keep a safer copy of expenses, budgets, sales, apartments, and petty cash data outside local browser storage
+- Keep a safer copy of expenses, budgets, sales, apartments, and petty cash data outside the live database
 
 ## Expense CSV template columns
 

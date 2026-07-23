@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Total Users</span>
+      <strong>{{ total_users }}</strong>
+      <small>Accounts in the current workspace</small>
+    </article>
+    <article class="metric-card">
+      <span>Active Users</span>
+      <strong>{{ active_users }}</strong>
+      <small>Accounts currently enabled for work</small>
+    </article>
+    <article class="metric-card">
+      <span>Login Enabled</span>
+      <strong>{{ login_enabled_users }}</strong>
+      <small>Accounts allowed to sign in</small>
+    </article>
+    <article class="metric-card">
+      <span>Owner Accounts</span>
+      <strong>{{ owner_users }}</strong>
+      <small>Keep at least one owner active at all times</small>
+    </article>
+  </section>
+
+  <section class="split-grid wide-right">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Directory</p>
+          <h3>Workspace Users</h3>
+        </div>
+        <div class="toolbar">
+          <form method="get" class="search-row">
+            <input type="search" name="q" placeholder="Search users or roles" value="{{ search_text }}">
+            <button class="button subtle" type="submit">Search</button>
+          </form>
+          <a class="button subtle" href="{{ url_for('users_page') }}">New User</a>
+        </div>
+      </div>
+      <p class="muted list-summary">{{ users|length }} user account{% if users|length != 1 %}s{% endif %} in view.</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Role</th>
+              <th>Status</th>
+              <th>Updated</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for user in users %}
+              <tr>
+                <td>
+                  <strong>{{ user.full_name or user.username }}</strong>
+                  <span class="table-secondary">{{ user.username }}{% if user.phone %} · {{ user.phone }}{% endif %}</span>
+                </td>
+                <td>
+                  {{ user_role_label(user.role) }}
+                  <span class="table-secondary">{{ role_descriptions.get(normalize_role_key(user.role), role_descriptions.get('viewer')) }}</span>
+                </td>
+                <td>
+                  {% if user.active %}
+                    <span class="status-chip">Active</span>
+                  {% else %}
+                    <span class="status-chip status-cancelled">Inactive</span>
+                  {% endif %}
+                  {% if user.login_enabled %}
+                    <span class="table-secondary">Login enabled</span>
+                  {% else %}
+                    <span class="table-secondary">Login disabled</span>
+                  {% endif %}
+                </td>
+                <td>{{ user.updated_at }}</td>
+                <td>
+                  <div class="row-actions">
+                    <a class="table-link" href="{{ url_for('users_page', edit=user.id, q=search_text) }}">Edit</a>
+                    {% if user.id == current_user.id %}
+                      <span class="muted">Signed in now</span>
+                    {% else %}
+                      <form method="post" action="{{ url_for('user_delete', user_id=user.id) }}" onsubmit="return confirm('Delete this user account?');">
+                        <input type="hidden" name="q" value="{{ search_text }}">
+                        <button class="text-button danger-text" type="submit">Delete</button>
+                      </form>
+                    {% endif %}
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No users found.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Access Setup</p>
+          <h3>{% if editing_user %}Edit User{% else %}Create User{% endif %}</h3>
+        </div>
+      </div>
+      <form method="post" class="form-grid single">
+        <input type="hidden" name="id" value="{{ form_user.get('id', '') }}">
+        <label>
+          <span>Full Name</span>
+          <input type="text" name="full_name" value="{{ form_user.get('full_name', '') }}" required>
+        </label>
+        <label>
+          <span>Username</span>
+          <input type="text" name="username" value="{{ form_user.get('username', '') }}" required>
+        </label>
+        <label>
+          <span>Role</span>
+          <select name="role">
+            {% for value, label in role_options %}
+              <option value="{{ value }}" {% if form_user.get('role') == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Phone</span>
+          <input type="text" name="phone" value="{{ form_user.get('phone', '') }}">
+        </label>
+        <label>
+          <span>{% if editing_user %}New Password{% else %}Password{% endif %}</span>
+          <input type="password" name="password" {% if not editing_user %}required{% endif %}>
+          <small class="muted">{% if editing_user %}Leave blank to keep the current password.{% else %}Set the password the staff member will use to sign in.{% endif %}</small>
+        </label>
+        <label>
+          <span>Notes</span>
+          <textarea name="notes" rows="4">{{ form_user.get('notes', '') }}</textarea>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="active" {% if form_user.get('active', True) %}checked{% endif %}>
+          <span>Active account</span>
+        </label>
+        <label class="checkbox-row">
+          <input type="checkbox" name="login_enabled" {% if form_user.get('login_enabled', True) %}checked{% endif %}>
+          <span>Allow sign in</span>
+        </label>
+        <div class="form-actions">
+          <button class="button primary" type="submit">{% if editing_user %}Save Changes{% else %}Create User{% endif %}</button>
+          <a class="button subtle" href="{{ url_for('users_page', q=search_text) }}">Clear Form</a>
+        </div>
+      </form>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Active User Mix</h3>
+        </div>
+      </div>
+      {% if role_chart %}
+        <div class="chart-stack">
+          {% for row in role_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|int }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Role distribution will appear once active users are available.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Guide</p>
+          <h3>Role Access Summary</h3>
+        </div>
+      </div>
+      <ul class="stack-list compact">
+        {% for value, label in role_options %}
+          <li>
+            <strong>{{ label }}</strong>
+            <span>{{ role_descriptions.get(value, '') }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </article>
+  </section>
+{% endblock %}

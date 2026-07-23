@@ -1,0 +1,35 @@
+{% extends "base.html" %}
+{% block content %}
+  <article class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Security & History</p>
+        <h3>Audit Trail</h3>
+      </div>
+    </div>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>When</th>
+            <th>Module</th>
+            <th>Action</th>
+            <th>Title</th>
+            <th>Actor</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in audits %}
+            <tr>
+              <td>{{ item.created_at }}</td>
+              <td>{{ item.module_label }}</td>
+              <td>{{ item.action }}</td>
+              <td>{{ item.title }}</td>
+              <td>{{ item.actor_name }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+{% endblock %}

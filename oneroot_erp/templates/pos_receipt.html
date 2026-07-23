@@ -1,0 +1,66 @@
+{% extends "document_base.html" %}
+{% set document_label = "POS Receipt" %}
+{% set document_title = "OneRoot POS Receipt" %}
+{% set document_subtitle = order.orderNumber ~ " · " ~ (order.orderDate|pretty_date) %}
+{% block document_body %}
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Order</span>
+      <strong>{{ order.orderNumber }}</strong>
+      <small>{{ order.orderDate|pretty_date }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Customer</span>
+      <strong>{{ order.customerName }}</strong>
+      <small>{{ order.customerPhone or 'Walk-in sale' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Payment</span>
+      <strong>{{ order.paymentMethod }}</strong>
+      <small>{{ order.itemCount }} item(s)</small>
+    </article>
+    <article class="mini-card">
+      <span>Total</span>
+      <strong>{{ order.totalAmount|currency }}</strong>
+      <small>Created {{ order.createdAt[:16]|replace('T', ' ') }}</small>
+    </article>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Item</th>
+          <th>Area</th>
+          <th>Qty</th>
+          <th>Unit</th>
+          <th>Total</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for item in line_items %}
+          <tr>
+            <td>{{ item.name }}{% if item.category %}<span class="table-secondary">{{ item.category }}</span>{% endif %}</td>
+            <td>{{ item.businessAreaLabel }}</td>
+            <td>{{ item.quantity }}</td>
+            <td>{{ item.unitPrice|currency }}</td>
+            <td>{{ item.totalAmount|currency }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th colspan="4">Grand Total</th>
+          <th>{{ order.totalAmount|currency }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  {% if order.notes %}
+    <section class="document-note">
+      <strong>Notes</strong>
+      <p>{{ order.notes }}</p>
+    </section>
+  {% endif %}
+{% endblock %}
