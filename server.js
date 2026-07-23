@@ -46,6 +46,8 @@ const WORKSPACE_SESSION_SECRET =
     )
     .digest("hex");
 const WORKSPACE_EVENT_CLIENTS = new Set();
+const POS_SYNC_SOURCE_TYPE = "pos-summary";
+const POS_SYNC_NOTE_PREFIX = "[POS Sync]";
 const ORDER_STATUSES = [
   "new",
   "confirmed",
@@ -511,6 +513,796 @@ function preserveWorkspaceOrderHistory(nextPayload, currentPayload) {
       onlineOrders: currentOrders
     }
   };
+}
+
+function normalizeDateInput(value) {
+  const raw = normalizeText(value);
+
+  if (!raw) {
+    return "";
+  }
+
+  const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})/);
+
+  if (match) {
+    return `${match[1]}-${match[2]}-${match[3]}`;
+  }
+
+  const parsed = new Date(raw);
+
+  if (Number.isNaN(parsed.getTime())) {
+    return "";
+  }
+
+  return parsed.toISOString().slice(0, 10);
+}
+
+function normalizeBusinessAreaId(value) {
+  const businessAreaId = normalizeText(value);
+  return BUSINESS_AREA_MAP.has(businessAreaId) ? businessAreaId : "";
+}
+
+function parseAmount(value) {
+  const amount = Number(value);
+  return Number.isFinite(amount) ? Number(amount.toFixed(2)) : 0;
+}
+
+function parseQuantity(value) {
+  const quantity = Number(value);
+  return Number.isFinite(quantity) ? Number(quantity.toFixed(2)) : 0;
+}
+
+function getBusinessAreaShortLabel(businessAreaId) {
+  return BUSINESS_AREA_MAP.get(normalizeBusinessAreaId(businessAreaId))?.shortLabel || "Business Area";
+}
+
+function getRecordTimestamp(record, keys = ["updatedAt", "closedAt", "timestamp", "createdAt", "date"]) {
+  for (const key of keys) {
+    const value = normalizeText(record?.[key]);
+
+    if (value) {
+      return value;
+    }
+  }
+
+  return "";
+}
+
+function chooseNewerRecord(currentRecord, nextRecord, keys) {
+  if (!currentRecord) {
+    return nextRecord;
+  }
+
+  if (!nextRecord) {
+    return currentRecord;
+  }
+
+  const currentTimestamp = getRecordTimestamp(currentRecord, keys);
+  const nextTimestamp = getRecordTimestamp(nextRecord, keys);
+
+  if (nextTimestamp > currentTimestamp) {
+    return nextRecord;
+  }
+
+  if (currentTimestamp > nextTimestamp) {
+    return currentRecord;
+  }
+
+  return nextRecord;
+}
+
+function sortPosOrdersForWorkspace(records) {
+  return [...records].sort((left, right) => {
+    const dateDifference = normalizeDateInput(right.orderDate).localeCompare(
+      normalizeDateInput(left.orderDate)
+    );
+
+    if (dateDifference !== 0) {
+      return dateDifference;
+    }
+
+    return getRecordTimestamp(right, ["updatedAt", "createdAt"]).localeCompare(
+      getRecordTimestamp(left, ["updatedAt", "createdAt"])
+    );
+  });
+}
+
+function sortPosCounterClosuresForWorkspace(records) {
+  return [...records].sort((left, right) => {
+    const dateDifference = normalizeDateInput(right.orderDate).localeCompare(
+      normalizeDateInput(left.orderDate)
+    );
+
+    if (dateDifference !== 0) {
+      return dateDifference;
+    }
+
+    return getRecordTimestamp(right, ["closedAt", "updatedAt", "createdAt"]).localeCompare(
+      getRecordTimestamp(left, ["closedAt", "updatedAt", "createdAt"])
+    );
+  });
+}
+
+function sortSalesForWorkspace(records) {
+  return [...records].sort((left, right) => {
+    const dateDifference = normalizeDateInput(right.date).localeCompare(
+      normalizeDateInput(left.date)
+    );
+
+    if (dateDifference !== 0) {
+      return dateDifference;
+    }
+
+    return getRecordTimestamp(right, ["updatedAt", "createdAt"]).localeCompare(
+      getRecordTimestamp(left, ["updatedAt", "createdAt"])
+    );
+  });
+}
+
+function sortAuditTrailForWorkspace(records) {
+  return [...records].sort((left, right) => {
+    const timestampDifference = getRecordTimestamp(right, ["timestamp", "createdAt", "updatedAt"]).localeCompare(
+      getRecordTimestamp(left, ["timestamp", "createdAt", "updatedAt"])
+    );
+
+    if (timestampDifference !== 0) {
+      return timestampDifference;
+    }
+
+    return normalizeText(right.id).localeCompare(normalizeText(left.id));
+  });
+}
+
+function sortInventoryItemsForWorkspace(records) {
+  return [...records].sort((left, right) => {
+    const activeDifference = Number(Boolean(right.active)) - Number(Boolean(left.active));
+
+    if (activeDifference !== 0) {
+      return activeDifference;
+    }
+
+    const areaDifference = getBusinessAreaShortLabel(left.businessAreaId).localeCompare(
+      getBusinessAreaShortLabel(right.businessAreaId)
+    );
+
+    if (areaDifference !== 0) {
+      return areaDifference;
+    }
+
+    const categoryDifference = normalizeText(left.category).localeCompare(normalizeText(right.category));
+
+    if (categoryDifference !== 0) {
+      return categoryDifference;
+    }
+
+    return normalizeText(left.name).localeCompare(normalizeText(right.name));
+  });
+}
+
+function mergeRecordsByKey(existingRecords, nextRecords, buildKey, sortFn, timestampKeys) {
+  const merged = new Map();
+
+  (Array.isArray(existingRecords) ? existingRecords : []).forEach((record) => {
+    const key = buildKey(record);
+
+    if (key) {
+      merged.set(key, record);
+    }
+  });
+
+  (Array.isArray(nextRecords) ? nextRecords : []).forEach((record) => {
+    const key = buildKey(record);
+
+    if (!key) {
+      return;
+    }
+
+    merged.set(key, chooseNewerRecord(merged.get(key), record, timestampKeys));
+  });
+
+  const records = [...merged.values()];
+  return typeof sortFn === "function" ? sortFn(records) : records;
+}
+
+function normalizePosOrderItemRecord(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const productId = normalizeText(item.productId || item.inventoryItemId || item.id);
+  const name = normalizeText(item.name || item.productName);
+  const quantity = parseQuantity(item.quantity);
+  const unitPrice = parseAmount(item.unitPrice || item.salesPrice || item.price);
+  const totalAmount = parseAmount(item.totalAmount || quantity * unitPrice);
+  const itemType = normalizeText(item.itemType).toLowerCase() === "service" ? "service" : "stock";
+  const trackInventory =
+    itemType === "stock" &&
+    !(
+      item.trackInventory === false ||
+      item.trackInventory === "false" ||
+      item.trackInventory === 0 ||
+      item.trackInventory === "0"
+    );
+
+  if (!productId || !name || quantity <= 0) {
+    return null;
+  }
+
+  return {
+    ...item,
+    productId,
+    businessAreaId: normalizeBusinessAreaId(item.businessAreaId || item.businessArea),
+    sku: normalizeText(item.sku),
+    barcode: normalizeText(item.barcode),
+    name,
+    category: normalizeText(item.category),
+    itemType,
+    trackInventory,
+    quantity,
+    unitPrice,
+    totalAmount
+  };
+}
+
+function normalizePosOrderRecord(record) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  const items = Array.isArray(record.items)
+    ? record.items.map(normalizePosOrderItemRecord).filter(Boolean)
+    : [];
+  const orderDate = normalizeDateInput(record.orderDate || record.date);
+  const businessAreaIds = Array.from(
+    new Set(
+      [
+        ...(Array.isArray(record.businessAreaIds) ? record.businessAreaIds : []),
+        record.businessAreaId,
+        ...items.map((item) => item.businessAreaId)
+      ]
+        .map((businessAreaId) => normalizeBusinessAreaId(businessAreaId))
+        .filter(Boolean)
+    )
+  );
+  const businessAreaId =
+    normalizeBusinessAreaId(record.businessAreaId) || businessAreaIds[0] || "";
+  const totalAmount = parseAmount(
+    record.totalAmount || record.subtotal || items.reduce((sum, item) => sum + item.totalAmount, 0)
+  );
+  const itemCount = Number(
+    items.reduce((sum, item) => sum + Number(item.quantity || 0), 0).toFixed(2)
+  );
+
+  if (!orderDate || items.length === 0 || totalAmount <= 0) {
+    return null;
+  }
+
+  return {
+    ...record,
+    id: normalizeText(record.id) || crypto.randomUUID(),
+    orderNumber: normalizeText(record.orderNumber),
+    createdAt: normalizeText(record.createdAt) || new Date().toISOString(),
+    updatedAt: normalizeText(record.updatedAt) || new Date().toISOString(),
+    orderDate,
+    businessAreaId,
+    businessAreaIds,
+    paymentMethod: normalizeText(record.paymentMethod) || "Cash",
+    customerName: normalizeText(record.customerName),
+    customerPhone: normalizeText(record.customerPhone),
+    notes: normalizeText(record.notes),
+    items,
+    itemCount,
+    subtotal: parseAmount(record.subtotal || totalAmount),
+    totalAmount
+  };
+}
+
+function normalizePosCounterClosureRecord(record) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  const orderDate = normalizeDateInput(record.orderDate || record.date);
+  const businessAreaId = normalizeBusinessAreaId(record.businessAreaId || record.businessArea);
+  const totalAmount = parseAmount(record.totalAmount);
+  const paymentBreakdown = Array.isArray(record.paymentBreakdown)
+    ? record.paymentBreakdown
+        .map((entry) => {
+          const paymentMethod = normalizeText(entry?.paymentMethod || entry?.label);
+          const amount = parseAmount(entry?.amount);
+
+          if (!paymentMethod || amount <= 0) {
+            return null;
+          }
+
+          return {
+            paymentMethod,
+            amount
+          };
+        })
+        .filter(Boolean)
+    : [];
+
+  if (!orderDate || totalAmount < 0) {
+    return null;
+  }
+
+  return {
+    ...record,
+    id: normalizeText(record.id) || crypto.randomUUID(),
+    createdAt: normalizeText(record.createdAt) || new Date().toISOString(),
+    updatedAt:
+      normalizeText(record.updatedAt || record.closedAt || record.createdAt) || new Date().toISOString(),
+    closedAt:
+      normalizeText(record.closedAt || record.updatedAt || record.createdAt) || new Date().toISOString(),
+    orderDate,
+    businessAreaId,
+    areaLabel:
+      normalizeText(record.areaLabel) ||
+      (businessAreaId ? getBusinessAreaShortLabel(businessAreaId) : "All POS Areas"),
+    orderCount: Math.max(Number(record.orderCount || 0), 0),
+    itemCount: Math.max(Number(record.itemCount || 0), 0),
+    totalAmount,
+    dailySalesLedgerTotal: parseAmount(record.dailySalesLedgerTotal),
+    cashSalesTotal: parseAmount(record.cashSalesTotal),
+    paymentBreakdown,
+    notes: normalizeText(record.notes),
+    closedByUserId: normalizeText(record.closedByUserId),
+    closedByName: normalizeText(record.closedByName)
+  };
+}
+
+function normalizeInventoryItemRecord(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const id = normalizeText(item.id);
+  const name = normalizeText(item.name || item.productName);
+  const businessAreaId = normalizeBusinessAreaId(item.businessAreaId || item.businessArea);
+
+  if (!id || !name || !businessAreaId) {
+    return null;
+  }
+
+  return {
+    ...item,
+    id,
+    createdAt: normalizeText(item.createdAt) || new Date().toISOString(),
+    updatedAt: normalizeText(item.updatedAt || item.createdAt) || new Date().toISOString(),
+    sku: normalizeText(item.sku),
+    barcode: normalizeText(item.barcode || item.upc || item.ean || item.code),
+    name,
+    businessAreaId,
+    category: normalizeText(item.category) || "Uncategorized",
+    itemType: normalizeText(item.itemType).toLowerCase() === "service" ? "service" : "stock",
+    trackInventory:
+      !(
+        item.trackInventory === false ||
+        item.trackInventory === "false" ||
+        item.trackInventory === 0 ||
+        item.trackInventory === "0"
+      ),
+    quantityOnHand: parseAmount(item.quantityOnHand),
+    quantityKnown:
+      item.quantityKnown === true ||
+      item.quantityKnown === "true" ||
+      normalizeText(item.quantityKnown).toLowerCase() === "yes",
+    minStockLevel: Math.max(Number(item.minStockLevel || item.reorderLevel || 0), 0),
+    salesPrice: parseAmount(item.salesPrice || item.unitPrice),
+    costPrice: parseAmount(item.costPrice || item.cost),
+    active:
+      !(
+        item.active === false ||
+        item.active === "false" ||
+        item.active === 0 ||
+        item.active === "0"
+      ),
+    notes: normalizeText(item.notes)
+  };
+}
+
+function normalizeAuditTrailRecord(record) {
+  if (!record || typeof record !== "object") {
+    return null;
+  }
+
+  const title = normalizeText(record.title || record.summary || record.event || "Activity saved");
+
+  if (!title) {
+    return null;
+  }
+
+  return {
+    ...record,
+    id: normalizeText(record.id) || crypto.randomUUID(),
+    timestamp:
+      normalizeText(record.timestamp || record.createdAt || record.updatedAt) || new Date().toISOString(),
+    moduleKey: normalizeText(record.moduleKey || record.module || "workspace").toLowerCase(),
+    moduleLabel: normalizeText(record.moduleLabel || record.module || "Workspace") || "Workspace",
+    action: normalizeText(record.action || record.eventType || "update").toLowerCase() || "update",
+    title,
+    detail: normalizeText(record.detail || record.notes),
+    recordId: normalizeText(record.recordId),
+    actorId: normalizeText(record.actorId || record.userId),
+    actorName: normalizeText(record.actorName || record.userName || "Workspace User") || "Workspace User",
+    actorRole: normalizeText(record.actorRole || record.userRole || "local") || "local",
+    entryCount: Math.max(Number(record.entryCount || record.count || 1), 1),
+    view: normalizeText(record.view || record.moduleView)
+  };
+}
+
+function buildPosOrderMergeKey(record) {
+  return normalizeText(record?.id) || normalizeText(record?.orderNumber);
+}
+
+function buildPosCounterClosureMergeKey(record) {
+  return (
+    normalizeText(record?.id) ||
+    [
+      normalizeDateInput(record?.orderDate),
+      normalizeBusinessAreaId(record?.businessAreaId),
+      getRecordTimestamp(record, ["closedAt", "updatedAt", "createdAt"]),
+      Number(record?.totalAmount || 0).toFixed(2)
+    ].join("|")
+  );
+}
+
+function buildInventoryItemMergeKey(record) {
+  return normalizeText(record?.id);
+}
+
+function mergePosSyncInventoryItems(existingRecords, nextRecords) {
+  const merged = new Map();
+
+  (Array.isArray(existingRecords) ? existingRecords : []).forEach((record) => {
+    const key = buildInventoryItemMergeKey(record);
+
+    if (key) {
+      merged.set(key, record);
+    }
+  });
+
+  (Array.isArray(nextRecords) ? nextRecords : []).forEach((record) => {
+    const key = buildInventoryItemMergeKey(record);
+
+    if (!key) {
+      return;
+    }
+
+    const currentRecord = merged.get(key);
+
+    if (!currentRecord) {
+      merged.set(key, record);
+      return;
+    }
+
+    merged.set(key, {
+      ...currentRecord,
+      ...record,
+      quantityOnHand: parseAmount(currentRecord.quantityOnHand),
+      quantityKnown:
+        currentRecord.quantityKnown === true ||
+        currentRecord.quantityKnown === "true" ||
+        record.quantityKnown === true ||
+        record.quantityKnown === "true",
+      updatedAt:
+        getRecordTimestamp(currentRecord, ["updatedAt", "createdAt"]) ||
+        getRecordTimestamp(record, ["updatedAt", "createdAt"]) ||
+        new Date().toISOString()
+    });
+  });
+
+  return sortInventoryItemsForWorkspace([...merged.values()]);
+}
+
+function buildAuditTrailMergeKey(record) {
+  return (
+    normalizeText(record?.id) ||
+    [
+      getRecordTimestamp(record, ["timestamp", "createdAt", "updatedAt"]),
+      normalizeText(record?.moduleKey).toLowerCase(),
+      normalizeText(record?.action).toLowerCase(),
+      normalizeText(record?.recordId),
+      normalizeText(record?.title).toLowerCase()
+    ].join("|")
+  );
+}
+
+function buildGeneratedSalesKey(date, businessAreaId, sourceType) {
+  return [
+    normalizeText(sourceType).toLowerCase(),
+    normalizeDateInput(date),
+    normalizeBusinessAreaId(businessAreaId)
+  ].join("|");
+}
+
+function buildPosAreaDateKey(date, businessAreaId) {
+  return `${normalizeDateInput(date)}|${normalizeBusinessAreaId(businessAreaId)}`;
+}
+
+function isPosGeneratedSaleRecord(record) {
+  return (
+    normalizeText(record?.sourceType).toLowerCase() === POS_SYNC_SOURCE_TYPE ||
+    normalizeText(record?.notes).startsWith(POS_SYNC_NOTE_PREFIX)
+  );
+}
+
+function buildPosOrderAreaTotals(order) {
+  const totals = new Map();
+
+  (Array.isArray(order?.items) ? order.items : []).forEach((item) => {
+    const businessAreaId =
+      normalizeBusinessAreaId(item?.businessAreaId || order?.businessAreaId) ||
+      normalizeBusinessAreaId(order?.businessAreaId);
+    const lineTotal = parseAmount(
+      item?.totalAmount || parseQuantity(item?.quantity) * parseAmount(item?.unitPrice)
+    );
+
+    if (!businessAreaId || lineTotal <= 0) {
+      return;
+    }
+
+    totals.set(businessAreaId, parseAmount((totals.get(businessAreaId) || 0) + lineTotal));
+  });
+
+  return totals;
+}
+
+function findMatchingPosOrderRecord(records, candidate) {
+  if (!candidate || typeof candidate !== "object") {
+    return null;
+  }
+
+  const targetId = normalizeText(candidate.id);
+  const targetOrderNumber = normalizeText(candidate.orderNumber);
+
+  return (
+    (Array.isArray(records) ? records : []).find((record) => {
+      const recordId = normalizeText(record?.id);
+      const recordOrderNumber = normalizeText(record?.orderNumber);
+
+      return (targetId && recordId === targetId) || (targetOrderNumber && recordOrderNumber === targetOrderNumber);
+    }) || null
+  );
+}
+
+function removeMatchingPosOrderRecord(records, candidate) {
+  const targetId = normalizeText(candidate?.id);
+  const targetOrderNumber = normalizeText(candidate?.orderNumber);
+
+  return (Array.isArray(records) ? records : []).filter((record) => {
+    const recordId = normalizeText(record?.id);
+    const recordOrderNumber = normalizeText(record?.orderNumber);
+
+    if (targetId && recordId === targetId) {
+      return false;
+    }
+
+    if (targetOrderNumber && recordOrderNumber === targetOrderNumber) {
+      return false;
+    }
+
+    return true;
+  });
+}
+
+function applyInventoryDeltaFromOrder(inventoryItems, order, direction) {
+  const multiplier = Number(direction || 0);
+
+  if (!Number.isFinite(multiplier) || multiplier === 0) {
+    return sortInventoryItemsForWorkspace(inventoryItems);
+  }
+
+  const adjustments = new Map();
+
+  (Array.isArray(order?.items) ? order.items : [])
+    .filter((item) => item?.trackInventory)
+    .forEach((item) => {
+      const productId = normalizeText(item.productId);
+
+      if (!productId) {
+        return;
+      }
+
+      adjustments.set(productId, parseAmount((adjustments.get(productId) || 0) + item.quantity * multiplier));
+    });
+
+  if (adjustments.size === 0) {
+    return sortInventoryItemsForWorkspace(inventoryItems);
+  }
+
+  return sortInventoryItemsForWorkspace(
+    (Array.isArray(inventoryItems) ? inventoryItems : []).map((item) => {
+      const itemId = normalizeText(item?.id);
+
+      if (!adjustments.has(itemId) || item?.trackInventory === false) {
+        return item;
+      }
+
+      return {
+        ...item,
+        quantityOnHand: parseAmount(Number(item.quantityOnHand || 0) + adjustments.get(itemId)),
+        quantityKnown: true,
+        updatedAt: new Date().toISOString()
+      };
+    })
+  );
+}
+
+function rebuildPosGeneratedSalesRecords(currentSales, posOrders) {
+  const preservedSales = (Array.isArray(currentSales) ? currentSales : []).filter(
+    (record) => !isPosGeneratedSaleRecord(record)
+  );
+  const existingGeneratedSales = new Map(
+    (Array.isArray(currentSales) ? currentSales : [])
+      .filter((record) => isPosGeneratedSaleRecord(record))
+      .map((record) => [
+        normalizeText(record.linkedGeneratedSalesKey) ||
+          buildGeneratedSalesKey(record.date, record.businessAreaId, POS_SYNC_SOURCE_TYPE),
+        record
+      ])
+      .filter(([key]) => key)
+  );
+  const aggregatedTotals = new Map();
+
+  (Array.isArray(posOrders) ? posOrders : []).forEach((order) => {
+    const orderDate = normalizeDateInput(order?.orderDate);
+
+    if (!orderDate) {
+      return;
+    }
+
+    buildPosOrderAreaTotals(order).forEach((amount, businessAreaId) => {
+      const key = buildGeneratedSalesKey(orderDate, businessAreaId, POS_SYNC_SOURCE_TYPE);
+      const currentAggregate = aggregatedTotals.get(key) || {
+        date: orderDate,
+        businessAreaId,
+        amount: 0,
+        orderCount: 0
+      };
+
+      aggregatedTotals.set(key, {
+        ...currentAggregate,
+        amount: parseAmount(currentAggregate.amount + amount),
+        orderCount: currentAggregate.orderCount + 1
+      });
+    });
+  });
+
+  const generatedSales = Array.from(aggregatedTotals.entries())
+    .map(([key, aggregate]) => {
+      const existing = existingGeneratedSales.get(key);
+      const createdAt = normalizeText(existing?.createdAt) || new Date().toISOString();
+
+      return {
+        ...existing,
+        id: normalizeText(existing?.id) || crypto.randomUUID(),
+        createdAt,
+        updatedAt: new Date().toISOString(),
+        businessAreaId: aggregate.businessAreaId,
+        date: aggregate.date,
+        amount: parseAmount(aggregate.amount),
+        notes: `${POS_SYNC_NOTE_PREFIX} ${aggregate.orderCount} order${
+          aggregate.orderCount === 1 ? "" : "s"
+        } captured in POS for ${getBusinessAreaShortLabel(aggregate.businessAreaId)}.`,
+        sourceType: POS_SYNC_SOURCE_TYPE,
+        sourceLabel: "POS Sync",
+        linkedGeneratedSalesKey: key,
+        linkedPosAreaDateKey: buildPosAreaDateKey(aggregate.date, aggregate.businessAreaId)
+      };
+    })
+    .filter((record) => record.amount > 0);
+
+  return sortSalesForWorkspace([...preservedSales, ...generatedSales]);
+}
+
+function buildWorkspacePosSyncResponse(snapshot) {
+  const normalized = normalizeWorkspaceSnapshotPayload(snapshot);
+  const workspace = getWorkspaceRoot(normalized);
+
+  return {
+    schemaVersion: normalized.schemaVersion,
+    app: normalized.app,
+    exportedAt: normalized.exportedAt,
+    settings: normalized.settings,
+    workspace: {
+      posOrders: Array.isArray(workspace.posOrders) ? workspace.posOrders : [],
+      posCounterClosures: Array.isArray(workspace.posCounterClosures) ? workspace.posCounterClosures : [],
+      inventoryItems: Array.isArray(workspace.inventoryItems) ? workspace.inventoryItems : [],
+      sales: Array.isArray(workspace.sales) ? workspace.sales : [],
+      auditTrail: Array.isArray(workspace.auditTrail) ? workspace.auditTrail : []
+    }
+  };
+}
+
+async function writeWorkspacePosSyncStore(payload) {
+  const currentSnapshot = await readWorkspaceSnapshotStore();
+  const currentWorkspace = getWorkspaceRoot(currentSnapshot);
+  const mutation = payload && typeof payload === "object" ? payload : {};
+  const operation = normalizeText(mutation.operation).toLowerCase();
+  const nextOrder = normalizePosOrderRecord(mutation.order);
+  const previousOrder = normalizePosOrderRecord(mutation.previousOrder);
+  const counterClosure = normalizePosCounterClosureRecord(mutation.counterClosure);
+  const incomingInventoryItems = (Array.isArray(mutation.inventoryItems) ? mutation.inventoryItems : [])
+    .map(normalizeInventoryItemRecord)
+    .filter(Boolean);
+  const incomingAuditTrail = (Array.isArray(mutation.auditTrail) ? mutation.auditTrail : [])
+    .map(normalizeAuditTrailRecord)
+    .filter(Boolean);
+  let nextPosOrders = sortPosOrdersForWorkspace(
+    (Array.isArray(currentWorkspace.posOrders) ? currentWorkspace.posOrders : [])
+      .map(normalizePosOrderRecord)
+      .filter(Boolean)
+  );
+  let nextPosCounterClosures = sortPosCounterClosuresForWorkspace(
+    (Array.isArray(currentWorkspace.posCounterClosures) ? currentWorkspace.posCounterClosures : [])
+      .map(normalizePosCounterClosureRecord)
+      .filter(Boolean)
+  );
+  let nextInventoryItems = sortInventoryItemsForWorkspace(
+    (Array.isArray(currentWorkspace.inventoryItems) ? currentWorkspace.inventoryItems : [])
+      .map(normalizeInventoryItemRecord)
+      .filter(Boolean)
+  );
+
+  nextInventoryItems = mergePosSyncInventoryItems(nextInventoryItems, incomingInventoryItems);
+
+  if (["save-order", "update-order", "delete-order"].includes(operation)) {
+    const matchedPreviousOrder =
+      findMatchingPosOrderRecord(nextPosOrders, nextOrder) ||
+      findMatchingPosOrderRecord(nextPosOrders, previousOrder);
+
+    if (matchedPreviousOrder) {
+      nextInventoryItems = applyInventoryDeltaFromOrder(nextInventoryItems, matchedPreviousOrder, 1);
+      nextPosOrders = removeMatchingPosOrderRecord(nextPosOrders, matchedPreviousOrder);
+    }
+
+    if (operation !== "delete-order" && nextOrder) {
+      nextPosOrders = sortPosOrdersForWorkspace([...nextPosOrders, nextOrder]);
+      nextInventoryItems = applyInventoryDeltaFromOrder(nextInventoryItems, nextOrder, -1);
+    }
+  }
+
+  if (operation === "close-counter" && counterClosure) {
+    nextPosCounterClosures = mergeRecordsByKey(
+      nextPosCounterClosures,
+      [counterClosure],
+      buildPosCounterClosureMergeKey,
+      sortPosCounterClosuresForWorkspace,
+      ["closedAt", "updatedAt", "createdAt"]
+    );
+  }
+
+  const nextSales = rebuildPosGeneratedSalesRecords(
+    Array.isArray(currentWorkspace.sales) ? currentWorkspace.sales : [],
+    nextPosOrders
+  );
+  const nextAuditTrail = mergeRecordsByKey(
+    (Array.isArray(currentWorkspace.auditTrail) ? currentWorkspace.auditTrail : [])
+      .map(normalizeAuditTrailRecord)
+      .filter(Boolean),
+    incomingAuditTrail,
+    buildAuditTrailMergeKey,
+    sortAuditTrailForWorkspace,
+    ["timestamp", "updatedAt", "createdAt"]
+  ).slice(0, 2500);
+
+  const nextSnapshot = normalizeWorkspaceSnapshotPayload({
+    ...currentSnapshot,
+    exportedAt: new Date().toISOString(),
+    workspace: {
+      ...currentWorkspace,
+      posOrders: nextPosOrders,
+      posCounterClosures: nextPosCounterClosures,
+      inventoryItems: nextInventoryItems,
+      sales: nextSales,
+      auditTrail: nextAuditTrail
+    }
+  });
+  const savedSnapshot = await writeWorkspaceSnapshotStore(nextSnapshot);
+
+  return buildWorkspacePosSyncResponse(savedSnapshot);
 }
 
 async function upsertOrderInDatabase(pool, order) {
@@ -1870,6 +2662,29 @@ async function handleApiRoute(request, response, pathname, url) {
         });
         return true;
       }
+    }
+  }
+
+  if (pathname === "/api/workspace-pos-sync" && request.method === "POST") {
+    if (!isAuthorizedWorkspaceRequest(request)) {
+      sendJson(response, 401, {
+        ok: false,
+        error: "Workspace sign-in is required."
+      });
+      return true;
+    }
+
+    try {
+      const body = await readRequestBody(request);
+      const snapshot = await writeWorkspacePosSyncStore(body);
+      sendJson(response, 200, snapshot);
+      return true;
+    } catch (error) {
+      sendJson(response, 400, {
+        ok: false,
+        errors: [error.message || "Unable to save the POS transaction online."]
+      });
+      return true;
     }
   }
 

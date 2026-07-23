@@ -19,6 +19,7 @@
   const LAUNDRY_SYNC_NOTE_PREFIX = "[Laundry Sync]";
   const EQUIPMENT_SYNC_NOTE_PREFIX = "[Equipment Sync]";
   const APARTMENT_SYNC_NOTE_PREFIX = "[Apartment Sync]";
+  const HOSTED_POS_SYNC_PATH = "/api/workspace-pos-sync";
   const POS_CATALOG_WORKBOOK_PATH =
     "./outputs/oneroot-products-pos/OneRoot_Products_Cleaned.xlsx?v=20260718a";
   const ONEROOT_LOGO_PATH = new URL("./assets/oneroot-logo.png?v=20260719a", window.location.href).href;
@@ -3235,12 +3236,21 @@
     }
 
     posTransactionInFlight = true;
-    persistInventoryItems();
-    persistPosOrders();
-    reconcilePosGeneratedSales({ persist: true });
+    render();
+    withHostedWorkspaceSyncSuppressed(() => {
+      persistInventoryItems();
+      persistPosOrders();
+      reconcilePosGeneratedSales({ persist: true });
+    });
 
-    const syncConfirmed = await confirmHostedPosTransaction(
-      existingOrder ? "pos-order-update" : "pos-order-save",
+    const syncConfirmed = await syncHostedPosTransaction(
+      {
+        operation: existingOrder ? "update-order" : "save-order",
+        order: orderRecord,
+        previousOrder: existingOrder || null,
+        inventoryItems: buildHostedPosInventorySubset([existingOrder, orderRecord]),
+        auditTrail: collectNewAuditTrailEntries(snapshot.auditTrail)
+      },
       "The POS order could not be saved online. Sign in again and retry."
     );
 
@@ -3321,18 +3331,163 @@
     return true;
   }
 
-  async function confirmHostedPosTransaction(reason, failureMessage) {
-    if (!isHostedPosSyncMode() || typeof flushHostedWorkspaceCriticalSync !== "function") {
+  function buildHostedPosInventorySubset(orders = []) {
+    const productIds = new Set();
+
+    (Array.isArray(orders) ? orders : []).forEach((order) => {
+      (Array.isArray(order?.items) ? order.items : [])
+        .filter((item) => item?.trackInventory)
+        .forEach((item) => {
+          const productId = normalizeText(item.productId);
+
+          if (productId) {
+            productIds.add(productId);
+          }
+        });
+    });
+
+    return clonePosRecords(
+      state.inventoryItems.filter((item) => productIds.has(normalizeText(item.id)))
+    );
+  }
+
+  function collectNewAuditTrailEntries(previousRecords = []) {
+    const previousKeys = new Set(
+      (Array.isArray(previousRecords) ? previousRecords : [])
+        .map((record) => buildAuditTrailMergeKey(record))
+        .filter(Boolean)
+    );
+
+    return cloneAuditRecords(
+      state.auditTrail.filter((record) => {
+        const key = buildAuditTrailMergeKey(record);
+        return key && !previousKeys.has(key);
+      })
+    );
+  }
+
+  function applyHostedPosSyncResponse(imported) {
+    if (!imported || typeof imported !== "object") {
+      return;
+    }
+
+    if (typeof withHostedWorkspaceSyncSuppressed === "function") {
+      withHostedWorkspaceSyncSuppressed(() => {
+        if (typeof mergeHostedWorkspaceImport === "function") {
+          mergeHostedWorkspaceImport(imported);
+        }
+        persistAllData();
+      });
+    } else if (typeof mergeHostedWorkspaceImport === "function") {
+      mergeHostedWorkspaceImport(imported);
+      persistAllData();
+    }
+
+    if (typeof syncHostedWorkspaceUiAfterMerge === "function") {
+      syncHostedWorkspaceUiAfterMerge();
+    }
+
+    if (typeof hostedWorkspaceSyncState === "object" && hostedWorkspaceSyncState) {
+      hostedWorkspaceSyncState.hasPendingLocalChanges = false;
+
+      if (typeof buildHostedWorkspaceSyncDigest === "function") {
+        hostedWorkspaceSyncState.lastUploadedDigest = buildHostedWorkspaceSyncDigest(state);
+      }
+    }
+
+    if (
+      typeof window !== "undefined" &&
+      window.localStorage &&
+      typeof HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY !== "undefined" &&
+      typeof getHostedWorkspaceSnapshotRevision === "function"
+    ) {
+      window.localStorage.setItem(
+        HOSTED_WORKSPACE_LIVE_SYNC_FLAG_KEY,
+        getHostedWorkspaceSnapshotRevision(imported)
+      );
+    }
+
+    if (
+      typeof setHostedWorkspaceSyncStatus === "function" &&
+      typeof formatHostedWorkspaceRecordLabel === "function" &&
+      typeof getWorkspaceRecordTotal === "function"
+    ) {
+      const recordTotal = getWorkspaceRecordTotal(state);
+      setHostedWorkspaceSyncStatus(
+        "live-connected",
+        `POS saved online with ${formatHostedWorkspaceRecordLabel(recordTotal)}.`,
+        {
+          recordTotal,
+          liveSyncAt: imported.exportedAt || new Date().toISOString()
+        }
+      );
+    }
+  }
+
+  async function syncHostedPosTransaction(payload, failureMessage) {
+    if (!isHostedPosSyncMode()) {
       return true;
     }
 
-    const synced = await flushHostedWorkspaceCriticalSync({ reason });
+    try {
+      const response = await fetch(HOSTED_POS_SYNC_PATH, {
+        method: "POST",
+        credentials: "same-origin",
+        headers:
+          typeof buildHostedWorkspaceSessionHeaders === "function"
+            ? buildHostedWorkspaceSessionHeaders({
+                Accept: "application/json",
+                "Content-Type": "application/json"
+              })
+            : {
+                Accept: "application/json",
+                "Content-Type": "application/json"
+              },
+        body: JSON.stringify(payload || {})
+      });
 
-    if (!synced) {
+      if (response.status === 401) {
+        state.signedInUserId = "";
+
+        if (typeof clearAuthSession === "function") {
+          clearAuthSession();
+        }
+
+        if (typeof closeHostedWorkspaceEventStream === "function") {
+          closeHostedWorkspaceEventStream();
+        }
+
+        if (typeof setHostedWorkspaceSyncStatus === "function") {
+          setHostedWorkspaceSyncStatus(
+            "auth-required",
+            "This device could not save the POS transaction online. Sign in again, then retry."
+          );
+        }
+
+        showToast(failureMessage);
+        return false;
+      }
+
+      if (!response.ok) {
+        throw new Error(`Hosted POS sync failed with ${response.status}.`);
+      }
+
+      const imported = sanitizeImportedBackup(await response.json());
+      applyHostedPosSyncResponse(imported);
+      return true;
+    } catch (error) {
+      console.error(error);
+
+      if (typeof setHostedWorkspaceSyncStatus === "function") {
+        setHostedWorkspaceSyncStatus(
+          "sync-error",
+          error.message || "This device could not save the POS transaction online right now."
+        );
+      }
+
       showToast(failureMessage);
+      return false;
     }
-
-    return synced;
   }
 
   function restorePosTransactionSnapshot(snapshot) {
@@ -3531,11 +3686,18 @@
     }
 
     posTransactionInFlight = true;
+    render();
     state.posCounterClosures = sortPosCounterClosures([closureRecord, ...state.posCounterClosures]);
-    persistPosCounterClosures();
+    withHostedWorkspaceSyncSuppressed(() => {
+      persistPosCounterClosures();
+    });
 
-    const syncConfirmed = await confirmHostedPosTransaction(
-      "pos-counter-close",
+    const syncConfirmed = await syncHostedPosTransaction(
+      {
+        operation: "close-counter",
+        counterClosure: closureRecord,
+        auditTrail: collectNewAuditTrailEntries(snapshot.auditTrail)
+      },
       "The counter closeout could not be saved online. Sign in again and retry."
     );
 
@@ -3654,12 +3816,20 @@
     applyInventoryMovementFromOrder(record, 1);
     state.posOrders = sortPosOrders(state.posOrders.filter((order) => order.id !== orderId));
     posTransactionInFlight = true;
-    persistInventoryItems();
-    persistPosOrders();
-    reconcilePosGeneratedSales({ persist: true });
+    render();
+    withHostedWorkspaceSyncSuppressed(() => {
+      persistInventoryItems();
+      persistPosOrders();
+      reconcilePosGeneratedSales({ persist: true });
+    });
 
-    const syncConfirmed = await confirmHostedPosTransaction(
-      "pos-order-delete",
+    const syncConfirmed = await syncHostedPosTransaction(
+      {
+        operation: "delete-order",
+        previousOrder: record,
+        inventoryItems: buildHostedPosInventorySubset([record]),
+        auditTrail: collectNewAuditTrailEntries(snapshot.auditTrail)
+      },
       "The POS order could not be deleted online. Sign in again and retry."
     );
 
