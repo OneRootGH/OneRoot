@@ -2458,13 +2458,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
             try:
                 initialize_database(engine, SessionLocal, app_config)
-                reconcile_session = SessionLocal()
-                try:
-                    reconcile_generated_sales(reconcile_session)
-                    reconcile_session.commit()
-                finally:
-                    reconcile_session.close()
-                    SessionLocal.remove()
             except OperationalError:
                 SessionLocal.remove()
                 mark_database_unavailable()
@@ -2639,6 +2632,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/login", methods=["GET", "POST"])
     def login():
         if request.method == "POST":
+            if not ensure_database_ready():
+                return database_unavailable_response()
             username = normalize_text(request.form.get("username")).lower()
             raw_password = request.form.get("password", "")
             user = find_user_by_username(username)
