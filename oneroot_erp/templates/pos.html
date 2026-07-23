@@ -58,7 +58,7 @@
           <div class="card-header compact">
             <div>
               <p class="eyebrow">Cashier Fastlane</p>
-              <h3>Browse, Search, And Add</h3>
+              <h3>Search First, Add Fast</h3>
             </div>
             <span class="status-chip" id="pos-result-count">Loading products...</span>
           </div>
@@ -85,31 +85,16 @@
               <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" autocomplete="off">
             </label>
           </div>
-          <div class="pos-payment-quick">
-            <div>
-              <p class="eyebrow">Payment</p>
-              <div class="pos-chip-row" id="pos-payment-buttons">
-                {% for method in payment_methods %}
-                  <button class="pos-chip {% if loop.first %}is-active{% endif %}" type="button" data-payment-method="{{ method }}">{{ method }}</button>
-                {% endfor %}
-              </div>
-            </div>
-            <label class="pos-payment-select">
-              <span>Payment Dropdown</span>
-              <select id="pos-payment-method">
-                {% for method in payment_methods %}
-                  <option value="{{ method }}">{{ method }}</option>
-                {% endfor %}
-              </select>
-            </label>
-          </div>
+          <p class="muted pos-fastlane-helper">
+            Pick the area, type the item, and tap from the results below. Payment comes later beside the cart so staff do not lose time scrolling.
+          </p>
         </section>
 
         <section class="card pos-browser-card">
           <div class="card-header compact">
             <div>
               <p class="eyebrow">Product Shelf</p>
-              <h3>Category Picks</h3>
+              <h3>Tap Matching Products</h3>
             </div>
             <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
           </div>
@@ -140,6 +125,29 @@
           </div>
           <strong class="pos-cart-grand-total" data-pos-total>GH₵0.00</strong>
         </div>
+
+        <section class="mini-card pos-payment-dock">
+          <div class="pos-payment-dock-head">
+            <div>
+              <span class="eyebrow">Checkout Payment</span>
+              <strong>Choose once before saving</strong>
+            </div>
+            <small class="muted">Keep this near the cart to finish faster.</small>
+          </div>
+          <div class="pos-chip-row" id="pos-payment-buttons">
+            {% for method in payment_methods %}
+              <button class="pos-chip {% if loop.first %}is-active{% endif %}" type="button" data-payment-method="{{ method }}">{{ method }}</button>
+            {% endfor %}
+          </div>
+          <label class="pos-payment-select">
+            <span>Payment Dropdown</span>
+            <select id="pos-payment-method">
+              {% for method in payment_methods %}
+                <option value="{{ method }}">{{ method }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </section>
 
         <section class="summary-grid pos-summary-grid">
           <article class="mini-card">

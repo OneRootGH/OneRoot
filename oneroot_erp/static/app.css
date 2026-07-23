@@ -397,6 +397,10 @@ textarea { resize: vertical; }
   margin: 0 0 1rem;
   line-height: 1.5;
 }
+.pos-fastlane-helper {
+  margin: 1rem 0 0;
+  line-height: 1.45;
+}
 .pos-payment-quick {
   display: grid;
   grid-template-columns: 1.4fr 0.8fr;
@@ -504,6 +508,23 @@ textarea { resize: vertical; }
 }
 .pos-summary-grid {
   margin-bottom: 1rem;
+}
+.pos-payment-dock {
+  margin-bottom: 1rem;
+  background: #f6f9ff;
+  border-color: #d9e3f2;
+  gap: 0.8rem;
+}
+.pos-payment-dock-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.pos-payment-dock-head strong {
+  display: block;
+  margin-top: 0.15rem;
 }
 .pos-cart-panel-enhanced {
   position: sticky;
@@ -758,6 +779,9 @@ textarea { resize: vertical; }
   .pos-cart-panel-enhanced,
   .document-toolbar {
     position: static;
+  }
+  .pos-payment-dock-head {
+    flex-direction: column;
   }
   .document-brand {
     flex-direction: column;
