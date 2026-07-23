@@ -1518,6 +1518,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "/operations",
             "/operations/",
             "/app/login",
+            "/app/reconnecting",
             "/api/public-config",
             "/api/public/config",
         }:
@@ -2487,6 +2488,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return database_unavailable_response()
 
         user_id = session.get("user_id")
+        pending_login_user = normalize_text(session.get("pending_login_user")).lower()
+        if not user_id and pending_login_user and app.config["DATABASE_READY"]:
+            pending_user = find_user_by_username(pending_login_user)
+            if pending_user and pending_user.active and pending_user.login_enabled:
+                session["user_id"] = pending_user.id
+                session.pop("pending_login_user", None)
+                user_id = pending_user.id
+
         if user_id and request.path.startswith(("/app", "/operations")):
             try:
                 g.current_user = g.db.get(User, user_id)
@@ -2641,6 +2650,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def login():
         if request.method == "POST":
             if not ensure_database_ready():
+                username = normalize_text(request.form.get("username")).lower()
+                raw_password = request.form.get("password", "")
+                admin_matches = (
+                    username == app_config.admin_username.lower()
+                    and raw_password == app_config.admin_password
+                )
+                if admin_matches:
+                    session["pending_login_user"] = app_config.admin_username.lower()
+                    flash("The live workspace is reconnecting. We will continue automatically as soon as the database is ready.", "warning")
+                    return redirect(url_for("reconnecting_page"))
                 flash("The live workspace is reconnecting. Please try again in a moment.", "warning")
                 return render_template("login.html", page_title="Sign In")
             username = normalize_text(request.form.get("username")).lower()
@@ -2654,6 +2673,26 @@ def create_app(config: AppConfig | None = None) -> Flask:
             g.db.commit()
             return redirect(request.args.get("next") or url_for("dashboard"))
         return render_template("login.html", page_title="Sign In")
+
+    @app.route("/app/reconnecting")
+    def reconnecting_page():
+        if ensure_database_ready():
+            pending_login_user = normalize_text(session.get("pending_login_user")).lower()
+            if pending_login_user:
+                user = find_user_by_username(pending_login_user)
+                if user and user.active and user.login_enabled:
+                    session["user_id"] = user.id
+                    session.pop("pending_login_user", None)
+                    return redirect(url_for("dashboard"))
+            if session.get("user_id"):
+                return redirect(url_for("dashboard"))
+            return redirect(url_for("login"))
+        return render_template(
+            "workspace_reconnecting.html",
+            page_title="Reconnecting",
+            reconnect_message="OneRoot is reconnecting to the live workspace. This page will keep checking and open the app automatically when the database is ready.",
+            refresh_url=url_for("reconnecting_page"),
+        )
 
     @app.route("/app/logout", methods=["POST"])
     @login_required
