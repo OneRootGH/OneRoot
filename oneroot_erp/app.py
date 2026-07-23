@@ -11,6 +11,7 @@ from datetime import date, datetime, timedelta
 from functools import wraps
 from io import BytesIO, StringIO
 from pathlib import Path
+from threading import Lock
 from typing import Any
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
@@ -47,8 +48,9 @@ TENANCY_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "Tenancy_Agreem
 TENANCY_PROPERTY_LOCATION = "Medie New City (Parks and Gardens), Accra, Ghana"
 TENANCY_PLACEHOLDER_LINE = "_______________________________"
 APARTMENT_ACTIVE_STATUSES = {"Occupied", "Reserved"}
-DATABASE_BOOT_RETRIES = 8
-DATABASE_BOOT_DELAY_SECONDS = 5
+DATABASE_INIT_RETRIES = 3
+DATABASE_INIT_DELAY_SECONDS = 2
+DATABASE_RETRY_COOLDOWN_SECONDS = 15
 
 
 def build_database_engine(database_url: str):
@@ -64,7 +66,7 @@ def build_database_engine(database_url: str):
 
 
 def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
-    retries = DATABASE_BOOT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
+    retries = DATABASE_INIT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
     last_error: OperationalError | None = None
 
     for attempt in range(1, retries + 1):
@@ -79,7 +81,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
             last_error = error
             if attempt >= retries:
                 raise
-            time.sleep(DATABASE_BOOT_DELAY_SECONDS)
+            time.sleep(DATABASE_INIT_DELAY_SECONDS)
 
     if last_error:
         raise last_error
@@ -1454,7 +1456,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
     SessionLocal = scoped_session(
         sessionmaker(bind=engine, autoflush=False, expire_on_commit=False, future=True)
     )
-    initialize_database(engine, SessionLocal, app_config)
 
     app = Flask(
         __name__,
@@ -1464,6 +1465,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
     app.config["SECRET_KEY"] = app_config.secret_key
     app.config["ONEROOT_CONFIG"] = app_config
     app.config["SESSION_LOCAL"] = SessionLocal
+    app.config["DATABASE_READY"] = False
+    app.config["DATABASE_NEXT_RETRY_AT"] = 0.0
+    app.config["DATABASE_INIT_LOCK"] = Lock()
 
     app.jinja_env.globals.update(
         business_area_labels=BUSINESS_AREA_LABELS,
@@ -1504,6 +1508,28 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return wrapped
 
         return decorator
+
+    def database_required_for_path(path: str) -> bool:
+        if path in {
+            "/",
+            "/track-order",
+            "/track-order.html",
+            "/icon.svg",
+            "/api/public-config",
+            "/api/public/config",
+        }:
+            return False
+        return not path.startswith(("/assets/", "/website/", "/static/"))
+
+    def mark_database_unavailable() -> None:
+        app.config["DATABASE_READY"] = False
+        app.config["DATABASE_NEXT_RETRY_AT"] = time.monotonic() + DATABASE_RETRY_COOLDOWN_SECONDS
+
+    def database_unavailable_response():
+        message = "OneRoot is reconnecting to the database. Please refresh in a moment."
+        if request.path.startswith("/api/") or request.path.startswith("/app/api/"):
+            return jsonify({"ok": False, "error": message}), 503
+        return Response(message, status=503, mimetype="text/plain")
 
     def enforce_module_access(module_key: str):
         if user_has_access(g.current_user, module_key):
@@ -2414,21 +2440,56 @@ def create_app(config: AppConfig | None = None) -> Flask:
             else:
                 sync_generated_sales_for_module_record(record, db_session=db_session)
 
-    reconcile_session = SessionLocal()
-    try:
-        reconcile_generated_sales(reconcile_session)
-        reconcile_session.commit()
-    finally:
-        reconcile_session.close()
-        SessionLocal.remove()
+    def ensure_database_ready() -> bool:
+        if app.config["DATABASE_READY"]:
+            return True
+
+        if time.monotonic() < app.config["DATABASE_NEXT_RETRY_AT"]:
+            return False
+
+        with app.config["DATABASE_INIT_LOCK"]:
+            if app.config["DATABASE_READY"]:
+                return True
+            if time.monotonic() < app.config["DATABASE_NEXT_RETRY_AT"]:
+                return False
+
+            try:
+                initialize_database(engine, SessionLocal, app_config)
+                reconcile_session = SessionLocal()
+                try:
+                    reconcile_generated_sales(reconcile_session)
+                    reconcile_session.commit()
+                finally:
+                    reconcile_session.close()
+                    SessionLocal.remove()
+            except OperationalError:
+                SessionLocal.remove()
+                mark_database_unavailable()
+                return False
+
+            app.config["DATABASE_READY"] = True
+            app.config["DATABASE_NEXT_RETRY_AT"] = 0.0
+            return True
 
     @app.before_request
     def open_session():
         g.db = app.config["SESSION_LOCAL"]()
         g.current_user = None
+        needs_database = database_required_for_path(request.path or "/")
+        if needs_database and not ensure_database_ready():
+            g.db.close()
+            app.config["SESSION_LOCAL"].remove()
+            g.db = None
+            return database_unavailable_response()
+
         user_id = session.get("user_id")
-        if user_id:
-            g.current_user = g.db.get(User, user_id)
+        if user_id and request.path.startswith(("/app", "/operations")):
+            try:
+                g.current_user = g.db.get(User, user_id)
+            except OperationalError:
+                session.clear()
+                mark_database_unavailable()
+                return database_unavailable_response()
             if not g.current_user or not g.current_user.active:
                 session.clear()
                 g.current_user = None
@@ -2444,6 +2505,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         finally:
             db_session.close()
             app.config["SESSION_LOCAL"].remove()
+
+    @app.errorhandler(OperationalError)
+    def handle_database_operational_error(_error):
+        mark_database_unavailable()
+        db_session = getattr(g, "db", None)
+        if db_session:
+            db_session.rollback()
+        return database_unavailable_response()
 
     @app.route("/website/<path:filename>")
     def website_files(filename: str):
