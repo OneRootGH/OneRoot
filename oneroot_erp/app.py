@@ -48,8 +48,8 @@ TENANCY_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "Tenancy_Agreem
 TENANCY_PROPERTY_LOCATION = "Medie New City (Parks and Gardens), Accra, Ghana"
 TENANCY_PLACEHOLDER_LINE = "_______________________________"
 APARTMENT_ACTIVE_STATUSES = {"Occupied", "Reserved"}
-DATABASE_INIT_RETRIES = 3
-DATABASE_INIT_DELAY_SECONDS = 2
+DATABASE_INIT_RETRIES = 2
+DATABASE_INIT_DELAY_SECONDS = 1
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
 
 
@@ -60,7 +60,7 @@ def build_database_engine(database_url: str):
             pool_pre_ping=True,
             pool_recycle=300,
             pool_timeout=30,
-            connect_args={"connect_timeout": 10},
+            connect_args={"connect_timeout": 3},
         )
     return create_engine(database_url, **engine_options)
 
@@ -1515,6 +1515,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "/track-order",
             "/track-order.html",
             "/icon.svg",
+            "/operations",
+            "/operations/",
+            "/app/login",
             "/api/public-config",
             "/api/public/config",
         }:
