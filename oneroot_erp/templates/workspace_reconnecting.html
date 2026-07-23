@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OneRoot Reconnecting</title>
+    <meta http-equiv="refresh" content="6;url={{ refresh_url }}">
+    <style>
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        padding: 1.5rem;
+        background: linear-gradient(180deg, #f6efde, #f4f7f1);
+        color: #1f2b22;
+        font-family: Georgia, serif;
+      }
+      main {
+        width: min(640px, 100%);
+        background: rgba(255, 252, 245, 0.96);
+        border: 1px solid #dcd2bd;
+        border-radius: 1.5rem;
+        box-shadow: 0 18px 40px rgba(41, 52, 40, 0.12);
+        padding: 2rem;
+      }
+      p {
+        line-height: 1.6;
+        font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .eyebrow {
+        letter-spacing: 0.18em;
+        text-transform: uppercase;
+        color: #2f5a43;
+        font: 700 0.78rem/1.2 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .actions {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        margin-top: 1.5rem;
+      }
+      a {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 44px;
+        padding: 0.8rem 1rem;
+        border-radius: 999px;
+        text-decoration: none;
+        font: 700 0.95rem/1 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      }
+      .primary {
+        background: #1f5b41;
+        color: #fffaf0;
+      }
+      .subtle {
+        background: #efe6d2;
+        color: #5d4c30;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <div class="eyebrow">OneRoot Essentials</div>
+      <h1>Workspace Reconnecting</h1>
+      <p>{{ reconnect_message }}</p>
+      <p>The page will try again automatically in a few seconds. If you were signing in, your login page will reopen so you can continue without the generic error page.</p>
+      <div class="actions">
+        <a class="primary" href="{{ refresh_url }}">Try Again Now</a>
+        <a class="subtle" href="{{ url_for('home') }}">Open Public Site</a>
+      </div>
+    </main>
+  </body>
+</html>

@@ -48,7 +48,7 @@ TENANCY_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "Tenancy_Agreem
 TENANCY_PROPERTY_LOCATION = "Medie New City (Parks and Gardens), Accra, Ghana"
 TENANCY_PLACEHOLDER_LINE = "_______________________________"
 APARTMENT_ACTIVE_STATUSES = {"Occupied", "Reserved"}
-DATABASE_INIT_RETRIES = 2
+DATABASE_INIT_RETRIES = 1
 DATABASE_INIT_DELAY_SECONDS = 1
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
 
@@ -60,7 +60,7 @@ def build_database_engine(database_url: str):
             pool_pre_ping=True,
             pool_recycle=300,
             pool_timeout=30,
-            connect_args={"connect_timeout": 3},
+            connect_args={"connect_timeout": 2},
         )
     return create_engine(database_url, **engine_options)
 
@@ -1532,7 +1532,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         message = "OneRoot is reconnecting to the database. Please refresh in a moment."
         if request.path.startswith("/api/") or request.path.startswith("/app/api/"):
             return jsonify({"ok": False, "error": message}), 503
-        return Response(message, status=503, mimetype="text/plain")
+        refresh_url = request.path
+        if request.path == "/app/login" and request.method == "POST":
+            refresh_url = url_for("login")
+        return render_template(
+            "workspace_reconnecting.html",
+            page_title="Reconnecting",
+            reconnect_message=message,
+            refresh_url=refresh_url or "/",
+        )
 
     def enforce_module_access(module_key: str):
         if user_has_access(g.current_user, module_key):
@@ -2633,7 +2641,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def login():
         if request.method == "POST":
             if not ensure_database_ready():
-                return database_unavailable_response()
+                flash("The live workspace is reconnecting. Please try again in a moment.", "warning")
+                return render_template("login.html", page_title="Sign In")
             username = normalize_text(request.form.get("username")).lower()
             raw_password = request.form.get("password", "")
             user = find_user_by_username(username)
