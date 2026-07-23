@@ -2370,6 +2370,48 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "lastCloseout": closeout_payload,
         }
 
+    def sync_existing_pos_closeouts(order_date: date, area_ids: list[str] | None = None) -> None:
+        scoped_area_ids = {normalize_text(area_id) for area_id in (area_ids or []) if normalize_text(area_id)}
+        scoped_area_ids.add("")
+        actor_name = getattr(g.current_user, "full_name", "") or getattr(g.current_user, "username", "") or "staff"
+
+        for area_id in sorted(scoped_area_ids):
+            reference = f"pos-closeout|{order_date.isoformat()}|{area_id or 'all'}"
+            record = g.db.scalar(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "pos_closeouts",
+                    ModuleRecord.reference == reference,
+                )
+            )
+            if not record:
+                continue
+
+            summary = build_pos_counter_summary(order_date, area_id)
+            if summary["orderCount"] <= 0:
+                g.db.delete(record)
+                continue
+
+            existing_payload = dict(record.payload or {})
+            closeout_payload = {
+                "id": record.id,
+                "orderDate": summary["orderDate"],
+                "areaId": area_id,
+                "areaLabel": summary["areaLabel"],
+                "reference": reference,
+                "status": "closed",
+                "totalAmount": summary["totalAmount"],
+                "orderCount": summary["orderCount"],
+                "itemCount": summary["itemCount"],
+                "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
+                "paymentMix": summary["paymentMix"],
+                "orderNumbers": [order["orderNumber"] for order in summary["orders"]],
+                "closedAt": existing_payload.get("closedAt") or datetime.utcnow().isoformat(),
+                "closedBy": existing_payload.get("closedBy") or actor_name,
+                "notes": normalize_text(existing_payload.get("notes"))
+                or f"Counter closeout for {summary['areaLabel']} on {summary['orderDate']}.",
+            }
+            set_module_record_metadata(record, MODULES["pos_closeouts"], closeout_payload)
+
     def sync_generated_sales_for_pos(order_date: date, area_ids: list[str], db_session=None) -> None:
         db = db_session or g.db
         unique_area_ids = sorted({area_id for area_id in area_ids if area_id})
@@ -4097,7 +4139,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         active_products = g.db.scalars(
             select(Product).where(Product.active.is_(True)).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
         ).all()
-        top_products = active_products[:36]
+        top_products = active_products[:8]
         pos_category_counts: dict[str, int] = defaultdict(int)
         for product in active_products:
             category = normalize_text(product.category)
@@ -4284,6 +4326,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.add(order)
         g.db.flush()
         sync_generated_sales_for_pos(order_date, order.business_area_ids)
+        sync_existing_pos_closeouts(order_date, order.business_area_ids)
         audit("pos", "POS", "create", f"{order.order_number} saved", order.id, f"{order.item_count:g} items · {format_currency(order.total_amount)}")
         g.db.commit()
         saved_order = {
@@ -4305,6 +4348,65 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "itemCount": order.item_count,
                 "order": saved_order,
                 "summary": build_pos_counter_summary(order_date, ""),
+            }
+        )
+
+    @app.route("/app/api/pos/orders/<order_id>", methods=["DELETE"])
+    @access_required("pos", api=True)
+    def pos_delete_order(order_id: str):
+        order = g.db.scalar(
+            select(PosOrder)
+            .options(selectinload(PosOrder.lines))
+            .where(PosOrder.id == order_id)
+        )
+        if not order:
+            return jsonify({"ok": False, "error": "That POS order could not be found."}), 404
+
+        affected_area_ids = {normalize_text(area_id) for area_id in (order.business_area_ids or []) if normalize_text(area_id)}
+        affected_area_ids.update(
+            normalize_text(line.business_area_id)
+            for line in order.lines
+            if normalize_text(line.business_area_id)
+        )
+        order_number = normalize_text(order.order_number)
+        customer_name = normalize_text(order.customer_name) or "Walk-in"
+        total_amount = round(parse_amount(order.total_amount), 2)
+        item_count = round(parse_amount(order.item_count), 2)
+        order_date = order.order_date
+
+        for line in order.lines:
+            if not line.track_inventory:
+                continue
+            product = g.db.get(Product, line.product_id)
+            if not product:
+                continue
+            product.quantity_on_hand = round(parse_amount(product.quantity_on_hand) + parse_amount(line.quantity), 2)
+            product.updated_at = datetime.utcnow()
+
+        g.db.delete(order)
+        g.db.flush()
+
+        sync_generated_sales_for_pos(order_date, sorted(affected_area_ids))
+        sync_existing_pos_closeouts(order_date, sorted(affected_area_ids))
+        audit(
+            "pos",
+            "POS",
+            "delete",
+            order_number or "POS Order",
+            order_id,
+            f"{customer_name} · {item_count:g} items removed · {format_currency(total_amount)}",
+        )
+        g.db.commit()
+        return jsonify(
+            {
+                "ok": True,
+                "deleted": {
+                    "id": order_id,
+                    "orderNumber": order_number,
+                    "orderDate": order_date.isoformat(),
+                    "itemCount": item_count,
+                    "totalAmount": total_amount,
+                },
             }
         )
 

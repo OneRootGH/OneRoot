@@ -445,6 +445,24 @@ textarea { resize: vertical; }
 .pos-browser-card {
   background: #fcfbf8;
 }
+.pos-results-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.85rem;
+  align-items: flex-start;
+  margin-bottom: 0.9rem;
+  flex-wrap: wrap;
+}
+.pos-results-toolbar strong {
+  display: block;
+  margin-bottom: 0.15rem;
+}
+.pos-results-nav {
+  flex-wrap: nowrap;
+}
+.pos-results-nav .button {
+  padding-inline: 1rem;
+}
 .result-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -452,6 +470,10 @@ textarea { resize: vertical; }
 }
 .pos-results-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+.pos-results-list {
+  display: grid;
+  gap: 0.65rem;
 }
 .result-card {
   width: 100%;
@@ -475,6 +497,50 @@ textarea { resize: vertical; }
   border-color: #dde3ec;
   box-shadow: 0 10px 22px rgba(30, 42, 56, 0.05);
 }
+.pos-result-row {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) auto auto;
+  align-items: center;
+  gap: 0.85rem;
+  text-align: left;
+  padding: 0.9rem 1rem;
+  border-radius: 1rem;
+  border: 1px solid #dde3ec;
+  background: #fff;
+  cursor: pointer;
+  box-shadow: 0 10px 22px rgba(30, 42, 56, 0.05);
+}
+.pos-result-row strong,
+.pos-result-row small {
+  display: block;
+}
+.pos-result-primary,
+.pos-result-meta {
+  min-width: 0;
+}
+.pos-result-primary strong {
+  font-size: 0.98rem;
+}
+.pos-result-primary small,
+.pos-result-meta small {
+  color: var(--muted);
+  margin-top: 0.18rem;
+}
+.pos-result-meta {
+  text-align: right;
+}
+.pos-result-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 62px;
+  padding: 0.55rem 0.8rem;
+  border-radius: 999px;
+  background: #edf3ee;
+  color: var(--green);
+  font-weight: 700;
+}
 .cart-box {
   border: 1px solid var(--line);
   border-radius: 1rem;
@@ -496,6 +562,9 @@ textarea { resize: vertical; }
 .history-empty {
   color: var(--muted);
   text-align: center;
+}
+.pos-history-actions {
+  justify-content: flex-end;
 }
 
 .mini-card {
@@ -779,6 +848,13 @@ textarea { resize: vertical; }
   .pos-cart-panel-enhanced,
   .document-toolbar {
     position: static;
+  }
+  .pos-result-row {
+    grid-template-columns: 1fr;
+    align-items: flex-start;
+  }
+  .pos-result-meta {
+    text-align: left;
   }
   .pos-payment-dock-head {
     flex-direction: column;

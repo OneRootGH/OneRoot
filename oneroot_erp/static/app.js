@@ -4,6 +4,10 @@
   const clearSearchButton = document.getElementById("pos-clear-search");
   const resultsContainer = document.getElementById("pos-results");
   const resultCountNode = document.getElementById("pos-result-count");
+  const resultsPageNode = document.getElementById("pos-results-page");
+  const resultsHelperNode = document.getElementById("pos-results-helper");
+  const resultsPrevButton = document.getElementById("pos-results-prev");
+  const resultsNextButton = document.getElementById("pos-results-next");
   const categoryButtonNodes = Array.from(document.querySelectorAll("[data-category]"));
   const paymentButtonNodes = Array.from(document.querySelectorAll("[data-payment-method]"));
   const cartContainer = document.getElementById("pos-cart-lines");
@@ -41,8 +45,10 @@
     searchTimer: null,
     latestResults: [],
     activeSearchRequest: 0,
-    selectedCategory: ""
+    selectedCategory: "",
+    resultPage: 0
   };
+  const RESULTS_PER_PAGE = 8;
 
   function escapeHtml(value) {
     return String(value ?? "")
@@ -202,26 +208,54 @@
     setStatus(`${product.name} added to cart.`);
   }
 
-  function renderResults(products) {
+  function renderResults(products, { resetPage = true } = {}) {
     state.latestResults = Array.isArray(products) ? products : [];
+    if (resetPage) {
+      state.resultPage = 0;
+    }
+    const totalResults = state.latestResults.length;
+    const totalPages = Math.max(1, Math.ceil(totalResults / RESULTS_PER_PAGE));
+    state.resultPage = Math.min(state.resultPage, totalPages - 1);
+    const startIndex = state.resultPage * RESULTS_PER_PAGE;
+    const visibleResults = state.latestResults.slice(startIndex, startIndex + RESULTS_PER_PAGE);
+
     if (resultCountNode) {
-      resultCountNode.textContent = state.latestResults.length
-        ? `${state.latestResults.length} item${state.latestResults.length === 1 ? "" : "s"} ready`
+      resultCountNode.textContent = totalResults
+        ? `${totalResults} match${totalResults === 1 ? "" : "es"}`
         : "No products found";
     }
+    if (resultsPageNode) {
+      resultsPageNode.textContent = totalResults ? `Page ${state.resultPage + 1} of ${totalPages}` : "No matches";
+    }
+    if (resultsHelperNode) {
+      resultsHelperNode.textContent = totalResults
+        ? `Showing ${startIndex + 1}-${Math.min(startIndex + visibleResults.length, totalResults)} of ${totalResults}.`
+        : "Try another name, SKU, barcode, or serving area.";
+    }
+    if (resultsPrevButton) {
+      resultsPrevButton.disabled = state.resultPage <= 0;
+    }
+    if (resultsNextButton) {
+      resultsNextButton.disabled = state.resultPage >= totalPages - 1 || totalResults === 0;
+    }
 
-    if (!state.latestResults.length) {
+    if (!totalResults) {
       resultsContainer.innerHTML = "<div class='mini-card'><strong>No matching item</strong><small>Try another name, SKU, barcode, or serving area.</small></div>";
       return;
     }
 
-    resultsContainer.innerHTML = state.latestResults
+    resultsContainer.innerHTML = visibleResults
       .map((product) => `
-        <button class="result-card pos-result-card" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
-          <strong>${escapeHtml(product.name)}</strong>
-          <span>${escapeHtml(product.businessAreaLabel)}${product.category ? ` · ${escapeHtml(product.category)}` : ""}</span>
-          <span>${formatCurrency(product.salesPrice)}</span>
-          <small>${product.trackInventory ? `Stock ${escapeHtml(product.quantityOnHand)}` : "Service item"}</small>
+        <button class="pos-result-row" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
+          <span class="pos-result-primary">
+            <strong>${escapeHtml(product.name)}</strong>
+            <small>${escapeHtml(product.businessAreaLabel)}${product.category ? ` · ${escapeHtml(product.category)}` : ""}</small>
+          </span>
+          <span class="pos-result-meta">
+            <strong>${formatCurrency(product.salesPrice)}</strong>
+            <small>${product.trackInventory ? `Stock ${escapeHtml(product.quantityOnHand)}` : "Service item"}</small>
+          </span>
+          <span class="pos-result-action">Add</span>
         </button>
       `)
       .join("");
@@ -319,7 +353,12 @@
         <td>${escapeHtml(order.itemCount)}</td>
         <td>${escapeHtml(order.paymentMethod || "Unspecified")}</td>
         <td>${formatCurrency(order.totalAmount)}</td>
-        <td>${order.receiptUrl ? `<a class="table-link" href="${escapeHtml(order.receiptUrl)}" target="_blank" rel="noopener">Receipt</a>` : ""}</td>
+        <td>
+          <div class="row-actions pos-history-actions">
+            ${order.receiptUrl ? `<a class="table-link" href="${escapeHtml(order.receiptUrl)}" target="_blank" rel="noopener">Receipt</a>` : ""}
+            ${order.id ? `<button class="text-button danger-text" type="button" data-action="delete-order" data-order-id="${escapeHtml(order.id)}" data-order-number="${escapeHtml(order.orderNumber)}">Delete</button>` : ""}
+          </div>
+        </td>
       </tr>
     `;
   }
@@ -405,6 +444,26 @@
     }, 120);
   }
 
+  async function deleteSavedOrder(orderId, orderNumber) {
+    const response = await fetch(`/app/api/pos/orders/${encodeURIComponent(orderId)}`, {
+      method: "DELETE",
+      credentials: "same-origin",
+      headers: {
+        Accept: "application/json"
+      }
+    });
+    const result = await response.json();
+    if (!response.ok || !result.ok) {
+      setStatus(result.error || "The POS order could not be deleted.", "error");
+      return;
+    }
+    if (lastOrderNode?.textContent === orderNumber) {
+      setLastReceipt(null);
+    }
+    await refreshSummary();
+    setStatus(`${result.deleted.orderNumber} deleted and added to the audit trail.`);
+  }
+
   searchInput.addEventListener("input", queueProductSearch);
 
   searchInput.addEventListener("keydown", (event) => {
@@ -443,6 +502,23 @@
       setActiveButton(categoryButtonNodes, (entry) => entry === button);
       void searchProducts(searchInput.value.trim());
     });
+  });
+
+  resultsPrevButton?.addEventListener("click", () => {
+    if (state.resultPage <= 0) {
+      return;
+    }
+    state.resultPage -= 1;
+    renderResults(state.latestResults, { resetPage: false });
+  });
+
+  resultsNextButton?.addEventListener("click", () => {
+    const totalPages = Math.max(1, Math.ceil(state.latestResults.length / RESULTS_PER_PAGE));
+    if (state.resultPage >= totalPages - 1) {
+      return;
+    }
+    state.resultPage += 1;
+    renderResults(state.latestResults, { resetPage: false });
   });
 
   orderDateInput?.addEventListener("change", () => {
@@ -495,6 +571,28 @@
     }
     renderSummary(result.summary);
     setStatus(`Counter closeout saved for ${result.closeout.areaLabel} at ${formatCurrency(result.closeout.totalAmount)}.`);
+  });
+
+  historyBody?.addEventListener("click", async (event) => {
+    const button = event.target.closest('[data-action="delete-order"]');
+    if (!button) {
+      return;
+    }
+    const orderId = button.getAttribute("data-order-id") || "";
+    const orderNumber = button.getAttribute("data-order-number") || "This POS order";
+    if (!orderId) {
+      return;
+    }
+    if (!window.confirm(`Delete ${orderNumber}? This will remove it from POS and re-sync daily sales.`)) {
+      return;
+    }
+    button.disabled = true;
+    setStatus(`Deleting ${orderNumber}...`);
+    try {
+      await deleteSavedOrder(orderId, orderNumber);
+    } finally {
+      button.disabled = false;
+    }
   });
 
   saveButton.addEventListener("click", async () => {

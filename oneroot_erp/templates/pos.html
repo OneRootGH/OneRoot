@@ -94,7 +94,7 @@
           <div class="card-header compact">
             <div>
               <p class="eyebrow">Product Shelf</p>
-              <h3>Tap Matching Products</h3>
+              <h3>Quick Pick Matches</h3>
             </div>
             <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
           </div>
@@ -104,13 +104,28 @@
               <button class="pos-chip" type="button" data-category="{{ category.name }}">{{ category.name }} <span>{{ category.count }}</span></button>
             {% endfor %}
           </div>
-          <div id="pos-results" class="result-grid pos-results-grid">
+          <div class="pos-results-toolbar">
+            <div>
+              <strong id="pos-results-page">Page 1 of 1</strong>
+              <small id="pos-results-helper" class="muted">Showing the fastest picks first so staff do not need to scroll far.</small>
+            </div>
+            <div class="toolbar pos-results-nav">
+              <button class="button subtle" type="button" id="pos-results-prev">Back</button>
+              <button class="button subtle" type="button" id="pos-results-next">More</button>
+            </div>
+          </div>
+          <div id="pos-results" class="pos-results-list">
             {% for product in top_products %}
-              <button class="result-card pos-result-card" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product.track_inventory, "sku": product.sku, "barcode": product.barcode}|tojson }}'>
-                <strong>{{ product.name }}</strong>
-                <span>{{ business_area_short.get(product.business_area_id, product.business_area_id) }}{% if product.category %} · {{ product.category }}{% endif %}</span>
-                <span>{{ product.sales_price|currency }}</span>
-                <small>{% if product.track_inventory %}Stock {{ product.quantity_on_hand|round(0, 'floor')|int }}{% else %}Service Item{% endif %}</small>
+              <button class="pos-result-row" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product.track_inventory, "sku": product.sku, "barcode": product.barcode}|tojson }}'>
+                <span class="pos-result-primary">
+                  <strong>{{ product.name }}</strong>
+                  <small>{{ business_area_short.get(product.business_area_id, product.business_area_id) }}{% if product.category %} · {{ product.category }}{% endif %}</small>
+                </span>
+                <span class="pos-result-meta">
+                  <strong>{{ product.sales_price|currency }}</strong>
+                  <small>{% if product.track_inventory %}Stock {{ product.quantity_on_hand|round(0, 'floor')|int }}{% else %}Service Item{% endif %}</small>
+                </span>
+                <span class="pos-result-action">Add</span>
               </button>
             {% endfor %}
           </div>
@@ -236,7 +251,12 @@
               <td>{{ order.item_count }}</td>
               <td>{{ order.payment_method }}</td>
               <td>{{ order.total_amount|currency }}</td>
-              <td><a class="table-link" href="{{ url_for('pos_receipt', order_id=order.id) }}" target="_blank" rel="noopener">Receipt</a></td>
+              <td>
+                <div class="row-actions pos-history-actions">
+                  <a class="table-link" href="{{ url_for('pos_receipt', order_id=order.id) }}" target="_blank" rel="noopener">Receipt</a>
+                  <button class="text-button danger-text" type="button" data-action="delete-order" data-order-id="{{ order.id }}" data-order-number="{{ order.order_number }}">Delete</button>
+                </div>
+              </td>
             </tr>
           {% else %}
             <tr><td colspan="7">No POS orders saved yet.</td></tr>
