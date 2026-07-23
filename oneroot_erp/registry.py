@@ -290,6 +290,36 @@ MOBILE_MONEY_PROVIDERS = [
     ("AirtelTigo Money", "AirtelTigo Money"),
     ("Other / Custom", "Other / Custom"),
 ]
+PETTY_CASH_TRANSACTION_TYPES = [
+    ("Float Top-Up", "Float Top-Up"),
+    ("Restock Purchase", "Restock Purchase"),
+    ("Transport", "Transport"),
+    ("Cleaning & Supplies", "Cleaning & Supplies"),
+    ("Maintenance Support", "Maintenance Support"),
+    ("Staff Welfare", "Staff Welfare"),
+    ("Refund / Reversal", "Refund / Reversal"),
+    ("Miscellaneous", "Miscellaneous"),
+]
+CASHBOOK_ENTRY_TYPES = [
+    ("Cash In", "Cash In"),
+    ("Cash Out", "Cash Out"),
+    ("Bank Deposit", "Bank Deposit"),
+    ("Bank Withdrawal", "Bank Withdrawal"),
+    ("Transfer", "Transfer"),
+    ("Bank Charge", "Bank Charge"),
+]
+PURCHASE_ORDER_STATUSES = [
+    ("Draft", "Draft"),
+    ("Ordered", "Ordered"),
+    ("Part Received", "Part Received"),
+    ("Received", "Received"),
+    ("Cancelled", "Cancelled"),
+]
+SALARY_PAYMENT_STATUSES = [
+    ("Pending", "Pending"),
+    ("Part Paid", "Part Paid"),
+    ("Paid", "Paid"),
+]
 ASSET_CATEGORIES = [
     ("Equipment", "Equipment"),
     ("Appliance", "Appliance"),
@@ -490,7 +520,7 @@ MODULES: dict[str, ModuleDefinition] = {
         fields=[
             FieldDefinition("date", "Date", "date", True),
             FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
-            FieldDefinition("transactionTypeId", "Transaction Type", "text", True),
+            FieldDefinition("transactionTypeId", "Transaction Type", "select", True, PETTY_CASH_TRANSACTION_TYPES),
             FieldDefinition("description", "Description", "text", True),
             FieldDefinition("amount", "Amount", "number", True),
             FieldDefinition("paymentMethod", "Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
@@ -530,7 +560,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("deductions", "Deductions", "number"),
             FieldDefinition("amountPaid", "Amount Paid", "number"),
             FieldDefinition("paymentDate", "Payment Date", "date"),
-            FieldDefinition("status", "Status", "text"),
+            FieldDefinition("status", "Status", "select", False, SALARY_PAYMENT_STATUSES),
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
@@ -546,7 +576,7 @@ MODULES: dict[str, ModuleDefinition] = {
         fields=[
             FieldDefinition("date", "Date", "date", True),
             FieldDefinition("accountName", "Account", "text", True),
-            FieldDefinition("entryType", "Entry Type", "text", True),
+            FieldDefinition("entryType", "Entry Type", "select", True, CASHBOOK_ENTRY_TYPES),
             FieldDefinition("amount", "Amount", "number", True),
             FieldDefinition("paymentMethod", "Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
             FieldDefinition("reference", "Reference", "text"),
@@ -568,7 +598,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("supplierName", "Supplier Name", "text", True),
             FieldDefinition("itemSummary", "Item Summary", "textarea", True),
             FieldDefinition("totalAmount", "Total Amount", "number", True),
-            FieldDefinition("status", "Status", "text"),
+            FieldDefinition("status", "Status", "select", False, PURCHASE_ORDER_STATUSES),
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
@@ -860,11 +890,34 @@ LEGACY_TO_MODULE = {definition.legacy_collection: definition.key for definition 
 MODULE_TO_LEGACY = {definition.key: definition.legacy_collection for definition in MODULES.values()}
 
 MENU_GROUPS = [
-    ("Operations", ["dashboard", "reports", "search", "pos", "inventory", "online_orders", "workbook"]),
-    ("Finance", ["expenses", "sales", "budgets", "petty_cash", "petty_cash_budgets", "cashbook_entries", "ledger_entries", "mobile_money_reconciliations"]),
-    ("Property", ["apartments", "security_deposit_records", "maintenance_records"]),
-    ("Services", ["laundry_tickets", "equipment_rental_bookings"]),
-    ("People", ["salary_records"]),
-    ("Procurement", ["purchase_orders", "suppliers"]),
-    ("Admin", ["users", "asset_records", "forecast_plans", "recurring_controls", "pos_closeouts", "audit"]),
+    (
+        "Workspace",
+        [
+            ("Overview", ["dashboard", "reports", "search"]),
+            ("Counter & Orders", ["pos", "online_orders", "workbook"]),
+            ("Stock", ["inventory"]),
+        ],
+    ),
+    (
+        "Finance",
+        [
+            ("Sales & Spend", ["sales", "expenses", "budgets", "petty_cash", "petty_cash_budgets"]),
+            ("Cash & Reconciliation", ["cashbook_entries", "ledger_entries", "mobile_money_reconciliations"]),
+        ],
+    ),
+    (
+        "Operations",
+        [
+            ("Apartments", ["apartments", "security_deposit_records", "maintenance_records"]),
+            ("Service Desk", ["laundry_tickets", "equipment_rental_bookings"]),
+            ("People & Supply", ["salary_records", "purchase_orders", "suppliers"]),
+        ],
+    ),
+    (
+        "Control",
+        [
+            ("Planning", ["forecast_plans", "recurring_controls", "pos_closeouts"]),
+            ("Assets & Admin", ["asset_records", "audit", "users"]),
+        ],
+    ),
 ]

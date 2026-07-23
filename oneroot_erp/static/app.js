@@ -48,6 +48,8 @@
     selectedCategory: "",
     resultPage: 0
   };
+  const initiallyActiveCategory = categoryButtonNodes.find((button) => button.classList.contains("is-active"));
+  state.selectedCategory = initiallyActiveCategory?.dataset.category || "";
   const RESULTS_PER_PAGE = 8;
 
   function escapeHtml(value) {
@@ -668,6 +670,6 @@
 
   setLastReceipt(null);
   renderCart();
-  void searchProducts("");
+  void searchProducts(searchInput.value.trim());
   void refreshSummary();
 })();

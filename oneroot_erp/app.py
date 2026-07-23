@@ -242,6 +242,320 @@ def build_chart_rows(
     return normalized_rows
 
 
+SIDEBAR_LINK_LABELS = {
+    "dashboard": ("Dashboard", "dashboard", None),
+    "reports": ("Reports", "reports_page", None),
+    "search": ("Global Search", "search_page", None),
+    "inventory": ("Inventory", "inventory", None),
+    "pos": ("POS", "pos_page", None),
+    "workbook": ("Excel Workbook", "download_workbook", None),
+    "audit": ("Audit Trail", "audit_page", None),
+    "online_orders": ("Online Orders", "online_orders_desk", None),
+    "users": ("User Accounts", "users_page", None),
+}
+
+MODULE_FILTER_CATEGORY_FIELDS = {
+    "expenses": "category",
+    "budgets": "category",
+    "petty_cash": "transactionTypeId",
+    "cashbook_entries": "entryType",
+    "laundry_tickets": "serviceType",
+    "equipment_rental_bookings": "equipmentItem",
+    "mobile_money_reconciliations": "provider",
+    "suppliers": "category",
+    "asset_records": "assetCategory",
+    "recurring_controls": "category",
+}
+
+MODULE_FILTER_CATEGORY_LABELS = {
+    "category": "Category",
+    "transactionTypeId": "Transaction Type",
+    "entryType": "Entry Type",
+    "serviceType": "Service Type",
+    "equipmentItem": "Equipment Item",
+    "provider": "Provider",
+    "assetCategory": "Asset Category",
+    "status": "Status",
+}
+
+MODULE_POS_SHORTCUTS = {
+    "laundry_tickets": {
+        "title": "Open Laundry POS",
+        "description": "Sell laundry service items from POS and let the synced payment appear in Daily Sales.",
+        "area": "laundry-services",
+    },
+    "equipment_rental_bookings": {
+        "title": "Open Equipment POS",
+        "description": "Use POS for quick equipment or consumable charges and keep Daily Sales aligned automatically.",
+        "area": "water-equipment",
+        "category": "Equipment & Construction Consumables",
+    },
+}
+
+
+def module_has_field(definition: ModuleDefinition, field_name: str) -> bool:
+    return any(field.name == field_name for field in definition.fields)
+
+
+def module_filter_category_field(definition: ModuleDefinition) -> str:
+    return MODULE_FILTER_CATEGORY_FIELDS.get(definition.key, "category" if module_has_field(definition, "category") else "")
+
+
+def module_filter_category_label(definition: ModuleDefinition) -> str:
+    field_name = module_filter_category_field(definition)
+    return MODULE_FILTER_CATEGORY_LABELS.get(field_name, "Category")
+
+
+def module_record_date_value(definition: ModuleDefinition, record: ModuleRecord) -> date | None:
+    if record.record_date:
+        return record.record_date
+    if definition.date_field:
+        parsed = parse_date((record.payload or {}).get(definition.date_field))
+        if parsed:
+            return parsed
+    if definition.month_field:
+        month_key = normalize_text((record.payload or {}).get(definition.month_field)) or normalize_text(record.month)
+        if month_key:
+            return parse_date(f"{month_key}-01")
+    return None
+
+
+def module_record_month_value(definition: ModuleDefinition, record: ModuleRecord) -> str:
+    if record.month:
+        return normalize_text(record.month)
+    if definition.month_field:
+        month_key = normalize_text((record.payload or {}).get(definition.month_field))
+        if month_key:
+            return month_key
+    record_date = module_record_date_value(definition, record)
+    return record_date.strftime("%Y-%m") if record_date else ""
+
+
+def module_record_category_value(definition: ModuleDefinition, record: ModuleRecord) -> str:
+    payload = record.payload or {}
+    category_field = module_filter_category_field(definition)
+    if category_field:
+        return normalize_text(payload.get(category_field))
+    return ""
+
+
+def module_record_open_balance(definition: ModuleDefinition, payload: dict[str, Any]) -> float:
+    if definition.key == "laundry_tickets":
+        return round(max(parse_amount(payload.get("amountDue")) - parse_amount(payload.get("amountPaid")), 0), 2)
+    if definition.key == "equipment_rental_bookings":
+        return round(max(parse_amount(payload.get("rentalFee")) - parse_amount(payload.get("amountPaid")), 0), 2)
+    if definition.key == "suppliers":
+        return round(max(parse_amount(payload.get("amountDue")) - parse_amount(payload.get("amountPaid")), 0), 2)
+    if definition.key == "security_deposit_records":
+        return round(max(parse_amount(payload.get("chargesRaised")) - parse_amount(payload.get("chargesPaid")), 0), 2)
+    return 0.0
+
+
+def module_status_options(definition: ModuleDefinition, records: list[ModuleRecord]) -> list[tuple[str, str]]:
+    if definition.status_field:
+        for field in definition.fields:
+            if field.name == definition.status_field and field.options:
+                return field.options
+    values = sorted(
+        {
+            normalize_text((record.payload or {}).get(definition.status_field)) or normalize_text(record.status)
+            for record in records
+            if normalize_text((record.payload or {}).get(definition.status_field)) or normalize_text(record.status)
+        }
+    )
+    return [(value, value) for value in values]
+
+
+def module_category_options(definition: ModuleDefinition, records: list[ModuleRecord], area_filter: str = "") -> list[str]:
+    category_field = module_filter_category_field(definition)
+    if not category_field:
+        return []
+    values: list[str] = []
+    if category_field == "category":
+        if area_filter and area_filter in INVENTORY_CATEGORY_LIBRARY:
+            values.extend(INVENTORY_CATEGORY_LIBRARY[area_filter])
+        else:
+            for categories in INVENTORY_CATEGORY_LIBRARY.values():
+                values.extend(categories)
+    values.extend(
+        normalize_text((record.payload or {}).get(category_field))
+        for record in records
+        if normalize_text((record.payload or {}).get(category_field))
+    )
+    seen: set[str] = set()
+    normalized: list[str] = []
+    for value in values:
+        if value and value not in seen:
+            normalized.append(value)
+            seen.add(value)
+    return normalized
+
+
+def filter_module_records(
+    records: list[ModuleRecord],
+    definition: ModuleDefinition,
+    *,
+    search: str = "",
+    area_filter: str = "",
+    status_filter: str = "",
+    category_filter: str = "",
+    month_filter: str = "",
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> list[ModuleRecord]:
+    filtered_records: list[ModuleRecord] = []
+    query_text = search.lower()
+
+    for record in records:
+        payload = record.payload or {}
+        record_area = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId"))
+        record_status = normalize_text(payload.get(definition.status_field)) or normalize_text(record.status)
+        record_category = module_record_category_value(definition, record)
+        record_date = module_record_date_value(definition, record)
+        record_month = module_record_month_value(definition, record)
+
+        if area_filter and record_area != area_filter:
+            continue
+        if status_filter and record_status != status_filter:
+            continue
+        if category_filter and record_category != category_filter:
+            continue
+        if month_filter and record_month != month_filter:
+            continue
+        if date_from and (not record_date or record_date < date_from):
+            continue
+        if date_to and (not record_date or record_date > date_to):
+            continue
+        if query_text:
+            payload_text = " ".join(
+                normalize_text(value)
+                for value in payload.values()
+                if isinstance(value, (str, int, float))
+            )
+            haystack = " ".join(
+                value
+                for value in [
+                    normalize_text(record.title),
+                    normalize_text(record.reference),
+                    normalize_text(record.status),
+                    normalize_text(record.business_area_id),
+                    normalize_text(record.month),
+                    payload_text,
+                ]
+                if value
+            ).lower()
+            if query_text not in haystack:
+                continue
+        filtered_records.append(record)
+
+    return filtered_records
+
+
+def build_target_progress_rows(records: list[ModuleRecord], month_value: str, *, area_filter: str = "") -> list[dict[str, Any]]:
+    month_key = parse_month(month_value)
+    if not month_key:
+        return []
+
+    sales_lookup = {
+        row["areaId"]: round(parse_amount(row["salesTotal"]), 2)
+        for row in report_area_rows(records, month_key)
+    }
+    target_lookup: dict[str, float] = defaultdict(float)
+    expense_budget_lookup: dict[str, float] = defaultdict(float)
+
+    for record in records:
+        if record.module_key != "forecast_plans" or record.month != month_key:
+            continue
+        area_id = normalize_text(record.business_area_id) or normalize_text((record.payload or {}).get("businessAreaId")) or "shared-operations"
+        target_lookup[area_id] += parse_amount((record.payload or {}).get("revenueTarget"))
+        expense_budget_lookup[area_id] += parse_amount((record.payload or {}).get("expenseBudget"))
+
+    rows: list[dict[str, Any]] = []
+    for area in BUSINESS_AREAS:
+        area_id = area["id"]
+        if area_filter and area_id != area_filter:
+            continue
+        actual = round(sales_lookup.get(area_id, 0), 2)
+        target = round(target_lookup.get(area_id, 0), 2)
+        expense_budget = round(expense_budget_lookup.get(area_id, 0), 2)
+        if target <= 0 and actual <= 0 and expense_budget <= 0:
+            continue
+        attainment = round((actual / target) * 100, 1) if target > 0 else 0.0
+        variance = round(actual - target, 2)
+        rows.append(
+            {
+                "areaId": area_id,
+                "areaLabel": area["label"],
+                "areaShort": area["short"],
+                "actual": actual,
+                "target": target,
+                "expenseBudget": expense_budget,
+                "variance": variance,
+                "attainment": attainment,
+                "progressWidth": min(attainment, 100) if target > 0 else 100 if actual > 0 else 0,
+                "progressTone": "var(--green)" if target > 0 and actual >= target else "var(--accent)",
+                "isOnTarget": target > 0 and actual >= target,
+                "targetNote": "No target set" if target <= 0 else f"{attainment:.1f}% of target",
+            }
+        )
+    return rows
+
+
+def build_module_overview(definition: ModuleDefinition, records: list[ModuleRecord]) -> dict[str, Any]:
+    total_amount = round(sum(parse_amount(record.amount) for record in records), 2)
+    this_month_key = date.today().strftime("%Y-%m")
+    month_amount = round(
+        sum(parse_amount(record.amount) for record in records if module_record_month_value(definition, record) == this_month_key),
+        2,
+    )
+    open_balance = round(sum(module_record_open_balance(definition, record.payload or {}) for record in records), 2)
+    status_counts: dict[str, int] = defaultdict(int)
+    area_totals: dict[str, float] = defaultdict(float)
+    for record in records:
+        status_value = normalize_text((record.payload or {}).get(definition.status_field)) or normalize_text(record.status) or "Unspecified"
+        status_counts[status_value] += 1
+        area_key = normalize_text(record.business_area_id) or normalize_text((record.payload or {}).get("businessAreaId")) or "shared-operations"
+        area_totals[area_key] += parse_amount(record.amount)
+
+    cards = [
+        {"label": "Records In View", "value": f"{len(records)}", "note": "Current filtered records"},
+        {"label": "Value In View", "value": format_currency(total_amount), "note": "Amount captured in this list"},
+        {"label": "This Month", "value": format_currency(month_amount), "note": f"Captured in {this_month_key}"},
+    ]
+    if open_balance > 0:
+        cards.append({"label": "Open Balance", "value": format_currency(open_balance), "note": "Still outstanding in this view"})
+    else:
+        cards.append({"label": "Areas In View", "value": f"{len([value for value in area_totals.values() if value or records])}", "note": "Business areas represented"})
+
+    status_chart = build_chart_rows(
+        [{"label": label, "short": label, "amount": count} for label, count in sorted(status_counts.items()) if count > 0],
+        label_key="label",
+        value_key="amount",
+        short_key="short",
+        positive_color="var(--accent)",
+    )
+    area_chart = build_chart_rows(
+        [
+            {
+                "label": BUSINESS_AREA_LABELS.get(area_id, area_id),
+                "short": BUSINESS_AREA_SHORT.get(area_id, area_id),
+                "amount": round(amount, 2),
+            }
+            for area_id, amount in sorted(area_totals.items(), key=lambda item: item[1], reverse=True)
+            if abs(amount) > 0
+        ],
+        label_key="label",
+        value_key="amount",
+        short_key="short",
+    )
+
+    return {
+        "cards": cards,
+        "statusChart": status_chart,
+        "areaChart": area_chart,
+    }
+
+
 APARTMENT_FORM_SECTIONS = [
     (
         "Capture Window",
@@ -1408,33 +1722,38 @@ def build_online_order_export_rows(orders: list[dict[str, Any]]) -> tuple[list[s
 def build_sidebar(user: User | None = None):
     allowed_keys = user_access_keys(user)
     items = []
-    for group_label, keys in MENU_GROUPS:
-        links = []
-        for key in keys:
-            if allowed_keys and key not in allowed_keys:
-                continue
-            if key == "dashboard":
-                links.append({"label": "Dashboard", "endpoint": "dashboard", "module": None})
-            elif key == "reports":
-                links.append({"label": "Reports", "endpoint": "reports_page", "module": None})
-            elif key == "search":
-                links.append({"label": "Global Search", "endpoint": "search_page", "module": None})
-            elif key == "inventory":
-                links.append({"label": "Inventory", "endpoint": "inventory", "module": None})
-            elif key == "pos":
-                links.append({"label": "POS", "endpoint": "pos_page", "module": None})
-            elif key == "workbook":
-                links.append({"label": "Excel Workbook", "endpoint": "download_workbook", "module": None})
-            elif key == "audit":
-                links.append({"label": "Audit Trail", "endpoint": "audit_page", "module": None})
-            elif key == "online_orders":
-                links.append({"label": "Online Orders", "endpoint": "online_orders_desk", "module": None})
-            elif key == "users":
-                links.append({"label": "User Accounts", "endpoint": "users_page", "module": None})
-            elif key in MODULES:
-                links.append({"label": MODULES[key].label, "endpoint": "module_list", "module": key})
-        if links:
-            items.append({"group": group_label, "links": links})
+    active_endpoint = request.endpoint or ""
+    active_module = request.view_args.get("module_key") if request.view_args else ""
+    for group_label, sections in MENU_GROUPS:
+        rendered_sections = []
+        group_active = False
+        for section_label, keys in sections:
+            links = []
+            section_active = False
+            for key in keys:
+                if allowed_keys and key not in allowed_keys:
+                    continue
+                if key in SIDEBAR_LINK_LABELS:
+                    label, endpoint, module = SIDEBAR_LINK_LABELS[key]
+                elif key in MODULES:
+                    label, endpoint, module = MODULES[key].label, "module_list", key
+                else:
+                    continue
+                is_active = (module and active_module == module) or (not module and active_endpoint == endpoint)
+                section_active = section_active or is_active
+                links.append(
+                    {
+                        "label": label,
+                        "endpoint": endpoint,
+                        "module": module,
+                        "is_active": is_active,
+                    }
+                )
+            if links:
+                rendered_sections.append({"label": section_label, "links": links, "is_active": section_active})
+                group_active = group_active or section_active
+        if rendered_sections:
+            items.append({"group": group_label, "sections": rendered_sections, "is_active": group_active})
     return items
 
 
@@ -2750,6 +3069,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def dashboard():
         all_records = g.db.scalars(select(ModuleRecord)).all()
         current_month = date.today().strftime("%Y-%m")
+        target_progress_rows = build_target_progress_rows(all_records, current_month)
         low_stock_items = g.db.scalars(
             select(Product)
             .where(Product.track_inventory.is_(True), Product.active.is_(True), Product.quantity_on_hand <= Product.min_stock_level)
@@ -2864,6 +3184,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             low_stock_count=len(low_stock_items),
             low_stock=low_stock,
             latest_audit=latest_audit,
+            target_progress_rows=target_progress_rows,
+            target_total=round(sum(row["target"] for row in target_progress_rows), 2),
+            target_actual_total=round(sum(row["actual"] for row in target_progress_rows), 2),
+            target_areas_on_track=sum(1 for row in target_progress_rows if row["isOnTarget"]),
             recent_pos_orders=g.db.scalars(
                 select(PosOrder).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(8)
             ).all(),
@@ -2951,6 +3275,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if recurring_control_status(record.payload or {}) in {"Due Soon", "Overdue"}
             and record_in_area_scope(record, area_filter)
         ][:12]
+        target_progress_rows = build_target_progress_rows(all_records, month_filter, area_filter=area_filter)
 
         return render_template(
             "reports.html",
@@ -2989,6 +3314,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             low_stock_items=low_stock_items,
             recurring_alerts=recurring_alerts,
             area_rows=area_rows,
+            target_progress_rows=target_progress_rows,
+            target_total=round(sum(row["target"] for row in target_progress_rows), 2),
+            target_actual_total=round(sum(row["actual"] for row in target_progress_rows), 2),
+            target_areas_on_track=sum(1 for row in target_progress_rows if row["isOnTarget"]),
             business_area_options=BUSINESS_AREA_OPTIONS,
             recent_audits=g.db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(10)).all(),
         )
@@ -3587,23 +3916,77 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 total_bills_collected=round(sum(item["billsPaid"] for item in history_rows), 2),
             )
 
-        query = select(ModuleRecord).where(ModuleRecord.module_key == module_key)
-        if search:
-            like_value = f"%{search}%"
-            query = query.where(
-                or_(
-                    ModuleRecord.title.ilike(like_value),
-                    ModuleRecord.reference.ilike(like_value),
-                    ModuleRecord.status.ilike(like_value),
-                )
+        area_filter = normalize_text(request.args.get("area"))
+        status_filter = normalize_text(request.args.get("status"))
+        category_filter = normalize_text(request.args.get("category"))
+        month_filter = parse_month(request.args.get("month")) if definition.month_field else ""
+        date_from = parse_date(request.args.get("date_from"))
+        date_to = parse_date(request.args.get("date_to"))
+        all_records = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == module_key)
+            .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+        records = filter_module_records(
+            all_records,
+            definition,
+            search=search,
+            area_filter=area_filter,
+            status_filter=status_filter,
+            category_filter=category_filter,
+            month_filter=month_filter,
+            date_from=date_from,
+            date_to=date_to,
+        )
+        module_overview = build_module_overview(definition, records)
+        module_quick_actions = []
+        pos_shortcut = MODULE_POS_SHORTCUTS.get(module_key)
+        if pos_shortcut and user_has_access(g.current_user, "pos"):
+            shortcut_kwargs = {"area": pos_shortcut["area"]}
+            if pos_shortcut.get("category"):
+                shortcut_kwargs["category"] = pos_shortcut["category"]
+            module_quick_actions.append(
+                {
+                    "label": pos_shortcut["title"],
+                    "href": url_for("pos_page", **shortcut_kwargs),
+                    "note": pos_shortcut["description"],
+                }
             )
-        records = g.db.scalars(query.order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))).all()
+        if user_has_access(g.current_user, "sales"):
+            module_quick_actions.append(
+                {
+                    "label": "Open Daily Sales",
+                    "href": url_for("module_list", module_key="sales"),
+                    "note": "Review the sales ledger that receives synced counter and service payments.",
+                }
+            )
+        target_area = area_filter or (pos_shortcut["area"] if pos_shortcut else "")
+        target_month = month_filter or (date_from.strftime("%Y-%m") if date_from else date.today().strftime("%Y-%m"))
         return render_template(
             "module_list.html",
             page_title=definition.label,
             definition=definition,
             records=records,
             search=search,
+            area_filter=area_filter,
+            status_filter=status_filter,
+            category_filter=category_filter,
+            month_filter=month_filter,
+            date_from=date_from.isoformat() if date_from else "",
+            date_to=date_to.isoformat() if date_to else "",
+            show_area_filter=module_has_field(definition, "businessAreaId"),
+            show_status_filter=bool(definition.status_field),
+            show_category_filter=bool(module_filter_category_field(definition)) and module_filter_category_field(definition) != definition.status_field,
+            show_month_filter=bool(definition.month_field),
+            show_date_filters=bool(definition.date_field),
+            status_options=module_status_options(definition, all_records),
+            category_options=module_category_options(definition, all_records, area_filter),
+            category_filter_label=module_filter_category_label(definition),
+            module_overview=module_overview,
+            module_quick_actions=module_quick_actions,
+            business_area_options=BUSINESS_AREA_OPTIONS,
+            target_progress_rows=build_target_progress_rows(g.db.scalars(select(ModuleRecord)).all(), target_month, area_filter=target_area) if target_area else [],
+            target_month=target_month,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")
@@ -3643,17 +4026,28 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 headers,
                 rows,
             )
-        query = select(ModuleRecord).where(ModuleRecord.module_key == module_key)
-        if search:
-            like_value = f"%{search}%"
-            query = query.where(
-                or_(
-                    ModuleRecord.title.ilike(like_value),
-                    ModuleRecord.reference.ilike(like_value),
-                    ModuleRecord.status.ilike(like_value),
-                )
-            )
-        records = g.db.scalars(query.order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))).all()
+        area_filter = normalize_text(request.args.get("area"))
+        status_filter = normalize_text(request.args.get("status"))
+        category_filter = normalize_text(request.args.get("category"))
+        month_filter = parse_month(request.args.get("month")) if definition.month_field else ""
+        date_from = parse_date(request.args.get("date_from"))
+        date_to = parse_date(request.args.get("date_to"))
+        all_records = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == module_key)
+            .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+        records = filter_module_records(
+            all_records,
+            definition,
+            search=search,
+            area_filter=area_filter,
+            status_filter=status_filter,
+            category_filter=category_filter,
+            month_filter=month_filter,
+            date_from=date_from,
+            date_to=date_to,
+        )
         headers, rows = build_module_export_rows(records, definition)
         return csv_download(
             f"oneroot-{module_key}-{date.today().isoformat()}.csv",
@@ -3721,12 +4115,28 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 section_fields=section_fields,
                 apartment_summary=apartment_summary,
             )
+        module_quick_actions = []
+        pos_shortcut = MODULE_POS_SHORTCUTS.get(module_key)
+        if pos_shortcut and user_has_access(g.current_user, "pos"):
+            shortcut_kwargs = {"area": pos_shortcut["area"]}
+            if pos_shortcut.get("category"):
+                shortcut_kwargs["category"] = pos_shortcut["category"]
+            module_quick_actions.append(
+                {
+                    "label": pos_shortcut["title"],
+                    "href": url_for("pos_page", **shortcut_kwargs),
+                    "note": pos_shortcut["description"],
+                }
+            )
         return render_template(
             "module_form.html",
             page_title=f"{definition.label} Form",
             definition=definition,
             record=record,
             payload=record_payload,
+            category_map=inventory_category_map(),
+            dynamic_category_field=module_filter_category_field(definition) if module_filter_category_field(definition) == "category" else "",
+            module_quick_actions=module_quick_actions,
         )
 
     @app.route("/app/modules/<module_key>/<record_id>/delete", methods=["POST"])
@@ -3760,7 +4170,19 @@ def create_app(config: AppConfig | None = None) -> Flask:
             }
         ):
             flash("Delete the source record instead of deleting a generated sales sync row directly.", "warning")
-            return redirect(url_for("module_list", module_key=module_key, q=normalize_text(request.form.get("q"))))
+            return redirect(
+                url_for(
+                    "module_list",
+                    module_key=module_key,
+                    q=normalize_text(request.form.get("q")),
+                    area=normalize_text(request.form.get("area")),
+                    status=normalize_text(request.form.get("status")),
+                    category=normalize_text(request.form.get("category")),
+                    month=parse_month(request.form.get("month")),
+                    date_from=normalize_text(request.form.get("date_from")),
+                    date_to=normalize_text(request.form.get("date_to")),
+                )
+            )
 
         for reference in generated_sales_references_for_module_record(record):
             linked_sales = g.db.scalars(
@@ -3788,7 +4210,19 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     alert=normalize_text(request.form.get("alert")),
                 )
             )
-        return redirect(url_for("module_list", module_key=module_key, q=normalize_text(request.form.get("q"))))
+        return redirect(
+            url_for(
+                "module_list",
+                module_key=module_key,
+                q=normalize_text(request.form.get("q")),
+                area=normalize_text(request.form.get("area")),
+                status=normalize_text(request.form.get("status")),
+                category=normalize_text(request.form.get("category")),
+                month=parse_month(request.form.get("month")),
+                date_from=normalize_text(request.form.get("date_from")),
+                date_to=normalize_text(request.form.get("date_to")),
+            )
+        )
 
     @app.route("/app/apartments/<record_id>/receipt")
     @access_required("apartments")
@@ -4132,12 +4566,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/pos")
     @access_required("pos")
     def pos_page():
-        summary = build_pos_counter_summary(date.today(), "")
+        order_date = parse_date(request.args.get("date")) or date.today()
+        initial_area = normalize_text(request.args.get("area"))
+        initial_category = normalize_text(request.args.get("category"))
+        initial_search = normalize_text(request.args.get("q"))
+        summary = build_pos_counter_summary(order_date, initial_area)
         recent_orders = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(20)
         ).all()
+        product_query = select(Product).where(Product.active.is_(True))
+        if initial_area:
+            product_query = product_query.where(Product.business_area_id == initial_area)
+        if initial_category:
+            product_query = product_query.where(Product.category == initial_category)
         active_products = g.db.scalars(
-            select(Product).where(Product.active.is_(True)).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
+            product_query.order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
         ).all()
         top_products = active_products[:8]
         pos_category_counts: dict[str, int] = defaultdict(int)
@@ -4156,8 +4599,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 {"name": name, "count": count}
                 for name, count in sorted(pos_category_counts.items(), key=lambda item: (-item[1], item[0]))
             ],
-            today_iso=date.today().isoformat(),
+            today_iso=order_date.isoformat(),
             counter_summary=summary,
+            initial_area=initial_area,
+            initial_category=initial_category,
+            initial_search=initial_search,
         )
 
     @app.route("/app/pos/<order_id>/receipt")

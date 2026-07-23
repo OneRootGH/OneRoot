@@ -46,6 +46,31 @@
     </article>
   </section>
 
+  {% if target_progress_rows %}
+    <section class="card-grid four">
+      <article class="metric-card">
+        <span>Sales Target</span>
+        <strong>{{ target_total|currency }}</strong>
+        <small>Revenue plan for the current month</small>
+      </article>
+      <article class="metric-card">
+        <span>Sales Captured</span>
+        <strong>{{ target_actual_total|currency }}</strong>
+        <small>Current month actual against forecast</small>
+      </article>
+      <article class="metric-card">
+        <span>Areas On Target</span>
+        <strong>{{ target_areas_on_track }}</strong>
+        <small>Business areas already meeting plan</small>
+      </article>
+      <article class="metric-card warning">
+        <span>Target Gap</span>
+        <strong>{{ (target_actual_total - target_total)|currency }}</strong>
+        <small>Positive means ahead of plan</small>
+      </article>
+    </section>
+  {% endif %}
+
   <section class="split-grid">
     <article class="card">
       <div class="card-header">
@@ -190,6 +215,49 @@
       </div>
     </article>
   </section>
+
+  {% if target_progress_rows %}
+    <section class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Target Watch</p>
+          <h3>Monthly Sales Target Progress</h3>
+        </div>
+        <a class="button subtle" href="{{ url_for('module_list', module_key='forecast_plans') }}">Open Forecast Plans</a>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Actual</th>
+              <th>Target</th>
+              <th>Variance</th>
+              <th>Progress</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in target_progress_rows %}
+              <tr>
+                <td>{{ row.areaLabel }}</td>
+                <td>{{ row.actual|currency }}</td>
+                <td>{{ row.target|currency }}</td>
+                <td class="{% if row.variance < 0 %}negative-text{% endif %}">{{ row.variance|currency }}</td>
+                <td>
+                  <div class="inline-progress">
+                    <div class="chart-track">
+                      <span class="chart-fill" style="width: {{ row.progressWidth }}%; background: {{ row.progressTone }};"></span>
+                    </div>
+                    <small>{{ row.targetNote }}</small>
+                  </div>
+                </td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  {% endif %}
 
   <article class="card">
     <div class="card-header">

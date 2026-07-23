@@ -18,22 +18,32 @@
           </div>
         </div>
         {% for group in sidebar_items %}
-          <section class="menu-group">
-            <h2>{{ group.group }}</h2>
-            <div class="menu-links">
-              {% for link in group.links %}
-                {% if link.module %}
-                  <a href="{{ url_for(link.endpoint, module_key=link.module) }}" class="menu-link {% if request.view_args and request.view_args.get('module_key') == link.module %}active{% endif %}">
-                    {{ link.label }}
-                  </a>
-                {% else %}
-                  <a href="{{ url_for(link.endpoint) }}" class="menu-link {% if request.endpoint == link.endpoint %}active{% endif %}">
-                    {{ link.label }}
-                  </a>
-                {% endif %}
+          <details class="menu-group" {% if group.is_active or loop.first %}open{% endif %}>
+            <summary>
+              <span>{{ group.group }}</span>
+              <small>{{ group.sections|length }} sections</small>
+            </summary>
+            <div class="menu-subgroups">
+              {% for section in group.sections %}
+                <section class="menu-subgroup {% if section.is_active %}is-active{% endif %}">
+                  <h3>{{ section.label }}</h3>
+                  <div class="menu-links">
+                    {% for link in section.links %}
+                      {% if link.module %}
+                        <a href="{{ url_for(link.endpoint, module_key=link.module) }}" class="menu-link {% if link.is_active %}active{% endif %}">
+                          {{ link.label }}
+                        </a>
+                      {% else %}
+                        <a href="{{ url_for(link.endpoint) }}" class="menu-link {% if link.is_active %}active{% endif %}">
+                          {{ link.label }}
+                        </a>
+                      {% endif %}
+                    {% endfor %}
+                  </div>
+                </section>
               {% endfor %}
             </div>
-          </section>
+          </details>
         {% endfor %}
       </aside>
       <main class="content">
@@ -56,9 +66,23 @@
               <a class="button subtle" href="{{ url_for('export_backup') }}">Export Backup</a>
             {% endif %}
             {% if current_user %}
-              <form method="post" action="{{ url_for('logout') }}">
-                <button class="button dark" type="submit">Sign Out {{ current_user.full_name or current_user.username }}</button>
-              </form>
+              <details class="account-menu">
+                <summary>
+                  <span class="account-avatar">{{ (current_user.full_name or current_user.username or 'O')[:1]|upper }}</span>
+                  <span class="account-copy">
+                    <strong>{{ current_user.full_name or current_user.username }}</strong>
+                    <small>{{ user_role_labels.get(normalize_role_key(current_user.role), normalize_role_key(current_user.role)) }}</small>
+                  </span>
+                </summary>
+                <div class="account-panel">
+                  <p class="eyebrow">Signed In</p>
+                  <strong>{{ current_user.full_name or current_user.username }}</strong>
+                  <small>{{ current_user.username }}</small>
+                  <form method="post" action="{{ url_for('logout') }}">
+                    <button class="button dark" type="submit">Sign Out</button>
+                  </form>
+                </div>
+              </details>
             {% endif %}
           </div>
         </header>

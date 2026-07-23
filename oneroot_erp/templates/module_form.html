@@ -1,19 +1,43 @@
 {% extends "base.html" %}
 {% block content %}
-  <article class="card">
+  <article class="card module-hero">
     <div class="card-header">
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }} Form</h3>
+        <p class="muted">Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.</p>
       </div>
-      <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back to {{ definition.label }}</a>
+      <div class="toolbar">
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back to {{ definition.label }}</a>
+      </div>
     </div>
-    <form method="post" class="form-grid">
+
+    {% if module_quick_actions %}
+      <section class="card-grid two module-inline-actions">
+        {% for action in module_quick_actions %}
+          <article class="metric-card module-action-card">
+            <span>{{ action.label }}</span>
+            <strong><a href="{{ action.href }}">{{ action.label }}</a></strong>
+            <small>{{ action.note }}</small>
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+
+    <form method="post" class="form-grid module-form-grid" id="generic-module-form">
       {% for field in definition.fields %}
         <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
           <span>{{ field.label }}</span>
           {% if field.field_type == 'textarea' %}
-            <textarea name="{{ field.name }}" rows="{{ field.rows }}">{{ payload.get(field.name, '') }}</textarea>
+            <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
+          {% elif dynamic_category_field and field.name == dynamic_category_field %}
+            <select
+              name="{{ field.name }}"
+              id="dynamic-category-field"
+              data-current="{{ payload.get(field.name, '') }}"
+            >
+              <option value="">Select {{ field.label }}</option>
+            </select>
           {% elif field.field_type == 'select' %}
             <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
               <option value="">Select {{ field.label }}</option>
@@ -28,6 +52,7 @@
               name="{{ field.name }}"
               step="{{ field.step if field.field_type == 'number' else '' }}"
               value="{{ payload.get(field.name, '') }}"
+              placeholder="{{ field.placeholder or field.label }}"
               {% if field.required %}required{% endif %}
             >
           {% endif %}
@@ -37,6 +62,7 @@
         <button class="button primary" type="submit">Save Record</button>
       </div>
     </form>
+
     {% if payload %}
       <details class="card muted-box">
         <summary>Preserved extra data</summary>
@@ -44,4 +70,43 @@
       </details>
     {% endif %}
   </article>
+{% endblock %}
+{% block scripts %}
+  {% if dynamic_category_field %}
+    <script>
+      (function () {
+        const areaField = document.querySelector('select[name="businessAreaId"]');
+        const categoryField = document.getElementById("dynamic-category-field");
+        const categoryMap = {{ category_map|tojson }};
+        if (!areaField || !categoryField) {
+          return;
+        }
+        const initialValue = categoryField.dataset.current || "";
+        function renderDynamicCategories() {
+          const areaId = areaField.value || "";
+          const options = areaId && categoryMap[areaId] ? categoryMap[areaId] : [];
+          const selectedValue = categoryField.value || initialValue;
+          categoryField.innerHTML = '<option value="">Select Category</option>';
+          options.forEach((category) => {
+            const option = document.createElement("option");
+            option.value = category;
+            option.textContent = category;
+            if (category === selectedValue) {
+              option.selected = true;
+            }
+            categoryField.appendChild(option);
+          });
+          if (selectedValue && !options.includes(selectedValue)) {
+            const customOption = document.createElement("option");
+            customOption.value = selectedValue;
+            customOption.textContent = selectedValue;
+            customOption.selected = true;
+            categoryField.appendChild(customOption);
+          }
+        }
+        areaField.addEventListener("change", renderDynamicCategories);
+        renderDynamicCategories();
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

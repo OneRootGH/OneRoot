@@ -52,6 +52,13 @@
       Press <strong>/</strong> to jump to product search. Use the barcode box for scanners or quick code entry.
     </p>
 
+    <section class="pos-lane-strip">
+      <a class="status-chip {% if initial_area == 'laundry-services' %}is-highlight{% endif %}" href="{{ url_for('pos_page', area='laundry-services') }}">Laundry Counter</a>
+      <a class="status-chip {% if initial_area == 'water-equipment' and initial_category == 'Equipment & Construction Consumables' %}is-highlight{% endif %}" href="{{ url_for('pos_page', area='water-equipment', category='Equipment & Construction Consumables') }}">Equipment Counter</a>
+      <a class="status-chip {% if initial_area == 'cold-store-groceries' %}is-highlight{% endif %}" href="{{ url_for('pos_page', area='cold-store-groceries') }}">Cold Store Counter</a>
+      <a class="status-chip {% if not initial_area %}is-highlight{% endif %}" href="{{ url_for('pos_page') }}">All POS Areas</a>
+    </section>
+
     <div class="pos-layout pos-layout-enhanced">
       <div class="pos-main-panel">
         <section class="card pos-fastlane-card">
@@ -72,7 +79,7 @@
               <select id="pos-area-filter">
                 <option value="">All POS Areas</option>
                 {% for value, label in business_area_options %}
-                  <option value="{{ value }}">{{ label }}</option>
+                  <option value="{{ value }}" {% if initial_area == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
             </label>
@@ -82,7 +89,7 @@
             </label>
             <label class="pos-search-wide">
               <span>Search Products</span>
-              <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" autocomplete="off">
+              <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" value="{{ initial_search }}" autocomplete="off">
             </label>
           </div>
           <p class="muted pos-fastlane-helper">
@@ -99,9 +106,9 @@
             <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
           </div>
           <div class="pos-chip-row pos-category-row" id="pos-category-buttons">
-            <button class="pos-chip is-active" type="button" data-category="">All Items</button>
+            <button class="pos-chip {% if not initial_category %}is-active{% endif %}" type="button" data-category="">All Items</button>
             {% for category in pos_categories %}
-              <button class="pos-chip" type="button" data-category="{{ category.name }}">{{ category.name }} <span>{{ category.count }}</span></button>
+              <button class="pos-chip {% if initial_category == category.name %}is-active{% endif %}" type="button" data-category="{{ category.name }}">{{ category.name }} <span>{{ category.count }}</span></button>
             {% endfor %}
           </div>
           <div class="pos-results-toolbar">
