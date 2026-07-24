@@ -8,7 +8,7 @@
   const resultsHelperNode = document.getElementById("pos-results-helper");
   const resultsPrevButton = document.getElementById("pos-results-prev");
   const resultsNextButton = document.getElementById("pos-results-next");
-  const categoryButtonNodes = Array.from(document.querySelectorAll("[data-category]"));
+  const categoryFilterInput = document.getElementById("pos-category-filter");
   const paymentButtonNodes = Array.from(document.querySelectorAll("[data-payment-method]"));
   const cartContainer = document.getElementById("pos-cart-lines");
   const totalNodes = document.querySelectorAll("[data-pos-total]");
@@ -45,11 +45,8 @@
     searchTimer: null,
     latestResults: [],
     activeSearchRequest: 0,
-    selectedCategory: "",
     resultPage: 0
   };
-  const initiallyActiveCategory = categoryButtonNodes.find((button) => button.classList.contains("is-active"));
-  state.selectedCategory = initiallyActiveCategory?.dataset.category || "";
   const RESULTS_PER_PAGE = 8;
 
   function escapeHtml(value) {
@@ -82,7 +79,7 @@
   }
 
   function getSelectedCategory() {
-    return state.selectedCategory || "";
+    return categoryFilterInput?.value?.trim() || "";
   }
 
   function getOrderDate() {
@@ -498,12 +495,8 @@
     void refreshSummary();
   });
 
-  categoryButtonNodes.forEach((button) => {
-    button.addEventListener("click", () => {
-      state.selectedCategory = button.dataset.category || "";
-      setActiveButton(categoryButtonNodes, (entry) => entry === button);
-      void searchProducts(searchInput.value.trim());
-    });
+  categoryFilterInput?.addEventListener("change", () => {
+    void searchProducts(searchInput.value.trim());
   });
 
   resultsPrevButton?.addEventListener("click", () => {

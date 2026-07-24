@@ -259,8 +259,8 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "budgets": "category",
     "petty_cash": "transactionTypeId",
     "cashbook_entries": "entryType",
-    "laundry_tickets": "serviceType",
-    "equipment_rental_bookings": "equipmentItem",
+    "laundry_tickets": "serviceCategory",
+    "equipment_rental_bookings": "equipmentCategory",
     "mobile_money_reconciliations": "provider",
     "suppliers": "category",
     "asset_records": "assetCategory",
@@ -272,24 +272,54 @@ MODULE_FILTER_CATEGORY_LABELS = {
     "transactionTypeId": "Transaction Type",
     "entryType": "Entry Type",
     "serviceType": "Service Type",
+    "serviceCategory": "Laundry Category",
     "equipmentItem": "Equipment Item",
+    "equipmentCategory": "Rental Category",
     "provider": "Provider",
     "assetCategory": "Asset Category",
     "status": "Status",
 }
 
-MODULE_POS_SHORTCUTS = {
-    "laundry_tickets": {
-        "title": "Open Laundry POS",
-        "description": "Sell laundry service items from POS and let the synced payment appear in Daily Sales.",
-        "area": "laundry-services",
-    },
-    "equipment_rental_bookings": {
-        "title": "Open Equipment POS",
-        "description": "Use POS for quick equipment or consumable charges and keep Daily Sales aligned automatically.",
-        "area": "water-equipment",
-        "category": "Equipment & Construction Consumables",
-    },
+SERVICE_MODULE_AREA_IDS = {
+    "laundry_tickets": "laundry-services",
+    "equipment_rental_bookings": "water-equipment",
+}
+
+SERVICE_MODULE_SECTIONS = {
+    "laundry_tickets": [
+        (
+            "Ticket Intake",
+            "Capture the customer, speed, and laundry category first so the front desk can issue the job quickly.",
+            ["ticketDate", "customerName", "customerPhone", "serviceType", "serviceCategory", "deliveryMode"],
+        ),
+        (
+            "Items & Pricing",
+            "Describe the pieces, amount due, and any payment already collected for this job.",
+            ["itemSummary", "pieces", "amountDue", "amountPaid", "paymentDate", "paymentMethod", "paymentReference"],
+        ),
+        (
+            "Promise & Completion",
+            "Track when the job is due, when it is ready, and the current delivery status.",
+            ["dueDate", "readyDate", "status", "notes"],
+        ),
+    ],
+    "equipment_rental_bookings": [
+        (
+            "Booking Intake",
+            "Record the renter, rental category, and exact item so staff can hand over the right equipment fast.",
+            ["bookingDate", "customerName", "customerPhone", "equipmentCategory", "equipmentItem", "reference"],
+        ),
+        (
+            "Charges & Payment",
+            "Capture the rental fee, deposit, damage charge, and payment details in one place.",
+            ["rentalFee", "amountPaid", "depositAmount", "damageCharge", "paymentDate", "paymentMethod", "paymentReference"],
+        ),
+        (
+            "Movement & Return",
+            "Track when the item goes out, when it is due back, and how it returns.",
+            ["outDate", "dueDate", "returnDate", "conditionOut", "conditionIn", "status", "notes"],
+        ),
+    ],
 }
 
 
@@ -349,6 +379,233 @@ def module_record_open_balance(definition: ModuleDefinition, payload: dict[str, 
     if definition.key == "security_deposit_records":
         return round(max(parse_amount(payload.get("chargesRaised")) - parse_amount(payload.get("chargesPaid")), 0), 2)
     return 0.0
+
+
+def is_pos_eligible_product(product: Product) -> bool:
+    area_id = normalize_text(product.business_area_id)
+    item_type = normalize_text(product.item_type).lower()
+    if area_id == "laundry-services":
+        return False
+    if area_id == "water-equipment" and (item_type == "service" or not product.track_inventory):
+        return False
+    return bool(product.active)
+
+
+def load_pos_products(
+    db_session,
+    *,
+    area_filter: str = "",
+    category_filter: str = "",
+    search: str = "",
+) -> list[Product]:
+    products = db_session.scalars(
+        select(Product).where(Product.active.is_(True)).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
+    ).all()
+    query_text = normalize_text(search).lower()
+    filtered_products: list[Product] = []
+    for product in products:
+        if not is_pos_eligible_product(product):
+            continue
+        if area_filter and normalize_text(product.business_area_id) != area_filter:
+            continue
+        if category_filter and normalize_text(product.category) != category_filter:
+            continue
+        if query_text:
+            haystack = " ".join(
+                [
+                    normalize_text(product.name),
+                    normalize_text(product.sku),
+                    normalize_text(product.barcode),
+                    normalize_text(product.category),
+                    normalize_text(product.business_area_id),
+                ]
+            ).lower()
+            if query_text not in haystack:
+                continue
+        filtered_products.append(product)
+    return filtered_products
+
+
+def pos_business_area_options() -> list[tuple[str, str]]:
+    return [(value, label) for value, label in BUSINESS_AREA_OPTIONS if value != "laundry-services"]
+
+
+def service_module_field_sections(definition: ModuleDefinition) -> list[dict[str, Any]]:
+    field_map = {field.name: field for field in definition.fields}
+    sections = []
+    for title, description, field_names in SERVICE_MODULE_SECTIONS.get(definition.key, []):
+        sections.append(
+            {
+                "title": title,
+                "description": description,
+                "fields": [field_map[name] for name in field_names if name in field_map],
+            }
+        )
+    return sections
+
+
+def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    today = date.today()
+    for record in records:
+        payload = record.payload or {}
+        amount_due = round(parse_amount(payload.get("amountDue")), 2)
+        amount_paid = round(parse_amount(payload.get("amountPaid")), 2)
+        balance = round(max(amount_due - amount_paid, 0), 2)
+        status = normalize_text(payload.get("status")) or "Received"
+        due_date = parse_date(payload.get("dueDate"))
+        ready_date = parse_date(payload.get("readyDate"))
+        rows.append(
+            {
+                "record": record,
+                "id": record.id,
+                "customerName": normalize_text(payload.get("customerName")) or record.title or "Walk-in Customer",
+                "customerPhone": normalize_phone(payload.get("customerPhone")),
+                "serviceType": normalize_text(payload.get("serviceType")) or "Normal",
+                "serviceCategory": normalize_text(payload.get("serviceCategory")) or "General Items",
+                "itemSummary": normalize_text(payload.get("itemSummary")) or "Laundry Job",
+                "pieces": int(parse_amount(payload.get("pieces"))) if parse_amount(payload.get("pieces")) else 0,
+                "ticketDate": parse_date(payload.get("ticketDate")),
+                "dueDate": due_date,
+                "readyDate": ready_date,
+                "deliveryMode": normalize_text(payload.get("deliveryMode")) or "Walk-in",
+                "status": status,
+                "amountDue": amount_due,
+                "amountPaid": amount_paid,
+                "balance": balance,
+                "isReady": status == "Ready",
+                "isDelivered": status == "Delivered",
+                "isOverdue": bool(balance > 0 and due_date and due_date < today and status not in {"Delivered", "Cancelled"}),
+                "isDueToday": bool(balance > 0 and due_date == today and status not in {"Delivered", "Cancelled"}),
+            }
+        )
+    return rows
+
+
+def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    today = date.today()
+    for record in records:
+        payload = record.payload or {}
+        rental_fee = round(parse_amount(payload.get("rentalFee")), 2)
+        amount_paid = round(parse_amount(payload.get("amountPaid")), 2)
+        deposit_amount = round(parse_amount(payload.get("depositAmount")), 2)
+        damage_charge = round(parse_amount(payload.get("damageCharge")), 2)
+        billed_total = round(rental_fee + damage_charge, 2)
+        balance = round(max(billed_total - amount_paid, 0), 2)
+        status = normalize_text(payload.get("status")) or "Booked"
+        due_date = parse_date(payload.get("dueDate"))
+        return_date = parse_date(payload.get("returnDate"))
+        rows.append(
+            {
+                "record": record,
+                "id": record.id,
+                "equipmentItem": normalize_text(payload.get("equipmentItem")) or record.title or "Equipment Rental",
+                "equipmentCategory": normalize_text(payload.get("equipmentCategory")) or "Construction Support",
+                "customerName": normalize_text(payload.get("customerName")) or "Customer",
+                "customerPhone": normalize_phone(payload.get("customerPhone")),
+                "bookingDate": parse_date(payload.get("bookingDate")),
+                "outDate": parse_date(payload.get("outDate")),
+                "dueDate": due_date,
+                "returnDate": return_date,
+                "reference": normalize_text(payload.get("reference")),
+                "status": status,
+                "rentalFee": rental_fee,
+                "damageCharge": damage_charge,
+                "depositAmount": deposit_amount,
+                "amountPaid": amount_paid,
+                "balance": balance,
+                "isOut": status == "Out",
+                "isDueToday": bool(status in {"Booked", "Out"} and due_date == today and not return_date),
+                "isOverdue": bool(status == "Out" and due_date and due_date < today and not return_date),
+            }
+        )
+    return rows
+
+
+def build_service_module_context(definition: ModuleDefinition, rows: list[dict[str, Any]]) -> dict[str, Any]:
+    if definition.key == "laundry_tickets":
+        status_counts: dict[str, int] = defaultdict(int)
+        category_counts: dict[str, int] = defaultdict(int)
+        for row in rows:
+            status_counts[row["status"]] += 1
+            category_counts[row["serviceCategory"]] += 1
+        status_chart = build_chart_rows(
+            [{"label": status, "short": status, "amount": count} for status, count in sorted(status_counts.items()) if count > 0],
+            label_key="label",
+            value_key="amount",
+            short_key="short",
+            positive_color="var(--accent)",
+        )
+        type_chart = build_chart_rows(
+            [{"label": name, "short": name, "amount": count} for name, count in sorted(category_counts.items()) if count > 0],
+            label_key="label",
+            value_key="amount",
+            short_key="short",
+        )
+        return {
+            "intro": "Capture every laundry job from intake to delivery, with category, due dates, and payments in one desk.",
+            "cards": [
+                {"label": "Tickets In View", "value": f"{len(rows)}", "note": "Filtered laundry jobs"},
+                {"label": "Ready For Pickup", "value": f"{sum(1 for row in rows if row['isReady'])}", "note": "Jobs marked ready"},
+                {"label": "Open Balance", "value": format_currency(sum(row["balance"] for row in rows)), "note": "Unpaid laundry still open"},
+                {"label": "Collected", "value": format_currency(sum(row["amountPaid"] for row in rows)), "note": "Payments captured in this view"},
+            ],
+            "statusChart": status_chart,
+            "mixChart": type_chart,
+            "mixEyebrow": "Laundry Category Mix",
+            "mixTitle": "Most Common Laundry Work",
+            "watchTitle": "Laundry Attention Queue",
+            "watchItems": [
+                row for row in rows if row["isOverdue"] or row["isDueToday"] or row["isReady"]
+            ][:10],
+            "table": {
+                "primaryHeading": "Customer",
+                "secondaryHeading": "Laundry Item",
+                "dateHeading": "Ticket Date",
+                "eventHeading": "Due / Ready",
+                "amountHeading": "Due / Paid / Balance",
+            },
+        }
+
+    status_counts: dict[str, int] = defaultdict(int)
+    category_counts: dict[str, int] = defaultdict(int)
+    for row in rows:
+        status_counts[row["status"]] += 1
+        category_counts[row["equipmentCategory"]] += 1
+    return {
+        "intro": "Track every rental from booking to return, with charges, deposits, return dates, and item condition together.",
+        "cards": [
+            {"label": "Bookings In View", "value": f"{len(rows)}", "note": "Filtered rental bookings"},
+            {"label": "Equipment Out", "value": f"{sum(1 for row in rows if row['isOut'])}", "note": "Currently out with customers"},
+            {"label": "Open Balance", "value": format_currency(sum(row["balance"] for row in rows)), "note": "Outstanding rental collections"},
+            {"label": "Deposit Held", "value": format_currency(sum(row["depositAmount"] for row in rows)), "note": "Deposits still being held"},
+        ],
+        "statusChart": build_chart_rows(
+            [{"label": status, "short": status, "amount": count} for status, count in sorted(status_counts.items()) if count > 0],
+            label_key="label",
+            value_key="amount",
+            short_key="short",
+            positive_color="var(--accent)",
+        ),
+        "mixChart": build_chart_rows(
+            [{"label": name, "short": name, "amount": count} for name, count in sorted(category_counts.items()) if count > 0],
+            label_key="label",
+            value_key="amount",
+            short_key="short",
+        ),
+        "mixEyebrow": "Rental Category Mix",
+        "mixTitle": "Most Used Rental Types",
+        "watchTitle": "Return & Payment Watch",
+        "watchItems": [row for row in rows if row["isOverdue"] or row["isDueToday"] or row["balance"] > 0][:10],
+        "table": {
+            "primaryHeading": "Equipment",
+            "secondaryHeading": "Customer",
+            "dateHeading": "Booking Date",
+            "eventHeading": "Out / Due / Return",
+            "amountHeading": "Fee / Paid / Balance",
+        },
+    }
 
 
 def module_status_options(definition: ModuleDefinition, records: list[ModuleRecord]) -> list[tuple[str, str]]:
@@ -3916,6 +4173,75 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 total_bills_collected=round(sum(item["billsPaid"] for item in history_rows), 2),
             )
 
+        if module_key in SERVICE_MODULE_AREA_IDS:
+            status_filter = normalize_text(request.args.get("status"))
+            category_filter = normalize_text(request.args.get("category"))
+            date_from = parse_date(request.args.get("date_from"))
+            date_to = parse_date(request.args.get("date_to"))
+            service_area = SERVICE_MODULE_AREA_IDS[module_key]
+            all_records = g.db.scalars(
+                select(ModuleRecord)
+                .where(ModuleRecord.module_key == module_key)
+                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+            ).all()
+            records = filter_module_records(
+                all_records,
+                definition,
+                search=search,
+                area_filter=service_area,
+                status_filter=status_filter,
+                category_filter=category_filter,
+                date_from=date_from,
+                date_to=date_to,
+            )
+            service_rows = (
+                build_laundry_service_rows(records)
+                if module_key == "laundry_tickets"
+                else build_equipment_service_rows(records)
+            )
+            service_context = build_service_module_context(definition, service_rows)
+            module_quick_actions = []
+            if definition.editable:
+                module_quick_actions.append(
+                    {
+                        "label": "New Record",
+                        "href": url_for("module_form", module_key=module_key),
+                        "note": f"Capture a new {definition.label[:-1].lower() if definition.label.endswith('s') else definition.label.lower()} quickly.",
+                    }
+                )
+            if user_has_access(g.current_user, "sales"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Daily Sales",
+                        "href": url_for("module_list", module_key="sales"),
+                        "note": "Payments saved here continue to sync into Daily Sales automatically.",
+                    }
+                )
+            if user_has_access(g.current_user, "inventory"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Inventory",
+                        "href": url_for("inventory", area=service_area),
+                        "note": "Review the related supplies and stock for this service area.",
+                    }
+                )
+            return render_template(
+                "service_module.html",
+                page_title=definition.label,
+                definition=definition,
+                search=search,
+                status_filter=status_filter,
+                category_filter=category_filter,
+                date_from=date_from.isoformat() if date_from else "",
+                date_to=date_to.isoformat() if date_to else "",
+                service_rows=service_rows,
+                service_context=service_context,
+                status_options=module_status_options(definition, all_records),
+                category_options=module_category_options(definition, all_records, service_area),
+                category_filter_label=module_filter_category_label(definition),
+                module_quick_actions=module_quick_actions,
+            )
+
         area_filter = normalize_text(request.args.get("area"))
         status_filter = normalize_text(request.args.get("status"))
         category_filter = normalize_text(request.args.get("category"))
@@ -3940,18 +4266,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         module_overview = build_module_overview(definition, records)
         module_quick_actions = []
-        pos_shortcut = MODULE_POS_SHORTCUTS.get(module_key)
-        if pos_shortcut and user_has_access(g.current_user, "pos"):
-            shortcut_kwargs = {"area": pos_shortcut["area"]}
-            if pos_shortcut.get("category"):
-                shortcut_kwargs["category"] = pos_shortcut["category"]
-            module_quick_actions.append(
-                {
-                    "label": pos_shortcut["title"],
-                    "href": url_for("pos_page", **shortcut_kwargs),
-                    "note": pos_shortcut["description"],
-                }
-            )
         if user_has_access(g.current_user, "sales"):
             module_quick_actions.append(
                 {
@@ -3960,7 +4274,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "note": "Review the sales ledger that receives synced counter and service payments.",
                 }
             )
-        target_area = area_filter or (pos_shortcut["area"] if pos_shortcut else "")
+        target_area = area_filter
         target_month = month_filter or (date_from.strftime("%Y-%m") if date_from else date.today().strftime("%Y-%m"))
         return render_template(
             "module_list.html",
@@ -4081,6 +4395,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload[field.name] = parse_field_input(field, request.form)
             if module_key == "apartments":
                 payload["businessAreaId"] = "rentals-apartments"
+            elif module_key in SERVICE_MODULE_AREA_IDS:
+                payload["businessAreaId"] = SERVICE_MODULE_AREA_IDS[module_key]
             payload["updatedAt"] = datetime.utcnow().isoformat()
             if not record:
                 record = ModuleRecord(id=payload["id"], module_key=module_key, created_at=datetime.utcnow())
@@ -4115,19 +4431,44 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 section_fields=section_fields,
                 apartment_summary=apartment_summary,
             )
-        module_quick_actions = []
-        pos_shortcut = MODULE_POS_SHORTCUTS.get(module_key)
-        if pos_shortcut and user_has_access(g.current_user, "pos"):
-            shortcut_kwargs = {"area": pos_shortcut["area"]}
-            if pos_shortcut.get("category"):
-                shortcut_kwargs["category"] = pos_shortcut["category"]
-            module_quick_actions.append(
-                {
-                    "label": pos_shortcut["title"],
-                    "href": url_for("pos_page", **shortcut_kwargs),
-                    "note": pos_shortcut["description"],
-                }
+        if module_key in SERVICE_MODULE_AREA_IDS:
+            record_payload.setdefault("businessAreaId", SERVICE_MODULE_AREA_IDS[module_key])
+            default_status = "Received" if module_key == "laundry_tickets" else "Booked"
+            record_payload.setdefault(definition.status_field, default_status)
+            service_area = SERVICE_MODULE_AREA_IDS[module_key]
+            inventory_reference_products = g.db.scalars(
+                select(Product)
+                .where(Product.business_area_id == service_area, Product.active.is_(True))
+                .order_by(Product.name.asc())
+            ).all()
+            module_quick_actions = []
+            if user_has_access(g.current_user, "sales"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Daily Sales",
+                        "href": url_for("module_list", module_key="sales"),
+                        "note": "Payments recorded here will appear in Daily Sales automatically.",
+                    }
+                )
+            if user_has_access(g.current_user, "inventory"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Inventory",
+                        "href": url_for("inventory", area=service_area),
+                        "note": "Check related stock, supplies, and referenced equipment.",
+                    }
+                )
+            return render_template(
+                "service_form.html",
+                page_title=f"{definition.label} Form",
+                definition=definition,
+                record=record,
+                payload=record_payload,
+                section_fields=service_module_field_sections(definition),
+                module_quick_actions=module_quick_actions,
+                reference_product_options=[product.name for product in inventory_reference_products],
             )
+        module_quick_actions = []
         return render_template(
             "module_form.html",
             page_title=f"{definition.label} Form",
@@ -4574,14 +4915,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
         recent_orders = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(20)
         ).all()
-        product_query = select(Product).where(Product.active.is_(True))
-        if initial_area:
-            product_query = product_query.where(Product.business_area_id == initial_area)
-        if initial_category:
-            product_query = product_query.where(Product.category == initial_category)
-        active_products = g.db.scalars(
-            product_query.order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
-        ).all()
+        active_products = load_pos_products(
+            g.db,
+            area_filter=initial_area,
+            category_filter=initial_category,
+            search=initial_search,
+        )
         top_products = active_products[:8]
         pos_category_counts: dict[str, int] = defaultdict(int)
         for product in active_products:
@@ -4594,7 +4933,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             top_products=top_products,
             recent_orders=recent_orders,
             payment_methods=PAYMENT_METHODS,
-            business_area_options=BUSINESS_AREA_OPTIONS,
+            business_area_options=pos_business_area_options(),
             pos_categories=[
                 {"name": name, "count": count}
                 for name, count in sorted(pos_category_counts.items(), key=lambda item: (-item[1], item[0]))
@@ -4654,22 +4993,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
         q = normalize_text(request.args.get("q"))
         area = normalize_text(request.args.get("area"))
         category = normalize_text(request.args.get("category"))
-        query = select(Product).where(Product.active.is_(True))
-        if area:
-            query = query.where(Product.business_area_id == area)
-        if category:
-            query = query.where(Product.category == category)
-        if q:
-            like_value = f"%{q}%"
-            query = query.where(
-                or_(
-                    Product.name.ilike(like_value),
-                    Product.sku.ilike(like_value),
-                    Product.barcode.ilike(like_value),
-                    Product.category.ilike(like_value),
-                )
-            )
-        products = g.db.scalars(query.order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc()).limit(60)).all()
+        products = load_pos_products(
+            g.db,
+            area_filter=area,
+            category_filter=category,
+            search=q,
+        )[:60]
         return jsonify(
             {
                 "ok": True,

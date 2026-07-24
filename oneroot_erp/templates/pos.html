@@ -5,6 +5,7 @@
       <div>
         <p class="eyebrow">Counter Sales</p>
         <h3>Fast POS Checkout</h3>
+        <p class="muted">Laundry services and equipment rentals are now managed from their own service desks, so POS stays focused on quick counter items.</p>
       </div>
       <div class="toolbar">
         <a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a>
@@ -52,13 +53,6 @@
       Press <strong>/</strong> to jump to product search. Use the barcode box for scanners or quick code entry.
     </p>
 
-    <section class="pos-lane-strip">
-      <a class="status-chip {% if initial_area == 'laundry-services' %}is-highlight{% endif %}" href="{{ url_for('pos_page', area='laundry-services') }}">Laundry Counter</a>
-      <a class="status-chip {% if initial_area == 'water-equipment' and initial_category == 'Equipment & Construction Consumables' %}is-highlight{% endif %}" href="{{ url_for('pos_page', area='water-equipment', category='Equipment & Construction Consumables') }}">Equipment Counter</a>
-      <a class="status-chip {% if initial_area == 'cold-store-groceries' %}is-highlight{% endif %}" href="{{ url_for('pos_page', area='cold-store-groceries') }}">Cold Store Counter</a>
-      <a class="status-chip {% if not initial_area %}is-highlight{% endif %}" href="{{ url_for('pos_page') }}">All POS Areas</a>
-    </section>
-
     <div class="pos-layout pos-layout-enhanced">
       <div class="pos-main-panel">
         <section class="card pos-fastlane-card">
@@ -84,6 +78,15 @@
               </select>
             </label>
             <label>
+              <span>Category</span>
+              <select id="pos-category-filter">
+                <option value="">All Categories</option>
+                {% for category in pos_categories %}
+                  <option value="{{ category.name }}" {% if initial_category == category.name %}selected{% endif %}>{{ category.name }} ({{ category.count }})</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
               <span>Scan Barcode / SKU</span>
               <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
             </label>
@@ -104,12 +107,6 @@
               <h3>Quick Pick Matches</h3>
             </div>
             <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
-          </div>
-          <div class="pos-chip-row pos-category-row" id="pos-category-buttons">
-            <button class="pos-chip {% if not initial_category %}is-active{% endif %}" type="button" data-category="">All Items</button>
-            {% for category in pos_categories %}
-              <button class="pos-chip {% if initial_category == category.name %}is-active{% endif %}" type="button" data-category="{{ category.name }}">{{ category.name }} <span>{{ category.count }}</span></button>
-            {% endfor %}
           </div>
           <div class="pos-results-toolbar">
             <div>
@@ -225,8 +222,8 @@
     </div>
   </section>
 
-  <section class="card">
-    <div class="card-header">
+  <details class="card pos-history-drawer">
+    <summary class="pos-history-summary">
       <div>
         <p class="eyebrow">Counter History</p>
         <h3>Recent POS Orders</h3>
@@ -235,7 +232,7 @@
         Current POS total for <strong id="pos-summary-date">{{ counter_summary.orderDate }}</strong> is
         <strong id="pos-summary-total">{{ counter_summary.totalAmount|currency }}</strong>.
       </p>
-    </div>
+    </summary>
     <div class="table-wrap tall">
       <table>
         <thead>
@@ -271,7 +268,7 @@
         </tbody>
       </table>
     </div>
-  </section>
+  </details>
 {% endblock %}
 {% block scripts %}
   <script src="{{ url_for('static', filename='app.js') }}"></script>

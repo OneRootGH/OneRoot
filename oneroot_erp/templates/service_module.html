@@ -1,0 +1,273 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card module-hero service-hero">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }}</h3>
+        <p class="muted">{{ service_context.intro }}</p>
+      </div>
+      <div class="toolbar">
+        <a class="button subtle" href="{{ url_for('module_export', module_key=definition.key, q=search, status=status_filter, category=category_filter, date_from=date_from, date_to=date_to) }}">Export CSV</a>
+        {% if definition.editable %}
+          <a class="button primary" href="{{ url_for('module_form', module_key=definition.key) }}">New Record</a>
+        {% endif %}
+      </div>
+    </div>
+
+    <form method="get" class="form-grid module-filter-grid">
+      <label class="span-2">
+        <span>Search</span>
+        <input type="search" name="q" placeholder="Search {{ definition.label|lower }}" value="{{ search }}">
+      </label>
+      <label>
+        <span>{{ category_filter_label }}</span>
+        <select name="category">
+          <option value="">All {{ category_filter_label }}</option>
+          {% for option in category_options %}
+            <option value="{{ option }}" {% if category_filter == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Status</span>
+        <select name="status">
+          <option value="">All Statuses</option>
+          {% for value, label in status_options %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Date From</span>
+        <input type="date" name="date_from" value="{{ date_from }}">
+      </label>
+      <label>
+        <span>Date To</span>
+        <input type="date" name="date_to" value="{{ date_to }}">
+      </label>
+      <div class="form-actions span-2">
+        <button class="button primary" type="submit">Apply Filters</button>
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Reset</a>
+      </div>
+    </form>
+  </section>
+
+  {% if module_quick_actions %}
+    <section class="card-grid two">
+      {% for action in module_quick_actions %}
+        <article class="metric-card module-action-card">
+          <span>{{ action.label }}</span>
+          <strong><a href="{{ action.href }}">{{ action.label }}</a></strong>
+          <small>{{ action.note }}</small>
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <section class="card-grid four">
+    {% for card in service_context.cards %}
+      <article class="metric-card">
+        <span>{{ card.label }}</span>
+        <strong>{{ card.value }}</strong>
+        <small>{{ card.note }}</small>
+      </article>
+    {% endfor %}
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Status Mix</p>
+          <h3>Current Workflow Load</h3>
+        </div>
+      </div>
+      {% if service_context.statusChart %}
+        <div class="chart-stack">
+          {% for row in service_context.statusChart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No status mix is available yet.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">{{ service_context.mixEyebrow or 'Service Mix' }}</p>
+          <h3>{{ service_context.mixTitle or 'Category View' }}</h3>
+        </div>
+      </div>
+      {% if service_context.mixChart %}
+        <div class="chart-stack">
+          {% for row in service_context.mixChart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No service mix is available yet.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header compact">
+      <div>
+        <p class="eyebrow">Attention Queue</p>
+        <h3>{{ service_context.watchTitle }}</h3>
+      </div>
+    </div>
+    <ul class="stack-list compact">
+      {% if definition.key == 'laundry_tickets' %}
+        {% for item in service_context.watchItems %}
+          <li>
+            <strong>{{ item.customerName }} · {{ item.itemSummary }}</strong>
+            <span>
+              {{ item.serviceCategory }} · {{ item.serviceType }} ·
+              {% if item.isReady %}Ready{% elif item.isOverdue %}Overdue{% elif item.isDueToday %}Due Today{% else %}Open{% endif %}
+              · {{ item.balance|currency }} balance
+            </span>
+          </li>
+        {% else %}
+          <li><span>No laundry jobs need special follow-up right now.</span></li>
+        {% endfor %}
+      {% else %}
+        {% for item in service_context.watchItems %}
+          <li>
+            <strong>{{ item.equipmentItem }} · {{ item.customerName }}</strong>
+            <span>
+              {{ item.equipmentCategory }} ·
+              {% if item.isOverdue %}Overdue Return{% elif item.isDueToday %}Due Back Today{% else %}Open Balance{% endif %}
+              · {{ item.balance|currency }} balance
+            </span>
+          </li>
+        {% else %}
+          <li><span>No equipment rentals need special follow-up right now.</span></li>
+        {% endfor %}
+      {% endif %}
+    </ul>
+  </section>
+
+  <article class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }} Desk</h3>
+      </div>
+      <p class="muted list-summary">{{ service_rows|length }} record{% if service_rows|length != 1 %}s{% endif %} in view.</p>
+    </div>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>{{ service_context.table.primaryHeading }}</th>
+            <th>{{ service_context.table.secondaryHeading }}</th>
+            <th>{{ service_context.table.dateHeading }}</th>
+            <th>{{ service_context.table.eventHeading }}</th>
+            <th>{{ service_context.table.amountHeading }}</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% if definition.key == 'laundry_tickets' %}
+            {% for row in service_rows %}
+              <tr>
+                <td>
+                  {{ row.customerName }}
+                  {% if row.customerPhone %}<span class="table-secondary">{{ row.customerPhone }}</span>{% endif %}
+                </td>
+                <td>
+                  {{ row.itemSummary }}
+                  <span class="table-secondary">{{ row.serviceCategory }} · {{ row.serviceType }}{% if row.pieces %} · {{ row.pieces }} pcs{% endif %}</span>
+                </td>
+                <td>{{ row.ticketDate or '—' }}</td>
+                <td>
+                  Due {{ row.dueDate or '—' }}
+                  <span class="table-secondary">Ready {{ row.readyDate or '—' }} · {{ row.deliveryMode }}</span>
+                </td>
+                <td>
+                  {{ row.amountDue|currency }}
+                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }}</span>
+                </td>
+                <td>{{ row.status }}</td>
+                <td>
+                  <div class="row-actions">
+                    <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                    <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
+                      <input type="hidden" name="q" value="{{ search }}">
+                      <input type="hidden" name="status" value="{{ status_filter }}">
+                      <input type="hidden" name="category" value="{{ category_filter }}">
+                      <input type="hidden" name="date_from" value="{{ date_from }}">
+                      <input type="hidden" name="date_to" value="{{ date_to }}">
+                      <button class="text-button danger-text" type="submit">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="7">No records yet.</td></tr>
+            {% endfor %}
+          {% else %}
+            {% for row in service_rows %}
+              <tr>
+                <td>
+                  {{ row.equipmentItem }}
+                  {% if row.reference %}<span class="table-secondary">{{ row.reference }}</span>{% endif %}
+                </td>
+                <td>
+                  {{ row.customerName }}
+                  <span class="table-secondary">{{ row.equipmentCategory }}{% if row.customerPhone %} · {{ row.customerPhone }}{% endif %}</span>
+                </td>
+                <td>{{ row.bookingDate or '—' }}</td>
+                <td>
+                  Out {{ row.outDate or '—' }}
+                  <span class="table-secondary">Due {{ row.dueDate or '—' }} · Return {{ row.returnDate or '—' }}</span>
+                </td>
+                <td>
+                  {{ row.rentalFee|currency }}
+                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }}{% if row.depositAmount %} · Dep {{ row.depositAmount|currency }}{% endif %}</span>
+                </td>
+                <td>{{ row.status }}</td>
+                <td>
+                  <div class="row-actions">
+                    <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                    <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
+                      <input type="hidden" name="q" value="{{ search }}">
+                      <input type="hidden" name="status" value="{{ status_filter }}">
+                      <input type="hidden" name="category" value="{{ category_filter }}">
+                      <input type="hidden" name="date_from" value="{{ date_from }}">
+                      <input type="hidden" name="date_to" value="{{ date_to }}">
+                      <button class="text-button danger-text" type="submit">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="7">No records yet.</td></tr>
+            {% endfor %}
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+{% endblock %}

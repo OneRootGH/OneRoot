@@ -266,8 +266,25 @@ RENEWAL_STATUSES = [
     ("Ending", "Ending"),
 ]
 LAUNDRY_SERVICE_TYPES = [("Normal", "Normal"), ("Express", "Express")]
+LAUNDRY_ITEM_CATEGORY_OPTIONS = [
+    ("Clothing", "Clothing"),
+    ("Bedding & Linen", "Bedding & Linen"),
+    ("Curtains & Covers", "Curtains & Covers"),
+    ("Carpets & Rugs", "Carpets & Rugs"),
+    ("Upholstery", "Upholstery"),
+    ("Footwear & Bags", "Footwear & Bags"),
+    ("Vehicle Fabrics", "Vehicle Fabrics"),
+    ("General Items", "General Items"),
+]
 LAUNDRY_STATUSES = ["Received", "In Progress", "Ready", "Delivered", "Cancelled"]
 LAUNDRY_DELIVERY_MODES = ["Walk-in", "Pickup", "Delivery", "Pickup / Delivery"]
+EQUIPMENT_RENTAL_CATEGORY_OPTIONS = [
+    ("Water Delivery", "Water Delivery"),
+    ("Hand Tools", "Hand Tools"),
+    ("Powered Tools", "Powered Tools"),
+    ("Concrete & Masonry", "Concrete & Masonry"),
+    ("Construction Support", "Construction Support"),
+]
 EQUIPMENT_RENTAL_STATUSES = ["Booked", "Out", "Returned", "Cancelled"]
 EQUIPMENT_CONDITIONS = ["Good", "Fair", "Damaged"]
 LEDGER_PARTY_TYPES = [
@@ -617,6 +634,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("customerName", "Customer Name", "text", True),
             FieldDefinition("customerPhone", "Customer Phone", "text"),
             FieldDefinition("serviceType", "Service Type", "select", True, LAUNDRY_SERVICE_TYPES),
+            FieldDefinition("serviceCategory", "Laundry Category", "select", False, LAUNDRY_ITEM_CATEGORY_OPTIONS),
             FieldDefinition("itemSummary", "Item Summary", "textarea", True),
             FieldDefinition("pieces", "Pieces", "number", False, step="1"),
             FieldDefinition("amountDue", "Amount Due", "number", True),
@@ -643,6 +661,7 @@ MODULES: dict[str, ModuleDefinition] = {
         fields=[
             FieldDefinition("bookingDate", "Booking Date", "date", True),
             FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("equipmentCategory", "Rental Category", "select", False, EQUIPMENT_RENTAL_CATEGORY_OPTIONS),
             FieldDefinition("equipmentItem", "Equipment Item", "text", True),
             FieldDefinition("customerName", "Customer Name", "text", True),
             FieldDefinition("customerPhone", "Customer Phone", "text"),

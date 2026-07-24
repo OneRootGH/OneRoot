@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+{% block content %}
+  <article class="card module-hero service-hero">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }} Form</h3>
+        <p class="muted">Capture the job, payment, and delivery or return details in one focused service desk form.</p>
+      </div>
+      <div class="toolbar">
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back to {{ definition.label }}</a>
+      </div>
+    </div>
+
+    {% if module_quick_actions %}
+      <section class="card-grid two module-inline-actions">
+        {% for action in module_quick_actions %}
+          <article class="metric-card module-action-card">
+            <span>{{ action.label }}</span>
+            <strong><a href="{{ action.href }}">{{ action.label }}</a></strong>
+            <small>{{ action.note }}</small>
+          </article>
+        {% endfor %}
+      </section>
+    {% endif %}
+
+    <form method="post" class="service-form-stack">
+      <input type="hidden" name="businessAreaId" value="{{ payload.get('businessAreaId', '') }}">
+      {% for section in section_fields %}
+        <section class="form-section">
+          <div class="card-header compact">
+            <div>
+              <p class="eyebrow">{{ definition.label }}</p>
+              <h3>{{ section.title }}</h3>
+            </div>
+          </div>
+          <p class="muted section-note">{{ section.description }}</p>
+          <div class="form-grid">
+            {% for field in section.fields %}
+              <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
+                <span>{{ field.label }}</span>
+                {% if field.field_type == 'textarea' %}
+                  <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
+                {% elif field.field_type == 'select' %}
+                  <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
+                    <option value="">Select {{ field.label }}</option>
+                    {% for value, label in field.options %}
+                      <option value="{{ value }}" {% if payload.get(field.name, '') == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                  </select>
+                {% elif definition.key == 'equipment_rental_bookings' and field.name == 'equipmentItem' %}
+                  <input
+                    type="text"
+                    name="{{ field.name }}"
+                    value="{{ payload.get(field.name, '') }}"
+                    list="service-reference-options"
+                    placeholder="Choose or type equipment item"
+                    {% if field.required %}required{% endif %}
+                  >
+                {% else %}
+                  <input
+                    type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
+                    {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
+                    name="{{ field.name }}"
+                    step="{{ field.step if field.field_type == 'number' else '' }}"
+                    value="{{ payload.get(field.name, '') }}"
+                    placeholder="{{ field.placeholder or field.label }}"
+                    {% if field.required %}required{% endif %}
+                  >
+                {% endif %}
+              </label>
+            {% endfor %}
+          </div>
+        </section>
+      {% endfor %}
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save Record</button>
+      </div>
+    </form>
+
+    {% if definition.key == 'equipment_rental_bookings' and reference_product_options %}
+      <datalist id="service-reference-options">
+        {% for item in reference_product_options %}
+          <option value="{{ item }}"></option>
+        {% endfor %}
+      </datalist>
+    {% endif %}
+  </article>
+{% endblock %}
