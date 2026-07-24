@@ -198,7 +198,7 @@
                 </td>
                 <td>
                   {{ row.itemSummary }}
-                  <span class="table-secondary">{{ row.serviceCategory }} · {{ row.serviceType }}{% if row.pieces %} · {{ row.pieces }} pcs{% endif %}</span>
+                  <span class="table-secondary">{{ row.serviceCategory }} · {{ row.serviceType }}{% if row.pieces %} · {{ row.pieces }} pcs{% endif %}{% if row.itemDetail %} · {{ row.itemDetail }}{% endif %}</span>
                 </td>
                 <td>{{ row.ticketDate or '—' }}</td>
                 <td>

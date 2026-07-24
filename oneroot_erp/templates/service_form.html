@@ -48,6 +48,15 @@
                       <option value="{{ value }}" {% if payload.get(field.name, '') == value %}selected{% endif %}>{{ label }}</option>
                     {% endfor %}
                   </select>
+                {% elif definition.key == 'laundry_tickets' and field.name == 'laundryItem' %}
+                  <input
+                    type="text"
+                    name="{{ field.name }}"
+                    value="{{ payload.get(field.name, '') }}"
+                    list="service-reference-options"
+                    placeholder="Choose or type laundry item"
+                    {% if field.required %}required{% endif %}
+                  >
                 {% elif definition.key == 'equipment_rental_bookings' and field.name == 'equipmentItem' %}
                   <input
                     type="text"
@@ -78,7 +87,7 @@
       </div>
     </form>
 
-    {% if definition.key == 'equipment_rental_bookings' and reference_product_options %}
+    {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] and reference_product_options %}
       <datalist id="service-reference-options">
         {% for item in reference_product_options %}
           <option value="{{ item }}"></option>

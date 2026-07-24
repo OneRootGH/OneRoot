@@ -531,11 +531,31 @@ textarea { resize: vertical; }
 .pos-counter-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 0.8rem;
+  gap: 0.55rem;
   margin-bottom: 1rem;
+  align-items: stretch;
 }
 .pos-wide-card {
-  grid-column: span 2;
+  grid-column: span 1;
+}
+.pos-counter-strip .mini-card {
+  min-width: 0;
+  padding: 0.72rem 0.8rem;
+  gap: 0.18rem;
+  background: #fffdf9;
+}
+.pos-counter-strip .mini-card strong {
+  font-size: 1rem;
+  line-height: 1.2;
+  word-break: break-word;
+}
+.pos-counter-strip .mini-card .eyebrow {
+  font-size: 0.68rem;
+  letter-spacing: 0.08em;
+}
+#pos-payment-mix {
+  font-size: 0.9rem;
+  line-height: 1.3;
 }
 .pos-serving-note {
   margin: 0 0 1rem;
@@ -981,11 +1001,13 @@ thead th {
   .pos-layout,
   .card-grid.four,
   .card-grid.two,
-  .pos-counter-strip,
   .pos-quick-grid,
   .pos-payment-quick,
   .pos-results-grid {
     grid-template-columns: 1fr;
+  }
+  .pos-counter-strip {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
   .sidebar {
     position: static;
@@ -1025,6 +1047,9 @@ thead th {
   .summary-grid {
     grid-template-columns: 1fr;
   }
+  .pos-counter-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
   .account-menu,
   .account-menu summary,
   .account-panel {
@@ -1061,6 +1086,12 @@ thead th {
   td {
     padding: 0.7rem 0.55rem;
     font-size: 0.9rem;
+  }
+}
+
+@media (max-width: 540px) {
+  .pos-counter-strip {
+    grid-template-columns: 1fr;
   }
 }
 

@@ -295,7 +295,7 @@ SERVICE_MODULE_SECTIONS = {
         (
             "Items & Pricing",
             "Describe the pieces, amount due, and any payment already collected for this job.",
-            ["itemSummary", "pieces", "amountDue", "amountPaid", "paymentDate", "paymentMethod", "paymentReference"],
+            ["laundryItem", "itemSummary", "pieces", "amountDue", "amountPaid", "paymentDate", "paymentMethod", "paymentReference"],
         ),
         (
             "Promise & Completion",
@@ -455,6 +455,11 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
         status = normalize_text(payload.get("status")) or "Received"
         due_date = parse_date(payload.get("dueDate"))
         ready_date = parse_date(payload.get("readyDate"))
+        laundry_item = normalize_text(payload.get("laundryItem"))
+        item_detail = normalize_text(payload.get("itemSummary"))
+        item_summary = laundry_item or item_detail or "Laundry Job"
+        if item_detail == item_summary:
+            item_detail = ""
         rows.append(
             {
                 "record": record,
@@ -463,7 +468,9 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "customerPhone": normalize_phone(payload.get("customerPhone")),
                 "serviceType": normalize_text(payload.get("serviceType")) or "Normal",
                 "serviceCategory": normalize_text(payload.get("serviceCategory")) or "General Items",
-                "itemSummary": normalize_text(payload.get("itemSummary")) or "Laundry Job",
+                "laundryItem": laundry_item,
+                "itemSummary": item_summary,
+                "itemDetail": item_detail,
                 "pieces": int(parse_amount(payload.get("pieces"))) if parse_amount(payload.get("pieces")) else 0,
                 "ticketDate": parse_date(payload.get("ticketDate")),
                 "dueDate": due_date,
