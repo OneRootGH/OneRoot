@@ -662,6 +662,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("equipmentItem", "Equipment Item", "text", True),
             FieldDefinition("customerName", "Customer Name", "text", True),
             FieldDefinition("customerPhone", "Customer Phone", "text"),
+            FieldDefinition("rentalDays", "Rental Days", "number", False, step="1"),
             FieldDefinition("rentalFee", "Rental Fee", "number", True),
             FieldDefinition("costAmount", "Service Cost", "number"),
             FieldDefinition("amountPaid", "Amount Paid", "number"),

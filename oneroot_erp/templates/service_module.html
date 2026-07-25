@@ -198,7 +198,7 @@
                 </td>
                 <td>
                   {{ row.itemSummary }}
-                  <span class="table-secondary">{{ row.serviceCategory }} · {{ row.serviceType }}{% if row.pieces %} · {{ row.pieces }} pcs{% endif %}{% if row.itemDetail %} · {{ row.itemDetail }}{% endif %}</span>
+                  <span class="table-secondary">{{ row.serviceCategory }} · {{ row.serviceType }}{% if row.pieces %} · {{ row.pieces }} pcs @ {{ row.unitRate|currency }}{% endif %}{% if row.itemDetail %} · {{ row.itemDetail }}{% endif %}</span>
                 </td>
                 <td>{{ row.ticketDate or '—' }}</td>
                 <td>
@@ -237,7 +237,7 @@
                 </td>
                 <td>
                   {{ row.customerName }}
-                  <span class="table-secondary">{{ row.equipmentCategory }}{% if row.customerPhone %} · {{ row.customerPhone }}{% endif %}</span>
+                  <span class="table-secondary">{{ row.equipmentCategory }} · {{ row.rentalDays }} day{% if row.rentalDays != 1 %}s{% endif %} @ {{ row.dailyRate|currency }}{% if row.customerPhone %} · {{ row.customerPhone }}{% endif %}</span>
                 </td>
                 <td>{{ row.bookingDate or '—' }}</td>
                 <td>
@@ -245,7 +245,7 @@
                   <span class="table-secondary">Due {{ row.dueDate or '—' }} · Return {{ row.returnDate or '—' }}</span>
                 </td>
                 <td>
-                  {{ row.rentalFee|currency }}
+                  {{ row.totalDue|currency }}
                   <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }} · Profit {{ row.profitAmount|currency }}{% if row.depositAmount %} · Dep {{ row.depositAmount|currency }}{% endif %}</span>
                 </td>
                 <td>{{ row.status }}</td>

@@ -118,4 +118,31 @@
       })();
     </script>
   {% endif %}
+  {% if definition.key == 'sales' %}
+    <script>
+      (function () {
+        const amountField = document.querySelector('input[name="amount"]');
+        const costField = document.querySelector('input[name="costAmount"]');
+        const profitField = document.querySelector('input[name="profitAmount"]');
+        if (!amountField || !costField || !profitField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updateProfit() {
+          profitField.value = (parseNumber(amountField.value) - parseNumber(costField.value)).toFixed(2);
+        }
+
+        amountField.addEventListener("input", updateProfit);
+        amountField.addEventListener("change", updateProfit);
+        costField.addEventListener("input", updateProfit);
+        costField.addEventListener("change", updateProfit);
+        updateProfit();
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

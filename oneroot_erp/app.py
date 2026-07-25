@@ -253,6 +253,50 @@ def service_cost_amount(module_key: str, payload: dict[str, Any]) -> float:
     return round(parse_amount(payload.get(service_cost_field_name(module_key))), 2)
 
 
+def laundry_piece_count(payload: dict[str, Any]) -> int:
+    pieces = int(round(parse_amount(payload.get("pieces"))))
+    return pieces if pieces > 0 else 1
+
+
+def equipment_rental_days(payload: dict[str, Any]) -> int:
+    out_date = parse_date(payload.get("outDate"))
+    due_date = parse_date(payload.get("dueDate"))
+    if out_date and due_date and due_date >= out_date:
+        return max((due_date - out_date).days, 1)
+    saved_days = int(round(parse_amount(payload.get("rentalDays"))))
+    return saved_days if saved_days > 0 else 1
+
+
+def service_pricing_multiplier(module_key: str, payload: dict[str, Any]) -> float:
+    if module_key == "laundry_tickets":
+        pieces = laundry_piece_count(payload)
+        payload["pieces"] = pieces
+        return float(pieces)
+    if module_key == "equipment_rental_bookings":
+        rental_days = equipment_rental_days(payload)
+        payload["rentalDays"] = rental_days
+        return float(rental_days)
+    return 1.0
+
+
+def service_reference_products(db_session, module_key: str) -> list[Product]:
+    service_area = SERVICE_MODULE_AREA_IDS.get(module_key, "")
+    if not service_area:
+        return []
+    return db_session.scalars(
+        select(Product)
+        .where(Product.business_area_id == service_area, Product.active.is_(True))
+        .order_by(Product.name.asc())
+    ).all()
+
+
+def match_service_reference_product(products: list[Product], item_name: str) -> Product | None:
+    normalized_item_name = normalize_text(item_name).lower()
+    if not normalized_item_name:
+        return None
+    return next((product for product in products if normalize_text(product.name).lower() == normalized_item_name), None)
+
+
 def service_payment_entries(module_key: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
     raw_entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY) if isinstance(payload.get(SERVICE_PAYMENT_ENTRIES_KEY), list) else []
     entries: list[dict[str, Any]] = []
@@ -357,23 +401,23 @@ def apply_service_payment_rollup(module_key: str, payload: dict[str, Any]) -> No
 
 def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str, Any]) -> None:
     cost_field = service_cost_field_name(module_key)
-    if parse_amount(payload.get(cost_field)) > 0:
-        return
-    service_area = SERVICE_MODULE_AREA_IDS.get(module_key, "")
+    multiplier = service_pricing_multiplier(module_key, payload)
     item_name = normalize_text(payload.get(service_item_field_name(module_key)))
-    if not service_area or not item_name:
+    if not item_name:
         return
-    products = db_session.scalars(
-        select(Product)
-        .where(Product.business_area_id == service_area, Product.active.is_(True))
-        .order_by(Product.name.asc())
-    ).all()
-    normalized_item_name = item_name.lower()
-    match = next((product for product in products if normalize_text(product.name).lower() == normalized_item_name), None)
+    products = service_reference_products(db_session, module_key)
+    match = match_service_reference_product(products, item_name)
     if not match:
         return
-    multiplier = max(parse_amount(payload.get("pieces")), 1.0) if module_key == "laundry_tickets" else 1.0
     payload[cost_field] = round(parse_amount(match.cost_price) * multiplier, 2)
+    if module_key == "laundry_tickets":
+        payload["amountDue"] = round(parse_amount(match.sales_price) * multiplier, 2)
+        if normalize_text(match.category):
+            payload["serviceCategory"] = normalize_text(match.category)
+    elif module_key == "equipment_rental_bookings":
+        payload["rentalFee"] = round(parse_amount(match.sales_price) * multiplier, 2)
+        if normalize_text(match.category):
+            payload["equipmentCategory"] = normalize_text(match.category)
 
 
 def sales_cost_amount(payload: dict[str, Any]) -> float:
@@ -543,7 +587,7 @@ SERVICE_MODULE_SECTIONS = {
         ),
         (
             "Items & Pricing",
-            "Describe the pieces, amount due, and service cost so OneRoot can track realized profit whenever payment is collected.",
+            "Select the laundry item and pieces so amount due and service cost can auto-calculate from the saved catalog.",
             ["laundryItem", "itemSummary", "pieces", "amountDue", "costAmount"],
         ),
         (
@@ -560,8 +604,8 @@ SERVICE_MODULE_SECTIONS = {
         ),
         (
             "Charges & Payment",
-            "Capture the rental fee, service cost, deposit, and any damage charge. Payments are collected separately from the booking.",
-            ["rentalFee", "costAmount", "depositAmount", "damageCharge"],
+            "Select the equipment and rental days so the rental fee and service cost can auto-calculate from the saved catalog.",
+            ["rentalDays", "rentalFee", "costAmount", "depositAmount", "damageCharge"],
         ),
         (
             "Movement & Return",
@@ -710,6 +754,7 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
         item_summary = laundry_item or item_detail or "Laundry Job"
         if item_detail == item_summary:
             item_detail = ""
+        pieces = int(parse_amount(payload.get("pieces"))) if parse_amount(payload.get("pieces")) else 0
         rows.append(
             {
                 "record": record,
@@ -721,7 +766,7 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "laundryItem": laundry_item,
                 "itemSummary": item_summary,
                 "itemDetail": item_detail,
-                "pieces": int(parse_amount(payload.get("pieces"))) if parse_amount(payload.get("pieces")) else 0,
+                "pieces": pieces,
                 "ticketDate": parse_date(payload.get("ticketDate")),
                 "dueDate": due_date,
                 "readyDate": ready_date,
@@ -731,6 +776,7 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "amountPaid": amount_paid,
                 "costAmount": payment_summary["totalCost"],
                 "profitAmount": payment_summary["profitRecognized"],
+                "unitRate": round(amount_due / pieces, 2) if pieces > 0 else amount_due,
                 "paymentCount": len(payment_summary["payments"]),
                 "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
                 "payments": payment_summary["payments"],
@@ -757,6 +803,7 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
         billed_total = round(rental_fee + damage_charge, 2)
         balance = payment_summary["balance"]
         status = normalize_text(payload.get("status")) or "Booked"
+        rental_days = equipment_rental_days(payload)
         due_date = parse_date(payload.get("dueDate"))
         return_date = parse_date(payload.get("returnDate"))
         rows.append(
@@ -773,12 +820,15 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
                 "returnDate": return_date,
                 "reference": normalize_text(payload.get("reference")),
                 "status": status,
+                "rentalDays": rental_days,
                 "rentalFee": rental_fee,
                 "damageCharge": damage_charge,
                 "depositAmount": deposit_amount,
                 "amountPaid": amount_paid,
                 "costAmount": payment_summary["totalCost"],
                 "profitAmount": payment_summary["profitRecognized"],
+                "dailyRate": round(rental_fee / rental_days, 2) if rental_days > 0 else rental_fee,
+                "totalDue": billed_total,
                 "paymentCount": len(payment_summary["payments"]),
                 "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
                 "payments": payment_summary["payments"],
@@ -4900,11 +4950,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             default_status = "Received" if module_key == "laundry_tickets" else "Booked"
             record_payload.setdefault(definition.status_field, default_status)
             service_area = SERVICE_MODULE_AREA_IDS[module_key]
-            inventory_reference_products = g.db.scalars(
-                select(Product)
-                .where(Product.business_area_id == service_area, Product.active.is_(True))
-                .order_by(Product.name.asc())
-            ).all()
+            inventory_reference_products = service_reference_products(g.db, module_key)
             module_quick_actions = []
             if user_has_access(g.current_user, "sales"):
                 module_quick_actions.append(
@@ -4931,6 +4977,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 section_fields=service_module_field_sections(definition),
                 module_quick_actions=module_quick_actions,
                 reference_product_options=[product.name for product in inventory_reference_products],
+                reference_product_catalog=[
+                    {
+                        "name": product.name,
+                        "category": product.category,
+                        "salesPrice": round(parse_amount(product.sales_price), 2),
+                        "costPrice": round(parse_amount(product.cost_price), 2),
+                    }
+                    for product in inventory_reference_products
+                ],
                 service_payment_summary=service_payment_summary(module_key, record_payload),
             )
         module_quick_actions = []

@@ -70,7 +70,11 @@
                 {% if field.field_type == 'textarea' %}
                   <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
                 {% elif field.field_type == 'select' %}
-                  <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
+                  <select
+                    name="{{ field.name }}"
+                    {% if field.name == 'serviceCategory' %}id="service-category"{% elif field.name == 'equipmentCategory' %}id="equipment-category"{% endif %}
+                    {% if field.required %}required{% endif %}
+                  >
                     <option value="">Select {{ field.label }}</option>
                     {% for value, label in field.options %}
                       <option value="{{ value }}" {% if payload.get(field.name, '') == value %}selected{% endif %}>{{ label }}</option>
@@ -80,6 +84,7 @@
                   <input
                     type="text"
                     name="{{ field.name }}"
+                    id="laundry-item"
                     value="{{ payload.get(field.name, '') }}"
                     list="service-reference-options"
                     placeholder="Choose or type laundry item"
@@ -89,6 +94,7 @@
                   <input
                     type="text"
                     name="{{ field.name }}"
+                    id="equipment-item"
                     value="{{ payload.get(field.name, '') }}"
                     list="service-reference-options"
                     placeholder="Choose or type equipment item"
@@ -99,6 +105,7 @@
                     type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
                     {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
                     name="{{ field.name }}"
+                    {% if field.name == 'pieces' %}id="laundry-pieces"{% elif field.name == 'amountDue' %}id="laundry-amount-due"{% elif field.name == 'costAmount' %}id="service-cost-amount"{% elif field.name == 'rentalDays' %}id="equipment-rental-days"{% elif field.name == 'rentalFee' %}id="equipment-rental-fee"{% elif field.name == 'outDate' %}id="equipment-out-date"{% elif field.name == 'dueDate' %}id="equipment-due-date"{% endif %}
                     step="{{ field.step if field.field_type == 'number' else '' }}"
                     value="{{ payload.get(field.name, '') }}"
                     placeholder="{{ field.placeholder or field.label }}"
@@ -143,4 +150,134 @@
       </datalist>
     {% endif %}
   </article>
+{% endblock %}
+{% block scripts %}
+  {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] %}
+    <script>
+      (function () {
+        const serviceKey = {{ definition.key|tojson }};
+        const catalog = {{ reference_product_catalog|tojson }};
+        if (!Array.isArray(catalog) || !catalog.length) {
+          return;
+        }
+
+        const fields = {
+          item: document.getElementById(serviceKey === "laundry_tickets" ? "laundry-item" : "equipment-item"),
+          category: document.getElementById(serviceKey === "laundry_tickets" ? "service-category" : "equipment-category"),
+          pieces: document.getElementById("laundry-pieces"),
+          amountDue: document.getElementById("laundry-amount-due"),
+          costAmount: document.getElementById("service-cost-amount"),
+          rentalDays: document.getElementById("equipment-rental-days"),
+          rentalFee: document.getElementById("equipment-rental-fee"),
+          outDate: document.getElementById("equipment-out-date"),
+          dueDate: document.getElementById("equipment-due-date"),
+        };
+        if (!fields.item || !fields.costAmount) {
+          return;
+        }
+
+        function normalize(value) {
+          return String(value || "").trim().toLowerCase();
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function formatAmount(value) {
+          return Number.isFinite(value) ? value.toFixed(2) : "";
+        }
+
+        function ensureSelectValue(select, value) {
+          if (!select || !value) {
+            return;
+          }
+          const hasOption = Array.from(select.options).some((option) => option.value === value);
+          if (!hasOption) {
+            const option = document.createElement("option");
+            option.value = value;
+            option.textContent = value;
+            select.appendChild(option);
+          }
+          select.value = value;
+        }
+
+        const catalogMap = new Map(
+          catalog.map((item) => [
+            normalize(item.name),
+            {
+              name: item.name,
+              category: item.category || "",
+              salesPrice: parseNumber(item.salesPrice),
+              costPrice: parseNumber(item.costPrice),
+            },
+          ]),
+        );
+
+        function deriveRentalDays() {
+          if (!fields.outDate || !fields.dueDate || !fields.rentalDays) {
+            return 0;
+          }
+          if (!fields.outDate.value || !fields.dueDate.value) {
+            return 0;
+          }
+          const outDate = new Date(fields.outDate.value + "T00:00:00");
+          const dueDate = new Date(fields.dueDate.value + "T00:00:00");
+          if (Number.isNaN(outDate.getTime()) || Number.isNaN(dueDate.getTime()) || dueDate < outDate) {
+            return 0;
+          }
+          const diffDays = Math.round((dueDate - outDate) / 86400000);
+          return Math.max(diffDays, 1);
+        }
+
+        function currentUnits() {
+          if (serviceKey === "laundry_tickets") {
+            const pieces = Math.max(Math.round(parseNumber(fields.pieces ? fields.pieces.value : "1")), 1);
+            if (fields.pieces) {
+              fields.pieces.value = String(pieces);
+            }
+            return pieces;
+          }
+          const derivedDays = deriveRentalDays();
+          const typedDays = Math.max(Math.round(parseNumber(fields.rentalDays ? fields.rentalDays.value : "1")), 1);
+          const rentalDays = derivedDays || typedDays;
+          if (fields.rentalDays) {
+            fields.rentalDays.value = String(rentalDays);
+          }
+          return rentalDays;
+        }
+
+        function applyCatalogPricing() {
+          const match = catalogMap.get(normalize(fields.item.value));
+          currentUnits();
+          if (!match) {
+            return;
+          }
+          const units = currentUnits();
+          ensureSelectValue(fields.category, match.category);
+          fields.costAmount.value = formatAmount(match.costPrice * units);
+          if (serviceKey === "laundry_tickets" && fields.amountDue) {
+            fields.amountDue.value = formatAmount(match.salesPrice * units);
+          }
+          if (serviceKey === "equipment_rental_bookings" && fields.rentalFee) {
+            fields.rentalFee.value = formatAmount(match.salesPrice * units);
+          }
+        }
+
+        [
+          fields.item,
+          fields.pieces,
+          fields.rentalDays,
+          fields.outDate,
+          fields.dueDate,
+        ].filter(Boolean).forEach((field) => {
+          field.addEventListener("input", applyCatalogPricing);
+          field.addEventListener("change", applyCatalogPricing);
+        });
+
+        applyCatalogPricing();
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

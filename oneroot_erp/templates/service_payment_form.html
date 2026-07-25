@@ -21,7 +21,7 @@
         {% if definition.key == 'laundry_tickets' %}
           {{ service_row.amountDue|currency }}
         {% else %}
-          {{ (service_row.rentalFee + service_row.damageCharge)|currency }}
+          {{ service_row.totalDue|currency }}
         {% endif %}
       </strong>
       <small>Request value currently billed</small>
@@ -54,10 +54,12 @@
       <ul class="stack-list compact">
         {% if definition.key == 'laundry_tickets' %}
           <li><strong>Service</strong><span>{{ service_row.itemSummary }} · {{ service_row.serviceCategory }} · {{ service_row.serviceType }}</span></li>
+          <li><strong>Pricing</strong><span>{{ service_row.pieces or 1 }} piece{% if (service_row.pieces or 1) != 1 %}s{% endif %} @ {{ service_row.unitRate|currency }}</span></li>
           <li><strong>Dates</strong><span>Ticket {{ service_row.ticketDate or '—' }} · Due {{ service_row.dueDate or '—' }} · Ready {{ service_row.readyDate or '—' }}</span></li>
         {% else %}
           <li><strong>Customer</strong><span>{{ service_row.customerName }}{% if service_row.customerPhone %} · {{ service_row.customerPhone }}{% endif %}</span></li>
-          <li><strong>Rental</strong><span>{{ service_row.equipmentCategory }} · Due {{ service_row.dueDate or '—' }} · Return {{ service_row.returnDate or '—' }}</span></li>
+          <li><strong>Rental</strong><span>{{ service_row.equipmentCategory }} · {{ service_row.rentalDays }} day{% if service_row.rentalDays != 1 %}s{% endif %} @ {{ service_row.dailyRate|currency }}</span></li>
+          <li><strong>Dates</strong><span>Due {{ service_row.dueDate or '—' }} · Return {{ service_row.returnDate or '—' }}</span></li>
         {% endif %}
         <li><strong>Status</strong><span>{{ service_row.status }}</span></li>
         <li><strong>Service Cost</strong><span>{{ service_row.costAmount|currency }}</span></li>
