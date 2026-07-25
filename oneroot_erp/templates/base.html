@@ -3,7 +3,9 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#204d3a">
     <title>{{ page_title }} | OneRoot Essentials Platform</title>
+    <link rel="manifest" href="/manifest.webmanifest">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body>
@@ -14,7 +16,7 @@
           <div>
             <p class="eyebrow">OneRoot Essentials</p>
             <h1>Platform</h1>
-            <p class="muted">Server-first operations workspace</p>
+            <p class="muted">Unified operations workspace</p>
           </div>
         </div>
         {% for group in sidebar_items %}
@@ -53,6 +55,7 @@
             <h2>{{ page_title }}</h2>
           </div>
           <div class="topbar-actions">
+            <button class="button subtle" type="button" data-install-app hidden>Install App</button>
             {% if 'search' in current_access_keys %}
               <form method="get" action="{{ url_for('search_page') }}" class="search-row topbar-search">
                 <input type="search" name="q" placeholder="Search records, orders, stock" value="{{ request.args.get('q', '') if request.endpoint == 'search_page' else '' }}">
@@ -98,6 +101,7 @@
         {% block content %}{% endblock %}
       </main>
     </div>
+    <script src="/website/pwa.js?v=20260725a" defer></script>
     {% block scripts %}{% endblock %}
   </body>
 </html>

@@ -6,3 +6,4 @@ __pycache__/
 *.pyc
 data/*.db
 outputs/*.json
+.do/*.json

@@ -9,8 +9,9 @@
     />
     <meta name="theme-color" content="#143a2b" />
     <title>OneRoot.shop | Your One-Stop Essentials Hub</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
-    <link rel="stylesheet" href="/website/styles.css?v=20260721b" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260725a" />
   </head>
   <body>
     <div class="shop-shell">
@@ -29,6 +30,7 @@
           <a href="/track-order.html">Track Order</a>
           <a href="#contact">Contact</a>
           <a href="/operations/#access">Staff App</a>
+          <button class="button button-secondary site-install" type="button" data-install-app hidden>Install App</button>
         </nav>
 
         <button id="cartToggleBtn" class="cart-toggle" type="button">
@@ -68,30 +70,6 @@
           </aside>
         </section>
 
-        <section class="order-flow-section">
-          <article class="step-card">
-            <span class="step-number">1</span>
-            <div>
-              <strong>Pick an area or search</strong>
-              <p>Jump straight to groceries, water, laundry, kitchen, or any other OneRoot lane.</p>
-            </div>
-          </article>
-          <article class="step-card">
-            <span class="step-number">2</span>
-            <div>
-              <strong>Add everything to one order</strong>
-              <p>Fixed-price items and quote items can sit together in the same basket.</p>
-            </div>
-          </article>
-          <article class="step-card">
-            <span class="step-number">3</span>
-            <div>
-              <strong>Send and wait for confirmation</strong>
-              <p>Leave your phone number once, then OneRoot follows up to confirm delivery, pickup, or quoted services.</p>
-            </div>
-          </article>
-        </section>
-
         <section class="shop-section" id="shop">
           <div class="section-heading">
             <div>
@@ -105,30 +83,18 @@
             <aside class="order-guide-panel">
               <article class="order-guide-card">
                 <p class="eyebrow">Quick Start</p>
-                <h3>Tap a business area to narrow the catalog fast.</h3>
-                <p>
-                  Use these shortcuts when you already know whether you need groceries,
-                  water delivery, laundry, drinks, equipment, or kitchen support.
-                </p>
+                <h3>Tap an area, search a product, then send one clean order.</h3>
+                <p>Use the shortcuts below when you already know the lane you want.</p>
                 <div id="catalogQuickFilters" class="filter-chip-row"></div>
               </article>
 
               <article class="order-guide-card order-guide-card-muted">
-                <p class="eyebrow">Ordering Tips</p>
+                <p class="eyebrow">Fast Order Tips</p>
                 <ul class="order-guide-list">
                   <li>Use search for item names, categories, or area names.</li>
                   <li>Quote items stay in the same basket for staff follow-up.</li>
                   <li>Use notes for laundry counts, equipment duration, meal preference, or suite enquiry.</li>
                 </ul>
-              </article>
-
-              <article class="order-guide-card order-guide-card-accent">
-                <p class="eyebrow">Need staff help?</p>
-                <h3>Send the order anyway and let OneRoot confirm the details by phone.</h3>
-                <p>
-                  This works well for water delivery, apartment enquiries, custom food requests,
-                  and services that need a quick quote before fulfillment.
-                </p>
               </article>
             </aside>
 
@@ -176,9 +142,7 @@
                 </button>
               </div>
 
-              <p class="cart-panel-copy">
-                Review your basket, then leave your contact, delivery, and payment details once.
-              </p>
+              <p class="cart-panel-copy">Review the basket once, then leave your contact, delivery, and payment details below.</p>
 
               <div class="order-snapshot-grid">
                 <article>
@@ -372,5 +336,6 @@
     </div>
 
     <script src="/website/app.js?v=20260721b"></script>
+    <script src="/website/pwa.js?v=20260725a"></script>
   </body>
 </html>

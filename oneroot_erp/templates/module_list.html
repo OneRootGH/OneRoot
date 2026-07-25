@@ -226,7 +226,12 @@
               <td>{{ business_area_short.get(record.business_area_id, business_area_labels.get(record.business_area_id, record.business_area_id or '—')) }}</td>
               <td>{{ record.status or '—' }}</td>
               <td>{{ record.month or record.record_date or '—' }}</td>
-              <td>{{ record.amount|currency }}</td>
+              <td>
+                {{ record.amount|currency }}
+                {% if definition.key == 'sales' %}
+                  <span class="table-secondary">Cost {{ (record.payload.get('costAmount', 0))|currency }} · Profit {{ (record.payload.get('profitAmount', record.amount - (record.payload.get('costAmount', 0) or 0)))|currency }}</span>
+                {% endif %}
+              </td>
               <td>{{ record.updated_at }}</td>
               <td>
                 {% if definition.editable %}

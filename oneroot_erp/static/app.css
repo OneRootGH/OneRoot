@@ -157,6 +157,29 @@ a { color: inherit; text-decoration: none; }
   align-items: center;
   flex-wrap: wrap;
 }
+.toolbar-inline-form {
+  display: flex;
+  gap: 0.6rem;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  padding: 0.45rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.72);
+}
+.toolbar-inline-form label {
+  display: grid;
+  gap: 0.3rem;
+  min-width: 148px;
+}
+.toolbar-inline-form label span {
+  font-size: 0.74rem;
+  color: var(--muted);
+  font-weight: 700;
+}
+.toolbar-inline-form input {
+  padding: 0.75rem 0.85rem;
+}
 .topbar-search {
   min-width: min(420px, 100%);
 }
@@ -529,18 +552,19 @@ textarea { resize: vertical; }
   grid-column: span 4;
 }
 .pos-counter-strip {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: wrap;
   gap: 0.55rem;
   margin-bottom: 1rem;
   align-items: stretch;
 }
 .pos-wide-card {
-  grid-column: span 1;
+  flex: 2 1 260px;
 }
 .pos-counter-strip .mini-card {
+  flex: 1 1 124px;
   min-width: 0;
-  padding: 0.72rem 0.8rem;
+  padding: 0.66rem 0.74rem;
   gap: 0.18rem;
   background: #fffdf9;
 }
@@ -1037,7 +1061,8 @@ thead th {
   }
   .topbar-actions > *,
   .toolbar > *,
-  .search-row > * {
+  .search-row > *,
+  .toolbar-inline-form {
     flex: 1 1 100%;
   }
   .menu-links,
@@ -1046,9 +1071,6 @@ thead th {
   .result-grid,
   .summary-grid {
     grid-template-columns: 1fr;
-  }
-  .pos-counter-strip {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
   .account-menu,
   .account-menu summary,
@@ -1086,12 +1108,6 @@ thead th {
   td {
     padding: 0.7rem 0.55rem;
     font-size: 0.9rem;
-  }
-}
-
-@media (max-width: 540px) {
-  .pos-counter-strip {
-    grid-template-columns: 1fr;
   }
 }
 

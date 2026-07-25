@@ -36,10 +36,23 @@
       <small>Income in the selected report scope</small>
     </article>
     <article class="metric-card">
+      <span>Cost</span>
+      <strong>{{ cost_total|currency }}</strong>
+      <small>Direct item and service cost linked to paid sales</small>
+    </article>
+    <article class="metric-card">
+      <span>Gross Profit</span>
+      <strong>{{ profit_total|currency }}</strong>
+      <small>Realized profit in the selected scope</small>
+    </article>
+    <article class="metric-card {% if net_total < 0 %}warning{% endif %}">
       <span>Expenses</span>
       <strong>{{ expenses_total|currency }}</strong>
       <small>Direct operating spend captured</small>
     </article>
+  </section>
+
+  <section class="card-grid four">
     <article class="metric-card">
       <span>Salaries</span>
       <strong>{{ salary_total|currency }}</strong>
@@ -48,11 +61,8 @@
     <article class="metric-card {% if net_total < 0 %}warning{% endif %}">
       <span>Net Position</span>
       <strong>{{ net_total|currency }}</strong>
-      <small>Sales minus expenses and salaries</small>
+      <small>Gross profit minus expenses and salaries</small>
     </article>
-  </section>
-
-  <section class="card-grid four">
     <article class="metric-card">
       <span>Petty Cash</span>
       <strong>{{ petty_cash_total|currency }}</strong>
@@ -131,27 +141,53 @@
       <div class="card-header">
         <div>
           <p class="eyebrow">Charts</p>
-          <h3>Net Position By Area</h3>
+          <h3>Profit By Business Area</h3>
         </div>
       </div>
-      {% if report_net_chart %}
+      {% if report_profit_chart %}
         <div class="chart-stack">
-          {% for area in report_net_chart %}
+          {% for area in report_profit_chart %}
             <div class="chart-row">
               <div class="chart-row-header">
                 <strong>{{ area.chartLabel }}</strong>
-                <span class="{% if area.chartNegative %}negative-text{% endif %}">{{ area.chartValue|currency }}</span>
+                <span>{{ area.chartValue|currency }}</span>
               </div>
               <div class="chart-track">
-                <span class="chart-fill {% if area.chartNegative %}negative{% endif %}" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
+                <span class="chart-fill" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
               </div>
             </div>
           {% endfor %}
         </div>
       {% else %}
-        <p class="muted">Net position by area will appear when activity exists in this report scope.</p>
+        <p class="muted">Profit by area will appear when cost-linked payments exist in this report scope.</p>
       {% endif %}
     </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Charts</p>
+        <h3>Net Position By Area</h3>
+      </div>
+    </div>
+    {% if report_net_chart %}
+      <div class="chart-stack">
+        {% for area in report_net_chart %}
+          <div class="chart-row">
+            <div class="chart-row-header">
+              <strong>{{ area.chartLabel }}</strong>
+              <span class="{% if area.chartNegative %}negative-text{% endif %}">{{ area.chartValue|currency }}</span>
+            </div>
+            <div class="chart-track">
+              <span class="chart-fill {% if area.chartNegative %}negative{% endif %}" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p class="muted">Net position by area will appear when activity exists in this report scope.</p>
+    {% endif %}
   </section>
 
   <section class="split-grid">
@@ -168,6 +204,8 @@
             <tr>
               <th>Area</th>
               <th>Sales</th>
+              <th>Cost</th>
+              <th>Profit</th>
               <th>Expenses</th>
               <th>Salaries</th>
               <th>Supplier Balance</th>
@@ -179,13 +217,15 @@
               <tr>
                 <td>{{ row.areaLabel }}</td>
                 <td>{{ row.salesTotal|currency }}</td>
+                <td>{{ row.costTotal|currency }}</td>
+                <td>{{ row.profitTotal|currency }}</td>
                 <td>{{ row.expenseTotal|currency }}</td>
                 <td>{{ row.salaryTotal|currency }}</td>
                 <td>{{ row.supplierBalance|currency }}</td>
                 <td class="{% if row.netTotal < 0 %}negative-text{% endif %}">{{ row.netTotal|currency }}</td>
               </tr>
             {% else %}
-              <tr><td colspan="6">No report rows are available for this filter yet.</td></tr>
+              <tr><td colspan="8">No report rows are available for this filter yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>

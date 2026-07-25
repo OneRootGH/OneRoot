@@ -11,6 +11,20 @@
         <a class="button subtle" href="{{ url_for('apartment_report_print', q=search, month=month_filter, status=status_filter, alert=alert_filter) }}" target="_blank" rel="noopener">Print Report</a>
         <a class="button subtle" href="{{ url_for('module_list', module_key='security_deposit_records') }}">Deposits & Charges</a>
         <a class="button subtle" href="{{ url_for('module_list', module_key='maintenance_records') }}">Maintenance</a>
+        <form method="post" action="{{ url_for('apartment_apply_monthly_bills') }}" class="toolbar-inline-form">
+          <input type="hidden" name="q" value="{{ search }}">
+          <input type="hidden" name="status" value="{{ status_filter }}">
+          <input type="hidden" name="alert" value="{{ alert_filter }}">
+          <label>
+            <span>Bill Month</span>
+            <input type="month" name="month" value="{{ month_filter or '' }}" required>
+          </label>
+          <label>
+            <span>Bill Due Date</span>
+            <input type="date" name="bill_due_date">
+          </label>
+          <button class="button subtle" type="submit">Issue Monthly Bills</button>
+        </form>
         <a class="button primary" href="{{ url_for('module_form', module_key='apartments') }}">New Apartment Entry</a>
       </div>
     </div>

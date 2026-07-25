@@ -1,8 +1,10 @@
 {
-  "name": "OneRoot Operations App",
+  "name": "OneRoot Essentials Platform",
   "short_name": "OneRoot",
-  "description": "Offline-ready operations app for OneRoot expenses, daily sales, apartments, and petty cash.",
-  "start_url": "./index.html#overview",
+  "description": "Installable OneRoot platform for operations, POS, apartments, services, stock, and customer ordering.",
+  "id": "/operations/",
+  "start_url": "/operations/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#f7f2ea",
   "theme_color": "#214131",

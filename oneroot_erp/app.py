@@ -17,7 +17,7 @@ from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
-from sqlalchemy import create_engine, desc, or_, select
+from sqlalchemy import create_engine, desc, inspect, or_, select
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
@@ -51,6 +51,19 @@ APARTMENT_ACTIVE_STATUSES = {"Occupied", "Reserved"}
 DATABASE_INIT_RETRIES = 1
 DATABASE_INIT_DELAY_SECONDS = 1
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
+SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
+SERVICE_ITEM_FIELD_MAP = {
+    "laundry_tickets": "laundryItem",
+    "equipment_rental_bookings": "equipmentItem",
+}
+SERVICE_COST_FIELD_MAP = {
+    "laundry_tickets": "costAmount",
+    "equipment_rental_bookings": "costAmount",
+}
+SERVICE_LEGACY_PAYMENT_FIELDS = {
+    "laundry_tickets": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
+    "equipment_rental_bookings": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
+}
 
 
 def build_database_engine(database_url: str):
@@ -65,6 +78,23 @@ def build_database_engine(database_url: str):
     return create_engine(database_url, **engine_options)
 
 
+def ensure_schema_columns(engine) -> None:
+    inspector = inspect(engine)
+    if "pos_order_lines" not in inspector.get_table_names():
+        return
+    existing_columns = {column["name"] for column in inspector.get_columns("pos_order_lines")}
+    statements: list[str] = []
+    if "unit_cost" not in existing_columns:
+        statements.append("ALTER TABLE pos_order_lines ADD COLUMN unit_cost FLOAT DEFAULT 0")
+    if "cost_amount" not in existing_columns:
+        statements.append("ALTER TABLE pos_order_lines ADD COLUMN cost_amount FLOAT DEFAULT 0")
+    if not statements:
+        return
+    with engine.begin() as connection:
+        for statement in statements:
+            connection.exec_driver_sql(statement)
+
+
 def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
     retries = DATABASE_INIT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
     last_error: OperationalError | None = None
@@ -72,8 +102,11 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
     for attempt in range(1, retries + 1):
         try:
             Base.metadata.create_all(engine)
+            ensure_schema_columns(engine)
             with session_factory() as bootstrap_session:
                 bootstrap_database(bootstrap_session, app_config)
+                backfill_pos_line_costs(bootstrap_session)
+                bootstrap_session.commit()
             session_factory.remove()
             return
         except OperationalError as error:
@@ -155,6 +188,222 @@ def parse_date(value: Any) -> date | None:
 def parse_month(value: Any) -> str:
     raw = normalize_text(value)
     return raw[:7] if len(raw) >= 7 else ""
+
+
+def align_date_to_month(date_value: Any, month_value: Any, fallback_day: int = 5) -> str:
+    month_key = parse_month(month_value)
+    if not month_key:
+        return ""
+    try:
+        year_text, month_text = month_key.split("-", 1)
+        year = int(year_text)
+        month_number = int(month_text)
+    except (TypeError, ValueError):
+        return ""
+    base_date = parse_date(date_value)
+    day = base_date.day if base_date else max(int(fallback_day), 1)
+    day = min(day, calendar.monthrange(year, month_number)[1])
+    return date(year, month_number, day).isoformat()
+
+
+def backfill_pos_line_costs(db_session) -> None:
+    lines = db_session.scalars(
+        select(PosOrderLine).where(
+            or_(
+                PosOrderLine.unit_cost == 0,
+                PosOrderLine.cost_amount == 0,
+            )
+        )
+    ).all()
+    if not lines:
+        return
+
+    product_ids = {line.product_id for line in lines if normalize_text(line.product_id)}
+    products = {
+        product.id: product
+        for product in db_session.scalars(select(Product).where(Product.id.in_(product_ids))).all()
+    }
+    for line in lines:
+        product = products.get(line.product_id)
+        if not product:
+            continue
+        if parse_amount(line.unit_cost) <= 0:
+            line.unit_cost = round(parse_amount(product.cost_price), 2)
+        if parse_amount(line.cost_amount) <= 0:
+            line.cost_amount = round(parse_amount(line.quantity) * parse_amount(line.unit_cost), 2)
+
+
+def service_item_field_name(module_key: str) -> str:
+    return SERVICE_ITEM_FIELD_MAP.get(module_key, "item")
+
+
+def service_cost_field_name(module_key: str) -> str:
+    return SERVICE_COST_FIELD_MAP.get(module_key, "costAmount")
+
+
+def service_total_due(module_key: str, payload: dict[str, Any]) -> float:
+    if module_key == "laundry_tickets":
+        return round(parse_amount(payload.get("amountDue")), 2)
+    if module_key == "equipment_rental_bookings":
+        return round(parse_amount(payload.get("rentalFee")) + parse_amount(payload.get("damageCharge")), 2)
+    return 0.0
+
+
+def service_cost_amount(module_key: str, payload: dict[str, Any]) -> float:
+    return round(parse_amount(payload.get(service_cost_field_name(module_key))), 2)
+
+
+def service_payment_entries(module_key: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY) if isinstance(payload.get(SERVICE_PAYMENT_ENTRIES_KEY), list) else []
+    entries: list[dict[str, Any]] = []
+    for raw_entry in raw_entries:
+        if not isinstance(raw_entry, dict):
+            continue
+        amount_paid = round(parse_amount(raw_entry.get("amountPaid")), 2)
+        if amount_paid <= 0:
+            continue
+        entries.append(
+            {
+                "id": normalize_text(raw_entry.get("id")) or uuid4().hex,
+                "amountPaid": amount_paid,
+                "paymentDate": normalize_text(raw_entry.get("paymentDate")),
+                "paymentMethod": normalize_text(raw_entry.get("paymentMethod")),
+                "paymentReference": normalize_text(raw_entry.get("paymentReference")),
+                "receivedBy": normalize_text(raw_entry.get("receivedBy")),
+                "notes": normalize_text(raw_entry.get("notes")),
+                "createdAt": normalize_text(raw_entry.get("createdAt")),
+                "isLegacy": False,
+            }
+        )
+
+    if entries:
+        entries.sort(
+            key=lambda item: (
+                normalize_text(item.get("paymentDate")) or "9999-12-31",
+                normalize_text(item.get("createdAt")) or "",
+                normalize_text(item.get("id")) or "",
+            )
+        )
+        return entries
+
+    legacy_amount = round(parse_amount(payload.get("amountPaid")), 2)
+    if legacy_amount <= 0:
+        return []
+    return [
+        {
+            "id": "legacy",
+            "amountPaid": legacy_amount,
+            "paymentDate": normalize_text(payload.get("paymentDate")),
+            "paymentMethod": normalize_text(payload.get("paymentMethod")),
+            "paymentReference": normalize_text(payload.get("paymentReference")),
+            "receivedBy": normalize_text(payload.get("receivedBy")),
+            "notes": "Imported from the earlier single-payment service capture.",
+            "createdAt": normalize_text(payload.get("updatedAt")) or normalize_text(payload.get("createdAt")),
+            "isLegacy": True,
+        }
+    ]
+
+
+def service_payment_summary(module_key: str, payload: dict[str, Any]) -> dict[str, Any]:
+    payments = service_payment_entries(module_key, payload)
+    total_due = service_total_due(module_key, payload)
+    total_cost = service_cost_amount(module_key, payload)
+    paid_total = 0.0
+    cost_recognized_total = 0.0
+    balance = total_due
+    rows: list[dict[str, Any]] = []
+
+    for payment in payments:
+        paid_amount = round(parse_amount(payment.get("amountPaid")), 2)
+        prior_paid = paid_total
+        paid_total = round(paid_total + paid_amount, 2)
+        if total_due > 0 and total_cost > 0:
+            prior_cost = round(total_cost * min(prior_paid / total_due, 1), 2)
+            running_cost = round(total_cost * min(paid_total / total_due, 1), 2)
+            payment_cost = round(max(running_cost - prior_cost, 0), 2)
+        else:
+            payment_cost = 0.0
+        cost_recognized_total = round(cost_recognized_total + payment_cost, 2)
+        payment_profit = round(paid_amount - payment_cost, 2)
+        balance = round(max(total_due - paid_total, 0), 2)
+        rows.append(
+            {
+                **payment,
+                "costAmount": payment_cost,
+                "profitAmount": payment_profit,
+                "balanceAfter": balance,
+            }
+        )
+
+    return {
+        "payments": rows,
+        "paidTotal": round(paid_total, 2),
+        "costRecognized": round(cost_recognized_total, 2),
+        "profitRecognized": round(sum(parse_amount(entry.get("profitAmount")) for entry in rows), 2),
+        "balance": round(max(total_due - paid_total, 0), 2),
+        "totalDue": round(total_due, 2),
+        "totalCost": round(total_cost, 2),
+    }
+
+
+def apply_service_payment_rollup(module_key: str, payload: dict[str, Any]) -> None:
+    summary = service_payment_summary(module_key, payload)
+    last_payment = summary["payments"][-1] if summary["payments"] else {}
+    payload["amountPaid"] = summary["paidTotal"]
+    payload["paymentDate"] = normalize_text(last_payment.get("paymentDate"))
+    payload["paymentMethod"] = normalize_text(last_payment.get("paymentMethod"))
+    payload["paymentReference"] = normalize_text(last_payment.get("paymentReference"))
+
+
+def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str, Any]) -> None:
+    cost_field = service_cost_field_name(module_key)
+    if parse_amount(payload.get(cost_field)) > 0:
+        return
+    service_area = SERVICE_MODULE_AREA_IDS.get(module_key, "")
+    item_name = normalize_text(payload.get(service_item_field_name(module_key)))
+    if not service_area or not item_name:
+        return
+    products = db_session.scalars(
+        select(Product)
+        .where(Product.business_area_id == service_area, Product.active.is_(True))
+        .order_by(Product.name.asc())
+    ).all()
+    normalized_item_name = item_name.lower()
+    match = next((product for product in products if normalize_text(product.name).lower() == normalized_item_name), None)
+    if not match:
+        return
+    multiplier = max(parse_amount(payload.get("pieces")), 1.0) if module_key == "laundry_tickets" else 1.0
+    payload[cost_field] = round(parse_amount(match.cost_price) * multiplier, 2)
+
+
+def sales_cost_amount(payload: dict[str, Any]) -> float:
+    return round(parse_amount(payload.get("costAmount")), 2)
+
+
+def sales_profit_amount(payload: dict[str, Any]) -> float:
+    amount = round(parse_amount(payload.get("amount")), 2)
+    cost_amount = sales_cost_amount(payload)
+    profit_amount = round(parse_amount(payload.get("profitAmount")), 2)
+    if profit_amount or normalize_text(payload.get("profitAmount")):
+        return profit_amount
+    if amount <= 0:
+        return 0.0
+    source_type = normalize_text(payload.get("sourceType")).lower()
+    if source_type in {"manual-sale", "pos-summary", "online-order-payments", "laundry-payment", "equipment-rental-payment"}:
+        return round(amount - cost_amount, 2)
+    return 0.0
+
+
+def module_record_profit_amount(record: ModuleRecord) -> float:
+    if record.module_key != "sales":
+        return 0.0
+    return sales_profit_amount(record.payload or {})
+
+
+def module_record_cost_amount(record: ModuleRecord) -> float:
+    if record.module_key != "sales":
+        return 0.0
+    return sales_cost_amount(record.payload or {})
 
 
 def password_hash(password: str) -> str:
@@ -294,8 +543,8 @@ SERVICE_MODULE_SECTIONS = {
         ),
         (
             "Items & Pricing",
-            "Describe the pieces, amount due, and any payment already collected for this job.",
-            ["laundryItem", "itemSummary", "pieces", "amountDue", "amountPaid", "paymentDate", "paymentMethod", "paymentReference"],
+            "Describe the pieces, amount due, and service cost so OneRoot can track realized profit whenever payment is collected.",
+            ["laundryItem", "itemSummary", "pieces", "amountDue", "costAmount"],
         ),
         (
             "Promise & Completion",
@@ -311,8 +560,8 @@ SERVICE_MODULE_SECTIONS = {
         ),
         (
             "Charges & Payment",
-            "Capture the rental fee, deposit, damage charge, and payment details in one place.",
-            ["rentalFee", "amountPaid", "depositAmount", "damageCharge", "paymentDate", "paymentMethod", "paymentReference"],
+            "Capture the rental fee, service cost, deposit, and any damage charge. Payments are collected separately from the booking.",
+            ["rentalFee", "costAmount", "depositAmount", "damageCharge"],
         ),
         (
             "Movement & Return",
@@ -371,9 +620,9 @@ def module_record_category_value(definition: ModuleDefinition, record: ModuleRec
 
 def module_record_open_balance(definition: ModuleDefinition, payload: dict[str, Any]) -> float:
     if definition.key == "laundry_tickets":
-        return round(max(parse_amount(payload.get("amountDue")) - parse_amount(payload.get("amountPaid")), 0), 2)
+        return service_payment_summary(definition.key, payload)["balance"]
     if definition.key == "equipment_rental_bookings":
-        return round(max(parse_amount(payload.get("rentalFee")) - parse_amount(payload.get("amountPaid")), 0), 2)
+        return service_payment_summary(definition.key, payload)["balance"]
     if definition.key == "suppliers":
         return round(max(parse_amount(payload.get("amountDue")) - parse_amount(payload.get("amountPaid")), 0), 2)
     if definition.key == "security_deposit_records":
@@ -449,9 +698,10 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
     today = date.today()
     for record in records:
         payload = record.payload or {}
-        amount_due = round(parse_amount(payload.get("amountDue")), 2)
-        amount_paid = round(parse_amount(payload.get("amountPaid")), 2)
-        balance = round(max(amount_due - amount_paid, 0), 2)
+        payment_summary = service_payment_summary("laundry_tickets", payload)
+        amount_due = payment_summary["totalDue"]
+        amount_paid = payment_summary["paidTotal"]
+        balance = payment_summary["balance"]
         status = normalize_text(payload.get("status")) or "Received"
         due_date = parse_date(payload.get("dueDate"))
         ready_date = parse_date(payload.get("readyDate"))
@@ -479,6 +729,11 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "status": status,
                 "amountDue": amount_due,
                 "amountPaid": amount_paid,
+                "costAmount": payment_summary["totalCost"],
+                "profitAmount": payment_summary["profitRecognized"],
+                "paymentCount": len(payment_summary["payments"]),
+                "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
+                "payments": payment_summary["payments"],
                 "balance": balance,
                 "isReady": status == "Ready",
                 "isDelivered": status == "Delivered",
@@ -495,11 +750,12 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
     for record in records:
         payload = record.payload or {}
         rental_fee = round(parse_amount(payload.get("rentalFee")), 2)
-        amount_paid = round(parse_amount(payload.get("amountPaid")), 2)
+        payment_summary = service_payment_summary("equipment_rental_bookings", payload)
+        amount_paid = payment_summary["paidTotal"]
         deposit_amount = round(parse_amount(payload.get("depositAmount")), 2)
         damage_charge = round(parse_amount(payload.get("damageCharge")), 2)
         billed_total = round(rental_fee + damage_charge, 2)
-        balance = round(max(billed_total - amount_paid, 0), 2)
+        balance = payment_summary["balance"]
         status = normalize_text(payload.get("status")) or "Booked"
         due_date = parse_date(payload.get("dueDate"))
         return_date = parse_date(payload.get("returnDate"))
@@ -521,6 +777,11 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
                 "damageCharge": damage_charge,
                 "depositAmount": deposit_amount,
                 "amountPaid": amount_paid,
+                "costAmount": payment_summary["totalCost"],
+                "profitAmount": payment_summary["profitRecognized"],
+                "paymentCount": len(payment_summary["payments"]),
+                "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
+                "payments": payment_summary["payments"],
                 "balance": balance,
                 "isOut": status == "Out",
                 "isDueToday": bool(status in {"Booked", "Out"} and due_date == today and not return_date),
@@ -551,12 +812,12 @@ def build_service_module_context(definition: ModuleDefinition, rows: list[dict[s
             short_key="short",
         )
         return {
-            "intro": "Capture every laundry job from intake to delivery, with category, due dates, and payments in one desk.",
+            "intro": "Capture each laundry request first, then record each collection separately so balances, daily sales, and realized profit stay aligned.",
             "cards": [
                 {"label": "Tickets In View", "value": f"{len(rows)}", "note": "Filtered laundry jobs"},
                 {"label": "Ready For Pickup", "value": f"{sum(1 for row in rows if row['isReady'])}", "note": "Jobs marked ready"},
                 {"label": "Open Balance", "value": format_currency(sum(row["balance"] for row in rows)), "note": "Unpaid laundry still open"},
-                {"label": "Collected", "value": format_currency(sum(row["amountPaid"] for row in rows)), "note": "Payments captured in this view"},
+                {"label": "Collected Profit", "value": format_currency(sum(row["profitAmount"] for row in rows)), "note": "Profit recognized from captured payments"},
             ],
             "statusChart": status_chart,
             "mixChart": type_chart,
@@ -581,12 +842,12 @@ def build_service_module_context(definition: ModuleDefinition, rows: list[dict[s
         status_counts[row["status"]] += 1
         category_counts[row["equipmentCategory"]] += 1
     return {
-        "intro": "Track every rental from booking to return, with charges, deposits, return dates, and item condition together.",
+        "intro": "Track every rental from booking to return, then post payments separately so sales and realized profit only move when the customer pays.",
         "cards": [
             {"label": "Bookings In View", "value": f"{len(rows)}", "note": "Filtered rental bookings"},
             {"label": "Equipment Out", "value": f"{sum(1 for row in rows if row['isOut'])}", "note": "Currently out with customers"},
             {"label": "Open Balance", "value": format_currency(sum(row["balance"] for row in rows)), "note": "Outstanding rental collections"},
-            {"label": "Deposit Held", "value": format_currency(sum(row["depositAmount"] for row in rows)), "note": "Deposits still being held"},
+            {"label": "Collected Profit", "value": format_currency(sum(row["profitAmount"] for row in rows)), "note": "Profit recognized from captured payments"},
         ],
         "statusChart": build_chart_rows(
             [{"label": status, "short": status, "amount": count} for status, count in sorted(status_counts.items()) if count > 0],
@@ -781,15 +1042,25 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
         area_key = normalize_text(record.business_area_id) or normalize_text((record.payload or {}).get("businessAreaId")) or "shared-operations"
         area_totals[area_key] += parse_amount(record.amount)
 
-    cards = [
-        {"label": "Records In View", "value": f"{len(records)}", "note": "Current filtered records"},
-        {"label": "Value In View", "value": format_currency(total_amount), "note": "Amount captured in this list"},
-        {"label": "This Month", "value": format_currency(month_amount), "note": f"Captured in {this_month_key}"},
-    ]
-    if open_balance > 0:
-        cards.append({"label": "Open Balance", "value": format_currency(open_balance), "note": "Still outstanding in this view"})
+    if definition.key == "sales":
+        total_cost = round(sum(module_record_cost_amount(record) for record in records), 2)
+        total_profit = round(sum(module_record_profit_amount(record) for record in records), 2)
+        cards = [
+            {"label": "Sales Records", "value": f"{len(records)}", "note": "Current filtered sales rows"},
+            {"label": "Revenue", "value": format_currency(total_amount), "note": "Sales captured in this list"},
+            {"label": "Cost", "value": format_currency(total_cost), "note": "Linked item or service cost in this view"},
+            {"label": "Profit", "value": format_currency(total_profit), "note": "Realized gross profit in this view"},
+        ]
     else:
-        cards.append({"label": "Areas In View", "value": f"{len([value for value in area_totals.values() if value or records])}", "note": "Business areas represented"})
+        cards = [
+            {"label": "Records In View", "value": f"{len(records)}", "note": "Current filtered records"},
+            {"label": "Value In View", "value": format_currency(total_amount), "note": "Amount captured in this list"},
+            {"label": "This Month", "value": format_currency(month_amount), "note": f"Captured in {this_month_key}"},
+        ]
+        if open_balance > 0:
+            cards.append({"label": "Open Balance", "value": format_currency(open_balance), "note": "Still outstanding in this view"})
+        else:
+            cards.append({"label": "Areas In View", "value": f"{len([value for value in area_totals.values() if value or records])}", "note": "Business areas represented"})
 
     status_chart = build_chart_rows(
         [{"label": label, "short": label, "amount": count} for label, count in sorted(status_counts.items()) if count > 0],
@@ -1744,9 +2015,21 @@ def generated_sales_references_for_module_record(record: ModuleRecord) -> list[s
             f"apartment-bill-payment|{record.id}",
         ]
     if record.module_key == "laundry_tickets":
-        return [f"laundry-payment|{record.id}"]
+        return [
+            f"laundry-payment|{record.id}",
+            *[
+                f"laundry-payment|{record.id}|{entry['id']}"
+                for entry in service_payment_entries(record.module_key, record.payload or {})
+            ],
+        ]
     if record.module_key == "equipment_rental_bookings":
-        return [f"equipment-rental-payment|{record.id}"]
+        return [
+            f"equipment-rental-payment|{record.id}",
+            *[
+                f"equipment-rental-payment|{record.id}|{entry['id']}"
+                for entry in service_payment_entries(record.module_key, record.payload or {})
+            ],
+        ]
     if record.module_key == "security_deposit_records":
         return [
             f"security-deposit-payment|{record.id}",
@@ -1780,6 +2063,26 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
         sales_total = round(
             sum(
                 record.amount
+                for record in records
+                if record.module_key == "sales"
+                and record_in_month_scope(record, month_value)
+                and record.business_area_id == area_id
+            ),
+            2,
+        )
+        cost_total = round(
+            sum(
+                module_record_cost_amount(record)
+                for record in records
+                if record.module_key == "sales"
+                and record_in_month_scope(record, month_value)
+                and record.business_area_id == area_id
+            ),
+            2,
+        )
+        profit_total = round(
+            sum(
+                module_record_profit_amount(record)
                 for record in records
                 if record.module_key == "sales"
                 and record_in_month_scope(record, month_value)
@@ -1825,13 +2128,15 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
             ),
             2,
         )
-        net_total = round(sales_total - expense_total - salary_total, 2)
+        net_total = round(profit_total - expense_total - salary_total, 2)
         rows.append(
             {
                 "areaId": area_id,
                 "areaLabel": area["label"],
                 "areaShort": area["short"],
                 "salesTotal": sales_total,
+                "costTotal": cost_total,
+                "profitTotal": profit_total,
                 "expenseTotal": expense_total,
                 "salaryTotal": salary_total,
                 "pettyCashTotal": petty_cash_total,
@@ -2406,6 +2711,19 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         return {key: round(value, 2) for key, value in totals.items() if value > 0}
 
+    def build_online_order_area_costs(items: list[dict[str, Any]]) -> dict[str, float]:
+        totals: dict[str, float] = defaultdict(float)
+        for item in items:
+            area_id = normalize_text(item.get("businessAreaId"))
+            if not area_id:
+                continue
+            quantity = max(parse_amount(item.get("quantity")), 1.0)
+            unit_cost = parse_amount(item.get("costPrice"))
+            if unit_cost <= 0:
+                continue
+            totals[area_id] += round(quantity * unit_cost, 2)
+        return {key: round(value, 2) for key, value in totals.items() if value > 0}
+
     def month_anchor_date(month_value: Any) -> date | None:
         month_text = parse_month(month_value)
         if not month_text:
@@ -2448,9 +2766,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
         sale_date: date | None,
         business_area_id: str,
         amount: float,
+        cost_amount: float = 0.0,
+        profit_amount: float | None = None,
         source_type: str,
         source_label: str,
         note: str,
+        transaction_count: int = 1,
     ) -> None:
         record = db_session.scalar(
             select(ModuleRecord).where(
@@ -2459,6 +2780,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         )
         clean_amount = round(parse_amount(amount), 2)
+        clean_cost = round(parse_amount(cost_amount), 2)
+        clean_profit = round(parse_amount(clean_amount - clean_cost if profit_amount is None else profit_amount), 2)
         if clean_amount <= 0 or not sale_date or not business_area_id:
             if record:
                 db_session.delete(record)
@@ -2469,9 +2792,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "date": sale_date.isoformat(),
             "businessAreaId": business_area_id,
             "amount": clean_amount,
+            "costAmount": clean_cost,
+            "profitAmount": clean_profit,
             "notes": note,
             "sourceType": source_type,
             "sourceLabel": source_label,
+            "transactionCount": max(int(parse_amount(transaction_count)), 1),
             "linkedGeneratedSalesKey": reference,
             "linkedPosAreaDateKey": "",
         }
@@ -2517,32 +2843,74 @@ def create_app(config: AppConfig | None = None) -> Flask:
             area_id = normalize_text(payload.get("businessAreaId")) or "laundry-services"
             customer = normalize_text(payload.get("customerName")) or "Customer"
             service_type = normalize_text(payload.get("serviceType")) or "Laundry"
-            upsert_generated_sale(
-                db,
-                reference=f"laundry-payment|{record.id}",
-                sale_date=get_laundry_payment_date(payload),
-                business_area_id=area_id,
-                amount=parse_amount(payload.get("amountPaid")),
-                source_type="laundry-payment",
-                source_label="Laundry Payment",
-                note=f"[Laundry Sync] {service_type} payment from {customer}.",
-            )
+            prefix = f"laundry-payment|{record.id}"
+            payment_summary = service_payment_summary(record.module_key, payload)
+            kept_references = set()
+            for index, payment in enumerate(payment_summary["payments"], start=1):
+                reference = f"{prefix}|{payment['id']}"
+                kept_references.add(reference)
+                payment_date = parse_date(payment.get("paymentDate")) or get_laundry_payment_date(payload)
+                upsert_generated_sale(
+                    db,
+                    reference=reference,
+                    sale_date=payment_date,
+                    business_area_id=area_id,
+                    amount=payment.get("amountPaid", 0),
+                    cost_amount=payment.get("costAmount", 0),
+                    profit_amount=payment.get("profitAmount", 0),
+                    source_type="laundry-payment",
+                    source_label="Laundry Payment",
+                    note=f"[Laundry Sync] Payment {index} for {service_type} from {customer}.",
+                )
+            stale_records = db.scalars(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "sales",
+                    or_(
+                        ModuleRecord.reference == prefix,
+                        ModuleRecord.reference.ilike(f"{prefix}|%"),
+                    ),
+                )
+            ).all()
+            for stale_record in stale_records:
+                if stale_record.reference not in kept_references:
+                    db.delete(stale_record)
             return
 
         if record.module_key == "equipment_rental_bookings":
             area_id = normalize_text(payload.get("businessAreaId")) or "water-equipment"
             customer = normalize_text(payload.get("customerName")) or "Customer"
             equipment_item = normalize_text(payload.get("equipmentItem")) or "Equipment Rental"
-            upsert_generated_sale(
-                db,
-                reference=f"equipment-rental-payment|{record.id}",
-                sale_date=get_equipment_payment_date(payload),
-                business_area_id=area_id,
-                amount=parse_amount(payload.get("amountPaid")),
-                source_type="equipment-rental-payment",
-                source_label="Equipment Rental Payment",
-                note=f"[Equipment Sync] Payment for {equipment_item} by {customer}.",
-            )
+            prefix = f"equipment-rental-payment|{record.id}"
+            payment_summary = service_payment_summary(record.module_key, payload)
+            kept_references = set()
+            for index, payment in enumerate(payment_summary["payments"], start=1):
+                reference = f"{prefix}|{payment['id']}"
+                kept_references.add(reference)
+                payment_date = parse_date(payment.get("paymentDate")) or get_equipment_payment_date(payload)
+                upsert_generated_sale(
+                    db,
+                    reference=reference,
+                    sale_date=payment_date,
+                    business_area_id=area_id,
+                    amount=payment.get("amountPaid", 0),
+                    cost_amount=payment.get("costAmount", 0),
+                    profit_amount=payment.get("profitAmount", 0),
+                    source_type="equipment-rental-payment",
+                    source_label="Equipment Rental Payment",
+                    note=f"[Equipment Sync] Payment {index} for {equipment_item} by {customer}.",
+                )
+            stale_records = db.scalars(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "sales",
+                    or_(
+                        ModuleRecord.reference == prefix,
+                        ModuleRecord.reference.ilike(f"{prefix}|%"),
+                    ),
+                )
+            ).all()
+            for stale_record in stale_records:
+                if stale_record.reference not in kept_references:
+                    db.delete(stale_record)
             return
 
         if record.module_key == "security_deposit_records":
@@ -2579,6 +2947,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         order_total = parse_amount(payload.get("quotedTotal")) or compute_order_fixed_total(items)
         area_totals = build_online_order_area_totals(items, order_total=order_total)
+        area_costs = build_online_order_area_costs(items)
         payment_date = parse_date(payload.get("paymentDate")) or parse_date(payload.get("updatedAt")) or date.today()
 
         existing_records = db.scalars(
@@ -2598,6 +2967,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         kept_references = set()
         for area_id, area_total in area_totals.items():
             amount = round(area_total * ratio if ratio else area_total, 2)
+            cost_amount = round(parse_amount(area_costs.get(area_id)) * ratio if ratio else parse_amount(area_costs.get(area_id)), 2)
             reference = f"online-order-payments|{order_number}|{area_id}"
             kept_references.add(reference)
             existing = next((record for record in existing_records if record.reference == reference), None)
@@ -2606,9 +2976,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "date": payment_date.isoformat(),
                 "businessAreaId": area_id,
                 "amount": amount,
+                "costAmount": cost_amount,
+                "profitAmount": round(amount - cost_amount, 2),
                 "notes": f"[Online Order Sync] Paid online order {order_number} for {BUSINESS_AREA_SHORT.get(area_id, area_id)}.",
                 "sourceType": "online-order-payments",
                 "sourceLabel": "Online Order Payment",
+                "transactionCount": 1,
                 "linkedGeneratedSalesKey": reference,
                 "linkedPosAreaDateKey": "",
             }
@@ -2680,6 +3053,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "trackInventory": bool(catalog_item.get("trackInventory")),
                     "quantity": quantity,
                     "unitPrice": unit_price,
+                    "costPrice": parse_amount(catalog_item.get("costPrice")),
                     "lineTotal": line_total,
                     "notes": normalize_text(raw_item.get("notes")),
                 }
@@ -2818,6 +3192,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                             "trackInventory": line.track_inventory,
                             "quantity": line.quantity,
                             "unitPrice": line.unit_price,
+                            "unitCost": line.unit_cost,
+                            "costAmount": line.cost_amount,
                             "totalAmount": line.total_amount,
                         }
                         for line in order.lines
@@ -2879,6 +3255,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order_rows: list[dict[str, Any]] = []
         payment_mix: dict[str, float] = defaultdict(float)
         total_amount = 0.0
+        total_cost = 0.0
         item_count = 0.0
         business_areas: set[str] = set()
 
@@ -2890,6 +3267,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if selected_area and line.business_area_id != selected_area:
                     continue
                 order_total += parse_amount(line.total_amount)
+                total_cost += parse_amount(line.cost_amount)
                 order_items += parse_amount(line.quantity)
                 if line.business_area_id:
                     order_area_ids.add(line.business_area_id)
@@ -2946,6 +3324,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "orderCount": len(order_rows),
             "itemCount": round(item_count, 2),
             "totalAmount": round(total_amount, 2),
+            "costAmount": round(total_cost, 2),
+            "profitAmount": round(total_amount - total_cost, 2),
             "dailySalesLedgerTotal": daily_sales_total,
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
             "orders": order_rows[:20],
@@ -2983,6 +3363,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "reference": reference,
                 "status": "closed",
                 "totalAmount": summary["totalAmount"],
+                "costAmount": summary["costAmount"],
+                "profitAmount": summary["profitAmount"],
                 "orderCount": summary["orderCount"],
                 "itemCount": summary["itemCount"],
                 "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
@@ -3005,14 +3387,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 .where(PosOrder.order_date == order_date)
             ).all()
             total_amount = 0.0
+            total_cost = 0.0
             order_count = 0
             for order in orders:
                 order_area_total = 0.0
+                order_area_cost = 0.0
                 for line in order.lines:
                     if line.business_area_id == area_id:
                         order_area_total += parse_amount(line.total_amount)
+                        order_area_cost += parse_amount(line.cost_amount)
                 if order_area_total > 0:
                     total_amount += order_area_total
+                    total_cost += order_area_cost
                     order_count += 1
 
             reference = f"pos-summary|{order_date.isoformat()}|{area_id}"
@@ -3033,9 +3419,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "date": order_date.isoformat(),
                 "businessAreaId": area_id,
                 "amount": round(total_amount, 2),
+                "costAmount": round(total_cost, 2),
+                "profitAmount": round(total_amount - total_cost, 2),
                 "notes": f"[POS Sync] {order_count} order{'s' if order_count != 1 else ''} captured in POS for {BUSINESS_AREA_SHORT.get(area_id, area_id)}.",
                 "sourceType": "pos-summary",
                 "sourceLabel": "POS Sync",
+                "transactionCount": max(order_count, 1),
                 "linkedGeneratedSalesKey": reference,
                 "linkedPosAreaDateKey": f"{order_date.isoformat()}|{area_id}",
             }
@@ -3163,6 +3552,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/icon.svg")
     def public_icon():
         return send_from_directory(app_config.root_dir, "icon.svg", max_age=0)
+
+    @app.route("/manifest.webmanifest")
+    def public_manifest():
+        return send_from_directory(app_config.root_dir, "manifest.webmanifest", max_age=0)
+
+    @app.route("/service-worker.js")
+    def public_service_worker():
+        return send_from_directory(app_config.root_dir, "service-worker.js", max_age=0)
 
     @app.route("/")
     def home():
@@ -3342,8 +3739,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         low_stock = low_stock_items[:10]
         expenses_total = sum(record.amount for record in all_records if record.module_key == "expenses")
         sales_total = sum(record.amount for record in all_records if record.module_key == "sales")
+        profit_total = sum(module_record_profit_amount(record) for record in all_records if record.module_key == "sales")
         today_sales_total = sum(
             record.amount for record in all_records if record.module_key == "sales" and record.record_date == date.today()
+        )
+        today_profit_total = sum(
+            module_record_profit_amount(record)
+            for record in all_records
+            if record.module_key == "sales" and record.record_date == date.today()
         )
         petty_cash_total = sum(record.amount for record in all_records if record.module_key == "petty_cash")
         apartment_due = sum(apartment_outstanding(record.payload or {}) for record in all_records if record.module_key == "apartments")
@@ -3370,9 +3773,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             reverse=True,
         )[:8]
         sales_by_area_map: dict[str, float] = defaultdict(float)
+        profit_by_area_map: dict[str, float] = defaultdict(float)
         for record in all_records:
             if record.module_key == "sales" and record.record_date and record.record_date.strftime("%Y-%m") == current_month:
                 sales_by_area_map[record.business_area_id or "shared-operations"] += record.amount
+                profit_by_area_map[record.business_area_id or "shared-operations"] += module_record_profit_amount(record)
         monthly_sales_by_area = sorted(
             [
                 {
@@ -3392,7 +3797,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for row in report_area_rows(all_records, current_month)
             if any(
                 abs(parse_amount(row.get(metric)))
-                for metric in ("salesTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "supplierBalance", "netTotal")
+                for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "supplierBalance", "netTotal")
             )
         ]
         online_orders = [
@@ -3418,7 +3823,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             counts=counts,
             expenses_total=expenses_total,
             sales_total=sales_total,
+            profit_total=round(profit_total, 2),
             today_sales_total=today_sales_total,
+            today_profit_total=round(today_profit_total, 2),
             petty_cash_total=petty_cash_total,
             apartment_due=apartment_due,
             supplier_balance=supplier_balance,
@@ -3431,6 +3838,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 label_key="label",
                 value_key="amount",
                 short_key="short",
+            ),
+            monthly_profit_chart=build_chart_rows(
+                [
+                    {
+                        "label": area["label"],
+                        "short": area["short"],
+                        "amount": round(profit_by_area_map.get(area["id"], 0), 2),
+                    }
+                    for area in BUSINESS_AREAS
+                    if round(profit_by_area_map.get(area["id"], 0), 2) > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--accent)",
             ),
             dashboard_net_chart=build_chart_rows(
                 [
@@ -3492,6 +3914,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             area_rows = [row for row in area_rows if row["areaId"] == area_filter]
 
         sales_total = round(sum(record.amount for record in filtered_records if record.module_key == "sales"), 2)
+        cost_total = round(sum(module_record_cost_amount(record) for record in filtered_records if record.module_key == "sales"), 2)
+        profit_total = round(sum(module_record_profit_amount(record) for record in filtered_records if record.module_key == "sales"), 2)
         expenses_total = round(sum(record.amount for record in filtered_records if record.module_key == "expenses"), 2)
         salary_total = round(
             sum(parse_amount((record.payload or {}).get("amountPaid")) for record in filtered_records if record.module_key == "salary_records"),
@@ -3514,13 +3938,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ),
             2,
         )
-        net_total = round(sales_total - expenses_total - salary_total, 2)
+        net_total = round(profit_total - expenses_total - salary_total, 2)
         area_rows = [
             row
             for row in area_rows
             if any(
                 abs(parse_amount(row.get(metric)))
-                for metric in ("salesTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "supplierBalance", "netTotal")
+                for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "supplierBalance", "netTotal")
             )
         ]
         low_stock_items = g.db.scalars(
@@ -3547,6 +3971,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             month_filter=month_filter,
             area_filter=area_filter,
             sales_total=sales_total,
+            cost_total=cost_total,
+            profit_total=profit_total,
             expenses_total=expenses_total,
             salary_total=salary_total,
             petty_cash_total=petty_cash_total,
@@ -3563,6 +3989,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 label_key="label",
                 value_key="amount",
                 short_key="short",
+            ),
+            report_profit_chart=build_chart_rows(
+                [
+                    {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["profitTotal"]}
+                    for row in area_rows
+                    if parse_amount(row["profitTotal"]) > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--accent)",
             ),
             report_net_chart=build_chart_rows(
                 [
@@ -3600,6 +4037,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "areaId",
             "areaLabel",
             "salesTotal",
+            "costTotal",
+            "profitTotal",
             "expenseTotal",
             "salaryTotal",
             "pettyCashTotal",
@@ -3813,6 +4252,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "target": search_target_for_module_record(record),
                 }
                 for record in module_records
+                if record.module_key in MODULES and user_has_access(g.current_user, record.module_key)
             ]
 
             products = g.db.scalars(
@@ -3838,6 +4278,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 }
                 for product in products
             ]
+            if not user_has_access(g.current_user, "inventory"):
+                product_results = []
 
             pos_orders = g.db.scalars(
                 select(PosOrder)
@@ -3863,6 +4305,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 }
                 for order in pos_orders
             ]
+            if not user_has_access(g.current_user, "pos"):
+                pos_results = []
 
             audits = g.db.scalars(
                 select(AuditLog)
@@ -3877,6 +4321,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 .limit(20)
             ).all()
             audit_results = audits
+            if not user_has_access(g.current_user, "audit"):
+                audit_results = []
 
         return render_template(
             "search.html",
@@ -4399,11 +4845,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload.setdefault("id", record.id if record else uuid4().hex)
             payload.setdefault("createdAt", record.created_at.isoformat() if record else datetime.utcnow().isoformat())
             for field in definition.fields:
+                if (
+                    module_key in SERVICE_LEGACY_PAYMENT_FIELDS
+                    and field.name in SERVICE_LEGACY_PAYMENT_FIELDS[module_key]
+                    and field.name not in request.form
+                ):
+                    continue
                 payload[field.name] = parse_field_input(field, request.form)
             if module_key == "apartments":
                 payload["businessAreaId"] = "rentals-apartments"
             elif module_key in SERVICE_MODULE_AREA_IDS:
                 payload["businessAreaId"] = SERVICE_MODULE_AREA_IDS[module_key]
+                hydrate_service_cost_payload(g.db, module_key, payload)
+                apply_service_payment_rollup(module_key, payload)
+            elif module_key == "sales":
+                payload["sourceType"] = normalize_text(payload.get("sourceType")) or "manual-sale"
+                payload["profitAmount"] = round(parse_amount(payload.get("amount")) - parse_amount(payload.get("costAmount")), 2)
             payload["updatedAt"] = datetime.utcnow().isoformat()
             if not record:
                 record = ModuleRecord(id=payload["id"], module_key=module_key, created_at=datetime.utcnow())
@@ -4474,6 +4931,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 section_fields=service_module_field_sections(definition),
                 module_quick_actions=module_quick_actions,
                 reference_product_options=[product.name for product in inventory_reference_products],
+                service_payment_summary=service_payment_summary(module_key, record_payload),
             )
         module_quick_actions = []
         return render_template(
@@ -4486,6 +4944,152 @@ def create_app(config: AppConfig | None = None) -> Flask:
             dynamic_category_field=module_filter_category_field(definition) if module_filter_category_field(definition) == "category" else "",
             module_quick_actions=module_quick_actions,
         )
+
+    @app.route("/app/services/<module_key>/<record_id>/payment", methods=["GET", "POST"])
+    @login_required
+    def service_payment_form(module_key: str, record_id: str):
+        if module_key not in SERVICE_MODULE_AREA_IDS:
+            return redirect(url_for("dashboard"))
+        definition = MODULES.get(module_key)
+        if not definition:
+            return redirect(url_for("dashboard"))
+        access_response = enforce_module_access(module_key)
+        if access_response:
+            return access_response
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != module_key:
+            flash("That service request could not be found.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
+
+        payload = dict(record.payload or {})
+        if request.method == "POST":
+            payment_date = normalize_text(request.form.get("paymentDate")) or date.today().isoformat()
+            amount_paid = round(parse_amount(request.form.get("amountPaid")), 2)
+            if amount_paid <= 0:
+                flash("Enter a payment amount greater than zero.", "error")
+            else:
+                entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY) if isinstance(payload.get(SERVICE_PAYMENT_ENTRIES_KEY), list) else []
+                if not entries and parse_amount(payload.get("amountPaid")) > 0:
+                    entries = [
+                        {
+                            "id": "legacy",
+                            "paymentDate": normalize_text(payload.get("paymentDate")),
+                            "amountPaid": round(parse_amount(payload.get("amountPaid")), 2),
+                            "paymentMethod": normalize_text(payload.get("paymentMethod")),
+                            "paymentReference": normalize_text(payload.get("paymentReference")),
+                            "receivedBy": normalize_text(payload.get("receivedBy")),
+                            "notes": "Imported from the earlier single-payment service capture.",
+                            "createdAt": normalize_text(payload.get("updatedAt")) or normalize_text(payload.get("createdAt")),
+                        }
+                    ]
+                entries.append(
+                    {
+                        "id": uuid4().hex,
+                        "paymentDate": payment_date,
+                        "amountPaid": amount_paid,
+                        "paymentMethod": normalize_text(request.form.get("paymentMethod")),
+                        "paymentReference": normalize_text(request.form.get("paymentReference")),
+                        "receivedBy": normalize_text(request.form.get("receivedBy")) or g.current_user.full_name or g.current_user.username,
+                        "notes": normalize_text(request.form.get("notes")),
+                        "createdAt": datetime.utcnow().isoformat(),
+                    }
+                )
+                payload[SERVICE_PAYMENT_ENTRIES_KEY] = entries
+                apply_service_payment_rollup(module_key, payload)
+                payload["updatedAt"] = datetime.utcnow().isoformat()
+                set_module_record_metadata(record, definition, payload)
+                sync_generated_sales_for_module_record(record)
+                audit(
+                    module_key,
+                    definition.label,
+                    "update",
+                    record.title,
+                    record.id,
+                    f"Payment captured: {format_currency(amount_paid)} on {payment_date}.",
+                )
+                g.db.commit()
+                flash("Service payment captured.", "success")
+                return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
+
+        service_row = (
+            build_laundry_service_rows([record])[0]
+            if module_key == "laundry_tickets"
+            else build_equipment_service_rows([record])[0]
+        )
+        return render_template(
+            "service_payment_form.html",
+            page_title=f"{definition.label} Payment",
+            definition=definition,
+            record=record,
+            payload=payload,
+            service_row=service_row,
+            payment_methods=PAYMENT_METHODS,
+            today_iso=date.today().isoformat(),
+        )
+
+    @app.route("/app/services/<module_key>/<record_id>/payments/<payment_id>/delete", methods=["POST"])
+    @login_required
+    def service_payment_delete(module_key: str, record_id: str, payment_id: str):
+        if module_key not in SERVICE_MODULE_AREA_IDS:
+            return redirect(url_for("dashboard"))
+        definition = MODULES.get(module_key)
+        if not definition:
+            return redirect(url_for("dashboard"))
+        access_response = enforce_module_access(module_key)
+        if access_response:
+            return access_response
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != module_key:
+            flash("That service request could not be found.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
+
+        payload = dict(record.payload or {})
+        entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY) if isinstance(payload.get(SERVICE_PAYMENT_ENTRIES_KEY), list) else []
+        if not entries and normalize_text(payment_id) == "legacy" and parse_amount(payload.get("amountPaid")) > 0:
+            payload[SERVICE_PAYMENT_ENTRIES_KEY] = []
+            payload["amountPaid"] = 0.0
+            payload["paymentDate"] = ""
+            payload["paymentMethod"] = ""
+            payload["paymentReference"] = ""
+            payload["updatedAt"] = datetime.utcnow().isoformat()
+            set_module_record_metadata(record, definition, payload)
+            sync_generated_sales_for_module_record(record)
+            audit(
+                module_key,
+                definition.label,
+                "update",
+                record.title,
+                record.id,
+                "A legacy single-payment entry was removed.",
+            )
+            g.db.commit()
+            flash("Service payment removed.", "success")
+            return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
+        next_entries = [
+            entry
+            for entry in entries
+            if normalize_text(entry.get("id")) != normalize_text(payment_id)
+        ]
+        if len(next_entries) == len(entries):
+            flash("That payment entry could not be found.", "error")
+            return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
+
+        payload[SERVICE_PAYMENT_ENTRIES_KEY] = next_entries
+        apply_service_payment_rollup(module_key, payload)
+        payload["updatedAt"] = datetime.utcnow().isoformat()
+        set_module_record_metadata(record, definition, payload)
+        sync_generated_sales_for_module_record(record)
+        audit(
+            module_key,
+            definition.label,
+            "update",
+            record.title,
+            record.id,
+            "A saved service payment was removed.",
+        )
+        g.db.commit()
+        flash("Service payment removed.", "success")
+        return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
 
     @app.route("/app/modules/<module_key>/<record_id>/delete", methods=["POST"])
     @login_required
@@ -4761,6 +5365,105 @@ def create_app(config: AppConfig | None = None) -> Flask:
             overdue_count=sum(1 for item in suite_profiles if item["alertKey"] in {"rent-overdue", "bills-overdue", "rent-bills-overdue"}),
             due_soon_count=sum(1 for item in suite_profiles if item["alertKey"] in {"rent-due-soon", "bills-due-soon", "rent-bills-due-soon"}),
             generated_on=date.today().isoformat(),
+        )
+
+    @app.route("/app/apartments/apply-monthly-bills", methods=["POST"])
+    @access_required("apartments")
+    def apartment_apply_monthly_bills():
+        month_value = parse_month(request.form.get("month")) or date.today().strftime("%Y-%m")
+        explicit_due_date = normalize_text(request.form.get("bill_due_date"))
+        records = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "apartments")
+            .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+
+        suite_latest: dict[str, ModuleRecord] = {}
+        for record in records:
+            profile = apartment_profile(record)
+            if profile["occupancyStatus"] not in APARTMENT_ACTIVE_STATUSES or not profile["tenant"]:
+                continue
+            current = suite_latest.get(profile["suite"])
+            if not current or apartment_record_sort_key(record) > apartment_record_sort_key(current):
+                suite_latest[profile["suite"]] = record
+
+        created_count = 0
+        skipped_count = 0
+        for suite, source_record in suite_latest.items():
+            existing = g.db.scalar(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "apartments",
+                    ModuleRecord.month == month_value,
+                    ModuleRecord.reference.ilike(f"{suite}|{month_value}|%"),
+                )
+            )
+            if existing:
+                skipped_count += 1
+                continue
+
+            source_payload = dict(source_record.payload or {})
+            new_payload = dict(source_payload)
+            new_payload["id"] = uuid4().hex
+            new_payload["month"] = month_value
+            new_payload["rentDue"] = 0.0
+            new_payload["rentPaid"] = 0.0
+            new_payload["rentPaymentDate"] = ""
+            new_payload["rentPaymentMethod"] = ""
+            new_payload["rentPaymentReference"] = ""
+            new_payload["rentReceivedBy"] = ""
+            new_payload["rentCoverageStartDate"] = ""
+            new_payload["rentCoverageEndDate"] = ""
+            new_payload["arrearsBroughtForward"] = apartment_rent_balance(source_payload)
+            new_payload["creditBroughtForward"] = apartment_credit_balance(source_payload)
+            new_payload["lateFee"] = 0.0
+            new_payload["billAmountPaid"] = 0.0
+            new_payload["billPaymentDate"] = ""
+            new_payload["billPaymentMethod"] = ""
+            new_payload["billPaymentReference"] = ""
+            new_payload["billReceivedBy"] = ""
+            new_payload["nextRentDueDate"] = align_date_to_month(source_payload.get("nextRentDueDate"), month_value, fallback_day=5)
+            new_payload["billDueDate"] = (
+                explicit_due_date
+                if parse_date(explicit_due_date)
+                else align_date_to_month(source_payload.get("billDueDate"), month_value, fallback_day=10)
+            )
+            new_payload["updatedAt"] = datetime.utcnow().isoformat()
+            note_prefix = f"Monthly bills issued in bulk for {month_value}."
+            existing_notes = normalize_text(source_payload.get("notes"))
+            new_payload["notes"] = f"{note_prefix} {existing_notes}".strip()
+
+            record = ModuleRecord(
+                id=new_payload["id"],
+                module_key="apartments",
+                created_at=datetime.utcnow(),
+            )
+            g.db.add(record)
+            set_module_record_metadata(record, MODULES["apartments"], new_payload)
+            sync_generated_sales_for_module_record(record)
+            created_count += 1
+
+        if created_count:
+            audit(
+                "apartments",
+                "Apartment Rentals",
+                "create",
+                f"Bulk monthly bills {month_value}",
+                detail=f"{created_count} suite bills issued in bulk.",
+            )
+        g.db.commit()
+        if created_count:
+            flash(f"Issued monthly bills for {created_count} suite(s) for {month_value}.", "success")
+        if skipped_count:
+            flash(f"Skipped {skipped_count} suite(s) because a {month_value} record already exists.", "warning")
+        return redirect(
+            url_for(
+                "module_list",
+                module_key="apartments",
+                q=normalize_text(request.form.get("q")),
+                month=month_value,
+                status=normalize_text(request.form.get("status")),
+                alert=normalize_text(request.form.get("alert")),
+            )
         )
 
     @app.route("/app/inventory", methods=["GET", "POST"])
@@ -5075,6 +5778,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             product = products[normalize_text(item.get("productId"))]
             quantity = max(parse_amount(item.get("quantity")), 1.0)
             unit_price = parse_amount(item.get("unitPrice")) or product.sales_price
+            unit_cost = parse_amount(product.cost_price)
+            cost_amount = round(quantity * unit_cost, 2)
             line_total = round(quantity * unit_price, 2)
             line = PosOrderLine(
                 id=f"{order_id}:{position}",
@@ -5089,6 +5794,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 track_inventory=product.track_inventory,
                 quantity=quantity,
                 unit_price=unit_price,
+                unit_cost=unit_cost,
+                cost_amount=cost_amount,
                 total_amount=line_total,
             )
             order.lines.append(line)

@@ -1,0 +1,151 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card module-hero service-hero">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }} Payment Desk</h3>
+        <p class="muted">Save each payment separately from the request so the balance, Daily Sales, and realized profit stay aligned.</p>
+      </div>
+      <div class="toolbar">
+        <a class="button subtle" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit Request</a>
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back to {{ definition.label }}</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Total Due</span>
+      <strong>
+        {% if definition.key == 'laundry_tickets' %}
+          {{ service_row.amountDue|currency }}
+        {% else %}
+          {{ (service_row.rentalFee + service_row.damageCharge)|currency }}
+        {% endif %}
+      </strong>
+      <small>Request value currently billed</small>
+    </article>
+    <article class="metric-card">
+      <span>Collected</span>
+      <strong>{{ service_row.amountPaid|currency }}</strong>
+      <small>{{ service_row.paymentCount }} payment{% if service_row.paymentCount != 1 %}s{% endif %} saved</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Balance Left</span>
+      <strong>{{ service_row.balance|currency }}</strong>
+      <small>Still outstanding on this request</small>
+    </article>
+    <article class="metric-card">
+      <span>Collected Profit</span>
+      <strong>{{ service_row.profitAmount|currency }}</strong>
+      <small>Profit recognized from payments already received</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Request Summary</p>
+          <h3>{% if definition.key == 'laundry_tickets' %}{{ service_row.customerName }}{% else %}{{ service_row.equipmentItem }}{% endif %}</h3>
+        </div>
+      </div>
+      <ul class="stack-list compact">
+        {% if definition.key == 'laundry_tickets' %}
+          <li><strong>Service</strong><span>{{ service_row.itemSummary }} · {{ service_row.serviceCategory }} · {{ service_row.serviceType }}</span></li>
+          <li><strong>Dates</strong><span>Ticket {{ service_row.ticketDate or '—' }} · Due {{ service_row.dueDate or '—' }} · Ready {{ service_row.readyDate or '—' }}</span></li>
+        {% else %}
+          <li><strong>Customer</strong><span>{{ service_row.customerName }}{% if service_row.customerPhone %} · {{ service_row.customerPhone }}{% endif %}</span></li>
+          <li><strong>Rental</strong><span>{{ service_row.equipmentCategory }} · Due {{ service_row.dueDate or '—' }} · Return {{ service_row.returnDate or '—' }}</span></li>
+        {% endif %}
+        <li><strong>Status</strong><span>{{ service_row.status }}</span></li>
+        <li><strong>Service Cost</strong><span>{{ service_row.costAmount|currency }}</span></li>
+      </ul>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">New Collection</p>
+          <h3>Capture Payment</h3>
+        </div>
+      </div>
+      <form method="post" class="form-grid">
+        <label>
+          <span>Payment Date</span>
+          <input type="date" name="paymentDate" value="{{ today_iso }}" required>
+        </label>
+        <label>
+          <span>Amount Paid</span>
+          <input type="number" min="0" step="0.01" name="amountPaid" required>
+        </label>
+        <label>
+          <span>Payment Method</span>
+          <select name="paymentMethod">
+            <option value="">Select Payment Method</option>
+            {% for method in payment_methods %}
+              <option value="{{ method }}">{{ method }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Reference</span>
+          <input type="text" name="paymentReference" placeholder="Transaction or receipt reference">
+        </label>
+        <label>
+          <span>Received By</span>
+          <input type="text" name="receivedBy" placeholder="Staff name">
+        </label>
+        <label class="span-2">
+          <span>Notes</span>
+          <textarea name="notes" rows="3" placeholder="Optional collection note"></textarea>
+        </label>
+        <div class="form-actions span-2">
+          <button class="button primary" type="submit">Save Payment</button>
+        </div>
+      </form>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Payment History</p>
+        <h3>Saved Collections</h3>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Amount</th>
+            <th>Method</th>
+            <th>Reference</th>
+            <th>Profit</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for payment in service_row.payments|reverse %}
+            <tr>
+              <td>{{ payment.paymentDate or '—' }}</td>
+              <td>{{ payment.amountPaid|currency }}</td>
+              <td>{{ payment.paymentMethod or '—' }}</td>
+              <td>{{ payment.paymentReference or '—' }}</td>
+              <td>{{ payment.profitAmount|currency }}</td>
+              <td>
+                <form method="post" action="{{ url_for('service_payment_delete', module_key=definition.key, record_id=record.id, payment_id=payment.id) }}" onsubmit="return confirm('Delete this payment entry? This will also re-sync Daily Sales.');">
+                  <button class="text-button danger-text" type="submit">Delete</button>
+                </form>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6">No payments have been saved for this request yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

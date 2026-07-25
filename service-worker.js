@@ -1,31 +1,17 @@
-const CACHE_NAME = "oneroot-operations-app-v59";
-const SCOPE_PATH = new URL(self.registration.scope || self.location.href).pathname;
-const BASE_PATH = SCOPE_PATH.endsWith("/") ? SCOPE_PATH : `${SCOPE_PATH}/`;
-
-function buildScopedAssetPath(asset) {
-  const normalizedAsset = String(asset || "").replace(/^\/+/, "");
-  return normalizedAsset ? `${BASE_PATH}${normalizedAsset}`.replace(/\/{2,}/g, "/") : BASE_PATH;
-}
-
+const CACHE_NAME = "oneroot-platform-v60";
 const APP_SHELL_ASSETS = [
-  "",
-  "index.html",
-  "styles.css",
-  "script.js",
-  "oneroot_product_catalog.js",
-  "pos_inventory_extension.js",
-  "online_orders_extension.js",
-  "data/public/oneroot-hosted-workspace-seed.json",
-  "assets/oneroot-logo.png",
-  "manifest.webmanifest",
-  "icon.svg",
-  "Tenancy_Agreement_Template.docx",
-  "service-worker.js"
-].map(buildScopedAssetPath);
-
-const APP_SHELL_PATHS = new Set(
-  APP_SHELL_ASSETS.map((assetPath) => new URL(assetPath, self.location.origin).pathname)
-);
+  "/",
+  "/operations/",
+  "/track-order.html",
+  "/manifest.webmanifest",
+  "/icon.svg",
+  "/assets/oneroot-logo.png",
+  "/website/styles.css?v=20260725a",
+  "/website/app.js?v=20260721b",
+  "/website/pwa.js?v=20260725a",
+  "/static/app.css",
+  "/static/oneroot-mark.svg"
+];
 
 self.addEventListener("install", (event) => {
   event.waitUntil(
@@ -37,11 +23,7 @@ self.addEventListener("install", (event) => {
 self.addEventListener("activate", (event) => {
   event.waitUntil(
     caches.keys().then((keys) =>
-      Promise.all(
-        keys
-          .filter((key) => key !== CACHE_NAME)
-          .map((key) => caches.delete(key))
-      )
+      Promise.all(keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key)))
     )
   );
   self.clients.claim();
@@ -53,62 +35,45 @@ self.addEventListener("fetch", (event) => {
   }
 
   const requestUrl = new URL(event.request.url);
-  const isApiRequest =
-    requestUrl.origin === self.location.origin &&
-    requestUrl.pathname.startsWith("/api/");
-  const isAppShellRequest =
-    requestUrl.origin === self.location.origin && APP_SHELL_PATHS.has(requestUrl.pathname);
+  if (requestUrl.origin !== self.location.origin) {
+    return;
+  }
 
-  if (isApiRequest) {
+  const isAppApi = requestUrl.pathname.startsWith("/app/api/");
+  if (isAppApi) {
     event.respondWith(fetch(event.request));
     return;
   }
 
   if (event.request.mode === "navigate") {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match(buildScopedAssetPath("index.html")))
-    );
-    return;
-  }
-
-  if (isAppShellRequest) {
-    event.respondWith(
       fetch(event.request)
-        .then((networkResponse) => {
-          if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== "basic") {
-            return networkResponse;
-          }
-
-          const responseClone = networkResponse.clone();
-          caches.open(CACHE_NAME).then((cache) => {
-            cache.put(event.request, responseClone);
-          });
-
-          return networkResponse;
+        .then((response) => {
+          const copy = response.clone();
+          caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          return response;
         })
-        .catch(() => caches.match(event.request))
+        .catch(async () => {
+          const exactMatch = await caches.match(event.request);
+          return exactMatch || caches.match("/");
+        })
     );
     return;
   }
 
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-
-      return fetch(event.request).then((networkResponse) => {
-        if (!networkResponse || networkResponse.status !== 200 || networkResponse.type !== "basic") {
+      const networkFetch = fetch(event.request)
+        .then((networkResponse) => {
+          if (networkResponse && networkResponse.status === 200) {
+            const copy = networkResponse.clone();
+            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, copy));
+          }
           return networkResponse;
-        }
+        })
+        .catch(() => cachedResponse);
 
-        const responseClone = networkResponse.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseClone);
-        });
-
-        return networkResponse;
-      });
+      return cachedResponse || networkFetch;
     })
   );
 });

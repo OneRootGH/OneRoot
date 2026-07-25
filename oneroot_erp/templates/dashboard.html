@@ -7,10 +7,23 @@
       <small>{{ counts.get('sales', 0) }} sales records saved</small>
     </article>
     <article class="metric-card">
+      <span>Profit Today</span>
+      <strong>{{ today_profit_total|currency }}</strong>
+      <small>Realized profit from paid sales today</small>
+    </article>
+    <article class="metric-card">
       <span>Total Sales</span>
       <strong>{{ sales_total|currency }}</strong>
       <small>All captured income so far</small>
     </article>
+    <article class="metric-card">
+      <span>Total Profit</span>
+      <strong>{{ profit_total|currency }}</strong>
+      <small>Realized gross profit so far</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
     <article class="metric-card warning">
       <span>Apartment Exposure</span>
       <strong>{{ apartment_due|currency }}</strong>
@@ -21,9 +34,6 @@
       <strong>{{ supplier_balance|currency }}</strong>
       <small>Outstanding supplier payments</small>
     </article>
-  </section>
-
-  <section class="card-grid four">
     <article class="metric-card">
       <span>Expenses</span>
       <strong>{{ expenses_total|currency }}</strong>
@@ -174,6 +184,26 @@
           </div>
         {% else %}
           <p class="muted">Net position by area will appear as activity is captured this month.</p>
+        {% endif %}
+      </div>
+      <div class="dashboard-subsection">
+        <p class="eyebrow">Profit By Area</p>
+        {% if monthly_profit_chart %}
+          <div class="chart-stack">
+            {% for area in monthly_profit_chart %}
+              <div class="chart-row">
+                <div class="chart-row-header">
+                  <strong>{{ area.chartLabel }}</strong>
+                  <span>{{ area.chartValue|currency }}</span>
+                </div>
+                <div class="chart-track">
+                  <span class="chart-fill" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
+                </div>
+              </div>
+            {% endfor %}
+          </div>
+        {% else %}
+          <p class="muted">Profit by area will appear as cost-linked payments are saved this month.</p>
         {% endif %}
       </div>
     </article>

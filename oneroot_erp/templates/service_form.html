@@ -5,12 +5,40 @@
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }} Form</h3>
-        <p class="muted">Capture the job, payment, and delivery or return details in one focused service desk form.</p>
+        <p class="muted">Capture the request first, then record each payment separately so balances, daily sales, and realized profit stay correct.</p>
       </div>
       <div class="toolbar">
         <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back to {{ definition.label }}</a>
+        {% if record %}
+          <a class="button primary" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=record.id) }}">Record Payment</a>
+        {% endif %}
       </div>
     </div>
+
+    {% if record %}
+      <section class="card-grid four module-inline-actions">
+        <article class="metric-card">
+          <span>Total Due</span>
+          <strong>{{ service_payment_summary.totalDue|currency }}</strong>
+          <small>Current billed value on this request</small>
+        </article>
+        <article class="metric-card">
+          <span>Collected</span>
+          <strong>{{ service_payment_summary.paidTotal|currency }}</strong>
+          <small>{{ service_payment_summary.payments|length }} payment{% if service_payment_summary.payments|length != 1 %}s{% endif %} saved</small>
+        </article>
+        <article class="metric-card warning">
+          <span>Balance</span>
+          <strong>{{ service_payment_summary.balance|currency }}</strong>
+          <small>Still to be collected</small>
+        </article>
+        <article class="metric-card">
+          <span>Collected Profit</span>
+          <strong>{{ service_payment_summary.profitRecognized|currency }}</strong>
+          <small>Realized from payments already received</small>
+        </article>
+      </section>
+    {% endif %}
 
     {% if module_quick_actions %}
       <section class="card-grid two module-inline-actions">
@@ -86,6 +114,26 @@
         <button class="button primary" type="submit">Save Record</button>
       </div>
     </form>
+
+    {% if record and service_payment_summary.payments %}
+      <section class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Collections</p>
+            <h3>Saved Payment History</h3>
+          </div>
+        </div>
+        <ul class="stack-list compact">
+          {% for payment in service_payment_summary.payments|reverse %}
+            <li>
+              <strong>{{ payment.amountPaid|currency }} on {{ payment.paymentDate or 'No date saved' }}</strong>
+              <span>{{ payment.paymentMethod or 'Payment method not saved' }}{% if payment.paymentReference %} · {{ payment.paymentReference }}{% endif %}</span>
+              <span>Cost {{ payment.costAmount|currency }} · Profit {{ payment.profitAmount|currency }}</span>
+            </li>
+          {% endfor %}
+        </ul>
+      </section>
+    {% endif %}
 
     {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] and reference_product_options %}
       <datalist id="service-reference-options">

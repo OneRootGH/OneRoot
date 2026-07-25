@@ -15,6 +15,7 @@
   const cartItemCountNode = document.getElementById("pos-cart-item-count");
   const cartItemCountDuplicateNode = document.getElementById("pos-cart-item-count-duplicate");
   const counterTotalNode = document.getElementById("pos-counter-total");
+  const counterProfitNode = document.getElementById("pos-counter-profit");
   const ledgerTotalNode = document.getElementById("pos-ledger-total");
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
@@ -379,6 +380,9 @@
     }
     if (counterTotalNode) {
       counterTotalNode.textContent = formatCurrency(summary.totalAmount);
+    }
+    if (counterProfitNode) {
+      counterProfitNode.textContent = formatCurrency(summary.profitAmount);
     }
     if (ledgerTotalNode) {
       ledgerTotalNode.textContent = formatCurrency(summary.dailySalesLedgerTotal);

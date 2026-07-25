@@ -3,14 +3,16 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#204d3a">
     <title>Sign In | OneRoot Essentials Platform</title>
+    <link rel="manifest" href="/manifest.webmanifest">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
   </head>
   <body class="login-body">
     <main class="login-card">
       <p class="eyebrow">OneRoot Essentials</p>
       <h1>Platform Sign In</h1>
-      <p class="muted">This rebuild stores business records directly on the server and database.</p>
+      <p class="muted">Sign in to the unified OneRoot operations workspace from any connected device.</p>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <div class="flash-stack">
@@ -31,6 +33,10 @@
         </label>
         <button class="button primary" type="submit">Sign In</button>
       </form>
+      <div class="form-actions" style="margin-top: 1rem;">
+        <button class="button subtle" type="button" data-install-app hidden>Install App</button>
+      </div>
     </main>
+    <script src="/website/pwa.js?v=20260725a" defer></script>
   </body>
 </html>

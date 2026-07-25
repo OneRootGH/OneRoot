@@ -127,6 +127,8 @@ class PosOrderLine(Base):
     track_inventory: Mapped[bool] = mapped_column(Boolean, default=True)
     quantity: Mapped[float] = mapped_column(Float, default=1)
     unit_price: Mapped[float] = mapped_column(Float, default=0)
+    unit_cost: Mapped[float] = mapped_column(Float, default=0)
+    cost_amount: Mapped[float] = mapped_column(Float, default=0)
     total_amount: Mapped[float] = mapped_column(Float, default=0)
 
     order: Mapped["PosOrder"] = relationship(back_populates="lines")

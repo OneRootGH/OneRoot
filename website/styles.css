@@ -162,7 +162,7 @@ main {
   grid-template-columns: minmax(0, 1.25fr) minmax(300px, 0.75fr);
   gap: 1.4rem;
   align-items: stretch;
-  padding: 2rem 0 0.2rem;
+  padding: 1.35rem 0 0.2rem;
 }
 
 .hero-copy,
@@ -460,7 +460,7 @@ main {
 
 .shop-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 0.7fr) minmax(0, 1.2fr) minmax(320px, 390px);
+  grid-template-columns: minmax(0, 1fr) minmax(320px, 390px);
   gap: 1.2rem;
   margin-top: 1.3rem;
   align-items: start;
@@ -468,13 +468,14 @@ main {
 
 .order-guide-panel {
   display: grid;
-  gap: 1rem;
-  position: sticky;
-  top: 6.1rem;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  position: static;
 }
 
 .order-guide-card {
-  padding: 1.15rem;
+  padding: 1rem 1.05rem;
   box-shadow: 0 20px 38px rgba(16, 41, 31, 0.08);
 }
 
@@ -731,9 +732,9 @@ textarea {
 }
 
 .cart-panel-copy {
-  margin: 0.8rem 0 0;
+  margin: 0.45rem 0 0;
   color: var(--ink-700);
-  line-height: 1.65;
+  line-height: 1.5;
 }
 
 .cart-panel-head {
@@ -1014,7 +1015,8 @@ textarea {
   .hero-section,
   .promise-section,
   .shop-layout,
-  .order-flow-section {
+  .order-flow-section,
+  .order-guide-panel {
     grid-template-columns: 1fr;
   }
 

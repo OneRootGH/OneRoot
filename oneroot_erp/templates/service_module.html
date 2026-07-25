@@ -207,12 +207,13 @@
                 </td>
                 <td>
                   {{ row.amountDue|currency }}
-                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }}</span>
+                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }} · Profit {{ row.profitAmount|currency }}</span>
                 </td>
                 <td>{{ row.status }}</td>
                 <td>
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                    <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">Payment</a>
                     <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
                       <input type="hidden" name="q" value="{{ search }}">
                       <input type="hidden" name="status" value="{{ status_filter }}">
@@ -245,12 +246,13 @@
                 </td>
                 <td>
                   {{ row.rentalFee|currency }}
-                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }}{% if row.depositAmount %} · Dep {{ row.depositAmount|currency }}{% endif %}</span>
+                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }} · Profit {{ row.profitAmount|currency }}{% if row.depositAmount %} · Dep {{ row.depositAmount|currency }}{% endif %}</span>
                 </td>
                 <td>{{ row.status }}</td>
                 <td>
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                    <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">Payment</a>
                     <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
                       <input type="hidden" name="q" value="{{ search }}">
                       <input type="hidden" name="status" value="{{ status_filter }}">

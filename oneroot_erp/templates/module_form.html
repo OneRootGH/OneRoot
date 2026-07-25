@@ -45,6 +45,15 @@
                 <option value="{{ value }}" {% if payload.get(field.name, '') == value %}selected{% endif %}>{{ label }}</option>
               {% endfor %}
             </select>
+          {% elif definition.key == 'sales' and field.name == 'profitAmount' %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from amount minus cost"
+              readonly
+            >
           {% else %}
             <input
               type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
