@@ -105,6 +105,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
             ensure_schema_columns(engine)
             with session_factory() as bootstrap_session:
                 bootstrap_database(bootstrap_session, app_config)
+                migrate_planning_workspace(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 bootstrap_session.commit()
             session_factory.remove()
@@ -549,7 +550,6 @@ SIDEBAR_LINK_LABELS = {
 
 MODULE_FILTER_CATEGORY_FIELDS = {
     "expenses": "category",
-    "budgets": "category",
     "petty_cash": "transactionTypeId",
     "cashbook_entries": "entryType",
     "laundry_tickets": "serviceCategory",
@@ -557,6 +557,12 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "mobile_money_reconciliations": "provider",
     "suppliers": "category",
     "asset_records": "assetCategory",
+    "forecast_plans": "planType",
+    "customer_crm": "customerSegment",
+    "promotions": "promotionType",
+    "whatsapp_campaigns": "channelType",
+    "campaign_roi": "channelType",
+    "delivery_dispatch": "dispatchType",
     "recurring_controls": "category",
 }
 
@@ -570,6 +576,11 @@ MODULE_FILTER_CATEGORY_LABELS = {
     "equipmentCategory": "Rental Category",
     "provider": "Provider",
     "assetCategory": "Asset Category",
+    "planType": "Plan Type",
+    "customerSegment": "Customer Segment",
+    "promotionType": "Promotion Type",
+    "channelType": "Channel",
+    "dispatchType": "Dispatch Type",
     "status": "Status",
 }
 
@@ -1042,8 +1053,10 @@ def build_target_progress_rows(records: list[ModuleRecord], month_value: str, *,
         if record.module_key != "forecast_plans" or record.month != month_key:
             continue
         area_id = normalize_text(record.business_area_id) or normalize_text((record.payload or {}).get("businessAreaId")) or "shared-operations"
-        target_lookup[area_id] += parse_amount((record.payload or {}).get("revenueTarget"))
-        expense_budget_lookup[area_id] += parse_amount((record.payload or {}).get("expenseBudget"))
+        payload = dict(record.payload or {})
+        planning_rollup(payload)
+        target_lookup[area_id] += parse_amount(payload.get("revenueTarget"))
+        expense_budget_lookup[area_id] += parse_amount(payload.get("totalBudget"))
 
     rows: list[dict[str, Any]] = []
     for area in BUSINESS_AREAS:
@@ -1100,6 +1113,74 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
             {"label": "Revenue", "value": format_currency(total_amount), "note": "Sales captured in this list"},
             {"label": "Cost", "value": format_currency(total_cost), "note": "Linked item or service cost in this view"},
             {"label": "Profit", "value": format_currency(total_profit), "note": "Realized gross profit in this view"},
+        ]
+    elif definition.key == "forecast_plans":
+        total_target = round(sum(parse_amount((record.payload or {}).get("revenueTarget")) for record in records), 2)
+        total_budget = round(sum(planning_total_budget(record.payload or {}) for record in records), 2)
+        marketing_budget = round(sum(parse_amount((record.payload or {}).get("marketingBudget")) for record in records), 2)
+        cards = [
+            {"label": "Planning Rows", "value": f"{len(records)}", "note": "Current planning records in view"},
+            {"label": "Revenue Target", "value": format_currency(total_target), "note": "Total target set for this view"},
+            {"label": "Budget Total", "value": format_currency(total_budget), "note": "Combined budgets across these records"},
+            {"label": "Marketing Budget", "value": format_currency(marketing_budget), "note": "Marketing spend planned in this view"},
+        ]
+    elif definition.key == "customer_crm":
+        follow_up_due = sum(
+            1
+            for record in records
+            if (follow_up := parse_date((record.payload or {}).get("followUpDate"))) and follow_up <= date.today()
+            and normalize_text((record.payload or {}).get("status")) != "Inactive"
+        )
+        active_count = sum(1 for record in records if normalize_text((record.payload or {}).get("status")) == "Active")
+        cards = [
+            {"label": "Customers In View", "value": f"{len(records)}", "note": "Current CRM contacts"},
+            {"label": "Active Customers", "value": f"{active_count}", "note": "Contacts marked active"},
+            {"label": "Follow-Ups Due", "value": f"{follow_up_due}", "note": "Customers needing a touchpoint now"},
+            {"label": "Lifetime Value", "value": format_currency(total_amount), "note": "Tracked customer value in this view"},
+        ]
+    elif definition.key == "promotions":
+        running_count = sum(
+            1
+            for record in records
+            if normalize_text((record.payload or {}).get("status")) in {"Running", "Scheduled"}
+        )
+        promo_budget = round(sum(parse_amount((record.payload or {}).get("budgetAmount")) for record in records), 2)
+        cards = [
+            {"label": "Promo Records", "value": f"{len(records)}", "note": "Campaigns and offers in view"},
+            {"label": "Running / Scheduled", "value": f"{running_count}", "note": "Promotions currently active or upcoming"},
+            {"label": "Promo Budget", "value": format_currency(promo_budget), "note": "Budget assigned to these promotions"},
+            {"label": "Expected Revenue", "value": format_currency(total_amount), "note": "Revenue expected from the filtered offers"},
+        ]
+    elif definition.key == "whatsapp_campaigns":
+        sent_total = round(sum(parse_amount((record.payload or {}).get("sentCount")) for record in records), 2)
+        response_total = round(sum(parse_amount((record.payload or {}).get("responseCount")) for record in records), 2)
+        order_total = round(sum(parse_amount((record.payload or {}).get("orderCount")) for record in records), 2)
+        response_rate = round((response_total / sent_total) * 100, 2) if sent_total > 0 else 0.0
+        cards = [
+            {"label": "Campaign Records", "value": f"{len(records)}", "note": "Saved WhatsApp and message campaigns"},
+            {"label": "Messages Sent", "value": f"{int(sent_total)}", "note": "Total messages captured in view"},
+            {"label": "Response Rate", "value": f"{response_rate:.2f}%", "note": "Responses compared with messages sent"},
+            {"label": "Revenue Generated", "value": format_currency(total_amount), "note": f"Orders won: {int(order_total)}"},
+        ]
+    elif definition.key == "campaign_roi":
+        total_spend = round(sum(parse_amount((record.payload or {}).get("amountSpent")) for record in records), 2)
+        total_revenue = round(sum(parse_amount((record.payload or {}).get("revenueGenerated")) for record in records), 2)
+        conversion_total = round(sum(parse_amount((record.payload or {}).get("conversionsCount")) for record in records), 2)
+        cards = [
+            {"label": "ROI Records", "value": f"{len(records)}", "note": "Saved campaign performance rows"},
+            {"label": "Campaign Spend", "value": format_currency(total_spend), "note": "Total spend captured in view"},
+            {"label": "Revenue Generated", "value": format_currency(total_revenue), "note": "Revenue attributed to these campaigns"},
+            {"label": "ROI", "value": format_currency(total_amount), "note": f"Tracked conversions: {int(conversion_total)}"},
+        ]
+    elif definition.key == "delivery_dispatch":
+        delivered_count = sum(1 for record in records if normalize_text((record.payload or {}).get("dispatchStatus")) == "Delivered")
+        delivery_margin = round(sum(parse_amount((record.payload or {}).get("deliveryMargin")) for record in records), 2)
+        outstanding_total = round(sum(parse_amount((record.payload or {}).get("outstandingAmount")) for record in records), 2)
+        cards = [
+            {"label": "Dispatch Records", "value": f"{len(records)}", "note": "Current delivery and dispatch rows"},
+            {"label": "Delivered", "value": f"{delivered_count}", "note": "Orders marked delivered"},
+            {"label": "Cash Collected", "value": format_currency(total_amount), "note": "Cash captured through dispatch records"},
+            {"label": "Delivery Margin", "value": format_currency(delivery_margin), "note": f"Outstanding: {format_currency(outstanding_total)}"},
         ]
     else:
         cards = [
@@ -1222,6 +1303,8 @@ APARTMENT_FORM_SECTIONS = [
 
 
 def title_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
+    if definition.key == "forecast_plans":
+        return planning_name(payload)
     for candidate in (
         definition.title_field,
         "title",
@@ -1309,7 +1392,75 @@ def maintenance_amount(payload: dict[str, Any]) -> float:
     return actual_cost if actual_cost > 0 else parse_amount(payload.get("estimatedCost"))
 
 
+def planning_total_budget(payload: dict[str, Any]) -> float:
+    return round(
+        parse_amount(payload.get("budgetAmount"))
+        + parse_amount(payload.get("expenseBudget"))
+        + parse_amount(payload.get("salaryBudget"))
+        + parse_amount(payload.get("marketingBudget"))
+        + parse_amount(payload.get("pettyCashBudget"))
+        + parse_amount(payload.get("stockBudget")),
+        2,
+    )
+
+
+def planning_type(payload: dict[str, Any]) -> str:
+    explicit = normalize_text(payload.get("planType"))
+    if explicit:
+        return explicit
+    if normalize_text(payload.get("category")) and parse_amount(payload.get("budgetAmount")) > 0:
+        return "Budget Line"
+    if parse_amount(payload.get("marketingBudget")) > 0:
+        return "Marketing Push"
+    if any(parse_amount(payload.get(field)) > 0 for field in ("revenueTarget", "expenseBudget", "salaryBudget", "stockBudget", "pettyCashBudget")):
+        return "Area Target"
+    return "Operations Plan"
+
+
+def planning_name(payload: dict[str, Any]) -> str:
+    return (
+        normalize_text(payload.get("planName"))
+        or normalize_text(payload.get("category"))
+        or planning_type(payload)
+        or BUSINESS_AREA_SHORT.get(normalize_text(payload.get("businessAreaId")), "")
+        or "Planning Target"
+    )
+
+
+def planning_rollup(payload: dict[str, Any]) -> None:
+    payload["planType"] = planning_type(payload)
+    payload["planName"] = planning_name(payload)
+    payload["totalBudget"] = planning_total_budget(payload)
+
+
+def whatsapp_campaign_rollup(payload: dict[str, Any]) -> None:
+    sent_count = parse_amount(payload.get("sentCount"))
+    response_count = parse_amount(payload.get("responseCount"))
+    order_count = parse_amount(payload.get("orderCount"))
+    payload["responseRate"] = round((response_count / sent_count) * 100, 2) if sent_count > 0 else 0.0
+    payload["conversionRate"] = round((order_count / sent_count) * 100, 2) if sent_count > 0 else 0.0
+
+
+def campaign_roi_rollup(payload: dict[str, Any]) -> None:
+    amount_spent = parse_amount(payload.get("amountSpent"))
+    revenue_generated = parse_amount(payload.get("revenueGenerated"))
+    roi_amount = round(revenue_generated - amount_spent, 2)
+    payload["roiAmount"] = roi_amount
+    payload["roiPercent"] = round((roi_amount / amount_spent) * 100, 2) if amount_spent > 0 else 0.0
+
+
+def delivery_dispatch_rollup(payload: dict[str, Any]) -> None:
+    order_total = parse_amount(payload.get("orderTotal"))
+    cash_collected = parse_amount(payload.get("cashCollected"))
+    delivery_fee = parse_amount(payload.get("deliveryFee"))
+    rider_cost = parse_amount(payload.get("riderCost"))
+    payload["deliveryMargin"] = round(delivery_fee - rider_cost, 2)
+    payload["outstandingAmount"] = round(max(order_total - cash_collected, 0), 2)
+
+
 def status_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
+    if definition.key == "forecast_plans":
+        return planning_type(payload)
     if definition.key == "suppliers":
         return supplier_payment_status(payload)
     if definition.key == "mobile_money_reconciliations":
@@ -1352,6 +1503,17 @@ def reference_for_module_record(definition: ModuleDefinition, payload: dict[str,
 
 
 def amount_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> float:
+    if definition.key == "forecast_plans":
+        planning_rollup(payload)
+        total_budget = parse_amount(payload.get("totalBudget"))
+        revenue_target = parse_amount(payload.get("revenueTarget"))
+        return total_budget if total_budget > 0 else revenue_target
+    if definition.key == "campaign_roi":
+        campaign_roi_rollup(payload)
+    if definition.key == "whatsapp_campaigns":
+        whatsapp_campaign_rollup(payload)
+    if definition.key == "delivery_dispatch":
+        delivery_dispatch_rollup(payload)
     if definition.key == "mobile_money_reconciliations":
         return abs(mobile_money_variance(payload))
     if definition.key == "maintenance_records":
@@ -1372,6 +1534,83 @@ def record_date_for_module_record(definition: ModuleDefinition, payload: dict[st
         if value:
             return value
     return None
+
+
+def apply_module_record_metadata(record: ModuleRecord, definition: ModuleDefinition, payload: dict[str, Any]) -> None:
+    record.title = title_for_module_record(definition, payload)
+    record.reference = reference_for_module_record(definition, payload) or None
+    record.status = status_for_module_record(definition, payload)
+    record.business_area_id = business_area_for_payload(payload)
+    record.month = record_month_for_module_record(definition, payload)
+    record.record_date = record_date_for_module_record(definition, payload)
+    record.amount = amount_for_module_record(definition, payload)
+    record.payload = payload
+    record.updated_at = datetime.utcnow()
+
+
+def migrate_planning_workspace(db_session) -> None:
+    planning_definition = MODULES.get("forecast_plans")
+    if not planning_definition:
+        return
+
+    planning_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "forecast_plans")
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+    ).all()
+
+    migrated_source_ids = {
+        normalize_text((record.payload or {}).get("mergedSourceRecordId"))
+        for record in planning_records
+        if normalize_text((record.payload or {}).get("mergedSourceRecordId"))
+    }
+
+    for record in planning_records:
+        payload = dict(record.payload or {})
+        planning_rollup(payload)
+        payload.setdefault("month", record.month or normalize_text(payload.get("month")))
+        payload.setdefault("businessAreaId", record.business_area_id or normalize_text(payload.get("businessAreaId")))
+        apply_module_record_metadata(record, planning_definition, payload)
+
+    legacy_budget_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "budgets")
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+    ).all()
+
+    for legacy_record in legacy_budget_records:
+        if legacy_record.id in migrated_source_ids:
+            continue
+        source_payload = dict(legacy_record.payload or {})
+        legacy_note = normalize_text(source_payload.get("notes"))
+        merged_payload = {
+            "id": uuid4().hex,
+            "createdAt": legacy_record.created_at.isoformat(),
+            "updatedAt": legacy_record.updated_at.isoformat(),
+            "month": normalize_text(source_payload.get("month")) or legacy_record.month,
+            "businessAreaId": normalize_text(source_payload.get("businessAreaId")) or legacy_record.business_area_id,
+            "planType": "Budget Line",
+            "planName": normalize_text(source_payload.get("category")) or "Legacy Budget Line",
+            "category": normalize_text(source_payload.get("category")),
+            "budgetAmount": parse_amount(source_payload.get("budgetAmount")) or legacy_record.amount,
+            "revenueTarget": 0,
+            "expenseBudget": 0,
+            "salaryBudget": 0,
+            "marketingBudget": 0,
+            "pettyCashBudget": 0,
+            "stockBudget": 0,
+            "notes": f"Migrated from the legacy Budget Planner.{f' {legacy_note}' if legacy_note else ''}",
+            "mergedSourceRecordId": legacy_record.id,
+            "mergedSourceModule": "budgets",
+        }
+        planning_rollup(merged_payload)
+        merged_record = ModuleRecord(
+            id=merged_payload["id"],
+            module_key="forecast_plans",
+            created_at=legacy_record.created_at,
+        )
+        apply_module_record_metadata(merged_record, planning_definition, merged_payload)
+        db_session.add(merged_record)
 
 
 def record_month_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
@@ -2568,15 +2807,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         }
 
     def set_module_record_metadata(record: ModuleRecord, definition: ModuleDefinition, payload: dict[str, Any]) -> None:
-        record.title = title_for_module_record(definition, payload)
-        record.reference = reference_for_module_record(definition, payload) or None
-        record.status = status_for_module_record(definition, payload)
-        record.business_area_id = business_area_for_payload(payload)
-        record.month = record_month_for_module_record(definition, payload)
-        record.record_date = record_date_for_module_record(definition, payload)
-        record.amount = amount_for_module_record(definition, payload)
-        record.payload = payload
-        record.updated_at = datetime.utcnow()
+        apply_module_record_metadata(record, definition, payload)
 
     def append_order_history(payload: dict[str, Any], status: str, note: str) -> None:
         history = payload.get("statusHistory")
@@ -4908,6 +5139,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["businessAreaId"] = SERVICE_MODULE_AREA_IDS[module_key]
                 hydrate_service_cost_payload(g.db, module_key, payload)
                 apply_service_payment_rollup(module_key, payload)
+            elif module_key == "forecast_plans":
+                planning_rollup(payload)
+            elif module_key == "whatsapp_campaigns":
+                whatsapp_campaign_rollup(payload)
+            elif module_key == "campaign_roi":
+                campaign_roi_rollup(payload)
+            elif module_key == "delivery_dispatch":
+                delivery_dispatch_rollup(payload)
             elif module_key == "sales":
                 payload["sourceType"] = normalize_text(payload.get("sourceType")) or "manual-sale"
                 payload["profitAmount"] = round(parse_amount(payload.get("amount")) - parse_amount(payload.get("costAmount")), 2)
@@ -4996,7 +5235,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record=record,
             payload=record_payload,
             category_map=inventory_category_map(),
-            dynamic_category_field=module_filter_category_field(definition) if module_filter_category_field(definition) == "category" else "",
+            dynamic_category_field="category" if module_has_field(definition, "category") else "",
             module_quick_actions=module_quick_actions,
         )
 

@@ -54,6 +54,42 @@
               placeholder="Calculated automatically from amount minus cost"
               readonly
             >
+          {% elif definition.key == 'forecast_plans' and field.name == 'totalBudget' %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from all budget lines"
+              readonly
+            >
+          {% elif definition.key == 'whatsapp_campaigns' and field.name in ['responseRate', 'conversionRate'] %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from campaign counts"
+              readonly
+            >
+          {% elif definition.key == 'campaign_roi' and field.name in ['roiAmount', 'roiPercent'] %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from revenue and spend"
+              readonly
+            >
+          {% elif definition.key == 'delivery_dispatch' and field.name in ['deliveryMargin', 'outstandingAmount'] %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from dispatch amounts"
+              readonly
+            >
           {% else %}
             <input
               type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
@@ -142,6 +178,152 @@
         costField.addEventListener("input", updateProfit);
         costField.addEventListener("change", updateProfit);
         updateProfit();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'forecast_plans' %}
+    <script>
+      (function () {
+        const fields = [
+          'budgetAmount',
+          'expenseBudget',
+          'salaryBudget',
+          'marketingBudget',
+          'pettyCashBudget',
+          'stockBudget',
+        ].map((name) => document.querySelector(`input[name="${name}"]`)).filter(Boolean);
+        const totalField = document.querySelector('input[name="totalBudget"]');
+        const planNameField = document.querySelector('input[name="planName"]');
+        const categoryField = document.querySelector('[name="category"]');
+        const planTypeField = document.querySelector('[name="planType"]');
+        if (!fields.length || !totalField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updatePlanningFields() {
+          const total = fields.reduce((sum, field) => sum + parseNumber(field.value), 0);
+          totalField.value = total.toFixed(2);
+          if (planNameField && !planNameField.value.trim()) {
+            const fallback = (categoryField && categoryField.value.trim()) || (planTypeField && planTypeField.value.trim()) || "";
+            if (fallback) {
+              planNameField.value = fallback;
+            }
+          }
+        }
+
+        fields.forEach((field) => {
+          field.addEventListener("input", updatePlanningFields);
+          field.addEventListener("change", updatePlanningFields);
+        });
+        [categoryField, planTypeField].filter(Boolean).forEach((field) => {
+          field.addEventListener("change", updatePlanningFields);
+        });
+        updatePlanningFields();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'whatsapp_campaigns' %}
+    <script>
+      (function () {
+        const sentField = document.querySelector('input[name="sentCount"]');
+        const responseField = document.querySelector('input[name="responseCount"]');
+        const orderField = document.querySelector('input[name="orderCount"]');
+        const responseRateField = document.querySelector('input[name="responseRate"]');
+        const conversionRateField = document.querySelector('input[name="conversionRate"]');
+        if (!sentField || !responseField || !orderField || !responseRateField || !conversionRateField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updateRates() {
+          const sent = parseNumber(sentField.value);
+          const responses = parseNumber(responseField.value);
+          const orders = parseNumber(orderField.value);
+          responseRateField.value = (sent > 0 ? (responses / sent) * 100 : 0).toFixed(2);
+          conversionRateField.value = (sent > 0 ? (orders / sent) * 100 : 0).toFixed(2);
+        }
+
+        [sentField, responseField, orderField].forEach((field) => {
+          field.addEventListener("input", updateRates);
+          field.addEventListener("change", updateRates);
+        });
+        updateRates();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'campaign_roi' %}
+    <script>
+      (function () {
+        const spendField = document.querySelector('input[name="amountSpent"]');
+        const revenueField = document.querySelector('input[name="revenueGenerated"]');
+        const roiAmountField = document.querySelector('input[name="roiAmount"]');
+        const roiPercentField = document.querySelector('input[name="roiPercent"]');
+        if (!spendField || !revenueField || !roiAmountField || !roiPercentField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updateRoi() {
+          const spend = parseNumber(spendField.value);
+          const revenue = parseNumber(revenueField.value);
+          const roiAmount = revenue - spend;
+          roiAmountField.value = roiAmount.toFixed(2);
+          roiPercentField.value = (spend > 0 ? (roiAmount / spend) * 100 : 0).toFixed(2);
+        }
+
+        [spendField, revenueField].forEach((field) => {
+          field.addEventListener("input", updateRoi);
+          field.addEventListener("change", updateRoi);
+        });
+        updateRoi();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'delivery_dispatch' %}
+    <script>
+      (function () {
+        const orderTotalField = document.querySelector('input[name="orderTotal"]');
+        const cashCollectedField = document.querySelector('input[name="cashCollected"]');
+        const deliveryFeeField = document.querySelector('input[name="deliveryFee"]');
+        const riderCostField = document.querySelector('input[name="riderCost"]');
+        const marginField = document.querySelector('input[name="deliveryMargin"]');
+        const outstandingField = document.querySelector('input[name="outstandingAmount"]');
+        if (!orderTotalField || !cashCollectedField || !deliveryFeeField || !riderCostField || !marginField || !outstandingField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updateDispatchFigures() {
+          const orderTotal = parseNumber(orderTotalField.value);
+          const cashCollected = parseNumber(cashCollectedField.value);
+          const deliveryFee = parseNumber(deliveryFeeField.value);
+          const riderCost = parseNumber(riderCostField.value);
+          marginField.value = (deliveryFee - riderCost).toFixed(2);
+          outstandingField.value = Math.max(orderTotal - cashCollected, 0).toFixed(2);
+        }
+
+        [orderTotalField, cashCollectedField, deliveryFeeField, riderCostField].forEach((field) => {
+          field.addEventListener("input", updateDispatchFigures);
+          field.addEventListener("change", updateDispatchFigures);
+        });
+        updateDispatchFigures();
       })();
     </script>
   {% endif %}
