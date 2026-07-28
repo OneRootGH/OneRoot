@@ -50,57 +50,82 @@
       </aside>
       <main class="content">
         <header class="topbar">
-          <div>
+          <div class="topbar-heading">
             <p class="eyebrow">OneRoot Essentials Platform</p>
             <h2>{{ page_title }}</h2>
           </div>
           <div class="topbar-actions">
-            <button class="button subtle" type="button" data-install-app hidden>Install App</button>
-            {% if 'search' in current_access_keys %}
-              <form method="get" action="{{ url_for('search_page') }}" class="search-row topbar-search">
-                <input type="search" name="q" placeholder="Search records, orders, stock" value="{{ request.args.get('q', '') if request.endpoint == 'search_page' else '' }}">
-                <button class="button subtle" type="submit">Search</button>
-              </form>
-            {% endif %}
-            {% if attendance_widget %}
-              <div class="attendance-quick">
-                <div class="attendance-quick-copy attendance-{{ attendance_widget.tone }}">
-                  <span>Attendance Today</span>
-                  <strong>{{ attendance_widget.statusLabel }}</strong>
-                  <small>{{ attendance_widget.statusNote }}</small>
-                </div>
-                <div class="attendance-quick-actions">
-                  <form method="post" action="{{ url_for('attendance_clock') }}">
-                    <input type="hidden" name="action" value="check-in">
-                    <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
-                    <button class="button primary" type="submit" {% if not attendance_widget.canCheckIn %}disabled{% endif %}>Check In</button>
-                  </form>
-                  <form method="post" action="{{ url_for('attendance_clock') }}">
-                    <input type="hidden" name="action" value="check-out">
-                    <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
-                    <button class="button dark" type="submit" {% if not attendance_widget.canCheckOut %}disabled{% endif %}>Check Out</button>
-                  </form>
-                </div>
-              </div>
-            {% endif %}
-            {% if 'workbook' in current_access_keys %}
-              <a class="button subtle" href="{{ url_for('download_workbook') }}">Download Workbook</a>
-            {% endif %}
-            {% if 'users' in current_access_keys %}
-              <a class="button subtle" href="{{ url_for('export_backup') }}">Export Backup</a>
-            {% endif %}
+            <div class="topbar-utilities">
+              {% if 'search' in current_access_keys %}
+                <details class="utility-menu">
+                  <summary>
+                    <span>Search</span>
+                  </summary>
+                  <div class="utility-panel utility-panel-search">
+                    <p class="eyebrow">Quick Search</p>
+                    <form method="get" action="{{ url_for('search_page') }}" class="search-row utility-search-form">
+                      <input type="search" name="q" placeholder="Search records, orders, stock" value="{{ request.args.get('q', '') if request.endpoint == 'search_page' else '' }}">
+                      <button class="button subtle" type="submit">Search</button>
+                    </form>
+                  </div>
+                </details>
+              {% endif %}
+              {% if attendance_widget %}
+                <details class="utility-menu">
+                  <summary class="utility-status utility-status-{{ attendance_widget.tone }}">
+                    <span>Attendance</span>
+                    <strong>{{ attendance_widget.statusLabel }}</strong>
+                  </summary>
+                  <div class="utility-panel utility-panel-attendance">
+                    <p class="eyebrow">Attendance Today</p>
+                    <strong>{{ attendance_widget.staffName }}</strong>
+                    <small>{{ attendance_widget.dateLabel }}</small>
+                    <p class="muted utility-note">{{ attendance_widget.statusNote }}</p>
+                    <div class="attendance-quick-actions">
+                      <form method="post" action="{{ url_for('attendance_clock') }}">
+                        <input type="hidden" name="action" value="check-in">
+                        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+                        <button class="button primary" type="submit" {% if not attendance_widget.canCheckIn %}disabled{% endif %}>Check In</button>
+                      </form>
+                      <form method="post" action="{{ url_for('attendance_clock') }}">
+                        <input type="hidden" name="action" value="check-out">
+                        <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+                        <button class="button dark" type="submit" {% if not attendance_widget.canCheckOut %}disabled{% endif %}>Check Out</button>
+                      </form>
+                    </div>
+                  </div>
+                </details>
+              {% endif %}
+              {% if 'workbook' in current_access_keys or 'users' in current_access_keys %}
+                <details class="utility-menu">
+                  <summary>
+                    <span>Workspace</span>
+                  </summary>
+                  <div class="utility-panel utility-panel-links">
+                    <p class="eyebrow">Quick Tools</p>
+                    <button class="button subtle utility-link" type="button" data-install-app hidden>Install App</button>
+                    {% if 'workbook' in current_access_keys %}
+                      <a class="button subtle utility-link" href="{{ url_for('download_workbook') }}">Download Workbook</a>
+                    {% endif %}
+                    {% if 'users' in current_access_keys %}
+                      <a class="button subtle utility-link" href="{{ url_for('export_backup') }}">Export Backup</a>
+                    {% endif %}
+                  </div>
+                </details>
+              {% else %}
+                <button class="button subtle topbar-hidden-install" type="button" data-install-app hidden>Install App</button>
+              {% endif %}
+            </div>
             {% if current_user %}
-              <details class="account-menu">
+              <details class="account-menu compact-account">
                 <summary>
                   <span class="account-avatar">{{ (current_user.full_name or current_user.username or 'O')[:1]|upper }}</span>
-                  <span class="account-copy">
-                    <strong>{{ current_user.full_name or current_user.username }}</strong>
-                    <small>{{ user_role_labels.get(normalize_role_key(current_user.role), normalize_role_key(current_user.role)) }}</small>
-                  </span>
+                  <span class="account-mini">{{ current_user.username or current_user.full_name }}</span>
                 </summary>
                 <div class="account-panel">
                   <p class="eyebrow">Signed In</p>
                   <strong>{{ current_user.full_name or current_user.username }}</strong>
+                  <small>{{ user_role_labels.get(normalize_role_key(current_user.role), normalize_role_key(current_user.role)) }}</small>
                   <small>{{ current_user.username }}</small>
                   <form method="post" action="{{ url_for('logout') }}">
                     <button class="button dark" type="submit">Sign Out</button>
