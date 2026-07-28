@@ -110,7 +110,7 @@
 
   function setLastReceipt(order) {
     if (lastOrderNode) {
-      lastOrderNode.textContent = order?.orderNumber || "No sale saved yet";
+      lastOrderNode.textContent = order?.orderNumber || "No receipt yet";
     }
     if (!lastReceiptLink) {
       return;
@@ -145,7 +145,7 @@
 
     cartContainer.innerHTML = "";
     if (!state.cart.length) {
-      cartContainer.innerHTML = "<div class='muted'>No items added yet. Search or scan a product to start this sale.</div>";
+      cartContainer.innerHTML = "<div class='muted'>No items in cart yet.</div>";
       return;
     }
 
@@ -228,16 +228,16 @@
 
     if (resultCountNode) {
       resultCountNode.textContent = totalResults
-        ? `${totalResults} match${totalResults === 1 ? "" : "es"}`
-        : "No products found";
+        ? `${totalResults} item${totalResults === 1 ? "" : "s"}`
+        : "No items";
     }
     if (resultsPageNode) {
-      resultsPageNode.textContent = totalResults ? `Page ${state.resultPage + 1} of ${totalPages}` : "No matches";
+      resultsPageNode.textContent = totalResults ? `${state.resultPage + 1}/${totalPages}` : "No matches";
     }
     if (resultsHelperNode) {
       resultsHelperNode.textContent = totalResults
-        ? `Showing ${startIndex + 1}-${Math.min(startIndex + visibleResults.length, totalResults)} of ${totalResults}.`
-        : "Try another name, SKU, barcode, or serving area.";
+        ? `${startIndex + 1}-${Math.min(startIndex + visibleResults.length, totalResults)} of ${totalResults}.`
+        : "Try another search.";
     }
     if (resultsPrevButton) {
       resultsPrevButton.disabled = state.resultPage <= 0;
@@ -247,7 +247,7 @@
     }
 
     if (!totalResults) {
-      resultsContainer.innerHTML = "<div class='mini-card'><strong>No matching item</strong><small>Try another name, SKU, barcode, or serving area.</small></div>";
+      resultsContainer.innerHTML = "<div class='mini-card'><strong>No item found</strong><small>Try another search.</small></div>";
       return;
     }
 
@@ -255,11 +255,10 @@
       .map((product) => `
         <button class="pos-product-tile" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
           <span class="pos-product-meta">
-            <small class="pos-product-area">${escapeHtml(product.businessAreaLabel)}</small>
             <small class="pos-product-stock">${product.trackInventory ? `Stock ${escapeHtml(product.quantityOnHand)}` : "Service"}</small>
+            <small class="pos-product-area">${escapeHtml(product.category || "General")}</small>
           </span>
           <strong class="pos-product-name">${escapeHtml(product.name)}</strong>
-          <small class="pos-product-category">${escapeHtml(product.category || "General")}</small>
           <span class="pos-product-footer">
             <strong class="pos-product-price">${formatCurrency(product.salesPrice)}</strong>
             <span class="pos-product-add">Add</span>

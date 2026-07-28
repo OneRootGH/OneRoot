@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#204d3a">
     <title>{{ page_title }} | OneRoot Essentials Platform</title>
     <link rel="manifest" href="/manifest.webmanifest">
-    <link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=static_asset_version) }}">
   </head>
   <body>
     <div class="shell">
@@ -51,7 +51,6 @@
       <main class="content">
         <header class="topbar">
           <div class="topbar-heading">
-            <p class="eyebrow">OneRoot Essentials Platform</p>
             <h2>{{ page_title }}</h2>
           </div>
           <div class="topbar-actions">
@@ -73,7 +72,6 @@
               {% if attendance_widget %}
                 <details class="utility-menu">
                   <summary class="utility-status utility-status-{{ attendance_widget.tone }}">
-                    <span>Attendance</span>
                     <strong>{{ attendance_widget.statusLabel }}</strong>
                   </summary>
                   <div class="utility-panel utility-panel-attendance">
@@ -99,7 +97,7 @@
               {% if 'workbook' in current_access_keys or 'users' in current_access_keys %}
                 <details class="utility-menu">
                   <summary>
-                    <span>Workspace</span>
+                    <span>Tools</span>
                   </summary>
                   <div class="utility-panel utility-panel-links">
                     <p class="eyebrow">Quick Tools</p>

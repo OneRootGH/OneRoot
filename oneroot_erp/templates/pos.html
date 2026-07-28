@@ -3,28 +3,18 @@
   <section class="card pos-workbench">
     <div class="card-header">
       <div>
-        <p class="eyebrow">Counter Sales</p>
-        <h3>Fast POS Checkout</h3>
-        <p class="muted">Laundry services and equipment rentals are now managed from their own service desks, so POS stays focused on quick counter items.</p>
+        <h3>Checkout</h3>
       </div>
       <div class="toolbar">
-        <a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a>
-        <button class="button subtle" type="button" id="pos-closeout">Close Counter</button>
+        <a class="button subtle" href="{{ url_for('inventory') }}">Inventory</a>
+        <button class="button subtle" type="button" id="pos-closeout">Close</button>
       </div>
     </div>
 
-    <section class="pos-counter-strip">
+    <section class="pos-counter-strip pos-counter-strip-primary">
       <article class="mini-card">
-        <span class="eyebrow">Counter Day</span>
+        <span class="eyebrow">Sales</span>
         <strong id="pos-counter-total">{{ counter_summary.totalAmount|currency }}</strong>
-      </article>
-      <article class="mini-card">
-        <span class="eyebrow">Counter Profit</span>
-        <strong id="pos-counter-profit">{{ counter_summary.profitAmount|currency }}</strong>
-      </article>
-      <article class="mini-card">
-        <span class="eyebrow">Daily Sales</span>
-        <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
       </article>
       <article class="mini-card">
         <span class="eyebrow">Cart</span>
@@ -35,48 +25,48 @@
         <strong id="pos-cart-item-count">0</strong>
       </article>
       <article class="mini-card">
-        <span class="eyebrow">Serving Area</span>
+        <span class="eyebrow">Area</span>
         <strong id="pos-area-label">{{ counter_summary.areaLabel }}</strong>
-      </article>
-      <article class="mini-card pos-wide-card">
-        <span class="eyebrow">Payment Mix</span>
-        <strong id="pos-payment-mix">
-          {% if counter_summary.paymentMix %}
-            {% for label, amount in counter_summary.paymentMix.items() %}
-              {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
-            {% endfor %}
-          {% else %}
-            No payment mix recorded yet.
-          {% endif %}
-        </strong>
       </article>
     </section>
 
+    <div class="pos-counter-inline">
+      <span>Profit <strong id="pos-counter-profit">{{ counter_summary.profitAmount|currency }}</strong></span>
+      <span>Daily <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong></span>
+      <span>Mix <strong id="pos-payment-mix">
+        {% if counter_summary.paymentMix %}
+          {% for label, amount in counter_summary.paymentMix.items() %}
+            {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        {% else %}
+          None
+        {% endif %}
+      </strong></span>
+    </div>
+
     <p class="muted pos-serving-note">
-      Search or scan first, tap to add, then save. Press <strong>/</strong> to jump straight to product search.
+      Search, add, save. Press <strong>/</strong> to jump to search.
     </p>
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
       <section class="card pos-catalog-card">
         <div class="card-header compact pos-catalog-head">
           <div>
-            <p class="eyebrow">Cashier Fastlane</p>
-            <h3>Odoo-Style Product Desk</h3>
-            <p class="muted pos-fastlane-helper">Search, browse by category, tap products, and keep the order ticket open beside the catalog.</p>
+            <h3>Products</h3>
           </div>
           <span class="status-chip" id="pos-result-count">Loading products...</span>
         </div>
         <div class="pos-control-grid">
           <label class="pos-search-dominant">
-            <span>Search Products</span>
+            <span>Search</span>
             <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" value="{{ initial_search }}" autocomplete="off">
           </label>
           <label class="pos-scan-field">
-            <span>Scan Barcode / SKU</span>
+            <span>Scan</span>
             <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
           </label>
           <label>
-            <span>Serving Area</span>
+            <span>Area</span>
             <select id="pos-area-filter">
               <option value="">All POS Areas</option>
               {% for value, label in business_area_options %}
@@ -101,21 +91,10 @@
             <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
           </div>
         </div>
-        <section class="pos-category-dock">
-          <div class="pos-category-strip" id="pos-category-strip">
-            <button class="pos-category-pill {% if not initial_category %}is-active{% endif %}" type="button" data-category-value="">All Products</button>
-            {% for category in pos_categories %}
-              <button class="pos-category-pill {% if initial_category == category.name %}is-active{% endif %}" type="button" data-category-value="{{ category.name }}">
-                {{ category.name }}
-                <span>{{ category.count }}</span>
-              </button>
-            {% endfor %}
-          </div>
-        </section>
         <div class="pos-results-toolbar pos-results-toolbar-compact">
           <div>
             <strong id="pos-results-page">Page 1 of 1</strong>
-            <small id="pos-results-helper" class="muted">Products stay in a compact grid so staff can see more with less scrolling.</small>
+            <small id="pos-results-helper" class="muted">Tap a product to add.</small>
           </div>
           <div class="toolbar pos-results-nav">
             <button class="button subtle" type="button" id="pos-results-prev">Back</button>
@@ -126,11 +105,10 @@
           {% for product in top_products %}
             <button class="pos-product-tile" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product.track_inventory, "sku": product.sku, "barcode": product.barcode}|tojson }}'>
               <span class="pos-product-meta">
-                <small class="pos-product-area">{{ business_area_short.get(product.business_area_id, product.business_area_id) }}</small>
                 <small class="pos-product-stock">{% if product.track_inventory %}Stock {{ product.quantity_on_hand|round(0, 'floor')|int }}{% else %}Service{% endif %}</small>
+                <small class="pos-product-area">{{ product.category or 'General' }}</small>
               </span>
               <strong class="pos-product-name">{{ product.name }}</strong>
-              <small class="pos-product-category">{{ product.category or 'General' }}</small>
               <span class="pos-product-footer">
                 <strong class="pos-product-price">{{ product.sales_price|currency }}</strong>
                 <span class="pos-product-add">Add</span>
@@ -143,58 +121,39 @@
       <aside class="card pos-cart-panel pos-cart-panel-enhanced">
         <div class="card-header">
           <div>
-            <p class="eyebrow">Current Sale</p>
-            <h3>Order Ticket</h3>
+            <h3>Cart</h3>
           </div>
           <strong class="pos-cart-grand-total" data-pos-total>GH₵0.00</strong>
         </div>
 
         <section class="mini-card pos-payment-dock">
           <div class="pos-payment-dock-head">
-            <div>
-              <span class="eyebrow">Checkout Payment</span>
-              <strong>Choose once before saving</strong>
-            </div>
-            <small class="muted">Keep this near the cart to finish faster.</small>
+            <strong>Payment</strong>
+            <label class="pos-payment-inline">
+              <span>Method</span>
+              <select id="pos-payment-method">
+                {% for method in payment_methods %}
+                  <option value="{{ method }}">{{ method }}</option>
+                {% endfor %}
+              </select>
+            </label>
           </div>
-          <div class="pos-chip-row" id="pos-payment-buttons">
-            {% for method in payment_methods %}
-              <button class="pos-chip {% if loop.first %}is-active{% endif %}" type="button" data-payment-method="{{ method }}">{{ method }}</button>
-            {% endfor %}
-          </div>
-          <label class="pos-payment-select">
-            <span>Payment Dropdown</span>
-            <select id="pos-payment-method">
-              {% for method in payment_methods %}
-                <option value="{{ method }}">{{ method }}</option>
-              {% endfor %}
-            </select>
-          </label>
         </section>
 
-        <section class="summary-grid pos-summary-grid">
-          <article class="mini-card">
-            <span>Items</span>
-            <strong id="pos-cart-item-count-duplicate">0</strong>
-            <small>Running quantity in cart</small>
-          </article>
-          <article class="mini-card">
-            <span>Payment</span>
-            <strong id="pos-payment-label">{{ payment_methods[0] if payment_methods else 'Cash' }}</strong>
-            <small>Change at the top anytime</small>
-          </article>
-        </section>
+        <div class="pos-ticket-inline">
+          <span><strong id="pos-cart-item-count-duplicate">0</strong> items</span>
+          <span><strong id="pos-payment-label">{{ payment_methods[0] if payment_methods else 'Cash' }}</strong></span>
+        </div>
 
         <section class="mini-card pos-last-receipt-card pos-last-receipt-inline">
           <div>
-            <span class="eyebrow">Receipt</span>
-            <strong id="pos-last-order-number">No sale saved yet</strong>
+            <strong id="pos-last-order-number">No receipt yet</strong>
           </div>
-          <a class="button subtle is-disabled" href="#" id="pos-last-receipt" target="_blank" rel="noopener">Print Last Receipt</a>
+          <a class="button subtle is-disabled" href="#" id="pos-last-receipt" target="_blank" rel="noopener">Receipt</a>
         </section>
 
         <details class="muted-box pos-customer-box pos-customer-box-compact">
-          <summary>Customer details, note, and counter info (optional)</summary>
+          <summary>Customer</summary>
           <div class="form-grid single">
             <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Only if needed"></label>
             <label><span>Customer Phone</span><input type="text" id="pos-customer-phone" placeholder="Optional contact"></label>
@@ -211,8 +170,7 @@
 
         <div class="cart-box pos-cart-box pos-cart-box-grow">
           <div class="card-header compact">
-            <h4>Cart Lines</h4>
-            <span class="muted">Adjust quantity here</span>
+            <h4>Items</h4>
           </div>
           <div id="pos-cart-lines" class="stack-list compact"></div>
         </div>
@@ -229,12 +187,11 @@
   <details class="card pos-history-drawer">
     <summary class="pos-history-summary">
       <div>
-        <p class="eyebrow">Counter History</p>
-        <h3>Recent POS Orders</h3>
+        <h3>Recent Sales</h3>
       </div>
       <p class="muted">
-        Current POS total for <strong id="pos-summary-date">{{ counter_summary.orderDate }}</strong> is
-        <strong id="pos-summary-total">{{ counter_summary.totalAmount|currency }}</strong>.
+        <strong id="pos-summary-date">{{ counter_summary.orderDate }}</strong> ·
+        <strong id="pos-summary-total">{{ counter_summary.totalAmount|currency }}</strong>
       </p>
     </summary>
     <div class="table-wrap tall">
@@ -275,5 +232,5 @@
   </details>
 {% endblock %}
 {% block scripts %}
-  <script src="{{ url_for('static', filename='app.js') }}"></script>
+  <script src="{{ url_for('static', filename='app.js', v=static_asset_version) }}"></script>
 {% endblock %}

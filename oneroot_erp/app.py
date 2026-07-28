@@ -6980,6 +6980,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         audits = g.db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(250)).all()
         return render_template("audit.html", page_title="Audit Trail", audits=audits)
 
+    def current_static_asset_version() -> str:
+        static_dir = Path(app.static_folder or "")
+        version_parts: list[str] = []
+        for asset_name in ("app.css", "app.js"):
+            asset_path = static_dir / asset_name
+            if asset_path.exists():
+                version_parts.append(str(int(asset_path.stat().st_mtime)))
+        return "-".join(version_parts) or str(int(time.time()))
+
     @app.context_processor
     def inject_common():
         current_user = getattr(g, "current_user", None)
@@ -6992,6 +7001,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "normalize_role_key": normalize_role_key,
             "user_role_label": role_label,
             "user_role_labels": USER_ROLE_LABELS,
+            "static_asset_version": current_static_asset_version(),
         }
 
     return app
