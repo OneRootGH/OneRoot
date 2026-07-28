@@ -174,7 +174,7 @@
         <div class="card-header">
           <div>
             <p class="eyebrow">Area Performance</p>
-            <h3>Amount By Business Area</h3>
+            <h3>{{ module_amount_label(definition) }} By Business Area</h3>
           </div>
         </div>
         {% if module_overview.areaChart %}
@@ -183,7 +183,7 @@
               <div class="chart-row">
                 <div class="chart-row-header">
                   <strong>{{ row.chartLabel }}</strong>
-                  <span>{{ row.chartValue|currency }}</span>
+                  <span>{{ format_module_amount(definition, row.chartValue) }}</span>
                 </div>
                 <div class="chart-track">
                   <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
@@ -214,7 +214,7 @@
             <th>Area</th>
             <th>Status</th>
             <th>Month / Date</th>
-            <th>Amount</th>
+            <th>{{ module_amount_label(definition) }}</th>
             <th>Updated</th>
             <th></th>
           </tr>
@@ -227,9 +227,23 @@
               <td>{{ record.status or '—' }}</td>
               <td>{{ record.month or record.record_date or '—' }}</td>
               <td>
-                {{ record.amount|currency }}
+                {% if definition.amount_field %}
+                  {{ format_module_amount(definition, record.amount) }}
+                {% else %}
+                  —
+                {% endif %}
                 {% if definition.key == 'sales' %}
                   <span class="table-secondary">Cost {{ (record.payload.get('costAmount', 0))|currency }} · Profit {{ (record.payload.get('profitAmount', record.amount - (record.payload.get('costAmount', 0) or 0)))|currency }}</span>
+                {% elif definition.key == 'salary_records' %}
+                  <span class="table-secondary">Net {{ (record.payload.get('netPay', 0))|currency }} · Paid {{ (record.payload.get('amountPaid', 0))|currency }} · Bal {{ (record.payload.get('balanceDue', 0))|currency }}</span>
+                {% elif definition.key == 'asset_records' %}
+                  <span class="table-secondary">Cost {{ (record.payload.get('purchaseCost', 0))|currency }} · Dep {{ (record.payload.get('accumulatedDepreciation', 0))|currency }}</span>
+                {% elif definition.key == 'maintenance_records' %}
+                  <span class="table-secondary">{{ record.payload.get('workOrderNumber', 'No work order ref') }} · Est {{ (record.payload.get('estimatedCost', 0))|currency }}</span>
+                {% elif definition.key == 'knowledge_base' %}
+                  <span class="table-secondary">{{ record.payload.get('entryType', 'Entry') }} · {{ record.payload.get('audienceRole', 'All Staff') }}</span>
+                {% elif definition.key == 'workforce_attendance' %}
+                  <span class="table-secondary">{{ record.payload.get('shiftType', 'Shift') }} · OT {{ record.payload.get('overtimeHours', 0) }} hrs · Late {{ record.payload.get('lateMinutes', 0) }} min</span>
                 {% endif %}
               </td>
               <td>{{ record.updated_at }}</td>
@@ -237,6 +251,9 @@
                 {% if definition.editable %}
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit</a>
+                    {% if definition.key == 'salary_records' %}
+                      <a class="table-link" href="{{ url_for('salary_payslip', record_id=record.id) }}">Payslip</a>
+                    {% endif %}
                     <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=record.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
                       <input type="hidden" name="q" value="{{ search }}">
                       <input type="hidden" name="area" value="{{ area_filter }}">

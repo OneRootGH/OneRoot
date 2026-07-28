@@ -191,6 +191,46 @@ def parse_month(value: Any) -> str:
     return raw[:7] if len(raw) >= 7 else ""
 
 
+def parse_time_value(value: Any) -> tuple[int, int] | None:
+    raw = normalize_text(value)
+    if len(raw) < 4 or ":" not in raw:
+        return None
+    try:
+        hour_text, minute_text = raw[:5].split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+    except (TypeError, ValueError):
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour, minute
+
+
+def hours_between_times(start_value: Any, end_value: Any, *, break_minutes: float = 0.0) -> float:
+    start_parts = parse_time_value(start_value)
+    end_parts = parse_time_value(end_value)
+    if not start_parts or not end_parts:
+        return 0.0
+    start_total = start_parts[0] * 60 + start_parts[1]
+    end_total = end_parts[0] * 60 + end_parts[1]
+    if end_total < start_total:
+        end_total += 24 * 60
+    minutes = max(end_total - start_total - max(int(parse_amount(break_minutes)), 0), 0)
+    return round(minutes / 60, 2)
+
+
+def minutes_late(scheduled_start: Any, check_in_value: Any) -> int:
+    start_parts = parse_time_value(scheduled_start)
+    check_in_parts = parse_time_value(check_in_value)
+    if not start_parts or not check_in_parts:
+        return 0
+    start_total = start_parts[0] * 60 + start_parts[1]
+    check_in_total = check_in_parts[0] * 60 + check_in_parts[1]
+    if check_in_total < start_total:
+        check_in_total += 24 * 60
+    return max(check_in_total - start_total, 0)
+
+
 def align_date_to_month(date_value: Any, month_value: Any, fallback_day: int = 5) -> str:
     month_key = parse_month(month_value)
     if not month_key:
@@ -451,6 +491,213 @@ def module_record_cost_amount(record: ModuleRecord) -> float:
     return sales_cost_amount(record.payload or {})
 
 
+def salary_rollup(payload: dict[str, Any]) -> None:
+    base_salary = parse_amount(payload.get("baseSalary"))
+    allowance = parse_amount(payload.get("allowance"))
+    bonus = parse_amount(payload.get("bonus"))
+    overtime_hours = parse_amount(payload.get("overtimeHours"))
+    overtime_rate = parse_amount(payload.get("overtimeRate"))
+    overtime_pay = parse_amount(payload.get("overtimePay"))
+    if overtime_hours > 0 and overtime_rate > 0:
+        overtime_pay = round(overtime_hours * overtime_rate, 2)
+    payload["overtimePay"] = round(overtime_pay, 2)
+    gross_pay = round(base_salary + allowance + bonus + overtime_pay, 2)
+    payload["grossPay"] = gross_pay
+    total_deductions = round(
+        parse_amount(payload.get("taxAmount"))
+        + parse_amount(payload.get("ssnitAmount"))
+        + parse_amount(payload.get("loanDeduction"))
+        + parse_amount(payload.get("deductions")),
+        2,
+    )
+    payload["totalDeductions"] = total_deductions
+    net_pay = round(max(gross_pay - total_deductions, 0), 2)
+    payload["netPay"] = net_pay
+    amount_paid = round(parse_amount(payload.get("amountPaid")), 2)
+    payload["balanceDue"] = round(max(net_pay - amount_paid, 0), 2)
+    payload["status"] = salary_payment_status(payload)
+
+
+def salary_payment_status(payload: dict[str, Any]) -> str:
+    net_pay = round(parse_amount(payload.get("netPay")), 2)
+    amount_paid = round(parse_amount(payload.get("amountPaid")), 2)
+    if net_pay > 0 and amount_paid >= net_pay:
+        return "Paid"
+    if amount_paid > 0:
+        return "Part Paid"
+    return "Pending"
+
+
+def salary_open_balance(payload: dict[str, Any]) -> float:
+    salary_rollup(payload)
+    return round(max(parse_amount(payload.get("balanceDue")), 0), 2)
+
+
+def salary_cost_for_reporting(payload: dict[str, Any]) -> float:
+    salary_rollup(payload)
+    gross_pay = parse_amount(payload.get("grossPay"))
+    return gross_pay if gross_pay > 0 else parse_amount(payload.get("amountPaid"))
+
+
+def months_between(start_date: date | None, end_date: date | None) -> int:
+    if not start_date or not end_date or end_date < start_date:
+        return 0
+    months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
+    if end_date.day < start_date.day:
+        months -= 1
+    return max(months, 0)
+
+
+def add_months(base_date: date, months: int) -> date:
+    month_index = base_date.month - 1 + max(months, 0)
+    year = base_date.year + month_index // 12
+    month_number = month_index % 12 + 1
+    day = min(base_date.day, calendar.monthrange(year, month_number)[1])
+    return date(year, month_number, day)
+
+
+def month_end_date(month_value: str) -> date | None:
+    month_key = parse_month(month_value)
+    if not month_key:
+        return None
+    try:
+        year_text, month_text = month_key.split("-", 1)
+        year = int(year_text)
+        month_number = int(month_text)
+    except (TypeError, ValueError):
+        return None
+    return date(year, month_number, calendar.monthrange(year, month_number)[1])
+
+
+def asset_rollup(payload: dict[str, Any]) -> None:
+    purchase_cost = parse_amount(payload.get("purchaseCost"))
+    salvage_value = max(parse_amount(payload.get("salvageValue")), 0)
+    existing_current_value = parse_amount(payload.get("currentValue"))
+    useful_life_months = int(parse_amount(payload.get("usefulLifeMonths")))
+    depreciation_method = normalize_text(payload.get("depreciationMethod")) or "Straight Line"
+    acquired_date = parse_date(payload.get("acquiredDate"))
+    today = date.today()
+    if acquired_date and acquired_date > today:
+        payload["monthlyDepreciation"] = 0.0
+        payload["annualDepreciation"] = 0.0
+        payload["accumulatedDepreciation"] = 0.0
+        payload["currentValue"] = round(purchase_cost or existing_current_value, 2)
+        if acquired_date and useful_life_months > 0:
+            payload["replacementDueDate"] = add_months(acquired_date, useful_life_months).isoformat()
+        return
+    months_elapsed = months_between(acquired_date, today)
+    depreciable_base = max(purchase_cost - salvage_value, 0)
+
+    monthly_depreciation = 0.0
+    accumulated = 0.0
+    if useful_life_months > 0 and depreciable_base > 0:
+        if depreciation_method == "Reducing Balance":
+            straight_rate = depreciable_base / useful_life_months
+            monthly_rate = (straight_rate / purchase_cost) if purchase_cost > 0 else 0
+            current_value = purchase_cost
+            for _ in range(min(months_elapsed, useful_life_months)):
+                reduction = round(current_value * monthly_rate, 2)
+                floor_value = salvage_value
+                if current_value - reduction < floor_value:
+                    reduction = max(current_value - floor_value, 0)
+                current_value = round(current_value - reduction, 2)
+                accumulated += reduction
+            monthly_depreciation = round(purchase_cost * monthly_rate, 2) if monthly_rate > 0 else 0.0
+        else:
+            monthly_depreciation = round(depreciable_base / useful_life_months, 2)
+            accumulated = round(min(monthly_depreciation * months_elapsed, depreciable_base), 2)
+    current_value = round(max(purchase_cost - accumulated, salvage_value if purchase_cost > 0 else existing_current_value), 2)
+    payload["monthlyDepreciation"] = monthly_depreciation
+    payload["annualDepreciation"] = round(monthly_depreciation * 12, 2)
+    payload["accumulatedDepreciation"] = round(accumulated, 2)
+    payload["currentValue"] = current_value
+    if acquired_date and useful_life_months > 0:
+        payload["replacementDueDate"] = add_months(acquired_date, useful_life_months).isoformat()
+
+
+def asset_depreciation_charge_for_month(payload: dict[str, Any], month_value: str) -> float:
+    month_end = month_end_date(month_value)
+    if not month_end:
+        return 0.0
+    acquired_date = parse_date(payload.get("acquiredDate"))
+    if acquired_date and acquired_date > month_end:
+        return 0.0
+    status = normalize_text(payload.get("status"))
+    if status in {"Retired", "Sold"}:
+        return 0.0
+    asset_rollup(payload)
+    return round(parse_amount(payload.get("monthlyDepreciation")), 2)
+
+
+def maintenance_rollup(payload: dict[str, Any]) -> None:
+    generated_id = normalize_text(payload.get("id"))[:6].upper() or "WORK"
+    reported_date = parse_date(payload.get("reportedDate")) or date.today()
+    if not normalize_text(payload.get("workOrderNumber")):
+        payload["workOrderNumber"] = f"WO-{reported_date.strftime('%Y%m%d')}-{generated_id}"
+    rolled_cost = round(
+        parse_amount(payload.get("laborCost"))
+        + parse_amount(payload.get("partsCost"))
+        + parse_amount(payload.get("otherCost")),
+        2,
+    )
+    if rolled_cost > 0 or not normalize_text(payload.get("actualCost")):
+        payload["actualCost"] = rolled_cost
+    if parse_date(payload.get("completedDate")):
+        payload["status"] = "Completed"
+    elif normalize_text(payload.get("status")) == "Completed":
+        payload["completedDate"] = payload.get("completedDate") or date.today().isoformat()
+    elif parse_date(payload.get("scheduledDate")) and normalize_text(payload.get("status")) == "Open":
+        payload["status"] = "Scheduled"
+
+
+def knowledge_rollup(payload: dict[str, Any]) -> None:
+    pass_score = parse_amount(payload.get("passScore"))
+    actual_score = parse_amount(payload.get("actualScore"))
+    completion_percent = parse_amount(payload.get("completionPercent"))
+    if pass_score > 0 and actual_score > 0:
+        completion_percent = round(min((actual_score / pass_score) * 100, 100), 2)
+    elif parse_date(payload.get("completionDate")):
+        completion_percent = 100.0
+    payload["completionPercent"] = round(max(completion_percent, 0), 2)
+
+    explicit_status = normalize_text(payload.get("status"))
+    if explicit_status in {"Archived", "Under Review"}:
+        return
+    if parse_date(payload.get("completionDate")) or payload["completionPercent"] >= 100:
+        payload["status"] = "Completed"
+    elif (due_date := parse_date(payload.get("dueDate"))) and due_date <= date.today():
+        payload["status"] = "Training Due"
+    elif normalize_text(payload.get("title")):
+        payload["status"] = "Active"
+    else:
+        payload["status"] = explicit_status or "Draft"
+
+
+def workforce_rollup(payload: dict[str, Any]) -> None:
+    break_minutes = parse_amount(payload.get("breakMinutes"))
+    scheduled_hours = hours_between_times(payload.get("shiftStart"), payload.get("shiftEnd"), break_minutes=break_minutes)
+    worked_hours = hours_between_times(payload.get("checkInTime"), payload.get("checkOutTime"), break_minutes=break_minutes)
+    late_minutes = minutes_late(payload.get("shiftStart"), payload.get("checkInTime"))
+    payload["scheduledHours"] = scheduled_hours
+    payload["workedHours"] = worked_hours
+    payload["overtimeHours"] = round(max(worked_hours - scheduled_hours, 0), 2)
+    payload["lateMinutes"] = late_minutes
+
+    explicit_status = normalize_text(payload.get("attendanceStatus"))
+    if explicit_status == "Off Duty":
+        return
+    if parse_time_value(payload.get("checkOutTime")):
+        payload["attendanceStatus"] = "Checked Out"
+    elif parse_time_value(payload.get("checkInTime")):
+        payload["attendanceStatus"] = "Late" if late_minutes > 0 else "Present"
+    elif explicit_status in {"Absent", "Scheduled"}:
+        payload["attendanceStatus"] = explicit_status
+    elif parse_time_value(payload.get("shiftStart")):
+        payload["attendanceStatus"] = "Scheduled"
+    else:
+        payload["attendanceStatus"] = explicit_status or "Scheduled"
+
+
 def password_hash(password: str) -> str:
     return f"sha256:{hashlib.sha256(password.encode('utf-8')).hexdigest()}"
 
@@ -536,9 +783,26 @@ def build_chart_rows(
     return normalized_rows
 
 
+def module_amount_label(definition: ModuleDefinition) -> str:
+    return {
+        "salary_records": "Gross Pay",
+        "knowledge_base": "Progress",
+        "workforce_attendance": "Worked Hours",
+    }.get(definition.key, "Amount")
+
+
+def format_module_amount(definition: ModuleDefinition, value: Any) -> str:
+    amount = round(parse_amount(value), 2)
+    if definition.key == "knowledge_base":
+        return f"{amount:.0f}%"
+    if definition.key == "workforce_attendance":
+        return f"{amount:,.2f} hrs"
+    return format_currency(amount)
+
+
 SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
-    "reports": ("Reports", "reports_page", None),
+    "reports": ("Management Reporting", "reports_page", None),
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
     "pos": ("POS", "pos_page", None),
@@ -557,6 +821,8 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "mobile_money_reconciliations": "provider",
     "suppliers": "category",
     "asset_records": "assetCategory",
+    "salary_records": "staffRole",
+    "maintenance_records": "workOrderType",
     "forecast_plans": "planType",
     "customer_crm": "customerSegment",
     "promotions": "promotionType",
@@ -564,6 +830,8 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "campaign_roi": "channelType",
     "delivery_dispatch": "dispatchType",
     "recurring_controls": "category",
+    "knowledge_base": "entryType",
+    "workforce_attendance": "shiftType",
 }
 
 MODULE_FILTER_CATEGORY_LABELS = {
@@ -576,11 +844,15 @@ MODULE_FILTER_CATEGORY_LABELS = {
     "equipmentCategory": "Rental Category",
     "provider": "Provider",
     "assetCategory": "Asset Category",
+    "staffRole": "Staff Role",
+    "workOrderType": "Work Order Type",
     "planType": "Plan Type",
     "customerSegment": "Customer Segment",
     "promotionType": "Promotion Type",
     "channelType": "Channel",
     "dispatchType": "Dispatch Type",
+    "entryType": "Entry Type",
+    "shiftType": "Shift Type",
     "status": "Status",
 }
 
@@ -678,6 +950,8 @@ def module_record_open_balance(definition: ModuleDefinition, payload: dict[str, 
         return service_payment_summary(definition.key, payload)["balance"]
     if definition.key == "equipment_rental_bookings":
         return service_payment_summary(definition.key, payload)["balance"]
+    if definition.key == "salary_records":
+        return salary_open_balance(payload)
     if definition.key == "suppliers":
         return round(max(parse_amount(payload.get("amountDue")) - parse_amount(payload.get("amountPaid")), 0), 2)
     if definition.key == "security_deposit_records":
@@ -1099,6 +1373,7 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
     open_balance = round(sum(module_record_open_balance(definition, record.payload or {}) for record in records), 2)
     status_counts: dict[str, int] = defaultdict(int)
     area_totals: dict[str, float] = defaultdict(float)
+    custom_area_chart: list[dict[str, Any]] | None = None
     for record in records:
         status_value = normalize_text((record.payload or {}).get(definition.status_field)) or normalize_text(record.status) or "Unspecified"
         status_counts[status_value] += 1
@@ -1123,6 +1398,82 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
             {"label": "Revenue Target", "value": format_currency(total_target), "note": "Total target set for this view"},
             {"label": "Budget Total", "value": format_currency(total_budget), "note": "Combined budgets across these records"},
             {"label": "Marketing Budget", "value": format_currency(marketing_budget), "note": "Marketing spend planned in this view"},
+        ]
+    elif definition.key == "salary_records":
+        gross_pay_total = round(sum(parse_amount((record.payload or {}).get("grossPay")) for record in records), 2)
+        net_pay_total = round(sum(parse_amount((record.payload or {}).get("netPay")) for record in records), 2)
+        paid_total = round(sum(parse_amount((record.payload or {}).get("amountPaid")) for record in records), 2)
+        balance_total = round(sum(salary_open_balance(record.payload or {}) for record in records), 2)
+        cards = [
+            {"label": "Payroll Rows", "value": f"{len(records)}", "note": "Salary and wage records in the current view"},
+            {"label": "Gross Pay", "value": format_currency(gross_pay_total), "note": "Total payroll before deductions"},
+            {"label": "Net Pay", "value": format_currency(net_pay_total), "note": "Take-home pay captured in view"},
+            {"label": "Balance Due", "value": format_currency(balance_total), "note": f"Paid so far: {format_currency(paid_total)}"},
+        ]
+    elif definition.key == "maintenance_records":
+        completed_count = sum(1 for record in records if normalize_text((record.payload or {}).get("status")) == "Completed")
+        open_count = sum(1 for record in records if normalize_text((record.payload or {}).get("status")) in {"Open", "Scheduled", "In Progress"})
+        downtime_total = round(sum(parse_amount((record.payload or {}).get("downtimeHours")) for record in records), 2)
+        cards = [
+            {"label": "Work Orders", "value": f"{len(records)}", "note": "Maintenance and repair tickets in view"},
+            {"label": "Open Work Orders", "value": f"{open_count}", "note": "Items still being scheduled or fixed"},
+            {"label": "Completed", "value": f"{completed_count}", "note": "Work orders already closed"},
+            {"label": "Downtime", "value": f"{downtime_total:,.2f} hrs", "note": f"Tracked maintenance cost: {format_currency(total_amount)}"},
+        ]
+    elif definition.key == "asset_records":
+        purchase_total = round(sum(parse_amount((record.payload or {}).get("purchaseCost")) for record in records), 2)
+        depreciation_total = round(sum(parse_amount((record.payload or {}).get("accumulatedDepreciation")) for record in records), 2)
+        next_service_due = sum(
+            1 for record in records if (due_date := parse_date((record.payload or {}).get("nextServiceDate"))) and due_date <= date.today() + timedelta(days=30)
+        )
+        cards = [
+            {"label": "Assets In View", "value": f"{len(records)}", "note": "Tracked equipment, tools, and fixtures"},
+            {"label": "Purchase Cost", "value": format_currency(purchase_total), "note": "Original cost of assets in this view"},
+            {"label": "Current Value", "value": format_currency(total_amount), "note": f"Accumulated depreciation: {format_currency(depreciation_total)}"},
+            {"label": "Service Due Soon", "value": f"{next_service_due}", "note": "Assets needing service within 30 days"},
+        ]
+    elif definition.key == "knowledge_base":
+        active_count = sum(1 for record in records if normalize_text((record.payload or {}).get("status")) in {"Active", "Training Due"})
+        completed_count = sum(1 for record in records if normalize_text((record.payload or {}).get("status")) == "Completed")
+        review_due = sum(
+            1 for record in records if (review_date := parse_date((record.payload or {}).get("reviewDate"))) and review_date <= date.today()
+        )
+        average_completion = round(total_amount / len(records), 2) if records else 0.0
+        completion_by_area: dict[str, list[float]] = defaultdict(list)
+        for record in records:
+            area_key = normalize_text(record.business_area_id) or normalize_text((record.payload or {}).get("businessAreaId")) or "shared-operations"
+            completion_by_area[area_key].append(parse_amount((record.payload or {}).get("completionPercent")))
+        custom_area_chart = build_chart_rows(
+            [
+                {
+                    "label": BUSINESS_AREA_LABELS.get(area_id, area_id),
+                    "short": BUSINESS_AREA_SHORT.get(area_id, area_id),
+                    "amount": round(sum(values) / len(values), 2),
+                }
+                for area_id, values in completion_by_area.items()
+                if values
+            ],
+            label_key="label",
+            value_key="amount",
+            short_key="short",
+            positive_color="var(--accent)",
+        )
+        cards = [
+            {"label": "Entries In View", "value": f"{len(records)}", "note": "SOPs, policies, and training records"},
+            {"label": "Active Items", "value": f"{active_count}", "note": "Items currently in use or due for training"},
+            {"label": "Completed", "value": f"{completed_count}", "note": "Training entries marked completed"},
+            {"label": "Average Progress", "value": f"{average_completion:.0f}%", "note": f"Review due now: {review_due}"},
+        ]
+    elif definition.key == "workforce_attendance":
+        total_worked = round(sum(parse_amount((record.payload or {}).get("workedHours")) for record in records), 2)
+        overtime_total = round(sum(parse_amount((record.payload or {}).get("overtimeHours")) for record in records), 2)
+        late_count = sum(1 for record in records if parse_amount((record.payload or {}).get("lateMinutes")) > 0)
+        completed_shifts = sum(1 for record in records if normalize_text((record.payload or {}).get("attendanceStatus")) == "Checked Out")
+        cards = [
+            {"label": "Shifts In View", "value": f"{len(records)}", "note": "Scheduled and attended shifts in this scope"},
+            {"label": "Worked Hours", "value": f"{total_worked:,.2f} hrs", "note": "Tracked hours based on check-in and check-out"},
+            {"label": "Overtime", "value": f"{overtime_total:,.2f} hrs", "note": "Hours worked above scheduled time"},
+            {"label": "Late Cases", "value": f"{late_count}", "note": f"Completed shifts: {completed_shifts}"},
         ]
     elif definition.key == "customer_crm":
         follow_up_due = sum(
@@ -1200,7 +1551,7 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
         short_key="short",
         positive_color="var(--accent)",
     )
-    area_chart = build_chart_rows(
+    area_chart = custom_area_chart or build_chart_rows(
         [
             {
                 "label": BUSINESS_AREA_LABELS.get(area_id, area_id),
@@ -1388,6 +1739,7 @@ def recurring_control_status(payload: dict[str, Any]) -> str:
 
 
 def maintenance_amount(payload: dict[str, Any]) -> float:
+    maintenance_rollup(payload)
     actual_cost = parse_amount(payload.get("actualCost"))
     return actual_cost if actual_cost > 0 else parse_amount(payload.get("estimatedCost"))
 
@@ -1461,6 +1813,17 @@ def delivery_dispatch_rollup(payload: dict[str, Any]) -> None:
 def status_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
     if definition.key == "forecast_plans":
         return planning_type(payload)
+    if definition.key == "salary_records":
+        salary_rollup(payload)
+        return salary_payment_status(payload)
+    if definition.key == "asset_records":
+        asset_rollup(payload)
+    if definition.key == "maintenance_records":
+        maintenance_rollup(payload)
+    if definition.key == "knowledge_base":
+        knowledge_rollup(payload)
+    if definition.key == "workforce_attendance":
+        workforce_rollup(payload)
     if definition.key == "suppliers":
         return supplier_payment_status(payload)
     if definition.key == "mobile_money_reconciliations":
@@ -1508,6 +1871,19 @@ def amount_for_module_record(definition: ModuleDefinition, payload: dict[str, An
         total_budget = parse_amount(payload.get("totalBudget"))
         revenue_target = parse_amount(payload.get("revenueTarget"))
         return total_budget if total_budget > 0 else revenue_target
+    if definition.key == "salary_records":
+        salary_rollup(payload)
+        gross_pay = parse_amount(payload.get("grossPay"))
+        return gross_pay if gross_pay > 0 else parse_amount(payload.get("amountPaid"))
+    if definition.key == "asset_records":
+        asset_rollup(payload)
+        return parse_amount(payload.get("currentValue"))
+    if definition.key == "knowledge_base":
+        knowledge_rollup(payload)
+        return parse_amount(payload.get("completionPercent"))
+    if definition.key == "workforce_attendance":
+        workforce_rollup(payload)
+        return parse_amount(payload.get("workedHours"))
     if definition.key == "campaign_roi":
         campaign_roi_rollup(payload)
     if definition.key == "whatsapp_campaigns":
@@ -2347,6 +2723,7 @@ def record_in_area_scope(record: ModuleRecord, area_id: str) -> bool:
 
 def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict[str, Any]]:
     rows = []
+    scoped_month = parse_month(month_value)
     for area in BUSINESS_AREAS:
         area_id = area["id"]
         sales_total = round(
@@ -2391,10 +2768,10 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
         )
         salary_total = round(
             sum(
-                parse_amount((record.payload or {}).get("amountPaid"))
+                salary_cost_for_reporting(record.payload or {})
                 for record in records
                 if record.module_key == "salary_records"
-                and record.month == parse_month(month_value)
+                and record.month == scoped_month
                 and normalize_text(record.business_area_id) == area_id
             ),
             2,
@@ -2409,6 +2786,25 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
             ),
             2,
         )
+        maintenance_total = round(
+            sum(
+                maintenance_amount(record.payload or {})
+                for record in records
+                if record.module_key == "maintenance_records"
+                and record_in_month_scope(record, month_value)
+                and normalize_text(record.business_area_id) == area_id
+            ),
+            2,
+        )
+        depreciation_total = round(
+            sum(
+                asset_depreciation_charge_for_month(record.payload or {}, month_value)
+                for record in records
+                if record.module_key == "asset_records"
+                and normalize_text(record.business_area_id) == area_id
+            ),
+            2,
+        )
         supplier_balance = round(
             sum(
                 supplier_outstanding(record.payload or {})
@@ -2417,7 +2813,8 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
             ),
             2,
         )
-        net_total = round(profit_total - expense_total - salary_total, 2)
+        operating_total = round(profit_total - expense_total - petty_cash_total - salary_total - maintenance_total, 2)
+        net_total = round(operating_total - depreciation_total, 2)
         rows.append(
             {
                 "areaId": area_id,
@@ -2429,6 +2826,9 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
                 "expenseTotal": expense_total,
                 "salaryTotal": salary_total,
                 "pettyCashTotal": petty_cash_total,
+                "maintenanceTotal": maintenance_total,
+                "depreciationTotal": depreciation_total,
+                "operatingTotal": operating_total,
                 "supplierBalance": supplier_balance,
                 "netTotal": net_total,
             }
@@ -2650,6 +3050,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         business_area_labels=BUSINESS_AREA_LABELS,
         business_area_short=BUSINESS_AREA_SHORT,
         current_year=datetime.utcnow().year,
+        format_module_amount=format_module_amount,
+        module_amount_label=module_amount_label,
     )
     app.jinja_env.filters["currency"] = format_currency
     app.jinja_env.filters["date_value"] = lambda value: value.isoformat() if isinstance(value, date) else ""
@@ -4040,6 +4442,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if record.module_key == "recurring_controls"
             and recurring_control_status(record.payload or {}) in {"Due Soon", "Overdue"}
         ]
+        maintenance_open = [
+            record
+            for record in all_records
+            if record.module_key == "maintenance_records"
+            and normalize_text((record.payload or {}).get("status")) in {"Open", "Scheduled", "In Progress"}
+        ]
+        training_due = [
+            record
+            for record in all_records
+            if record.module_key == "knowledge_base"
+            and normalize_text((record.payload or {}).get("status")) in {"Training Due", "Under Review"}
+        ]
+        attendance_today = [
+            record
+            for record in all_records
+            if record.module_key == "workforce_attendance" and record.record_date == date.today()
+        ]
         apartment_watch = sorted(
             [
                 {
@@ -4078,7 +4497,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for row in report_area_rows(all_records, current_month)
             if any(
                 abs(parse_amount(row.get(metric)))
-                for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "supplierBalance", "netTotal")
+                for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "maintenanceTotal", "depreciationTotal", "supplierBalance", "netTotal")
             )
         ]
         online_orders = [
@@ -4112,6 +4531,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             supplier_balance=supplier_balance,
             recurring_due_count=len(recurring_due),
             recurring_due=recurring_due[:8],
+            maintenance_open_count=len(maintenance_open),
+            maintenance_open=maintenance_open[:8],
+            training_due_count=len(training_due),
+            training_due=training_due[:8],
+            attendance_today_count=len(attendance_today),
             apartment_watch=apartment_watch,
             monthly_sales_by_area=monthly_sales_by_area,
             monthly_sales_chart=build_chart_rows(
@@ -4198,11 +4622,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         cost_total = round(sum(module_record_cost_amount(record) for record in filtered_records if record.module_key == "sales"), 2)
         profit_total = round(sum(module_record_profit_amount(record) for record in filtered_records if record.module_key == "sales"), 2)
         expenses_total = round(sum(record.amount for record in filtered_records if record.module_key == "expenses"), 2)
-        salary_total = round(
-            sum(parse_amount((record.payload or {}).get("amountPaid")) for record in filtered_records if record.module_key == "salary_records"),
-            2,
-        )
+        salary_total = round(sum(parse_amount(row["salaryTotal"]) for row in area_rows), 2)
         petty_cash_total = round(sum(record.amount for record in filtered_records if record.module_key == "petty_cash"), 2)
+        maintenance_total = round(sum(parse_amount(row["maintenanceTotal"]) for row in area_rows), 2)
+        depreciation_total = round(sum(parse_amount(row["depreciationTotal"]) for row in area_rows), 2)
         supplier_balance = round(
             sum(supplier_outstanding(record.payload or {}) for record in filtered_records if record.module_key == "suppliers"),
             2,
@@ -4219,13 +4642,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ),
             2,
         )
-        net_total = round(profit_total - expenses_total - salary_total, 2)
+        operating_total = round(profit_total - expenses_total - petty_cash_total - salary_total - maintenance_total, 2)
+        net_total = round(operating_total - depreciation_total, 2)
+        gross_margin_percent = round((profit_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
+        operating_margin_percent = round((net_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
         area_rows = [
             row
             for row in area_rows
             if any(
                 abs(parse_amount(row.get(metric)))
-                for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "supplierBalance", "netTotal")
+                for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "maintenanceTotal", "depreciationTotal", "supplierBalance", "netTotal")
             )
         ]
         low_stock_items = g.db.scalars(
@@ -4248,7 +4674,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         return render_template(
             "reports.html",
-            page_title="Reports",
+            page_title="Management Reporting & Profitability",
             month_filter=month_filter,
             area_filter=area_filter,
             sales_total=sales_total,
@@ -4257,9 +4683,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             expenses_total=expenses_total,
             salary_total=salary_total,
             petty_cash_total=petty_cash_total,
+            maintenance_total=maintenance_total,
+            depreciation_total=depreciation_total,
+            operating_total=operating_total,
             supplier_balance=supplier_balance,
             apartment_exposure=apartment_exposure,
             online_open_balance=online_open_balance,
+            gross_margin_percent=gross_margin_percent,
+            operating_margin_percent=operating_margin_percent,
             net_total=net_total,
             report_sales_chart=build_chart_rows(
                 [
@@ -4276,6 +4707,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["profitTotal"]}
                     for row in area_rows
                     if parse_amount(row["profitTotal"]) > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--accent)",
+            ),
+            report_operating_chart=build_chart_rows(
+                [
+                    {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["operatingTotal"]}
+                    for row in area_rows
+                    if abs(parse_amount(row["operatingTotal"])) > 0
                 ],
                 label_key="label",
                 value_key="amount",
@@ -4323,6 +4765,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "expenseTotal",
             "salaryTotal",
             "pettyCashTotal",
+            "maintenanceTotal",
+            "depreciationTotal",
+            "operatingTotal",
             "supplierBalance",
             "netTotal",
         ]
@@ -5141,6 +5586,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 apply_service_payment_rollup(module_key, payload)
             elif module_key == "forecast_plans":
                 planning_rollup(payload)
+            elif module_key == "salary_records":
+                salary_rollup(payload)
+            elif module_key == "asset_records":
+                asset_rollup(payload)
+            elif module_key == "maintenance_records":
+                maintenance_rollup(payload)
+            elif module_key == "knowledge_base":
+                knowledge_rollup(payload)
+            elif module_key == "workforce_attendance":
+                workforce_rollup(payload)
             elif module_key == "whatsapp_campaigns":
                 whatsapp_campaign_rollup(payload)
             elif module_key == "campaign_roi":
@@ -5162,6 +5617,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("module_list", module_key=module_key))
 
         record_payload = dict(record.payload if record else {})
+        if module_key == "salary_records":
+            salary_rollup(record_payload)
+        elif module_key == "asset_records":
+            asset_rollup(record_payload)
+        elif module_key == "maintenance_records":
+            maintenance_rollup(record_payload)
+        elif module_key == "knowledge_base":
+            knowledge_rollup(record_payload)
+        elif module_key == "workforce_attendance":
+            workforce_rollup(record_payload)
         if module_key == "apartments":
             record_payload.setdefault("businessAreaId", "rentals-apartments")
             field_map = {field.name: field for field in definition.fields}
@@ -5228,6 +5693,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 service_payment_summary=service_payment_summary(module_key, record_payload),
             )
         module_quick_actions = []
+        if module_key == "salary_records" and record:
+            module_quick_actions.append(
+                {
+                    "label": "Open Payslip",
+                    "href": url_for("salary_payslip", record_id=record.id),
+                    "note": "Print or save the payslip for this payroll record.",
+                }
+            )
         return render_template(
             "module_form.html",
             page_title=f"{definition.label} Form",
@@ -5468,6 +5941,25 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 date_from=normalize_text(request.form.get("date_from")),
                 date_to=normalize_text(request.form.get("date_to")),
             )
+        )
+
+    @app.route("/app/salaries/<record_id>/payslip")
+    @access_required("salary_records")
+    def salary_payslip(record_id: str):
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != "salary_records":
+            flash("That payroll record could not be found.", "error")
+            return redirect(url_for("module_list", module_key="salary_records"))
+        payload = dict(record.payload or {})
+        salary_rollup(payload)
+        return render_template(
+            "salary_payslip.html",
+            page_title=f"Payslip - {normalize_text(payload.get('staffName')) or record.title}",
+            back_url=url_for("module_form", module_key="salary_records", record_id=record.id),
+            record=record,
+            payload=payload,
+            generated_on=date.today().isoformat(),
+            payroll_month=record.month or parse_month(payload.get("month")),
         )
 
     @app.route("/app/apartments/<record_id>/receipt")

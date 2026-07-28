@@ -4,7 +4,7 @@
     <div class="card-header">
       <div>
         <p class="eyebrow">Filters</p>
-        <h3>Operating Report Scope</h3>
+        <h3>Management Reporting Scope</h3>
       </div>
       <a class="button subtle" href="{{ url_for('reports_export', month=month_filter, area=area_filter) }}">Export Report CSV</a>
     </div>
@@ -33,7 +33,7 @@
     <article class="metric-card">
       <span>Sales</span>
       <strong>{{ sales_total|currency }}</strong>
-      <small>Income in the selected report scope</small>
+      <small>Income captured in the selected report scope</small>
     </article>
     <article class="metric-card">
       <span>Cost</span>
@@ -43,9 +43,9 @@
     <article class="metric-card">
       <span>Gross Profit</span>
       <strong>{{ profit_total|currency }}</strong>
-      <small>Realized profit in the selected scope</small>
+      <small>{{ gross_margin_percent }}% gross margin in this scope</small>
     </article>
-    <article class="metric-card {% if net_total < 0 %}warning{% endif %}">
+    <article class="metric-card {% if expenses_total < 0 %}warning{% endif %}">
       <span>Expenses</span>
       <strong>{{ expenses_total|currency }}</strong>
       <small>Direct operating spend captured</small>
@@ -54,19 +54,37 @@
 
   <section class="card-grid four">
     <article class="metric-card">
-      <span>Salaries</span>
+      <span>Petty Cash</span>
+      <strong>{{ petty_cash_total|currency }}</strong>
+      <small>Petty cash movement treated as operating spend</small>
+    </article>
+    <article class="metric-card">
+      <span>Payroll</span>
       <strong>{{ salary_total|currency }}</strong>
-      <small>Salary records in the selected month</small>
+      <small>Gross payroll cost in the selected month</small>
+    </article>
+    <article class="metric-card">
+      <span>Maintenance</span>
+      <strong>{{ maintenance_total|currency }}</strong>
+      <small>Maintenance and work-order cost in scope</small>
+    </article>
+    <article class="metric-card">
+      <span>Depreciation</span>
+      <strong>{{ depreciation_total|currency }}</strong>
+      <small>Monthly depreciation loaded from the asset register</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card {% if operating_total < 0 %}warning{% endif %}">
+      <span>Operating Profit</span>
+      <strong>{{ operating_total|currency }}</strong>
+      <small>After expenses, petty cash, payroll, and maintenance</small>
     </article>
     <article class="metric-card {% if net_total < 0 %}warning{% endif %}">
       <span>Net Position</span>
       <strong>{{ net_total|currency }}</strong>
-      <small>Gross profit minus expenses and salaries</small>
-    </article>
-    <article class="metric-card">
-      <span>Petty Cash</span>
-      <strong>{{ petty_cash_total|currency }}</strong>
-      <small>Captured petty cash movement</small>
+      <small>{{ operating_margin_percent }}% net margin after depreciation</small>
     </article>
     <article class="metric-card warning">
       <span>Supplier Balance</span>
@@ -141,7 +159,7 @@
       <div class="card-header">
         <div>
           <p class="eyebrow">Charts</p>
-          <h3>Profit By Business Area</h3>
+          <h3>Gross Profit By Business Area</h3>
         </div>
       </div>
       {% if report_profit_chart %}
@@ -164,30 +182,58 @@
     </article>
   </section>
 
-  <section class="card">
-    <div class="card-header">
-      <div>
-        <p class="eyebrow">Charts</p>
-        <h3>Net Position By Area</h3>
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Operating Profit By Business Area</h3>
+        </div>
       </div>
-    </div>
-    {% if report_net_chart %}
-      <div class="chart-stack">
-        {% for area in report_net_chart %}
-          <div class="chart-row">
-            <div class="chart-row-header">
-              <strong>{{ area.chartLabel }}</strong>
-              <span class="{% if area.chartNegative %}negative-text{% endif %}">{{ area.chartValue|currency }}</span>
+      {% if report_operating_chart %}
+        <div class="chart-stack">
+          {% for area in report_operating_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ area.chartLabel }}</strong>
+                <span class="{% if area.chartNegative %}negative-text{% endif %}">{{ area.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill {% if area.chartNegative %}negative{% endif %}" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
+              </div>
             </div>
-            <div class="chart-track">
-              <span class="chart-fill {% if area.chartNegative %}negative{% endif %}" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
-            </div>
-          </div>
-        {% endfor %}
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Operating profit by area will appear when activity exists in this report scope.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Net Position By Business Area</h3>
+        </div>
       </div>
-    {% else %}
-      <p class="muted">Net position by area will appear when activity exists in this report scope.</p>
-    {% endif %}
+      {% if report_net_chart %}
+        <div class="chart-stack">
+          {% for area in report_net_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ area.chartLabel }}</strong>
+                <span class="{% if area.chartNegative %}negative-text{% endif %}">{{ area.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill {% if area.chartNegative %}negative{% endif %}" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Net position by area will appear when activity exists in this report scope.</p>
+      {% endif %}
+    </article>
   </section>
 
   <section class="split-grid">
@@ -207,7 +253,11 @@
               <th>Cost</th>
               <th>Profit</th>
               <th>Expenses</th>
-              <th>Salaries</th>
+              <th>Petty Cash</th>
+              <th>Payroll</th>
+              <th>Maintenance</th>
+              <th>Operating</th>
+              <th>Depreciation</th>
               <th>Supplier Balance</th>
               <th>Net</th>
             </tr>
@@ -220,12 +270,16 @@
                 <td>{{ row.costTotal|currency }}</td>
                 <td>{{ row.profitTotal|currency }}</td>
                 <td>{{ row.expenseTotal|currency }}</td>
+                <td>{{ row.pettyCashTotal|currency }}</td>
                 <td>{{ row.salaryTotal|currency }}</td>
+                <td>{{ row.maintenanceTotal|currency }}</td>
+                <td class="{% if row.operatingTotal < 0 %}negative-text{% endif %}">{{ row.operatingTotal|currency }}</td>
+                <td>{{ row.depreciationTotal|currency }}</td>
                 <td>{{ row.supplierBalance|currency }}</td>
                 <td class="{% if row.netTotal < 0 %}negative-text{% endif %}">{{ row.netTotal|currency }}</td>
               </tr>
             {% else %}
-              <tr><td colspan="8">No report rows are available for this filter yet.</td></tr>
+              <tr><td colspan="12">No report rows are available for this filter yet.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -318,31 +372,15 @@
       </div>
       <a class="button subtle" href="{{ url_for('audit_page') }}">Open Full Audit Trail</a>
     </div>
-    <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>When</th>
-            <th>Module</th>
-            <th>Action</th>
-            <th>Title</th>
-            <th>Actor</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for item in recent_audits %}
-            <tr>
-              <td>{{ item.created_at }}</td>
-              <td>{{ item.module_label }}</td>
-              <td>{{ item.action }}</td>
-              <td>{{ item.title }}</td>
-              <td>{{ item.actor_name }}</td>
-            </tr>
-          {% else %}
-            <tr><td colspan="5">No audit activity has been recorded yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+    <ul class="stack-list">
+      {% for entry in recent_audits %}
+        <li>
+          <strong>{{ entry.title }}</strong>
+          <span>{{ entry.module_label }} · {{ entry.action }} · {{ entry.created_at }}</span>
+        </li>
+      {% else %}
+        <li><span>No recent audit activity is available yet.</span></li>
+      {% endfor %}
+    </ul>
   </article>
 {% endblock %}

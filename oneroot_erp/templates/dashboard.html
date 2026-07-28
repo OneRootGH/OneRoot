@@ -54,6 +54,21 @@
       <strong>{{ recurring_due_count }}</strong>
       <small>{{ low_stock_count }} low stock items flagged</small>
     </article>
+    <article class="metric-card">
+      <span>Open Work Orders</span>
+      <strong>{{ maintenance_open_count }}</strong>
+      <small>Maintenance tickets still active</small>
+    </article>
+    <article class="metric-card">
+      <span>Training Due</span>
+      <strong>{{ training_due_count }}</strong>
+      <small>Knowledge and SOP items needing follow-up</small>
+    </article>
+    <article class="metric-card">
+      <span>Attendance Today</span>
+      <strong>{{ attendance_today_count }}</strong>
+      <small>Shift records captured for today</small>
+    </article>
   </section>
 
   {% if target_progress_rows %}
@@ -240,6 +255,34 @@
             </li>
           {% else %}
             <li><span>No apartment balances are currently outstanding.</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="dashboard-subsection">
+        <p class="eyebrow">Maintenance</p>
+        <ul class="stack-list compact">
+          {% for record in maintenance_open %}
+            <li>
+              <strong>{{ record.payload.get('workOrderNumber') or record.title }}</strong>
+              <span>{{ record.payload.get('status') or record.status }} · {{ record.payload.get('location') or business_area_short.get(record.business_area_id, record.business_area_id) }}</span>
+            </li>
+          {% else %}
+            <li><span>No maintenance work orders are open right now.</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="dashboard-subsection">
+        <p class="eyebrow">Training & SOPs</p>
+        <ul class="stack-list compact">
+          {% for record in training_due %}
+            <li>
+              <strong>{{ record.title }}</strong>
+              <span>{{ record.payload.get('status') or record.status }} · {{ record.payload.get('reviewDate') or record.payload.get('dueDate') or 'No due date' }}</span>
+            </li>
+          {% else %}
+            <li><span>No knowledge or training follow-up is due right now.</span></li>
           {% endfor %}
         </ul>
       </div>

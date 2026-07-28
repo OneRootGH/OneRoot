@@ -63,6 +63,51 @@
               placeholder="Calculated automatically from all budget lines"
               readonly
             >
+          {% elif definition.key == 'salary_records' and field.name in ['overtimePay', 'grossPay', 'totalDeductions', 'netPay', 'balanceDue'] %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from payroll details"
+              readonly
+            >
+          {% elif definition.key == 'asset_records' and field.name in ['monthlyDepreciation', 'annualDepreciation', 'accumulatedDepreciation', 'currentValue', 'replacementDueDate'] %}
+            <input
+              type="{{ 'date' if field.name == 'replacementDueDate' else 'number' }}"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from cost and useful life"
+              readonly
+            >
+          {% elif definition.key == 'maintenance_records' and field.name == 'actualCost' %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from labor, parts, and other cost"
+              readonly
+            >
+          {% elif definition.key == 'knowledge_base' and field.name == 'completionPercent' %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from score or completion date"
+              readonly
+            >
+          {% elif definition.key == 'workforce_attendance' and field.name in ['scheduledHours', 'workedHours', 'overtimeHours', 'lateMinutes'] %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from shift and attendance times"
+              readonly
+            >
           {% elif definition.key == 'whatsapp_campaigns' and field.name in ['responseRate', 'conversionRate'] %}
             <input
               type="number"
@@ -224,6 +269,331 @@
           field.addEventListener("change", updatePlanningFields);
         });
         updatePlanningFields();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'salary_records' %}
+    <script>
+      (function () {
+        const baseSalaryField = document.querySelector('input[name="baseSalary"]');
+        const allowanceField = document.querySelector('input[name="allowance"]');
+        const overtimeHoursField = document.querySelector('input[name="overtimeHours"]');
+        const overtimeRateField = document.querySelector('input[name="overtimeRate"]');
+        const overtimePayField = document.querySelector('input[name="overtimePay"]');
+        const bonusField = document.querySelector('input[name="bonus"]');
+        const taxField = document.querySelector('input[name="taxAmount"]');
+        const ssnitField = document.querySelector('input[name="ssnitAmount"]');
+        const loanField = document.querySelector('input[name="loanDeduction"]');
+        const deductionsField = document.querySelector('input[name="deductions"]');
+        const grossField = document.querySelector('input[name="grossPay"]');
+        const totalDeductionsField = document.querySelector('input[name="totalDeductions"]');
+        const netPayField = document.querySelector('input[name="netPay"]');
+        const amountPaidField = document.querySelector('input[name="amountPaid"]');
+        const balanceField = document.querySelector('input[name="balanceDue"]');
+        const statusField = document.querySelector('select[name="status"]');
+        if (!baseSalaryField || !grossField || !netPayField || !balanceField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updatePayroll() {
+          const overtimePay = parseNumber(overtimeHoursField && overtimeHoursField.value) * parseNumber(overtimeRateField && overtimeRateField.value);
+          if (overtimePayField) {
+            overtimePayField.value = overtimePay.toFixed(2);
+          }
+          const grossPay =
+            parseNumber(baseSalaryField.value) +
+            parseNumber(allowanceField && allowanceField.value) +
+            parseNumber(bonusField && bonusField.value) +
+            overtimePay;
+          const totalDeductions =
+            parseNumber(taxField && taxField.value) +
+            parseNumber(ssnitField && ssnitField.value) +
+            parseNumber(loanField && loanField.value) +
+            parseNumber(deductionsField && deductionsField.value);
+          const netPay = Math.max(grossPay - totalDeductions, 0);
+          const amountPaid = parseNumber(amountPaidField && amountPaidField.value);
+          const balanceDue = Math.max(netPay - amountPaid, 0);
+          grossField.value = grossPay.toFixed(2);
+          if (totalDeductionsField) {
+            totalDeductionsField.value = totalDeductions.toFixed(2);
+          }
+          netPayField.value = netPay.toFixed(2);
+          balanceField.value = balanceDue.toFixed(2);
+          if (statusField) {
+            statusField.value = netPay > 0 && amountPaid >= netPay ? "Paid" : amountPaid > 0 ? "Part Paid" : "Pending";
+          }
+        }
+
+        [
+          baseSalaryField,
+          allowanceField,
+          overtimeHoursField,
+          overtimeRateField,
+          bonusField,
+          taxField,
+          ssnitField,
+          loanField,
+          deductionsField,
+          amountPaidField,
+        ].filter(Boolean).forEach((field) => {
+          field.addEventListener("input", updatePayroll);
+          field.addEventListener("change", updatePayroll);
+        });
+        updatePayroll();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'asset_records' %}
+    <script>
+      (function () {
+        const acquiredDateField = document.querySelector('input[name="acquiredDate"]');
+        const purchaseCostField = document.querySelector('input[name="purchaseCost"]');
+        const salvageValueField = document.querySelector('input[name="salvageValue"]');
+        const usefulLifeField = document.querySelector('input[name="usefulLifeMonths"]');
+        const methodField = document.querySelector('select[name="depreciationMethod"]');
+        const monthlyField = document.querySelector('input[name="monthlyDepreciation"]');
+        const annualField = document.querySelector('input[name="annualDepreciation"]');
+        const accumulatedField = document.querySelector('input[name="accumulatedDepreciation"]');
+        const currentValueField = document.querySelector('input[name="currentValue"]');
+        const replacementField = document.querySelector('input[name="replacementDueDate"]');
+        if (!purchaseCostField || !usefulLifeField || !monthlyField || !annualField || !accumulatedField || !currentValueField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function monthDiff(startDate, endDate) {
+          let months = (endDate.getFullYear() - startDate.getFullYear()) * 12 + (endDate.getMonth() - startDate.getMonth());
+          if (endDate.getDate() < startDate.getDate()) {
+            months -= 1;
+          }
+          return Math.max(months, 0);
+        }
+
+        function addMonths(baseDate, months) {
+          const result = new Date(baseDate);
+          result.setMonth(result.getMonth() + months);
+          if (result.getDate() !== baseDate.getDate()) {
+            result.setDate(0);
+          }
+          return result;
+        }
+
+        function formatDate(dateValue) {
+          const month = `${dateValue.getMonth() + 1}`.padStart(2, "0");
+          const day = `${dateValue.getDate()}`.padStart(2, "0");
+          return `${dateValue.getFullYear()}-${month}-${day}`;
+        }
+
+        function updateDepreciation() {
+          const purchaseCost = parseNumber(purchaseCostField.value);
+          const salvageValue = parseNumber(salvageValueField && salvageValueField.value);
+          const usefulLifeMonths = Math.max(parseInt(usefulLifeField.value || "0", 10) || 0, 0);
+          const depreciableBase = Math.max(purchaseCost - salvageValue, 0);
+          const depreciationMethod = methodField && methodField.value ? methodField.value : "Straight Line";
+          let monthly = usefulLifeMonths > 0 ? depreciableBase / usefulLifeMonths : 0;
+          const acquiredDate = acquiredDateField && acquiredDateField.value ? new Date(`${acquiredDateField.value}T00:00:00`) : null;
+          const today = new Date();
+          if (acquiredDate && acquiredDate > today) {
+            monthlyField.value = "0.00";
+            annualField.value = "0.00";
+            accumulatedField.value = "0.00";
+            currentValueField.value = purchaseCost.toFixed(2);
+            if (replacementField && usefulLifeMonths > 0) {
+              replacementField.value = formatDate(addMonths(acquiredDate, usefulLifeMonths));
+            }
+            return;
+          }
+          const monthsElapsed = acquiredDate ? monthDiff(acquiredDate, today) : 0;
+          let accumulated = usefulLifeMonths > 0 ? Math.min(monthly * monthsElapsed, depreciableBase) : 0;
+          if (depreciationMethod === "Reducing Balance" && purchaseCost > 0 && usefulLifeMonths > 0) {
+            const straightRate = depreciableBase / usefulLifeMonths;
+            const monthlyRate = straightRate / purchaseCost;
+            let runningValue = purchaseCost;
+            accumulated = 0;
+            for (let step = 0; step < Math.min(monthsElapsed, usefulLifeMonths); step += 1) {
+              let reduction = runningValue * monthlyRate;
+              if (runningValue - reduction < salvageValue) {
+                reduction = Math.max(runningValue - salvageValue, 0);
+              }
+              runningValue -= reduction;
+              accumulated += reduction;
+            }
+            monthly = purchaseCost * monthlyRate;
+          }
+          const currentValue = Math.max(purchaseCost - accumulated, purchaseCost > 0 ? salvageValue : 0);
+          monthlyField.value = monthly.toFixed(2);
+          annualField.value = (monthly * 12).toFixed(2);
+          accumulatedField.value = accumulated.toFixed(2);
+          currentValueField.value = currentValue.toFixed(2);
+          if (replacementField && acquiredDate && usefulLifeMonths > 0) {
+            replacementField.value = formatDate(addMonths(acquiredDate, usefulLifeMonths));
+          }
+        }
+
+        [acquiredDateField, purchaseCostField, salvageValueField, usefulLifeField, methodField].filter(Boolean).forEach((field) => {
+          field.addEventListener("input", updateDepreciation);
+          field.addEventListener("change", updateDepreciation);
+        });
+        updateDepreciation();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'maintenance_records' %}
+    <script>
+      (function () {
+        const laborField = document.querySelector('input[name="laborCost"]');
+        const partsField = document.querySelector('input[name="partsCost"]');
+        const otherField = document.querySelector('input[name="otherCost"]');
+        const actualCostField = document.querySelector('input[name="actualCost"]');
+        if (!actualCostField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updateActualCost() {
+          const total =
+            parseNumber(laborField && laborField.value) +
+            parseNumber(partsField && partsField.value) +
+            parseNumber(otherField && otherField.value);
+          actualCostField.value = total.toFixed(2);
+        }
+
+        [laborField, partsField, otherField].filter(Boolean).forEach((field) => {
+          field.addEventListener("input", updateActualCost);
+          field.addEventListener("change", updateActualCost);
+        });
+        updateActualCost();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'knowledge_base' %}
+    <script>
+      (function () {
+        const passScoreField = document.querySelector('input[name="passScore"]');
+        const actualScoreField = document.querySelector('input[name="actualScore"]');
+        const completionDateField = document.querySelector('input[name="completionDate"]');
+        const completionPercentField = document.querySelector('input[name="completionPercent"]');
+        const statusField = document.querySelector('select[name="status"]');
+        if (!completionPercentField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function updateKnowledgeProgress() {
+          const passScore = parseNumber(passScoreField && passScoreField.value);
+          const actualScore = parseNumber(actualScoreField && actualScoreField.value);
+          let percent = parseNumber(completionPercentField.value);
+          if (passScore > 0 && actualScore > 0) {
+            percent = Math.min((actualScore / passScore) * 100, 100);
+          } else if (completionDateField && completionDateField.value) {
+            percent = 100;
+          }
+          completionPercentField.value = percent.toFixed(2);
+          if (statusField && statusField.value !== "Archived" && statusField.value !== "Under Review") {
+            statusField.value = percent >= 100 ? "Completed" : "Active";
+          }
+        }
+
+        [passScoreField, actualScoreField, completionDateField].filter(Boolean).forEach((field) => {
+          field.addEventListener("input", updateKnowledgeProgress);
+          field.addEventListener("change", updateKnowledgeProgress);
+        });
+        updateKnowledgeProgress();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'workforce_attendance' %}
+    <script>
+      (function () {
+        const shiftStartField = document.querySelector('input[name="shiftStart"]');
+        const shiftEndField = document.querySelector('input[name="shiftEnd"]');
+        const checkInField = document.querySelector('input[name="checkInTime"]');
+        const checkOutField = document.querySelector('input[name="checkOutTime"]');
+        const breakMinutesField = document.querySelector('input[name="breakMinutes"]');
+        const scheduledHoursField = document.querySelector('input[name="scheduledHours"]');
+        const workedHoursField = document.querySelector('input[name="workedHours"]');
+        const overtimeField = document.querySelector('input[name="overtimeHours"]');
+        const lateMinutesField = document.querySelector('input[name="lateMinutes"]');
+        const attendanceStatusField = document.querySelector('select[name="attendanceStatus"]');
+        if (!scheduledHoursField || !workedHoursField || !overtimeField || !lateMinutesField) {
+          return;
+        }
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        function parseTime(value) {
+          if (!value || !value.includes(":")) {
+            return null;
+          }
+          const [hourText, minuteText] = value.split(":");
+          const hour = Number.parseInt(hourText, 10);
+          const minute = Number.parseInt(minuteText, 10);
+          if (!Number.isFinite(hour) || !Number.isFinite(minute)) {
+            return null;
+          }
+          return hour * 60 + minute;
+        }
+
+        function hoursBetween(startValue, endValue, breakMinutes) {
+          const start = parseTime(startValue);
+          const end = parseTime(endValue);
+          if (start === null || end === null) {
+            return 0;
+          }
+          let finish = end;
+          if (finish < start) {
+            finish += 24 * 60;
+          }
+          return Math.max(finish - start - breakMinutes, 0) / 60;
+        }
+
+        function updateAttendance() {
+          const breakMinutes = Math.max(parseInt(breakMinutesField && breakMinutesField.value || "0", 10) || 0, 0);
+          const scheduledHours = hoursBetween(shiftStartField && shiftStartField.value, shiftEndField && shiftEndField.value, breakMinutes);
+          const workedHours = hoursBetween(checkInField && checkInField.value, checkOutField && checkOutField.value, breakMinutes);
+          const scheduledStart = parseTime(shiftStartField && shiftStartField.value);
+          const actualStart = parseTime(checkInField && checkInField.value);
+          const lateMinutes = scheduledStart !== null && actualStart !== null ? Math.max(actualStart - scheduledStart, 0) : 0;
+          scheduledHoursField.value = scheduledHours.toFixed(2);
+          workedHoursField.value = workedHours.toFixed(2);
+          overtimeField.value = Math.max(workedHours - scheduledHours, 0).toFixed(2);
+          lateMinutesField.value = `${lateMinutes}`;
+          if (attendanceStatusField && attendanceStatusField.value !== "Off Duty") {
+            if (checkOutField && checkOutField.value) {
+              attendanceStatusField.value = "Checked Out";
+            } else if (checkInField && checkInField.value) {
+              attendanceStatusField.value = lateMinutes > 0 ? "Late" : "Present";
+            } else if (shiftStartField && shiftStartField.value) {
+              attendanceStatusField.value = "Scheduled";
+            }
+          }
+        }
+
+        [shiftStartField, shiftEndField, checkInField, checkOutField, breakMinutesField].filter(Boolean).forEach((field) => {
+          field.addEventListener("input", updateAttendance);
+          field.addEventListener("change", updateAttendance);
+        });
+        updateAttendance();
       })();
     </script>
   {% endif %}

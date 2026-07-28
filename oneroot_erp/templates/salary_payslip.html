@@ -1,0 +1,112 @@
+{% extends "document_base.html" %}
+{% set document_label = "Payslip" %}
+{% set document_title = "OneRoot Staff Payslip" %}
+{% set document_subtitle = (payload.get('staffName') or record.title) ~ " · " ~ (payroll_month or "Current Period") %}
+{% block document_body %}
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Staff</span>
+      <strong>{{ payload.get('staffName') or record.title }}</strong>
+      <small>{{ payload.get('staffRole') or 'Role not saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Business Area</span>
+      <strong>{{ business_area_short.get(record.business_area_id, business_area_labels.get(record.business_area_id, record.business_area_id or 'Shared')) }}</strong>
+      <small>{{ payroll_month or 'No payroll month saved' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Net Pay</span>
+      <strong>{{ payload.get('netPay', 0)|currency }}</strong>
+      <small>Gross {{ payload.get('grossPay', 0)|currency }} · Paid {{ payload.get('amountPaid', 0)|currency }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Status</span>
+      <strong>{{ payload.get('status') or record.status or 'Pending' }}</strong>
+      <small>Balance {{ payload.get('balanceDue', 0)|currency }}</small>
+    </article>
+  </section>
+
+  <section class="card-grid two document-detail-grid">
+    <article class="mini-card">
+      <span>Pay Period</span>
+      <strong>{{ payload.get('payPeriodStart')|pretty_date or 'Not set' }}</strong>
+      <small>To {{ payload.get('payPeriodEnd')|pretty_date or 'Not set' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Payment</span>
+      <strong>{{ payload.get('paymentMethod') or 'Not saved' }}</strong>
+      <small>{{ payload.get('paymentDate')|pretty_date or 'No payment date saved' }}{% if payload.get('paymentReference') %} · {{ payload.get('paymentReference') }}{% endif %}</small>
+    </article>
+  </section>
+
+  <div class="table-wrap">
+    <table>
+      <thead>
+        <tr>
+          <th>Earnings</th>
+          <th>Amount</th>
+          <th>Deductions</th>
+          <th>Amount</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Base Salary</td>
+          <td>{{ payload.get('baseSalary', 0)|currency }}</td>
+          <td>Tax / PAYE</td>
+          <td>{{ payload.get('taxAmount', 0)|currency }}</td>
+        </tr>
+        <tr>
+          <td>Allowance</td>
+          <td>{{ payload.get('allowance', 0)|currency }}</td>
+          <td>SSNIT</td>
+          <td>{{ payload.get('ssnitAmount', 0)|currency }}</td>
+        </tr>
+        <tr>
+          <td>Bonus</td>
+          <td>{{ payload.get('bonus', 0)|currency }}</td>
+          <td>Loan Deduction</td>
+          <td>{{ payload.get('loanDeduction', 0)|currency }}</td>
+        </tr>
+        <tr>
+          <td>Overtime Pay</td>
+          <td>{{ payload.get('overtimePay', 0)|currency }}</td>
+          <td>Other Deductions</td>
+          <td>{{ payload.get('deductions', 0)|currency }}</td>
+        </tr>
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>Gross Pay</th>
+          <th>{{ payload.get('grossPay', 0)|currency }}</th>
+          <th>Total Deductions</th>
+          <th>{{ payload.get('totalDeductions', 0)|currency }}</th>
+        </tr>
+        <tr>
+          <th colspan="2">Net Pay</th>
+          <th colspan="2">{{ payload.get('netPay', 0)|currency }}</th>
+        </tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <section class="card-grid two document-detail-grid">
+    <article class="mini-card">
+      <span>Overtime</span>
+      <strong>{{ payload.get('overtimeHours', 0) }} hrs</strong>
+      <small>Rate {{ payload.get('overtimeRate', 0)|currency }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Balance Due</span>
+      <strong>{{ payload.get('balanceDue', 0)|currency }}</strong>
+      <small>Generated {{ generated_on|pretty_date }}</small>
+    </article>
+  </section>
+
+  {% if payload.get('notes') %}
+    <section class="document-note">
+      <strong>Notes</strong>
+      <p>{{ payload.get('notes') }}</p>
+    </section>
+  {% endif %}
+{% endblock %}

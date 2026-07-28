@@ -136,11 +136,181 @@ def _recurring_status(payload: dict[str, Any]) -> str:
 
 
 def _maintenance_amount(payload: dict[str, Any]) -> float:
+    _maintenance_rollup(payload)
     actual_cost = _parse_amount(payload.get("actualCost"))
     return actual_cost if actual_cost > 0 else _parse_amount(payload.get("estimatedCost"))
 
 
+def _salary_status(payload: dict[str, Any]) -> str:
+    net_pay = _parse_amount(payload.get("netPay"))
+    amount_paid = _parse_amount(payload.get("amountPaid"))
+    if net_pay > 0 and amount_paid >= net_pay:
+        return "Paid"
+    if amount_paid > 0:
+        return "Part Paid"
+    return "Pending"
+
+
+def _salary_rollup(payload: dict[str, Any]) -> None:
+    overtime_hours = _parse_amount(payload.get("overtimeHours"))
+    overtime_rate = _parse_amount(payload.get("overtimeRate"))
+    overtime_pay = _parse_amount(payload.get("overtimePay"))
+    if overtime_hours > 0 and overtime_rate > 0:
+        overtime_pay = round(overtime_hours * overtime_rate, 2)
+    payload["overtimePay"] = overtime_pay
+    gross_pay = round(
+        _parse_amount(payload.get("baseSalary"))
+        + _parse_amount(payload.get("allowance"))
+        + _parse_amount(payload.get("bonus"))
+        + overtime_pay,
+        2,
+    )
+    payload["grossPay"] = gross_pay
+    total_deductions = round(
+        _parse_amount(payload.get("taxAmount"))
+        + _parse_amount(payload.get("ssnitAmount"))
+        + _parse_amount(payload.get("loanDeduction"))
+        + _parse_amount(payload.get("deductions")),
+        2,
+    )
+    payload["totalDeductions"] = total_deductions
+    payload["netPay"] = round(max(gross_pay - total_deductions, 0), 2)
+    payload["balanceDue"] = round(max(_parse_amount(payload.get("netPay")) - _parse_amount(payload.get("amountPaid")), 0), 2)
+    payload["status"] = _salary_status(payload)
+
+
+def _months_between(start_date: date | None, end_date: date | None) -> int:
+    if not start_date or not end_date or end_date < start_date:
+        return 0
+    months = (end_date.year - start_date.year) * 12 + (end_date.month - start_date.month)
+    if end_date.day < start_date.day:
+        months -= 1
+    return max(months, 0)
+
+
+def _maintenance_rollup(payload: dict[str, Any]) -> None:
+    rolled_cost = round(
+        _parse_amount(payload.get("laborCost"))
+        + _parse_amount(payload.get("partsCost"))
+        + _parse_amount(payload.get("otherCost")),
+        2,
+    )
+    if rolled_cost > 0 or not _normalize_text(payload.get("actualCost")):
+        payload["actualCost"] = rolled_cost
+
+
+def _asset_rollup(payload: dict[str, Any]) -> None:
+    purchase_cost = _parse_amount(payload.get("purchaseCost"))
+    salvage_value = max(_parse_amount(payload.get("salvageValue")), 0)
+    existing_current_value = _parse_amount(payload.get("currentValue"))
+    useful_life_months = int(_parse_amount(payload.get("usefulLifeMonths")))
+    acquired_date = _parse_date(payload.get("acquiredDate"))
+    if acquired_date and acquired_date > date.today():
+        payload["monthlyDepreciation"] = 0.0
+        payload["annualDepreciation"] = 0.0
+        payload["accumulatedDepreciation"] = 0.0
+        payload["currentValue"] = round(purchase_cost or existing_current_value, 2)
+        return
+    months_elapsed = _months_between(acquired_date, date.today())
+    depreciable_base = max(purchase_cost - salvage_value, 0)
+    monthly_depreciation = round(depreciable_base / useful_life_months, 2) if useful_life_months > 0 else 0.0
+    accumulated = round(min(monthly_depreciation * months_elapsed, depreciable_base), 2) if useful_life_months > 0 else 0.0
+    payload["monthlyDepreciation"] = monthly_depreciation
+    payload["annualDepreciation"] = round(monthly_depreciation * 12, 2)
+    payload["accumulatedDepreciation"] = accumulated
+    payload["currentValue"] = round(max(purchase_cost - accumulated, salvage_value if purchase_cost > 0 else existing_current_value), 2)
+
+
+def _knowledge_rollup(payload: dict[str, Any]) -> None:
+    pass_score = _parse_amount(payload.get("passScore"))
+    actual_score = _parse_amount(payload.get("actualScore"))
+    completion_percent = _parse_amount(payload.get("completionPercent"))
+    if pass_score > 0 and actual_score > 0:
+        completion_percent = round(min((actual_score / pass_score) * 100, 100), 2)
+    elif _parse_date(payload.get("completionDate")):
+        completion_percent = 100.0
+    payload["completionPercent"] = completion_percent
+    if _normalize_text(payload.get("status")) not in {"Archived", "Under Review"}:
+        if _parse_date(payload.get("completionDate")) or completion_percent >= 100:
+            payload["status"] = "Completed"
+        elif (due_date := _parse_date(payload.get("dueDate"))) and due_date <= date.today():
+            payload["status"] = "Training Due"
+        elif _normalize_text(payload.get("title")):
+            payload["status"] = "Active"
+
+
+def _parse_time_value(value: Any) -> tuple[int, int] | None:
+    raw = _normalize_text(value)
+    if len(raw) < 4 or ":" not in raw:
+        return None
+    try:
+        hour_text, minute_text = raw[:5].split(":", 1)
+        hour = int(hour_text)
+        minute = int(minute_text)
+    except (TypeError, ValueError):
+        return None
+    if hour < 0 or hour > 23 or minute < 0 or minute > 59:
+        return None
+    return hour, minute
+
+
+def _hours_between_times(start_value: Any, end_value: Any, *, break_minutes: float = 0.0) -> float:
+    start_parts = _parse_time_value(start_value)
+    end_parts = _parse_time_value(end_value)
+    if not start_parts or not end_parts:
+        return 0.0
+    start_total = start_parts[0] * 60 + start_parts[1]
+    end_total = end_parts[0] * 60 + end_parts[1]
+    if end_total < start_total:
+        end_total += 24 * 60
+    minutes = max(end_total - start_total - max(int(_parse_amount(break_minutes)), 0), 0)
+    return round(minutes / 60, 2)
+
+
+def _minutes_late(scheduled_start: Any, check_in_value: Any) -> int:
+    start_parts = _parse_time_value(scheduled_start)
+    check_in_parts = _parse_time_value(check_in_value)
+    if not start_parts or not check_in_parts:
+        return 0
+    start_total = start_parts[0] * 60 + start_parts[1]
+    check_in_total = check_in_parts[0] * 60 + check_in_parts[1]
+    if check_in_total < start_total:
+        check_in_total += 24 * 60
+    return max(check_in_total - start_total, 0)
+
+
+def _workforce_rollup(payload: dict[str, Any]) -> None:
+    break_minutes = _parse_amount(payload.get("breakMinutes"))
+    scheduled_hours = _hours_between_times(payload.get("shiftStart"), payload.get("shiftEnd"), break_minutes=break_minutes)
+    worked_hours = _hours_between_times(payload.get("checkInTime"), payload.get("checkOutTime"), break_minutes=break_minutes)
+    late_minutes = _minutes_late(payload.get("shiftStart"), payload.get("checkInTime"))
+    payload["scheduledHours"] = scheduled_hours
+    payload["workedHours"] = worked_hours
+    payload["overtimeHours"] = round(max(worked_hours - scheduled_hours, 0), 2)
+    payload["lateMinutes"] = late_minutes
+    if _normalize_text(payload.get("attendanceStatus")) != "Off Duty":
+        if _parse_time_value(payload.get("checkOutTime")):
+            payload["attendanceStatus"] = "Checked Out"
+        elif _parse_time_value(payload.get("checkInTime")):
+            payload["attendanceStatus"] = "Late" if late_minutes > 0 else "Present"
+        elif _normalize_text(payload.get("attendanceStatus")) in {"Absent", "Scheduled"}:
+            payload["attendanceStatus"] = _normalize_text(payload.get("attendanceStatus"))
+        else:
+            payload["attendanceStatus"] = "Scheduled"
+
+
 def _ensure_status(module_key: str, payload: dict[str, Any]) -> str:
+    if module_key == "salary_records":
+        _salary_rollup(payload)
+        return _salary_status(payload)
+    if module_key == "asset_records":
+        _asset_rollup(payload)
+    if module_key == "maintenance_records":
+        _maintenance_rollup(payload)
+    if module_key == "knowledge_base":
+        _knowledge_rollup(payload)
+    if module_key == "workforce_attendance":
+        _workforce_rollup(payload)
     if module_key == "suppliers":
         return _supplier_status(payload)
     if module_key == "mobile_money_reconciliations":
@@ -183,6 +353,19 @@ def _ensure_reference(module_key: str, payload: dict[str, Any]) -> str:
 
 
 def _ensure_amount(module_key: str, payload: dict[str, Any]) -> float:
+    if module_key == "salary_records":
+        _salary_rollup(payload)
+        gross_pay = _parse_amount(payload.get("grossPay"))
+        return gross_pay if gross_pay > 0 else _parse_amount(payload.get("amountPaid"))
+    if module_key == "asset_records":
+        _asset_rollup(payload)
+        return _parse_amount(payload.get("currentValue"))
+    if module_key == "knowledge_base":
+        _knowledge_rollup(payload)
+        return _parse_amount(payload.get("completionPercent"))
+    if module_key == "workforce_attendance":
+        _workforce_rollup(payload)
+        return _parse_amount(payload.get("workedHours"))
     if module_key == "mobile_money_reconciliations":
         return abs(_mobile_money_variance(payload))
     if module_key == "maintenance_records":
