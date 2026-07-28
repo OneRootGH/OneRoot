@@ -15,6 +15,7 @@ from threading import Lock
 from typing import Any
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
+from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from sqlalchemy import create_engine, desc, inspect, or_, select
@@ -64,6 +65,7 @@ SERVICE_LEGACY_PAYMENT_FIELDS = {
     "laundry_tickets": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
     "equipment_rental_bookings": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
 }
+LOCAL_TIMEZONE = ZoneInfo("Africa/Accra")
 
 
 def build_database_engine(database_url: str):
@@ -229,6 +231,10 @@ def minutes_late(scheduled_start: Any, check_in_value: Any) -> int:
     if check_in_total < start_total:
         check_in_total += 24 * 60
     return max(check_in_total - start_total, 0)
+
+
+def current_local_datetime() -> datetime:
+    return datetime.now(LOCAL_TIMEZONE)
 
 
 def align_date_to_month(date_value: Any, month_value: Any, fallback_day: int = 5) -> str:
@@ -3181,6 +3187,144 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 return normalize_text(user.full_name) or normalize_text(user.username) or "OneRoot Essentials"
         return "OneRoot Essentials"
 
+    def safe_next_path(value: Any, fallback: str) -> str:
+        candidate = normalize_text(value)
+        if candidate.startswith("/") and not candidate.startswith("//"):
+            return candidate
+        return fallback
+
+    def attendance_display_name_for_user(user: User | None) -> str:
+        return normalize_text(getattr(user, "full_name", "")) or normalize_text(getattr(user, "username", "")) or "Staff"
+
+    def attendance_staff_role_for_user(user: User | None) -> str:
+        role_key = normalize_role_key(getattr(user, "role", "viewer"))
+        role_map = {
+            "owner": "Manager",
+            "admin": "Manager",
+            "finance": "Finance Officer",
+            "operations": "Manager",
+            "apartment-manager": "Apartment Manager",
+            "sales-stock-operator": "Stock Officer",
+            "cashier": "Cashier",
+            "viewer": "Support Staff",
+        }
+        return role_map.get(role_key, "Support Staff")
+
+    def attendance_shift_type_for_timestamp(timestamp: datetime) -> str:
+        hour = timestamp.hour
+        if 5 <= hour < 12:
+            return "Morning"
+        if 12 <= hour < 17:
+            return "Afternoon"
+        if 17 <= hour < 22:
+            return "Evening"
+        return "Night"
+
+    def attendance_reference_for_user(user: User | None, target_date: date) -> str:
+        identity = normalize_text(getattr(user, "username", "")).lower() or normalize_text(getattr(user, "id", "")).lower() or "staff"
+        return f"attendance|{target_date.isoformat()}|{identity}"
+
+    def attendance_record_for_user(user: User | None, target_date: date) -> ModuleRecord | None:
+        if not user:
+            return None
+        reference = attendance_reference_for_user(user, target_date)
+        direct_match = g.db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "workforce_attendance",
+                ModuleRecord.reference == reference,
+            )
+        )
+        if direct_match:
+            return direct_match
+
+        match_names = {
+            normalize_text(getattr(user, "full_name", "")).lower(),
+            normalize_text(getattr(user, "username", "")).lower(),
+        }
+        match_names.discard("")
+        if not match_names:
+            return None
+
+        candidate_records = g.db.scalars(
+            select(ModuleRecord)
+            .where(
+                ModuleRecord.module_key == "workforce_attendance",
+                ModuleRecord.record_date == target_date,
+            )
+            .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+        ).all()
+        for candidate in candidate_records:
+            payload = candidate.payload or {}
+            candidate_names = {
+                normalize_text(payload.get("staffName")).lower(),
+                normalize_text(candidate.title).lower(),
+                normalize_text(candidate.reference).lower(),
+            }
+            candidate_names.discard("")
+            if match_names.intersection(candidate_names):
+                return candidate
+        return None
+
+    def build_attendance_widget(user: User | None) -> dict[str, Any] | None:
+        if not user or not user_has_access(user, "workforce_attendance"):
+            return None
+
+        target_date = current_local_datetime().date()
+        record = attendance_record_for_user(user, target_date)
+        payload = dict(record.payload if record else {})
+        check_in_time = normalize_text(payload.get("checkInTime"))
+        check_out_time = normalize_text(payload.get("checkOutTime"))
+        worked_hours = parse_amount(payload.get("workedHours"))
+        stored_status = normalize_text(payload.get("attendanceStatus")) or normalize_text(getattr(record, "status", ""))
+
+        if check_out_time:
+            status_label = "Checked Out"
+            status_note = (
+                f"{check_in_time or 'Start not saved'} to {check_out_time} · {worked_hours:.2f} hrs worked"
+                if worked_hours > 0
+                else f"Checked out at {check_out_time}"
+            )
+            tone = "success"
+            can_check_in = False
+            can_check_out = False
+        elif check_in_time:
+            status_label = "Checked In"
+            status_note = f"Checked in at {check_in_time}. Tap Check Out when the shift ends."
+            tone = "accent"
+            can_check_in = False
+            can_check_out = True
+        elif record:
+            status_label = stored_status or "Scheduled"
+            if status_label == "Off Duty":
+                status_note = "Marked off duty for today."
+                tone = "muted"
+                can_check_in = False
+            else:
+                status_note = "No check-in time saved yet for today."
+                tone = "warning"
+                can_check_in = True
+            can_check_out = False
+        else:
+            status_label = "Not Checked In"
+            status_note = f"No attendance has been saved for {target_date.strftime('%A, %d %b %Y')} yet."
+            tone = "warning"
+            can_check_in = True
+            can_check_out = False
+
+        return {
+            "dateLabel": target_date.strftime("%A, %d %b %Y"),
+            "staffName": attendance_display_name_for_user(user),
+            "statusLabel": status_label,
+            "statusNote": status_note,
+            "tone": tone,
+            "canCheckIn": can_check_in,
+            "canCheckOut": can_check_out,
+            "checkInTime": check_in_time,
+            "checkOutTime": check_out_time,
+            "workedHours": worked_hours,
+            "recordId": getattr(record, "id", ""),
+        }
+
     def apartment_document_bundle(record_id: str) -> dict[str, Any] | None:
         record = g.db.get(ModuleRecord, record_id)
         if not record or record.module_key != "apartments":
@@ -4407,6 +4551,97 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.commit()
         session.clear()
         return redirect(url_for("login"))
+
+    @app.route("/app/attendance/clock", methods=["POST"])
+    @access_required("workforce_attendance")
+    def attendance_clock():
+        action = normalize_text(request.form.get("action")).lower()
+        next_path = safe_next_path(
+            request.form.get("next"),
+            request.referrer or url_for("module_list", module_key="workforce_attendance"),
+        )
+        if action not in {"check-in", "check-out"}:
+            flash("Choose Check In or Check Out to save attendance.", "warning")
+            return redirect(next_path)
+
+        definition = MODULES["workforce_attendance"]
+        now_local = current_local_datetime()
+        attendance_date = now_local.date()
+        clock_time = now_local.strftime("%H:%M")
+        record = attendance_record_for_user(g.current_user, attendance_date)
+        is_new = record is None
+
+        if record:
+            payload = dict(record.payload or {})
+        else:
+            payload = {
+                "id": uuid4().hex,
+                "createdAt": datetime.utcnow().isoformat(),
+                "shiftDate": attendance_date.isoformat(),
+                "businessAreaId": "shared-operations",
+                "staffName": attendance_display_name_for_user(g.current_user),
+                "staffRole": attendance_staff_role_for_user(g.current_user),
+                "shiftType": attendance_shift_type_for_timestamp(now_local),
+                "breakMinutes": 0,
+                "approvalStatus": "Draft",
+                "notes": "",
+                "reference": attendance_reference_for_user(g.current_user, attendance_date),
+            }
+            record = ModuleRecord(id=payload["id"], module_key=definition.key, created_at=datetime.utcnow())
+            g.db.add(record)
+
+        payload.setdefault("id", record.id)
+        payload.setdefault("createdAt", record.created_at.isoformat())
+        payload["shiftDate"] = normalize_text(payload.get("shiftDate")) or attendance_date.isoformat()
+        payload["reference"] = normalize_text(payload.get("reference")) or attendance_reference_for_user(g.current_user, attendance_date)
+        payload["staffName"] = normalize_text(payload.get("staffName")) or attendance_display_name_for_user(g.current_user)
+        payload["staffRole"] = normalize_text(payload.get("staffRole")) or attendance_staff_role_for_user(g.current_user)
+        payload["shiftType"] = normalize_text(payload.get("shiftType")) or attendance_shift_type_for_timestamp(now_local)
+        payload["businessAreaId"] = normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        payload["approvalStatus"] = normalize_text(payload.get("approvalStatus")) or "Draft"
+
+        has_check_in = bool(parse_time_value(payload.get("checkInTime")))
+        has_check_out = bool(parse_time_value(payload.get("checkOutTime")))
+
+        if action == "check-in":
+            if has_check_in and not has_check_out:
+                flash(f"You are already checked in today at {normalize_text(payload.get('checkInTime'))}.", "warning")
+                return redirect(next_path)
+            if has_check_out:
+                flash("You already checked out today. Open the attendance record if you need to adjust it.", "warning")
+                return redirect(next_path)
+            payload["checkInTime"] = clock_time
+            payload["shiftStart"] = normalize_text(payload.get("shiftStart")) or clock_time
+            success_message = f"Checked in at {clock_time}."
+            audit_action = "check-in"
+            audit_detail = f"{payload['staffName']} checked in at {clock_time}."
+        else:
+            if not has_check_in:
+                flash("Check in first before checking out.", "warning")
+                return redirect(next_path)
+            if has_check_out:
+                flash(f"You already checked out today at {normalize_text(payload.get('checkOutTime'))}.", "warning")
+                return redirect(next_path)
+            payload["checkOutTime"] = clock_time
+            payload["shiftEnd"] = normalize_text(payload.get("shiftEnd")) or clock_time
+            success_message = f"Checked out at {clock_time}."
+            audit_action = "check-out"
+            audit_detail = f"{payload['staffName']} checked out at {clock_time}."
+
+        payload["updatedAt"] = datetime.utcnow().isoformat()
+        workforce_rollup(payload)
+        set_module_record_metadata(record, definition, payload)
+        audit(
+            "workforce_attendance",
+            definition.label,
+            audit_action,
+            payload["staffName"],
+            record.id,
+            audit_detail if not is_new else f"{audit_detail} Daily attendance record opened automatically.",
+        )
+        g.db.commit()
+        flash(success_message, "success")
+        return redirect(next_path)
 
     @app.route("/app/")
     @access_required("dashboard")
@@ -6751,6 +6986,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return {
             "current_user": current_user,
             "current_access_keys": user_access_keys(current_user),
+            "attendance_widget": build_attendance_widget(current_user),
             "sidebar_items": build_sidebar(current_user),
             "module_definitions": MODULES,
             "normalize_role_key": normalize_role_key,

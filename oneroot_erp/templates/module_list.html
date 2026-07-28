@@ -88,6 +88,38 @@
     </section>
   {% endif %}
 
+  {% if definition.key == 'workforce_attendance' and attendance_widget %}
+    <section class="card attendance-desk-card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Quick Attendance</p>
+          <h3>My Check In / Check Out</h3>
+          <p class="muted">Use these buttons for the signed-in staff account. The app updates the same attendance record for today automatically.</p>
+        </div>
+        <a class="button subtle" href="{{ url_for('module_form', module_key=definition.key) }}">Open Full Attendance Form</a>
+      </div>
+      <div class="attendance-desk-layout">
+        <article class="metric-card">
+          <span>{{ attendance_widget.dateLabel }}</span>
+          <strong>{{ attendance_widget.statusLabel }}</strong>
+          <small>{{ attendance_widget.statusNote }}</small>
+        </article>
+        <div class="attendance-desk-actions">
+          <form method="post" action="{{ url_for('attendance_clock') }}">
+            <input type="hidden" name="action" value="check-in">
+            <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+            <button class="button primary" type="submit" {% if not attendance_widget.canCheckIn %}disabled{% endif %}>Check In</button>
+          </form>
+          <form method="post" action="{{ url_for('attendance_clock') }}">
+            <input type="hidden" name="action" value="check-out">
+            <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+            <button class="button dark" type="submit" {% if not attendance_widget.canCheckOut %}disabled{% endif %}>Check Out</button>
+          </form>
+        </div>
+      </div>
+    </section>
+  {% endif %}
+
   {% if module_overview and module_overview.cards %}
     <section class="card-grid four">
       {% for card in module_overview.cards %}

@@ -62,6 +62,27 @@
                 <button class="button subtle" type="submit">Search</button>
               </form>
             {% endif %}
+            {% if attendance_widget %}
+              <div class="attendance-quick">
+                <div class="attendance-quick-copy attendance-{{ attendance_widget.tone }}">
+                  <span>Attendance Today</span>
+                  <strong>{{ attendance_widget.statusLabel }}</strong>
+                  <small>{{ attendance_widget.statusNote }}</small>
+                </div>
+                <div class="attendance-quick-actions">
+                  <form method="post" action="{{ url_for('attendance_clock') }}">
+                    <input type="hidden" name="action" value="check-in">
+                    <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+                    <button class="button primary" type="submit" {% if not attendance_widget.canCheckIn %}disabled{% endif %}>Check In</button>
+                  </form>
+                  <form method="post" action="{{ url_for('attendance_clock') }}">
+                    <input type="hidden" name="action" value="check-out">
+                    <input type="hidden" name="next" value="{{ request.full_path if request.query_string else request.path }}">
+                    <button class="button dark" type="submit" {% if not attendance_widget.canCheckOut %}disabled{% endif %}>Check Out</button>
+                  </form>
+                </div>
+              </div>
+            {% endif %}
             {% if 'workbook' in current_access_keys %}
               <a class="button subtle" href="{{ url_for('download_workbook') }}">Download Workbook</a>
             {% endif %}
