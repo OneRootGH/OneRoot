@@ -706,6 +706,10 @@ textarea { resize: vertical; }
 .pos-layout-enhanced {
   align-items: start;
 }
+.pos-layout-compact {
+  grid-template-columns: minmax(0, 1.5fr) minmax(340px, 0.88fr);
+  align-items: stretch;
+}
 .pos-main-panel {
   display: grid;
   gap: 1rem;
@@ -713,26 +717,57 @@ textarea { resize: vertical; }
 .pos-fastlane-card {
   background: linear-gradient(180deg, #ffffff, #f7f3ea);
 }
+.pos-catalog-card {
+  background: #fcfbf8;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 0.8rem;
+  min-height: clamp(34rem, 74vh, 49rem);
+  overflow: hidden;
+}
+.pos-catalog-head {
+  margin-bottom: 0;
+}
 .pos-quick-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 0.9rem;
+}
+.pos-control-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(220px, 1fr) repeat(3, minmax(0, 0.75fr)) auto;
+  gap: 0.75rem;
+  align-items: end;
+}
+.pos-search-dominant {
+  min-width: 0;
+}
+.pos-scan-field {
+  min-width: 0;
+}
+.pos-inline-tools {
+  display: flex;
+  justify-content: flex-end;
+  align-items: flex-end;
 }
 .pos-search-wide {
   grid-column: span 4;
 }
 .pos-counter-strip {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.55rem;
   margin-bottom: 1rem;
   align-items: stretch;
+  overflow-x: auto;
+  padding-bottom: 0.2rem;
+  scrollbar-gutter: stable;
 }
 .pos-wide-card {
-  flex: 2 1 260px;
+  flex: 0 0 320px;
 }
 .pos-counter-strip .mini-card {
-  flex: 1 1 124px;
+  flex: 0 0 132px;
   min-width: 0;
   padding: 0.66rem 0.74rem;
   gap: 0.18rem;
@@ -748,16 +783,18 @@ textarea { resize: vertical; }
   letter-spacing: 0.08em;
 }
 #pos-payment-mix {
-  font-size: 0.9rem;
-  line-height: 1.3;
+  font-size: 0.86rem;
+  line-height: 1.25;
 }
 .pos-serving-note {
-  margin: 0 0 1rem;
-  line-height: 1.5;
+  margin: 0 0 0.8rem;
+  line-height: 1.35;
+  font-size: 0.92rem;
 }
 .pos-fastlane-helper {
-  margin: 1rem 0 0;
-  line-height: 1.45;
+  margin: 0.35rem 0 0;
+  line-height: 1.35;
+  font-size: 0.92rem;
 }
 .pos-payment-quick {
   display: grid;
@@ -810,8 +847,11 @@ textarea { resize: vertical; }
   justify-content: space-between;
   gap: 0.85rem;
   align-items: flex-start;
-  margin-bottom: 0.9rem;
+  margin-bottom: 0.55rem;
   flex-wrap: wrap;
+}
+.pos-results-toolbar-compact {
+  margin-bottom: 0;
 }
 .pos-results-toolbar strong {
   display: block;
@@ -837,6 +877,11 @@ textarea { resize: vertical; }
   max-height: 31rem;
   overflow: auto;
   padding-right: 0.15rem;
+}
+.pos-results-list-tall {
+  max-height: none;
+  min-height: 0;
+  align-content: start;
 }
 .result-card {
   width: 100%;
@@ -867,7 +912,7 @@ textarea { resize: vertical; }
   align-items: center;
   gap: 0.85rem;
   text-align: left;
-  padding: 0.82rem 0.95rem;
+  padding: 0.72rem 0.86rem;
   border-radius: 1rem;
   border: 1px solid #dde3ec;
   background: #fff;
@@ -883,12 +928,13 @@ textarea { resize: vertical; }
   min-width: 0;
 }
 .pos-result-primary strong {
-  font-size: 0.98rem;
+  font-size: 0.94rem;
 }
 .pos-result-primary small,
 .pos-result-meta small {
   color: var(--muted);
   margin-top: 0.18rem;
+  font-size: 0.82rem;
 }
 .pos-result-meta {
   text-align: right;
@@ -897,8 +943,8 @@ textarea { resize: vertical; }
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 62px;
-  padding: 0.55rem 0.8rem;
+  min-width: 56px;
+  padding: 0.48rem 0.7rem;
   border-radius: 999px;
   background: #edf3ee;
   color: var(--green);
@@ -940,9 +986,11 @@ textarea { resize: vertical; }
 }
 .pos-summary-grid {
   margin-bottom: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
 }
 .pos-payment-dock {
-  margin-bottom: 1rem;
+  margin-bottom: 0.85rem;
   background: #f6f9ff;
   border-color: #d9e3f2;
   gap: 0.8rem;
@@ -963,6 +1011,11 @@ textarea { resize: vertical; }
   top: 1.25rem;
   background: #f8fbff;
   border-color: #d9e5f5;
+  display: grid;
+  grid-template-rows: auto auto auto auto auto minmax(0, 1fr) auto auto;
+  gap: 0;
+  max-height: clamp(34rem, 74vh, 49rem);
+  overflow: hidden;
 }
 .pos-cart-grand-total {
   font-size: 1.45rem;
@@ -971,9 +1024,16 @@ textarea { resize: vertical; }
 .pos-customer-box {
   margin-bottom: 1rem;
 }
+.pos-customer-box-compact {
+  margin-top: 0;
+}
 .pos-customer-box summary {
   cursor: pointer;
   font-weight: 700;
+}
+.pos-closeout-note {
+  margin: 0.8rem 0 0;
+  line-height: 1.4;
 }
 .pos-cart-line {
   gap: 0.85rem;
@@ -1003,6 +1063,22 @@ textarea { resize: vertical; }
 .pos-last-receipt-card {
   margin-top: 1rem;
 }
+.pos-last-receipt-inline {
+  margin-top: 0;
+  margin-bottom: 0.85rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 0.85rem;
+  flex-wrap: wrap;
+}
+.pos-last-receipt-inline .button {
+  white-space: nowrap;
+}
+.pos-cart-box-grow {
+  min-height: 0;
+  max-height: none;
+}
 .pos-history-drawer {
   margin-top: 1rem;
 }
@@ -1022,6 +1098,9 @@ textarea { resize: vertical; }
 }
 .pos-action-bar {
   margin-top: 1rem;
+  padding-top: 0.85rem;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(248, 251, 255, 0), #f8fbff 28%);
 }
 .is-disabled {
   opacity: 0.5;
@@ -1197,12 +1276,21 @@ thead th {
   .card-grid.two,
   .attendance-desk-layout,
   .pos-quick-grid,
+  .pos-control-grid,
   .pos-payment-quick,
   .pos-results-grid {
     grid-template-columns: 1fr;
   }
-  .pos-counter-strip {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+  .pos-layout-compact {
+    grid-template-columns: 1fr;
+  }
+  .pos-catalog-card,
+  .pos-cart-panel-enhanced {
+    min-height: auto;
+    max-height: none;
+  }
+  .pos-inline-tools {
+    justify-content: flex-start;
   }
   .sidebar {
     position: static;
@@ -1274,6 +1362,10 @@ thead th {
   .pos-search-wide {
     grid-column: auto;
   }
+  .pos-counter-strip .mini-card,
+  .pos-wide-card {
+    flex: 0 0 78%;
+  }
   .pos-cart-panel-enhanced,
   .document-toolbar {
     position: static;
@@ -1287,6 +1379,9 @@ thead th {
   }
   .pos-payment-dock-head {
     flex-direction: column;
+  }
+  .pos-last-receipt-inline {
+    align-items: flex-start;
   }
   .document-brand {
     flex-direction: column;

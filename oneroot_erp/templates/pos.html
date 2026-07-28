@@ -53,92 +53,80 @@
     </section>
 
     <p class="muted pos-serving-note">
-      Serve faster from one screen: choose date, area, and payment at the top, type or scan the item, tap add, then save.
-      Press <strong>/</strong> to jump to product search. Use the barcode box for scanners or quick code entry.
+      Search or scan first, tap to add, then save. Press <strong>/</strong> to jump straight to product search.
     </p>
 
-    <div class="pos-layout pos-layout-enhanced">
-      <div class="pos-main-panel">
-        <section class="card pos-fastlane-card">
-          <div class="card-header compact">
-            <div>
-              <p class="eyebrow">Cashier Fastlane</p>
-              <h3>Search First, Add Fast</h3>
-            </div>
-            <span class="status-chip" id="pos-result-count">Loading products...</span>
+    <div class="pos-layout pos-layout-enhanced pos-layout-compact">
+      <section class="card pos-catalog-card">
+        <div class="card-header compact pos-catalog-head">
+          <div>
+            <p class="eyebrow">Cashier Fastlane</p>
+            <h3>Search First, Add Fast</h3>
+            <p class="muted pos-fastlane-helper">Results stay beside the cart so staff can serve without long page scrolls.</p>
           </div>
-          <div class="pos-quick-grid">
-            <label>
-              <span>Order Date</span>
-              <input type="date" id="pos-order-date" value="{{ today_iso }}">
-            </label>
-            <label>
-              <span>Serving Area</span>
-              <select id="pos-area-filter">
-                <option value="">All POS Areas</option>
-                {% for value, label in business_area_options %}
-                  <option value="{{ value }}" {% if initial_area == value %}selected{% endif %}>{{ label }}</option>
-                {% endfor %}
-              </select>
-            </label>
-            <label>
-              <span>Category</span>
-              <select id="pos-category-filter">
-                <option value="">All Categories</option>
-                {% for category in pos_categories %}
-                  <option value="{{ category.name }}" {% if initial_category == category.name %}selected{% endif %}>{{ category.name }} ({{ category.count }})</option>
-                {% endfor %}
-              </select>
-            </label>
-            <label>
-              <span>Scan Barcode / SKU</span>
-              <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
-            </label>
-            <label class="pos-search-wide">
-              <span>Search Products</span>
-              <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" value="{{ initial_search }}" autocomplete="off">
-            </label>
-          </div>
-          <p class="muted pos-fastlane-helper">
-            Pick the area, type the item, and tap from the results below. Payment comes later beside the cart so staff do not lose time scrolling.
-          </p>
-        </section>
-
-        <section class="card pos-browser-card">
-          <div class="card-header compact">
-            <div>
-              <p class="eyebrow">Product Shelf</p>
-              <h3>Quick Pick Matches</h3>
-            </div>
+          <span class="status-chip" id="pos-result-count">Loading products...</span>
+        </div>
+        <div class="pos-control-grid">
+          <label class="pos-search-dominant">
+            <span>Search Products</span>
+            <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" value="{{ initial_search }}" autocomplete="off">
+          </label>
+          <label class="pos-scan-field">
+            <span>Scan Barcode / SKU</span>
+            <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
+          </label>
+          <label>
+            <span>Serving Area</span>
+            <select id="pos-area-filter">
+              <option value="">All POS Areas</option>
+              {% for value, label in business_area_options %}
+                <option value="{{ value }}" {% if initial_area == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Category</span>
+            <select id="pos-category-filter">
+              <option value="">All Categories</option>
+              {% for category in pos_categories %}
+                <option value="{{ category.name }}" {% if initial_category == category.name %}selected{% endif %}>{{ category.name }} ({{ category.count }})</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Order Date</span>
+            <input type="date" id="pos-order-date" value="{{ today_iso }}">
+          </label>
+          <div class="pos-inline-tools">
             <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
           </div>
-          <div class="pos-results-toolbar">
-            <div>
-              <strong id="pos-results-page">Page 1 of 1</strong>
-              <small id="pos-results-helper" class="muted">Showing the fastest picks first so staff do not need to scroll far.</small>
-            </div>
-            <div class="toolbar pos-results-nav">
-              <button class="button subtle" type="button" id="pos-results-prev">Back</button>
-              <button class="button subtle" type="button" id="pos-results-next">More</button>
-            </div>
+        </div>
+        <div class="pos-results-toolbar pos-results-toolbar-compact">
+          <div>
+            <strong id="pos-results-page">Page 1 of 1</strong>
+            <small id="pos-results-helper" class="muted">Showing the fastest picks first so staff do not need to scroll far.</small>
           </div>
-          <div id="pos-results" class="pos-results-list">
-            {% for product in top_products %}
-              <button class="pos-result-row" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product.track_inventory, "sku": product.sku, "barcode": product.barcode}|tojson }}'>
-                <span class="pos-result-primary">
-                  <strong>{{ product.name }}</strong>
-                  <small>{{ business_area_short.get(product.business_area_id, product.business_area_id) }}{% if product.category %} · {{ product.category }}{% endif %}</small>
-                </span>
-                <span class="pos-result-meta">
-                  <strong>{{ product.sales_price|currency }}</strong>
-                  <small>{% if product.track_inventory %}Stock {{ product.quantity_on_hand|round(0, 'floor')|int }}{% else %}Service Item{% endif %}</small>
-                </span>
-                <span class="pos-result-action">Add</span>
-              </button>
-            {% endfor %}
+          <div class="toolbar pos-results-nav">
+            <button class="button subtle" type="button" id="pos-results-prev">Back</button>
+            <button class="button subtle" type="button" id="pos-results-next">More</button>
           </div>
-        </section>
-      </div>
+        </div>
+        <div id="pos-results" class="pos-results-list pos-results-list-tall">
+          {% for product in top_products %}
+            <button class="pos-result-row" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product.track_inventory, "sku": product.sku, "barcode": product.barcode}|tojson }}'>
+              <span class="pos-result-primary">
+                <strong>{{ product.name }}</strong>
+                <small>{{ business_area_short.get(product.business_area_id, product.business_area_id) }}{% if product.category %} · {{ product.category }}{% endif %}</small>
+              </span>
+              <span class="pos-result-meta">
+                <strong>{{ product.sales_price|currency }}</strong>
+                <small>{% if product.track_inventory %}Stock {{ product.quantity_on_hand|round(0, 'floor')|int }}{% else %}Service Item{% endif %}</small>
+              </span>
+              <span class="pos-result-action">Add</span>
+            </button>
+          {% endfor %}
+        </div>
+      </section>
 
       <aside class="card pos-cart-panel pos-cart-panel-enhanced">
         <div class="card-header">
@@ -185,37 +173,37 @@
           </article>
         </section>
 
-        <details class="muted-box pos-customer-box">
-          <summary>Customer details and note (optional)</summary>
+        <section class="mini-card pos-last-receipt-card pos-last-receipt-inline">
+          <div>
+            <span class="eyebrow">Receipt</span>
+            <strong id="pos-last-order-number">No sale saved yet</strong>
+          </div>
+          <a class="button subtle is-disabled" href="#" id="pos-last-receipt" target="_blank" rel="noopener">Print Last Receipt</a>
+        </section>
+
+        <details class="muted-box pos-customer-box pos-customer-box-compact">
+          <summary>Customer details, note, and counter info (optional)</summary>
           <div class="form-grid single">
             <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Only if needed"></label>
             <label><span>Customer Phone</span><input type="text" id="pos-customer-phone" placeholder="Optional contact"></label>
             <label><span>Notes</span><textarea id="pos-notes" rows="3" placeholder="Optional counter note"></textarea></label>
           </div>
+          <p class="muted pos-closeout-note" id="pos-closeout-meta">
+            {% if counter_summary.lastCloseout %}
+              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}.
+            {% else %}
+              No closeout has been saved for this counter day yet.
+            {% endif %}
+          </p>
         </details>
 
-        <div class="cart-box pos-cart-box">
+        <div class="cart-box pos-cart-box pos-cart-box-grow">
           <div class="card-header compact">
             <h4>Cart Lines</h4>
             <span class="muted">Adjust quantity here</span>
           </div>
           <div id="pos-cart-lines" class="stack-list compact"></div>
         </div>
-
-        <section class="mini-card pos-last-receipt-card">
-          <span class="eyebrow">Receipt</span>
-          <strong id="pos-last-order-number">No sale saved yet</strong>
-          <small id="pos-closeout-meta">
-            {% if counter_summary.lastCloseout %}
-              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}.
-            {% else %}
-              No closeout has been saved for this counter day yet.
-            {% endif %}
-          </small>
-          <div class="form-actions">
-            <a class="button subtle is-disabled" href="#" id="pos-last-receipt" target="_blank" rel="noopener">Print Last Receipt</a>
-          </div>
-        </section>
 
         <div class="form-actions pos-action-bar">
           <button class="button subtle" type="button" id="pos-clear">Clear Cart</button>
