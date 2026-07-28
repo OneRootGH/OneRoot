@@ -9,6 +9,8 @@
   const resultsPrevButton = document.getElementById("pos-results-prev");
   const resultsNextButton = document.getElementById("pos-results-next");
   const categoryFilterInput = document.getElementById("pos-category-filter");
+  const categoryStrip = document.getElementById("pos-category-strip");
+  const categoryPillNodes = Array.from(document.querySelectorAll("[data-category-value]"));
   const paymentButtonNodes = Array.from(document.querySelectorAll("[data-payment-method]"));
   const cartContainer = document.getElementById("pos-cart-lines");
   const totalNodes = document.querySelectorAll("[data-pos-total]");
@@ -91,6 +93,11 @@
     buttons.forEach((button) => {
       button.classList.toggle("is-active", Boolean(predicate(button)));
     });
+  }
+
+  function syncCategoryPills() {
+    const selectedCategory = getSelectedCategory();
+    setActiveButton(categoryPillNodes, (button) => (button.dataset.categoryValue || "") === selectedCategory);
   }
 
   function getCartTotal() {
@@ -246,16 +253,17 @@
 
     resultsContainer.innerHTML = visibleResults
       .map((product) => `
-        <button class="pos-result-row" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
-          <span class="pos-result-primary">
-            <strong>${escapeHtml(product.name)}</strong>
-            <small>${escapeHtml(product.businessAreaLabel)}${product.category ? ` · ${escapeHtml(product.category)}` : ""}</small>
+        <button class="pos-product-tile" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
+          <span class="pos-product-meta">
+            <small class="pos-product-area">${escapeHtml(product.businessAreaLabel)}</small>
+            <small class="pos-product-stock">${product.trackInventory ? `Stock ${escapeHtml(product.quantityOnHand)}` : "Service"}</small>
           </span>
-          <span class="pos-result-meta">
-            <strong>${formatCurrency(product.salesPrice)}</strong>
-            <small>${product.trackInventory ? `Stock ${escapeHtml(product.quantityOnHand)}` : "Service item"}</small>
+          <strong class="pos-product-name">${escapeHtml(product.name)}</strong>
+          <small class="pos-product-category">${escapeHtml(product.category || "General")}</small>
+          <span class="pos-product-footer">
+            <strong class="pos-product-price">${formatCurrency(product.salesPrice)}</strong>
+            <span class="pos-product-add">Add</span>
           </span>
-          <span class="pos-result-action">Add</span>
         </button>
       `)
       .join("");
@@ -500,6 +508,18 @@
   });
 
   categoryFilterInput?.addEventListener("change", () => {
+    syncCategoryPills();
+    void searchProducts(searchInput.value.trim());
+  });
+
+  categoryStrip?.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-category-value]");
+    if (!button || !categoryFilterInput) {
+      return;
+    }
+    const nextCategory = button.dataset.categoryValue || "";
+    categoryFilterInput.value = nextCategory;
+    syncCategoryPills();
     void searchProducts(searchInput.value.trim());
   });
 
@@ -664,6 +684,7 @@
   if (paymentMethodInput) {
     setActiveButton(paymentButtonNodes, (button) => button.dataset.paymentMethod === paymentMethodInput.value);
   }
+  syncCategoryPills();
 
   setLastReceipt(null);
   renderCart();
