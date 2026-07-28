@@ -1,104 +1,109 @@
 {% extends "base.html" %}
 {% block content %}
   <section class="card pos-workbench">
-    <div class="card-header">
-      <div>
+    <div class="pos-workbench-bar">
+      <div class="pos-workbench-title">
         <h3>Checkout</h3>
+        <p class="muted pos-serving-note">
+          Fast counter view. Press <strong>/</strong> to jump to search.
+        </p>
       </div>
-      <div class="toolbar">
+      <div class="toolbar pos-workbench-tools">
         <a class="button subtle" href="{{ url_for('inventory') }}">Inventory</a>
         <button class="button subtle" type="button" id="pos-closeout">Close</button>
       </div>
     </div>
 
-    <section class="pos-counter-strip pos-counter-strip-primary">
-      <article class="mini-card">
-        <span class="eyebrow">Sales</span>
+    <section class="pos-counter-ribbon">
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Sales</span>
         <strong id="pos-counter-total">{{ counter_summary.totalAmount|currency }}</strong>
       </article>
-      <article class="mini-card">
-        <span class="eyebrow">Cart</span>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Cart</span>
         <strong data-pos-total>GH₵0.00</strong>
       </article>
-      <article class="mini-card">
-        <span class="eyebrow">Items</span>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Items</span>
         <strong id="pos-cart-item-count">0</strong>
       </article>
-      <article class="mini-card">
-        <span class="eyebrow">Area</span>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Area</span>
         <strong id="pos-area-label">{{ counter_summary.areaLabel }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Profit</span>
+        <strong id="pos-counter-profit">{{ counter_summary.profitAmount|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Daily</span>
+        <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill pos-counter-pill-wide">
+        <span class="pos-counter-label">Payment Mix</span>
+        <strong id="pos-payment-mix">
+          {% if counter_summary.paymentMix %}
+            {% for label, amount in counter_summary.paymentMix.items() %}
+              {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
+            {% endfor %}
+          {% else %}
+            No payment mix recorded yet.
+          {% endif %}
+        </strong>
       </article>
     </section>
 
-    <div class="pos-counter-inline">
-      <span>Profit <strong id="pos-counter-profit">{{ counter_summary.profitAmount|currency }}</strong></span>
-      <span>Daily <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong></span>
-      <span>Mix <strong id="pos-payment-mix">
-        {% if counter_summary.paymentMix %}
-          {% for label, amount in counter_summary.paymentMix.items() %}
-            {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
-          {% endfor %}
-        {% else %}
-          None
-        {% endif %}
-      </strong></span>
-    </div>
-
-    <p class="muted pos-serving-note">
-      Search, add, save. Press <strong>/</strong> to jump to search.
-    </p>
-
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
       <section class="card pos-catalog-card">
-        <div class="card-header compact pos-catalog-head">
-          <div>
+        <div class="pos-catalog-head">
+          <div class="pos-catalog-summary">
             <h3>Products</h3>
-          </div>
-          <span class="status-chip" id="pos-result-count">Loading products...</span>
-        </div>
-        <div class="pos-control-grid">
-          <label class="pos-search-dominant">
-            <span>Search</span>
-            <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" value="{{ initial_search }}" autocomplete="off">
-          </label>
-          <label class="pos-scan-field">
-            <span>Scan</span>
-            <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
-          </label>
-          <label>
-            <span>Area</span>
-            <select id="pos-area-filter">
-              <option value="">All POS Areas</option>
-              {% for value, label in business_area_options %}
-                <option value="{{ value }}" {% if initial_area == value %}selected{% endif %}>{{ label }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label class="pos-category-select">
-            <span>Category</span>
-            <select id="pos-category-filter">
-              <option value="">All Categories</option>
-              {% for category in pos_categories %}
-                <option value="{{ category.name }}" {% if initial_category == category.name %}selected{% endif %}>{{ category.name }} ({{ category.count }})</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label>
-            <span>Order Date</span>
-            <input type="date" id="pos-order-date" value="{{ today_iso }}">
-          </label>
-          <div class="pos-inline-tools">
-            <button class="button subtle" type="button" id="pos-clear-search">Clear Search</button>
-          </div>
-        </div>
-        <div class="pos-results-toolbar pos-results-toolbar-compact">
-          <div>
-            <strong id="pos-results-page">Page 1 of 1</strong>
+            <span class="status-chip" id="pos-result-count">Loading products...</span>
             <small id="pos-results-helper" class="muted">Tap a product to add.</small>
           </div>
-          <div class="toolbar pos-results-nav">
-            <button class="button subtle" type="button" id="pos-results-prev">Back</button>
-            <button class="button subtle" type="button" id="pos-results-next">More</button>
+          <div class="pos-results-compact">
+            <strong id="pos-results-page">1/1</strong>
+            <div class="toolbar pos-results-nav">
+              <button class="button subtle" type="button" id="pos-results-prev">Back</button>
+              <button class="button subtle" type="button" id="pos-results-next">More</button>
+            </div>
+          </div>
+        </div>
+        <div class="pos-control-tray">
+          <div class="pos-control-grid">
+            <label class="pos-search-dominant">
+              <span>Search</span>
+              <input type="search" id="pos-search" placeholder="Type product name, SKU, or barcode" value="{{ initial_search }}" autocomplete="off">
+            </label>
+            <label class="pos-scan-field">
+              <span>Scan</span>
+              <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
+            </label>
+            <label>
+              <span>Area</span>
+              <select id="pos-area-filter">
+                <option value="">All POS Areas</option>
+                {% for value, label in business_area_options %}
+                  <option value="{{ value }}" {% if initial_area == value %}selected{% endif %}>{{ label }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label class="pos-category-select">
+              <span>Category</span>
+              <select id="pos-category-filter">
+                <option value="">All Categories</option>
+                {% for category in pos_categories %}
+                  <option value="{{ category.name }}" {% if initial_category == category.name %}selected{% endif %}>{{ category.name }} ({{ category.count }})</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              <span>Date</span>
+              <input type="date" id="pos-order-date" value="{{ today_iso }}">
+            </label>
+            <div class="pos-inline-tools">
+              <button class="button subtle" type="button" id="pos-clear-search">Clear</button>
+            </div>
           </div>
         </div>
         <div id="pos-results" class="pos-results-list pos-results-list-tall">
