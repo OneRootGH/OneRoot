@@ -999,6 +999,34 @@ textarea { resize: vertical; }
   border-color: #dde3ec;
   box-shadow: 0 10px 22px rgba(30, 42, 56, 0.05);
 }
+.product-thumb {
+  width: 42px;
+  height: 42px;
+  border-radius: 0.9rem;
+  object-fit: cover;
+  background: #f6f1e7;
+  border: 1px solid #e0d8ca;
+  flex-shrink: 0;
+}
+.product-thumb-square {
+  width: 52px;
+  height: 52px;
+}
+.product-thumb-large {
+  width: 96px;
+  height: 96px;
+  border-radius: 1.3rem;
+}
+.stack-list-media {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.stack-list-media > div {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
 .pos-result-row {
   width: 100%;
   display: grid;
@@ -1015,24 +1043,33 @@ textarea { resize: vertical; }
 }
 .pos-product-tile {
   width: 100%;
-  min-height: 136px;
+  min-height: 126px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
-  gap: 0.35rem;
+  gap: 0.42rem;
   text-align: left;
-  padding: 0.72rem;
+  padding: 0.68rem;
   border-radius: 0.95rem;
   border: 1px solid #dbe1ec;
   background: linear-gradient(180deg, #ffffff, #f8fafc);
   cursor: pointer;
   box-shadow: 0 8px 18px rgba(33, 45, 68, 0.05);
 }
-.pos-product-meta {
+.pos-product-top {
   display: flex;
-  justify-content: space-between;
-  gap: 0.35rem;
+  gap: 0.65rem;
   align-items: center;
-  flex-wrap: wrap;
+  min-width: 0;
+}
+.pos-product-thumb {
+  width: 50px;
+  height: 50px;
+  border-radius: 1rem;
+}
+.pos-product-meta {
+  min-width: 0;
+  display: grid;
+  gap: 0.3rem;
 }
 .pos-product-area,
 .pos-product-stock {
@@ -1048,6 +1085,7 @@ textarea { resize: vertical; }
 .pos-product-name {
   font-size: 0.88rem;
   line-height: 1.22;
+  min-width: 0;
 }
 .pos-product-footer {
   display: flex;
@@ -1069,6 +1107,49 @@ textarea { resize: vertical; }
   color: var(--green);
   font-size: 0.74rem;
   font-weight: 700;
+}
+.inventory-item-summary {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.inventory-item-summary > div {
+  min-width: 0;
+  display: grid;
+  gap: 0.2rem;
+}
+.inventory-item-summary strong,
+.stack-list-media .table-link {
+  display: block;
+}
+.inventory-item-summary span,
+.inventory-price-stack span,
+.inventory-editor-copy span {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.inventory-price-stack {
+  display: grid;
+  gap: 0.18rem;
+}
+.inventory-editor-hero {
+  display: flex;
+  gap: 0.9rem;
+  align-items: center;
+  padding: 0.9rem 1rem;
+  border-radius: 1.25rem;
+  border: 1px solid var(--line);
+  background: linear-gradient(135deg, #faf7f0, #ffffff);
+}
+.inventory-editor-copy {
+  display: grid;
+  gap: 0.28rem;
+}
+.inventory-edit-note,
+.helper-copy {
+  margin: -0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
 }
 .pos-result-row strong,
 .pos-result-row small {

@@ -12,11 +12,50 @@ from sqlalchemy.orm import Session
 
 from .config import AppConfig
 from .models import AuditLog, ModuleRecord, PosOrder, PosOrderLine, Product, User
-from .registry import BUSINESS_AREA_LABELS, LEGACY_TO_MODULE, MODULES
+from .registry import BUSINESS_AREA_LABELS, BUSINESS_AREA_SHORT, LEGACY_TO_MODULE, MODULES
 
 
 def _normalize_text(value: Any) -> str:
     return " ".join(str(value or "").split())
+
+
+def _sku_code_token(value: Any) -> str:
+    cleaned = "".join(character if str(character).isalnum() else " " for character in _normalize_text(value).upper())
+    return " ".join(cleaned.split())
+
+
+def _sku_segment(value: Any, length: int = 3, default: str = "GEN") -> str:
+    tokens = [token for token in _sku_code_token(value).split() if token]
+    if not tokens:
+        return default[:length]
+    if len(tokens) == 1:
+        single = tokens[0][:length]
+        return single.ljust(length, "X")
+    segment = "".join(token[0] for token in tokens[:length])
+    if len(segment) < length:
+        for token in tokens:
+            remainder = token[1:]
+            if not remainder:
+                continue
+            take = length - len(segment)
+            segment += remainder[:take]
+            if len(segment) >= length:
+                break
+    return segment[:length].ljust(length, "X")
+
+
+def _auto_product_sku(product_id: str, name: Any, business_area_id: Any, category: Any) -> str:
+    area_seed = BUSINESS_AREA_SHORT.get(_normalize_text(business_area_id), _normalize_text(business_area_id) or "Shared Operations")
+    suffix_seed = "".join(character for character in _normalize_text(product_id).upper() if character.isalnum()) or uuid4().hex.upper()
+    suffix = suffix_seed[-4:].rjust(4, "0")
+    return "-".join(
+        [
+            _sku_segment(area_seed, default="ARE"),
+            _sku_segment(category, default="CAT"),
+            _sku_segment(name, default="ITM"),
+            suffix,
+        ]
+    )
 
 
 def _parse_date(value: Any) -> date | None:
@@ -532,15 +571,18 @@ def bootstrap_database(session: Session, config: AppConfig) -> None:
         name = _normalize_text(item.get("name"))
         if not product_id or not name:
             continue
+        business_area_id = _ensure_business_area(item)
+        category = _normalize_text(item.get("category"))
+        sku_value = _normalize_text(item.get("sku")) or _auto_product_sku(product_id, name, business_area_id, category)
         session.add(
             Product(
                 id=product_id,
                 source_catalog_id=_normalize_text(item.get("sourceCatalogId")),
-                sku=_normalize_text(item.get("sku")),
+                sku=sku_value,
                 barcode=_normalize_text(item.get("barcode")),
                 name=name,
-                business_area_id=_ensure_business_area(item),
-                category=_normalize_text(item.get("category")),
+                business_area_id=business_area_id,
+                category=category,
                 source_category=_normalize_text(item.get("sourceCategory")),
                 item_type=_normalize_text(item.get("itemType")) or "stock",
                 track_inventory=bool(item.get("trackInventory", True)),
@@ -549,6 +591,7 @@ def bootstrap_database(session: Session, config: AppConfig) -> None:
                 min_stock_level=int(item.get("minStockLevel") or 0),
                 sales_price=_parse_amount(item.get("salesPrice")),
                 cost_price=_parse_amount(item.get("costPrice")),
+                image_url=_normalize_text(item.get("imageUrl")),
                 active=bool(item.get("active", True)),
                 user_created=bool(item.get("userCreated", False)),
                 notes=_normalize_text(item.get("notes")),

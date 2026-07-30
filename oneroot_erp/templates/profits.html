@@ -1,0 +1,272 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Filters</p>
+        <h3>Profit Scope</h3>
+      </div>
+      <a class="button subtle" href="{{ url_for('profits_export', month=month_filter, area=area_filter) }}">Export Profit CSV</a>
+    </div>
+    <form class="form-grid">
+      <label>
+        <span>Month</span>
+        <input type="month" name="month" value="{{ month_filter }}">
+      </label>
+      <label>
+        <span>Business Area</span>
+        <select name="area">
+          <option value="">All Business Areas</option>
+          {% for value, label in business_area_options %}
+            <option value="{{ value }}" {% if area_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Apply Profit Filter</button>
+        <a class="button subtle" href="{{ url_for('profits_page') }}">Reset</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Realized Sales</span>
+      <strong>{{ sales_total|currency }}</strong>
+      <small>Paid sales captured in the selected scope</small>
+    </article>
+    <article class="metric-card">
+      <span>Direct Cost</span>
+      <strong>{{ cost_total|currency }}</strong>
+      <small>Item and service cost linked to saved payments</small>
+    </article>
+    <article class="metric-card">
+      <span>Gross Profit</span>
+      <strong>{{ profit_total|currency }}</strong>
+      <small>{{ gross_margin_percent }}% gross margin</small>
+    </article>
+    <article class="metric-card">
+      <span>Transactions</span>
+      <strong>{{ transaction_total }}</strong>
+      <small>Captured sales transactions in this filter</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Best Area</span>
+      <strong>{{ best_area.areaShort if best_area else '—' }}</strong>
+      <small>{% if best_area %}{{ best_area.profitTotal|currency }} profit{% else %}No area profit yet{% endif %}</small>
+    </article>
+    <article class="metric-card {% if weakest_area and weakest_area.profitTotal < 0 %}warning{% endif %}">
+      <span>Watch Area</span>
+      <strong>{{ weakest_area.areaShort if weakest_area else '—' }}</strong>
+      <small>{% if weakest_area %}{{ weakest_area.profitTotal|currency }} profit{% else %}No area profit yet{% endif %}</small>
+    </article>
+    <article class="metric-card">
+      <span>Profit Sources</span>
+      <strong>{{ source_rows|length }}</strong>
+      <small>POS, online orders, rent, services, and more</small>
+    </article>
+    <article class="metric-card">
+      <span>Profit Days</span>
+      <strong>{{ daily_rows|length }}</strong>
+      <small>Days with profit activity in scope</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Profit By Business Area</h3>
+        </div>
+      </div>
+      {% if profit_area_chart %}
+        <div class="chart-stack">
+          {% for row in profit_area_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span class="{% if row.chartNegative %}negative-text{% endif %}">{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill {% if row.chartNegative %}negative{% endif %}" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Profit by area will appear once paid sales exist in this scope.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Profit By Source</h3>
+        </div>
+      </div>
+      {% if profit_source_chart %}
+        <div class="chart-stack">
+          {% for row in profit_source_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span class="{% if row.chartNegative %}negative-text{% endif %}">{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill {% if row.chartNegative %}negative{% endif %}" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Source profitability will appear as payments are recorded.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Trend</p>
+          <h3>Daily Profit Movement</h3>
+        </div>
+      </div>
+      {% if profit_daily_chart %}
+        <div class="chart-stack">
+          {% for row in profit_daily_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span class="{% if row.chartNegative %}negative-text{% endif %}">{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill {% if row.chartNegative %}negative{% endif %}" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Daily profit will appear when dated sales are saved in this scope.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Source Scorecard</p>
+          <h3>Profitability By Channel</h3>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Sales</th>
+              <th>Cost</th>
+              <th>Profit</th>
+              <th>Margin</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in source_rows %}
+              <tr>
+                <td>{{ row.sourceLabel }}</td>
+                <td>{{ row.salesTotal|currency }}</td>
+                <td>{{ row.costTotal|currency }}</td>
+                <td class="{% if row.profitTotal < 0 %}negative-text{% endif %}">{{ row.profitTotal|currency }}</td>
+                <td>{% if row.salesTotal > 0 %}{{ ((row.profitTotal / row.salesTotal) * 100)|round(2) }}%{% else %}0.00%{% endif %}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No source profit rows are available for this filter yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Area Scorecard</p>
+        <h3>Profitability By Business Area</h3>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Transactions</th>
+            <th>Sales</th>
+            <th>Cost</th>
+            <th>Profit</th>
+            <th>Margin</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in area_rows %}
+            <tr>
+              <td>{{ row.areaLabel }}</td>
+              <td>{{ row.transactionCount }}</td>
+              <td>{{ row.salesTotal|currency }}</td>
+              <td>{{ row.costTotal|currency }}</td>
+              <td class="{% if row.profitTotal < 0 %}negative-text{% endif %}">{{ row.profitTotal|currency }}</td>
+              <td>{% if row.salesTotal > 0 %}{{ ((row.profitTotal / row.salesTotal) * 100)|round(2) }}%{% else %}0.00%{% endif %}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="6">No business area profit rows are available for this filter yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Recent Entries</p>
+        <h3>Latest Profit-Carrying Sales</h3>
+      </div>
+    </div>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Area</th>
+            <th>Source</th>
+            <th>Sales</th>
+            <th>Cost</th>
+            <th>Profit</th>
+            <th>Margin</th>
+            <th>Reference</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in recent_profit_rows %}
+            <tr>
+              <td>{{ row.recordDate }}</td>
+              <td>{{ row.areaShort }}</td>
+              <td>{{ row.sourceLabel }}</td>
+              <td>{{ row.salesTotal|currency }}</td>
+              <td>{{ row.costTotal|currency }}</td>
+              <td class="{% if row.profitTotal < 0 %}negative-text{% endif %}">{{ row.profitTotal|currency }}</td>
+              <td>{{ row.marginPercent }}%</td>
+              <td>{{ row.reference or row.title }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8">No profit entries are available for this scope yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

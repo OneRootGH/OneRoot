@@ -79,6 +79,7 @@ class Product(Base):
     min_stock_level: Mapped[int] = mapped_column(Integer, default=0)
     sales_price: Mapped[float] = mapped_column(Float, default=0)
     cost_price: Mapped[float] = mapped_column(Float, default=0)
+    image_url: Mapped[str] = mapped_column(Text, default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
     user_created: Mapped[bool] = mapped_column(Boolean, default=False)
     notes: Mapped[str] = mapped_column(Text, default="")

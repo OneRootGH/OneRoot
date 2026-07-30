@@ -69,9 +69,14 @@
         <ul class="stack-list">
           {% for item in product_results %}
             <li>
-              <a class="table-link" href="{{ item.target }}">{{ item.name }}</a>
-              <span>{{ item.area }} · {{ item.category or 'No category' }}</span>
-              <span>Stock {{ item.stock }}</span>
+              <div class="stack-list-media">
+                <img class="product-thumb" src="{{ item.imageUrl }}" alt="{{ item.name }}">
+                <div>
+                  <a class="table-link" href="{{ item.target }}">{{ item.name }}</a>
+                  <span>{{ item.area }} · {{ item.category or 'No category' }}</span>
+                  <span>{{ item.stockLabel }}</span>
+                </div>
+              </div>
             </li>
           {% else %}
             <li><span>No inventory items matched this search.</span></li>

@@ -108,10 +108,13 @@
         </div>
         <div id="pos-results" class="pos-results-list pos-results-list-tall">
           {% for product in top_products %}
-            <button class="pos-product-tile" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product.track_inventory, "sku": product.sku, "barcode": product.barcode}|tojson }}'>
-              <span class="pos-product-meta">
-                <small class="pos-product-stock">{% if product.track_inventory %}Stock {{ product.quantity_on_hand|round(0, 'floor')|int }}{% else %}Service{% endif %}</small>
-                <small class="pos-product-area">{{ product.category or 'General' }}</small>
+            <button class="pos-product-tile" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product_tracks_inventory(product), "itemType": normalized_product_item_type(product.item_type, product.track_inventory), "stockLabel": format_product_stock_badge(product), "imageUrl": product_image_src(product), "sku": product.sku, "barcode": product.barcode}|tojson }}'>
+              <span class="pos-product-top">
+                <img class="product-thumb pos-product-thumb" src="{{ product_image_src(product) }}" alt="{{ product.name }}">
+                <span class="pos-product-meta">
+                  <small class="pos-product-stock">{{ format_product_stock_badge(product) }}</small>
+                  <small class="pos-product-area">{{ product.category or 'General' }}</small>
+                </span>
               </span>
               <strong class="pos-product-name">{{ product.name }}</strong>
               <span class="pos-product-footer">

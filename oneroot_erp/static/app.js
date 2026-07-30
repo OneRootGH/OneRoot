@@ -254,9 +254,12 @@
     resultsContainer.innerHTML = visibleResults
       .map((product) => `
         <button class="pos-product-tile" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
-          <span class="pos-product-meta">
-            <small class="pos-product-stock">${product.trackInventory ? `Stock ${escapeHtml(product.quantityOnHand)}` : "Service"}</small>
-            <small class="pos-product-area">${escapeHtml(product.category || "General")}</small>
+          <span class="pos-product-top">
+            <img class="product-thumb pos-product-thumb" src="${escapeHtml(product.imageUrl || "")}" alt="${escapeHtml(product.name)}">
+            <span class="pos-product-meta">
+              <small class="pos-product-stock">${escapeHtml(product.stockLabel || (product.trackInventory ? `Stock ${product.quantityOnHand ?? 0}` : "Service"))}</small>
+              <small class="pos-product-area">${escapeHtml(product.category || "General")}</small>
+            </span>
           </span>
           <strong class="pos-product-name">${escapeHtml(product.name)}</strong>
           <span class="pos-product-footer">

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import calendar
+import base64
 import csv
 import hashlib
 import html
@@ -66,6 +67,24 @@ SERVICE_LEGACY_PAYMENT_FIELDS = {
     "equipment_rental_bookings": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
 }
 LOCAL_TIMEZONE = ZoneInfo("Africa/Accra")
+PRODUCT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
+PRODUCT_IMAGE_ALLOWED_MIME_TYPES = {
+    "image/jpeg",
+    "image/png",
+    "image/webp",
+    "image/gif",
+    "image/svg+xml",
+}
+PRODUCT_IMAGE_AREA_COLORS = {
+    "water-equipment": "#2f6ea8",
+    "cold-store-groceries": "#1f6b5b",
+    "laundry-services": "#5f6fd8",
+    "mobile-money": "#9a6a19",
+    "rentals-apartments": "#8a4f74",
+    "fresh-foods-drinks": "#ca5d27",
+    "kitchen": "#8e5d23",
+    "shared-operations": "#50606f",
+}
 
 
 def build_database_engine(database_url: str):
@@ -90,6 +109,11 @@ def ensure_schema_columns(engine) -> None:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN unit_cost FLOAT DEFAULT 0")
     if "cost_amount" not in existing_columns:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN cost_amount FLOAT DEFAULT 0")
+    product_columns = set()
+    if "products" in inspector.get_table_names():
+        product_columns = {column["name"] for column in inspector.get_columns("products")}
+    if "products" in inspector.get_table_names() and "image_url" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT ''")
     if not statements:
         return
     with engine.begin() as connection:
@@ -108,6 +132,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
             with session_factory() as bootstrap_session:
                 bootstrap_database(bootstrap_session, app_config)
                 migrate_planning_workspace(bootstrap_session)
+                normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 bootstrap_session.commit()
             session_factory.remove()
@@ -140,6 +165,216 @@ def inventory_category_map(products: list[Product] | None = None) -> dict[str, l
         for area_id, values in category_map.items()
         if values
     }
+
+
+def sku_code_token(value: Any) -> str:
+    cleaned = "".join(character if str(character).isalnum() else " " for character in normalize_text(value).upper())
+    return " ".join(cleaned.split())
+
+
+def sku_segment(value: Any, length: int = 3, default: str = "GEN") -> str:
+    tokens = [token for token in sku_code_token(value).split() if token]
+    if not tokens:
+        return default[:length]
+    if len(tokens) == 1:
+        single = tokens[0][:length]
+        return single.ljust(length, "X")
+    segment = "".join(token[0] for token in tokens[:length])
+    if len(segment) < length:
+        for token in tokens:
+            remaining = token[1:]
+            if not remaining:
+                continue
+            take = length - len(segment)
+            segment += remaining[:take]
+            if len(segment) >= length:
+                break
+    return segment[:length].ljust(length, "X")
+
+
+def generate_auto_product_sku(*, product_id: str, name: Any, business_area_id: Any, category: Any) -> str:
+    area_seed = BUSINESS_AREA_SHORT.get(normalize_text(business_area_id), normalize_text(business_area_id) or "Shared Operations")
+    suffix_seed = "".join(character for character in normalize_text(product_id).upper() if character.isalnum()) or uuid4().hex.upper()
+    suffix = suffix_seed[-4:].rjust(4, "0")
+    return "-".join(
+        [
+            sku_segment(area_seed, default="ARE"),
+            sku_segment(category, default="CAT"),
+            sku_segment(name, default="ITM"),
+            suffix,
+        ]
+    )
+
+
+def ensure_product_sku(product: Product) -> str:
+    existing_sku = sku_code_token(product.sku).replace(" ", "-")
+    if existing_sku:
+        return existing_sku
+    return generate_auto_product_sku(
+        product_id=product.id,
+        name=product.name,
+        business_area_id=product.business_area_id,
+        category=product.category,
+    )
+
+
+def normalized_product_item_type(item_type: Any, track_inventory: Any = True) -> str:
+    clean_item_type = normalize_text(item_type).lower()
+    if clean_item_type in {"stock", "service"}:
+        return clean_item_type
+    return "service" if not bool(track_inventory) else "stock"
+
+
+def product_tracks_inventory(item_or_type: Product | dict[str, Any] | str | None, track_inventory: Any = True) -> bool:
+    if isinstance(item_or_type, Product):
+        item_type = item_or_type.item_type
+        track_value = item_or_type.track_inventory
+    elif isinstance(item_or_type, dict):
+        item_type = item_or_type.get("itemType") or item_or_type.get("item_type")
+        track_value = item_or_type.get("trackInventory", item_or_type.get("track_inventory", True))
+    else:
+        item_type = item_or_type
+        track_value = track_inventory
+    return normalized_product_item_type(item_type, track_value) != "service"
+
+
+def product_quantity_known(item_or_payload: Product | dict[str, Any]) -> bool:
+    if isinstance(item_or_payload, Product):
+        return bool(item_or_payload.quantity_known)
+    return bool(item_or_payload.get("quantityKnown", item_or_payload.get("quantity_known", True)))
+
+
+def format_product_stock_badge(item_or_payload: Product | dict[str, Any]) -> str:
+    if not product_tracks_inventory(item_or_payload):
+        return "Service"
+    quantity_value = parse_amount(
+        item_or_payload.quantity_on_hand if isinstance(item_or_payload, Product) else item_or_payload.get("quantityOnHand", 0)
+    )
+    if not product_quantity_known(item_or_payload):
+        return "Stock"
+    if abs(quantity_value - round(quantity_value)) < 0.001:
+        quantity_display = str(int(round(quantity_value)))
+    else:
+        quantity_display = f"{quantity_value:.2f}".rstrip("0").rstrip(".")
+    return f"Stock {quantity_display}"
+
+
+def normalize_product_record(product: Product) -> bool:
+    changed = False
+    item_type = normalized_product_item_type(product.item_type, product.track_inventory)
+    should_track_inventory = item_type != "service"
+    image_url = normalize_text(product.image_url)
+    sku_value = ensure_product_sku(product)
+    if normalize_text(product.item_type) != item_type:
+        product.item_type = item_type
+        changed = True
+    if bool(product.track_inventory) != should_track_inventory:
+        product.track_inventory = should_track_inventory
+        changed = True
+    if bool(product.quantity_known) != should_track_inventory:
+        product.quantity_known = should_track_inventory
+        changed = True
+    if item_type == "service" and parse_amount(product.quantity_on_hand) != 0:
+        product.quantity_on_hand = 0
+        changed = True
+    if image_url != (product.image_url or ""):
+        product.image_url = image_url
+        changed = True
+    if normalize_text(product.sku) != sku_value:
+        product.sku = sku_value
+        changed = True
+    return changed
+
+
+def normalize_product_image_value(value: Any) -> str:
+    raw = normalize_text(value)
+    if not raw:
+        return ""
+    lowered = raw.lower()
+    if lowered.startswith("http://") or lowered.startswith("https://") or lowered.startswith("data:image/"):
+        return raw
+    raise ValueError("Use a valid image URL or upload an image file.")
+
+
+def encode_uploaded_product_image(file_storage) -> str:
+    if not file_storage or not getattr(file_storage, "filename", ""):
+        return ""
+    mime_type = normalize_text(getattr(file_storage, "mimetype", "")).lower()
+    if mime_type not in PRODUCT_IMAGE_ALLOWED_MIME_TYPES:
+        raise ValueError("Upload PNG, JPG, WEBP, GIF, or SVG images only.")
+    data = file_storage.read()
+    if not data:
+        return ""
+    if len(data) > PRODUCT_IMAGE_MAX_BYTES:
+        raise ValueError("Keep product images under 2 MB each.")
+    encoded = base64.b64encode(data).decode("ascii")
+    return f"data:{mime_type};base64,{encoded}"
+
+
+def product_placeholder_svg_payload(name: str, category: str, area_id: str) -> str:
+    clean_name = normalize_text(name) or "OneRoot Item"
+    clean_category = normalize_text(category) or "Product"
+    initials = "".join(part[:1].upper() for part in clean_name.split()[:2]) or "OR"
+    accent = PRODUCT_IMAGE_AREA_COLORS.get(normalize_text(area_id), PRODUCT_IMAGE_AREA_COLORS["shared-operations"])
+    subtitle = BUSINESS_AREA_SHORT.get(normalize_text(area_id), clean_category) or clean_category
+    return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" role="img" aria-label="{html.escape(clean_name)}">
+  <defs>
+    <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+      <stop offset="0%" stop-color="{accent}"/>
+      <stop offset="100%" stop-color="#f4ede1"/>
+    </linearGradient>
+  </defs>
+  <rect width="320" height="240" rx="28" fill="url(#g)"/>
+  <circle cx="248" cy="56" r="38" fill="rgba(255,255,255,0.18)"/>
+  <circle cx="68" cy="188" r="56" fill="rgba(255,255,255,0.12)"/>
+  <rect x="26" y="28" width="116" height="112" rx="24" fill="rgba(255,255,255,0.20)"/>
+  <text x="84" y="96" text-anchor="middle" font-family="Georgia, serif" font-size="48" font-weight="700" fill="#ffffff">{html.escape(initials[:2])}</text>
+  <text x="26" y="176" font-family="Arial, sans-serif" font-size="14" letter-spacing="2" fill="rgba(255,255,255,0.92)">{html.escape(subtitle.upper()[:24])}</text>
+  <text x="26" y="208" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">{html.escape(clean_name[:26])}</text>
+  <text x="26" y="228" font-family="Arial, sans-serif" font-size="13" fill="rgba(255,255,255,0.88)">{html.escape(clean_category[:34])}</text>
+</svg>"""
+
+
+def product_image_src(item_or_payload: Product | dict[str, Any]) -> str:
+    if isinstance(item_or_payload, Product):
+        image_url = normalize_text(item_or_payload.image_url)
+        product_id = item_or_payload.id
+        name = item_or_payload.name
+        category = item_or_payload.category
+        area_id = item_or_payload.business_area_id
+    else:
+        image_url = normalize_text(item_or_payload.get("imageUrl") or item_or_payload.get("image_url"))
+        product_id = normalize_text(item_or_payload.get("id"))
+        name = normalize_text(item_or_payload.get("name"))
+        category = normalize_text(item_or_payload.get("category"))
+        area_id = normalize_text(item_or_payload.get("businessAreaId") or item_or_payload.get("business_area_id"))
+    if image_url:
+        return image_url
+    if product_id:
+        return url_for("product_placeholder_image", product_id=product_id)
+    svg = product_placeholder_svg_payload(name, category, area_id)
+    encoded = base64.b64encode(svg.encode("utf-8")).decode("ascii")
+    return f"data:image/svg+xml;base64,{encoded}"
+
+
+PROFIT_SOURCE_LABELS = {
+    "manual-sale": "Manual Sales",
+    "pos-summary": "POS Counter Sales",
+    "online-order-payments": "Online Orders",
+    "laundry-payment": "Laundry Payments",
+    "equipment-rental-payment": "Equipment Rentals",
+    "apartment-rent-payment": "Apartment Rent",
+    "apartment-bill-payment": "Apartment Bills",
+    "security-deposit-payment": "Security Deposits",
+    "tenant-charge-payment": "Tenant Charges",
+}
+
+
+def profit_source_label(value: Any) -> str:
+    source_key = normalize_text(value).lower()
+    if not source_key:
+        return "Unspecified"
+    return PROFIT_SOURCE_LABELS.get(source_key, source_key.replace("-", " ").title())
 
 
 def normalize_text(value: Any) -> str:
@@ -278,6 +513,12 @@ def backfill_pos_line_costs(db_session) -> None:
             line.unit_cost = round(parse_amount(product.cost_price), 2)
         if parse_amount(line.cost_amount) <= 0:
             line.cost_amount = round(parse_amount(line.quantity) * parse_amount(line.unit_cost), 2)
+
+
+def normalize_product_catalog(db_session) -> None:
+    products = db_session.scalars(select(Product)).all()
+    for product in products:
+        normalize_product_record(product)
 
 
 def service_item_field_name(module_key: str) -> str:
@@ -808,6 +1049,7 @@ def format_module_amount(definition: ModuleDefinition, value: Any) -> str:
 
 SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
+    "profits": ("Profit Center", "profits_page", None),
     "reports": ("Management Reporting", "reports_page", None),
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
@@ -967,10 +1209,10 @@ def module_record_open_balance(definition: ModuleDefinition, payload: dict[str, 
 
 def is_pos_eligible_product(product: Product) -> bool:
     area_id = normalize_text(product.business_area_id)
-    item_type = normalize_text(product.item_type).lower()
+    item_type = normalized_product_item_type(product.item_type, product.track_inventory)
     if area_id == "laundry-services":
         return False
-    if area_id == "water-equipment" and (item_type == "service" or not product.track_inventory):
+    if area_id == "water-equipment" and item_type == "service":
         return False
     return bool(product.active)
 
@@ -988,6 +1230,7 @@ def load_pos_products(
     query_text = normalize_text(search).lower()
     filtered_products: list[Product] = []
     for product in products:
+        normalize_product_record(product)
         if not is_pos_eligible_product(product):
             continue
         if area_filter and normalize_text(product.business_area_id) != area_filter:
@@ -2843,6 +3086,43 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
     return rows
 
 
+def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: str = "") -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        if record.module_key != "sales":
+            continue
+        if not record_in_month_scope(record, month_value) or not record_in_area_scope(record, area_id):
+            continue
+        payload = record.payload or {}
+        business_area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        source_type = normalize_text(payload.get("sourceType")).lower() or "manual-sale"
+        amount = round(parse_amount(record.amount), 2)
+        cost_total = round(module_record_cost_amount(record), 2)
+        profit_total = round(module_record_profit_amount(record), 2)
+        transaction_count = max(int(parse_amount(payload.get("transactionCount"))), 1)
+        rows.append(
+            {
+                "id": record.id,
+                "title": record.title,
+                "reference": record.reference,
+                "recordDate": record.record_date.isoformat() if record.record_date else normalize_text(payload.get("date")),
+                "areaId": business_area_id,
+                "areaLabel": BUSINESS_AREA_LABELS.get(business_area_id, business_area_id),
+                "areaShort": BUSINESS_AREA_SHORT.get(business_area_id, business_area_id),
+                "sourceType": source_type,
+                "sourceLabel": normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type),
+                "transactionCount": transaction_count,
+                "salesTotal": amount,
+                "costTotal": cost_total,
+                "profitTotal": profit_total,
+                "marginPercent": round((profit_total / amount) * 100, 2) if amount > 0 else 0.0,
+                "notes": normalize_text(payload.get("notes")),
+            }
+        )
+    rows.sort(key=lambda item: (item["recordDate"], item["profitTotal"], item["title"]), reverse=True)
+    return rows
+
+
 def search_target_for_module_record(record: ModuleRecord) -> str:
     if record.module_key == "online_orders":
         return url_for("online_orders_desk", order_id=record.id)
@@ -2906,6 +3186,7 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
         "minStockLevel",
         "salesPrice",
         "costPrice",
+        "imageUrl",
         "trackInventory",
         "active",
         "notes",
@@ -2925,7 +3206,8 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
             "minStockLevel": item.min_stock_level,
             "salesPrice": item.sales_price,
             "costPrice": item.cost_price,
-            "trackInventory": item.track_inventory,
+            "imageUrl": item.image_url,
+            "trackInventory": product_tracks_inventory(item),
             "active": item.active,
             "notes": item.notes,
             "createdAt": item.created_at.isoformat(),
@@ -3058,6 +3340,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         current_year=datetime.utcnow().year,
         format_module_amount=format_module_amount,
         module_amount_label=module_amount_label,
+        normalized_product_item_type=normalized_product_item_type,
+        product_image_src=product_image_src,
+        product_tracks_inventory=product_tracks_inventory,
+        format_product_stock_badge=format_product_stock_badge,
+        profit_source_label=profit_source_label,
     )
     app.jinja_env.filters["currency"] = format_currency
     app.jinja_env.filters["date_value"] = lambda value: value.isoformat() if isinstance(value, date) else ""
@@ -3463,8 +3750,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "costPrice": product.cost_price,
                     "quantityOnHand": product.quantity_on_hand,
                     "quantityKnown": product.quantity_known,
-                    "itemType": product.item_type,
-                    "trackInventory": product.track_inventory,
+                    "itemType": normalized_product_item_type(product.item_type, product.track_inventory),
+                    "trackInventory": product_tracks_inventory(product),
+                    "imageUrl": product_image_src(product),
                     "notes": product.notes,
                     "source": "inventory",
                 }
@@ -3487,6 +3775,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "quantityKnown": bool(item.get("quantityKnown", False)),
                     "itemType": normalize_text(item.get("itemType")) or "service",
                     "trackInventory": bool(item.get("trackInventory", False)),
+                    "imageUrl": normalize_text(item.get("imageUrl")),
                     "notes": normalize_text(item.get("notes")),
                     "source": "service-offer",
                 }
@@ -3974,13 +4263,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "businessAreaId": product.business_area_id,
                     "category": product.category,
                     "sourceCategory": product.source_category,
-                    "itemType": product.item_type,
-                    "trackInventory": product.track_inventory,
+                    "itemType": normalized_product_item_type(product.item_type, product.track_inventory),
+                    "trackInventory": product_tracks_inventory(product),
                     "quantityOnHand": product.quantity_on_hand,
-                    "quantityKnown": product.quantity_known,
+                    "quantityKnown": product_quantity_known(product),
                     "minStockLevel": product.min_stock_level,
                     "salesPrice": product.sales_price,
                     "costPrice": product.cost_price,
+                    "imageUrl": product.image_url,
                     "active": product.active,
                     "notes": product.notes,
                     "userCreated": product.user_created,
@@ -4379,6 +4669,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/icon.svg")
     def public_icon():
         return send_from_directory(app_config.root_dir, "icon.svg", max_age=0)
+
+    @app.route("/app/products/<product_id>/placeholder.svg")
+    def product_placeholder_image(product_id: str):
+        product = None
+        if ensure_database_ready():
+            db_session = app.config["SESSION_LOCAL"]()
+            try:
+                product = db_session.get(Product, normalize_text(product_id))
+            finally:
+                db_session.close()
+                app.config["SESSION_LOCAL"].remove()
+        svg_payload = product_placeholder_svg_payload(
+            product.name if product else "OneRoot Item",
+            product.category if product else "Product",
+            product.business_area_id if product else "shared-operations",
+        )
+        return Response(svg_payload, mimetype="image/svg+xml", headers={"Cache-Control": "no-store"})
 
     @app.route("/manifest.webmanifest")
     def public_manifest():
@@ -4838,6 +5145,168 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("dashboard"))
         return send_from_directory(workbook_path.parent, workbook_path.name, as_attachment=True)
 
+    @app.route("/app/profits")
+    @access_required("profits")
+    def profits_page():
+        month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
+        area_filter = normalize_text(request.args.get("area"))
+        sales_records = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "sales")
+            .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+        detail_rows = profit_detail_rows(sales_records, month_filter, area_filter)
+
+        sales_total = round(sum(row["salesTotal"] for row in detail_rows), 2)
+        cost_total = round(sum(row["costTotal"] for row in detail_rows), 2)
+        profit_total = round(sum(row["profitTotal"] for row in detail_rows), 2)
+        transaction_total = sum(row["transactionCount"] for row in detail_rows)
+        gross_margin_percent = round((profit_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
+
+        area_map: dict[str, dict[str, Any]] = {}
+        source_map: dict[str, dict[str, Any]] = {}
+        daily_map: dict[str, dict[str, Any]] = {}
+        for row in detail_rows:
+            area_entry = area_map.setdefault(
+                row["areaId"],
+                {
+                    "areaId": row["areaId"],
+                    "areaLabel": row["areaLabel"],
+                    "areaShort": row["areaShort"],
+                    "salesTotal": 0.0,
+                    "costTotal": 0.0,
+                    "profitTotal": 0.0,
+                    "transactionCount": 0,
+                },
+            )
+            area_entry["salesTotal"] = round(area_entry["salesTotal"] + row["salesTotal"], 2)
+            area_entry["costTotal"] = round(area_entry["costTotal"] + row["costTotal"], 2)
+            area_entry["profitTotal"] = round(area_entry["profitTotal"] + row["profitTotal"], 2)
+            area_entry["transactionCount"] += row["transactionCount"]
+
+            source_entry = source_map.setdefault(
+                row["sourceType"],
+                {
+                    "sourceType": row["sourceType"],
+                    "sourceLabel": row["sourceLabel"],
+                    "salesTotal": 0.0,
+                    "costTotal": 0.0,
+                    "profitTotal": 0.0,
+                    "transactionCount": 0,
+                },
+            )
+            source_entry["salesTotal"] = round(source_entry["salesTotal"] + row["salesTotal"], 2)
+            source_entry["costTotal"] = round(source_entry["costTotal"] + row["costTotal"], 2)
+            source_entry["profitTotal"] = round(source_entry["profitTotal"] + row["profitTotal"], 2)
+            source_entry["transactionCount"] += row["transactionCount"]
+
+            day_key = row["recordDate"] or month_filter
+            daily_entry = daily_map.setdefault(
+                day_key,
+                {
+                    "day": day_key,
+                    "salesTotal": 0.0,
+                    "costTotal": 0.0,
+                    "profitTotal": 0.0,
+                    "transactionCount": 0,
+                },
+            )
+            daily_entry["salesTotal"] = round(daily_entry["salesTotal"] + row["salesTotal"], 2)
+            daily_entry["costTotal"] = round(daily_entry["costTotal"] + row["costTotal"], 2)
+            daily_entry["profitTotal"] = round(daily_entry["profitTotal"] + row["profitTotal"], 2)
+            daily_entry["transactionCount"] += row["transactionCount"]
+
+        area_rows = sorted(area_map.values(), key=lambda item: (item["profitTotal"], item["salesTotal"]), reverse=True)
+        source_rows = sorted(source_map.values(), key=lambda item: (item["profitTotal"], item["salesTotal"]), reverse=True)
+        daily_rows = sorted(daily_map.values(), key=lambda item: item["day"])
+
+        best_area = area_rows[0] if area_rows else None
+        weakest_area = min(area_rows, key=lambda item: item["profitTotal"]) if area_rows else None
+
+        return render_template(
+            "profits.html",
+            page_title="Profit Center",
+            month_filter=month_filter,
+            area_filter=area_filter,
+            business_area_options=BUSINESS_AREA_OPTIONS,
+            sales_total=sales_total,
+            cost_total=cost_total,
+            profit_total=profit_total,
+            gross_margin_percent=gross_margin_percent,
+            transaction_total=transaction_total,
+            best_area=best_area,
+            weakest_area=weakest_area,
+            area_rows=area_rows,
+            source_rows=source_rows,
+            daily_rows=daily_rows,
+            recent_profit_rows=detail_rows[:40],
+            profit_area_chart=build_chart_rows(
+                [
+                    {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["profitTotal"]}
+                    for row in area_rows
+                    if abs(parse_amount(row["profitTotal"])) > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--accent)",
+            ),
+            profit_source_chart=build_chart_rows(
+                [
+                    {"label": row["sourceLabel"], "short": row["sourceLabel"], "amount": row["profitTotal"]}
+                    for row in source_rows
+                    if abs(parse_amount(row["profitTotal"])) > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--green)",
+            ),
+            profit_daily_chart=build_chart_rows(
+                [
+                    {"label": row["day"], "short": row["day"][5:] if len(row["day"]) >= 10 else row["day"], "amount": row["profitTotal"]}
+                    for row in daily_rows
+                    if abs(parse_amount(row["profitTotal"])) > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--accent)",
+            ),
+        )
+
+    @app.route("/app/profits/export.csv")
+    @access_required("profits")
+    def profits_export():
+        month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
+        area_filter = normalize_text(request.args.get("area"))
+        sales_records = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "sales")
+            .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+        rows = profit_detail_rows(sales_records, month_filter, area_filter)
+        headers = [
+            "recordDate",
+            "areaId",
+            "areaLabel",
+            "sourceType",
+            "sourceLabel",
+            "transactionCount",
+            "salesTotal",
+            "costTotal",
+            "profitTotal",
+            "marginPercent",
+            "title",
+            "reference",
+            "notes",
+        ]
+        return csv_download(
+            f"oneroot-profits-{month_filter}{'-' + area_filter if area_filter else ''}.csv",
+            headers,
+            rows,
+        )
+
     @app.route("/app/reports")
     @access_required("reports")
     def reports_page():
@@ -5229,12 +5698,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 .order_by(Product.active.desc(), Product.name.asc())
                 .limit(24)
             ).all()
+            for product in products:
+                normalize_product_record(product)
             product_results = [
                 {
                     "name": product.name,
                     "area": BUSINESS_AREA_SHORT.get(product.business_area_id, product.business_area_id),
                     "category": product.category,
                     "stock": product.quantity_on_hand,
+                    "stockLabel": format_product_stock_badge(product),
+                    "imageUrl": product_image_src(product),
                     "target": url_for("inventory", edit=product.id, q=query_text),
                 }
                 for product in products
@@ -6493,6 +6966,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         editing_id = normalize_text(request.args.get("edit"))
         editing_product = g.db.get(Product, editing_id) if editing_id else None
         all_products = g.db.scalars(select(Product).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())).all()
+        for product in all_products:
+            normalize_product_record(product)
+        if editing_product:
+            normalize_product_record(editing_product)
         category_map = inventory_category_map(all_products)
         category_groups = [
             {
@@ -6512,33 +6989,62 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not product:
                 product = Product(id=product_id, created_at=datetime.utcnow())
                 g.db.add(product)
-            product.updated_at = datetime.utcnow()
-            product.sku = normalize_text(request.form.get("sku"))
-            product.barcode = normalize_text(request.form.get("barcode"))
-            product.name = normalize_text(request.form.get("name"))
-            product.business_area_id = normalize_text(request.form.get("business_area_id"))
-            product.category = normalize_text(request.form.get("category"))
-            product.item_type = normalize_text(request.form.get("item_type")) or "stock"
-            product.track_inventory = request.form.get("track_inventory") == "on"
-            product.quantity_on_hand = parse_amount(request.form.get("quantity_on_hand"))
-            product.quantity_known = True
-            product.min_stock_level = int(parse_amount(request.form.get("min_stock_level")))
-            product.sales_price = parse_amount(request.form.get("sales_price"))
-            product.cost_price = parse_amount(request.form.get("cost_price"))
-            product.active = request.form.get("active") == "on"
-            product.notes = normalize_text(request.form.get("notes"))
-            product.user_created = True
-            audit("inventory", "Inventory", "create" if is_new else "update", product.name, product.id)
-            g.db.commit()
-            flash("Inventory item saved.", "success")
-            return redirect(
-                url_for(
-                    "inventory",
-                    q=normalize_text(request.args.get("q")),
-                    area=normalize_text(request.args.get("area")),
-                    category=normalize_text(request.args.get("category")),
+            try:
+                existing_image_url = normalize_text(product.image_url)
+                existing_sku = normalize_text(product.sku)
+                product.updated_at = datetime.utcnow()
+                product.sku = existing_sku or normalize_text(request.form.get("sku"))
+                product.barcode = normalize_text(request.form.get("barcode"))
+                product.name = normalize_text(request.form.get("name"))
+                product.business_area_id = normalize_text(request.form.get("business_area_id"))
+                product.category = normalize_text(request.form.get("category"))
+                product.item_type = normalized_product_item_type(request.form.get("item_type"), True)
+                product.quantity_on_hand = parse_amount(request.form.get("quantity_on_hand"))
+                product.min_stock_level = int(parse_amount(request.form.get("min_stock_level")))
+                product.sales_price = parse_amount(request.form.get("sales_price"))
+                product.cost_price = parse_amount(request.form.get("cost_price"))
+                product.active = request.form.get("active") == "on"
+                product.notes = normalize_text(request.form.get("notes"))
+                product.user_created = True
+
+                if request.form.get("clear_image") == "on":
+                    product.image_url = ""
+                else:
+                    uploaded_image = encode_uploaded_product_image(request.files.get("image_file"))
+                    if uploaded_image:
+                        product.image_url = uploaded_image
+                    else:
+                        typed_image_url = normalize_text(request.form.get("image_url"))
+                        product.image_url = normalize_product_image_value(typed_image_url) if typed_image_url else existing_image_url
+
+                if not product.name or not product.business_area_id or not product.category:
+                    raise ValueError("Name, business area, and category are required.")
+
+                normalize_product_record(product)
+                audit("inventory", "Inventory", "create" if is_new else "update", product.name, product.id)
+                g.db.commit()
+                flash("Inventory item saved.", "success")
+                return redirect(
+                    url_for(
+                        "inventory",
+                        q=normalize_text(request.args.get("q")),
+                        area=normalize_text(request.args.get("area")),
+                        category=normalize_text(request.args.get("category")),
+                    )
                 )
-            )
+            except ValueError as error:
+                g.db.rollback()
+                if is_new:
+                    g.db.expunge(product)
+                editing_product = product
+                flash(str(error), "error")
+            except Exception:
+                g.db.rollback()
+                if is_new:
+                    g.db.expunge(product)
+                editing_product = product
+                app.logger.exception("Inventory save failed for %s", product_id)
+                flash("That item could not be saved. Please check the item type, category, and image fields.", "error")
 
         q = normalize_text(request.args.get("q"))
         area_filter = normalize_text(request.args.get("area"))
@@ -6559,14 +7065,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
             )
         products = g.db.scalars(query.order_by(Product.active.desc(), Product.business_area_id.asc(), Product.name.asc()).limit(300)).all()
+        for item in products:
+            normalize_product_record(item)
         low_stock_count = sum(
             1
             for item in products
-            if item.track_inventory and item.active and item.quantity_on_hand <= item.min_stock_level
+            if product_tracks_inventory(item) and item.active and item.quantity_on_hand <= item.min_stock_level
         )
         active_count = sum(1 for item in products if item.active)
-        service_count = sum(1 for item in products if item.item_type == "service")
-        stock_value = round(sum(item.quantity_on_hand * item.cost_price for item in products if item.track_inventory), 2)
+        service_count = sum(1 for item in products if normalized_product_item_type(item.item_type, item.track_inventory) == "service")
+        stock_value = round(sum(item.quantity_on_hand * item.cost_price for item in products if product_tracks_inventory(item)), 2)
         return render_template(
             "inventory.html",
             page_title="Inventory",
@@ -6582,6 +7090,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             active_count=active_count,
             service_count=service_count,
             stock_value=stock_value,
+            product_image_src=product_image_src,
+            product_tracks_inventory=product_tracks_inventory,
+            format_product_stock_badge=format_product_stock_badge,
         )
 
     @app.route("/app/inventory/<product_id>/delete", methods=["POST"])
@@ -6744,7 +7255,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "category": product.category,
                         "salesPrice": product.sales_price,
                         "quantityOnHand": product.quantity_on_hand,
-                        "trackInventory": product.track_inventory,
+                        "trackInventory": product_tracks_inventory(product),
+                        "itemType": normalized_product_item_type(product.item_type, product.track_inventory),
+                        "stockLabel": format_product_stock_badge(product),
+                        "imageUrl": product_image_src(product),
                     }
                     for product in products
                 ],
@@ -6802,6 +7316,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             unit_cost = parse_amount(product.cost_price)
             cost_amount = round(quantity * unit_cost, 2)
             line_total = round(quantity * unit_price, 2)
+            line_tracks_inventory = product_tracks_inventory(product)
             line = PosOrderLine(
                 id=f"{order_id}:{position}",
                 position=position,
@@ -6811,8 +7326,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 barcode=product.barcode,
                 name=product.name,
                 category=product.category,
-                item_type=product.item_type,
-                track_inventory=product.track_inventory,
+                item_type=normalized_product_item_type(product.item_type, product.track_inventory),
+                track_inventory=line_tracks_inventory,
                 quantity=quantity,
                 unit_price=unit_price,
                 unit_cost=unit_cost,
@@ -6824,7 +7339,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             item_count += quantity
             if product.business_area_id:
                 area_ids.append(product.business_area_id)
-            if product.track_inventory:
+            if line_tracks_inventory:
                 product.quantity_on_hand = round(product.quantity_on_hand - quantity, 2)
                 product.updated_at = datetime.utcnow()
 

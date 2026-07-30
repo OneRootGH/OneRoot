@@ -92,6 +92,7 @@ ROLE_DESCRIPTIONS = {
 ROLE_ACCESS_KEYS = {
     "owner": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "pos",
@@ -127,6 +128,7 @@ ROLE_ACCESS_KEYS = {
     },
     "admin": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "pos",
@@ -162,6 +164,7 @@ ROLE_ACCESS_KEYS = {
     },
     "finance": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "workbook",
@@ -182,6 +185,7 @@ ROLE_ACCESS_KEYS = {
     },
     "operations": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "workbook",
@@ -202,6 +206,7 @@ ROLE_ACCESS_KEYS = {
     },
     "apartment-manager": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "workbook",
@@ -213,6 +218,7 @@ ROLE_ACCESS_KEYS = {
     },
     "sales-stock-operator": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "pos",
@@ -228,6 +234,7 @@ ROLE_ACCESS_KEYS = {
     },
     "cashier": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "pos",
@@ -236,6 +243,7 @@ ROLE_ACCESS_KEYS = {
     },
     "viewer": {
         "dashboard",
+        "profits",
         "reports",
         "search",
         "workbook",
@@ -1324,7 +1332,7 @@ MENU_GROUPS = [
     (
         "Workspace",
         [
-            ("Overview", ["dashboard", "reports", "search"]),
+            ("Overview", ["dashboard", "profits", "reports", "search"]),
             ("Counter & Orders", ["pos", "online_orders", "delivery_dispatch", "workbook"]),
             ("Stock", ["inventory"]),
         ],

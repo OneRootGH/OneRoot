@@ -58,9 +58,10 @@
         <table>
           <thead>
             <tr>
-              <th>Name</th>
+              <th>Item</th>
               <th>Area</th>
               <th>SKU</th>
+              <th>Type</th>
               <th>Stock</th>
               <th>Price</th>
               <th></th>
@@ -69,11 +70,25 @@
           <tbody>
             {% for item in products %}
               <tr>
-                <td>{{ item.name }}</td>
+                <td>
+                  <div class="inventory-item-summary">
+                    <img class="product-thumb product-thumb-square" src="{{ product_image_src(item) }}" alt="{{ item.name }}">
+                    <div>
+                      <strong>{{ item.name }}</strong>
+                      <span>{{ item.category or 'No category' }}</span>
+                    </div>
+                  </div>
+                </td>
                 <td>{{ business_area_short.get(item.business_area_id, item.business_area_id) }}</td>
                 <td>{{ item.sku or '—' }}</td>
-                <td>{{ item.quantity_on_hand }}</td>
-                <td>{{ item.sales_price|currency }}</td>
+                <td>{{ item.item_type|title }}</td>
+                <td>{{ format_product_stock_badge(item) }}</td>
+                <td>
+                  <div class="inventory-price-stack">
+                    <strong>{{ item.sales_price|currency }}</strong>
+                    <span>Cost {{ item.cost_price|currency }}</span>
+                  </div>
+                </td>
                 <td>
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('inventory', edit=item.id, q=search) }}">Edit</a>
@@ -87,7 +102,7 @@
                 </td>
               </tr>
             {% else %}
-              <tr><td colspan="6">No inventory items found.</td></tr>
+              <tr><td colspan="7">No inventory items found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -100,8 +115,15 @@
           <h3>{{ "Edit Item" if editing_product else "New Item" }}</h3>
         </div>
       </div>
-      <form method="post" class="form-grid single">
+      <form method="post" enctype="multipart/form-data" class="form-grid single">
         <input type="hidden" name="id" value="{{ editing_product.id if editing_product else '' }}">
+        <div class="inventory-editor-hero">
+          <img class="product-thumb product-thumb-large" src="{{ product_image_src(editing_product or {}) }}" alt="{{ editing_product.name if editing_product else 'New inventory item' }}">
+          <div class="inventory-editor-copy">
+            <strong>{{ editing_product.name if editing_product else 'Item photo ready' }}</strong>
+            <span>Upload an image file or paste an image URL. If you skip this, OneRoot will show a branded item picture automatically.</span>
+          </div>
+        </div>
         <label><span>Name</span><input type="text" name="name" value="{{ editing_product.name if editing_product else '' }}" required></label>
         <label><span>Business Area</span>
           <select name="business_area_id" id="inventory-business-area" required>
@@ -116,7 +138,7 @@
             <option value="">Select Category</option>
           </select>
         </label>
-        <label><span>SKU</span><input type="text" name="sku" value="{{ editing_product.sku if editing_product else '' }}"></label>
+        <label><span>SKU</span><input type="text" name="sku" value="{{ editing_product.sku if editing_product else '' }}" placeholder="Auto-generated on save" readonly></label>
         <label><span>Barcode</span><input type="text" name="barcode" value="{{ editing_product.barcode if editing_product else '' }}"></label>
         <label><span>Item Type</span>
           <select name="item_type">
@@ -124,11 +146,16 @@
             <option value="service" {% if editing_product and editing_product.item_type == 'service' %}selected{% endif %}>Service</option>
           </select>
         </label>
+        <p class="helper-copy inventory-edit-note">Stock items stay quantity-based in POS and inventory. Service items do not reduce stock and now show correctly across the system.</p>
         <label><span>Quantity On Hand</span><input type="number" step="0.01" name="quantity_on_hand" value="{{ editing_product.quantity_on_hand if editing_product else 0 }}"></label>
         <label><span>Min Stock Level</span><input type="number" step="1" name="min_stock_level" value="{{ editing_product.min_stock_level if editing_product else 5 }}"></label>
         <label><span>Sales Price</span><input type="number" step="0.01" name="sales_price" value="{{ editing_product.sales_price if editing_product else 0 }}"></label>
         <label><span>Cost Price</span><input type="number" step="0.01" name="cost_price" value="{{ editing_product.cost_price if editing_product else 0 }}"></label>
-        <label class="checkbox-row"><input type="checkbox" name="track_inventory" {% if not editing_product or editing_product.track_inventory %}checked{% endif %}><span>Track inventory</span></label>
+        <label><span>Image URL</span><input type="url" name="image_url" value="{{ editing_product.image_url if editing_product and ((editing_product.image_url or '').startswith('http://') or (editing_product.image_url or '').startswith('https://')) else '' }}" placeholder="https://..."></label>
+        <label><span>Upload Image</span><input type="file" name="image_file" accept="image/*"></label>
+        {% if editing_product and editing_product.image_url %}
+          <label class="checkbox-row"><input type="checkbox" name="clear_image"><span>Remove saved image</span></label>
+        {% endif %}
         <label class="checkbox-row"><input type="checkbox" name="active" {% if not editing_product or editing_product.active %}checked{% endif %}><span>Active</span></label>
         <label><span>Notes</span><textarea name="notes" rows="4">{{ editing_product.notes if editing_product else '' }}</textarea></label>
         <div class="form-actions">
