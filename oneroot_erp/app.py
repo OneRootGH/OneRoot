@@ -32,6 +32,7 @@ from .registry import (
     BUSINESS_AREA_SHORT,
     BUSINESS_AREAS,
     INVENTORY_CATEGORY_LIBRARY,
+    JOB_VACANCY_STATUSES,
     MENU_GROUPS,
     MODULES,
     MODULE_TO_LEGACY,
@@ -41,6 +42,8 @@ from .registry import (
     PAYMENT_METHODS,
     ROLE_ACCESS_KEYS,
     ROLE_DESCRIPTIONS,
+    STAFF_WORK_ROLE_LABELS,
+    STAFF_WORK_ROLES,
     SUITE_NAMES,
     USER_ROLE_LABELS,
     USER_ROLE_OPTIONS,
@@ -85,6 +88,9 @@ PRODUCT_IMAGE_AREA_COLORS = {
     "kitchen": "#8e5d23",
     "shared-operations": "#50606f",
 }
+PUBLIC_JOB_VACANCY_STATUSES = {
+    status for status, _label in JOB_VACANCY_STATUSES if status not in {"Draft", "Filled", "Closed"}
+}
 
 
 def build_database_engine(database_url: str):
@@ -101,19 +107,23 @@ def build_database_engine(database_url: str):
 
 def ensure_schema_columns(engine) -> None:
     inspector = inspect(engine)
-    if "pos_order_lines" not in inspector.get_table_names():
-        return
-    existing_columns = {column["name"] for column in inspector.get_columns("pos_order_lines")}
+    table_names = set(inspector.get_table_names())
+    existing_columns = {column["name"] for column in inspector.get_columns("pos_order_lines")} if "pos_order_lines" in table_names else set()
     statements: list[str] = []
-    if "unit_cost" not in existing_columns:
+    if "pos_order_lines" in table_names and "unit_cost" not in existing_columns:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN unit_cost FLOAT DEFAULT 0")
-    if "cost_amount" not in existing_columns:
+    if "pos_order_lines" in table_names and "cost_amount" not in existing_columns:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN cost_amount FLOAT DEFAULT 0")
     product_columns = set()
-    if "products" in inspector.get_table_names():
+    if "products" in table_names:
         product_columns = {column["name"] for column in inspector.get_columns("products")}
-    if "products" in inspector.get_table_names() and "image_url" not in product_columns:
+    if "products" in table_names and "image_url" not in product_columns:
         statements.append("ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT ''")
+    user_columns = set()
+    if "app_users" in table_names:
+        user_columns = {column["name"] for column in inspector.get_columns("app_users")}
+    if "app_users" in table_names and "staff_role" not in user_columns:
+        statements.append("ALTER TABLE app_users ADD COLUMN staff_role VARCHAR(100) DEFAULT ''")
     if not statements:
         return
     with engine.begin() as connection:
@@ -981,6 +991,36 @@ def role_label(value: Any) -> str:
     return USER_ROLE_LABELS.get(normalize_role_key(value), "Viewer")
 
 
+def default_staff_role_for_access_role(value: Any) -> str:
+    role_key = normalize_role_key(value)
+    role_map = {
+        "owner": "Manager",
+        "admin": "Manager",
+        "finance": "Finance Officer",
+        "operations": "Manager",
+        "apartment-manager": "Apartment Manager",
+        "sales-stock-operator": "Stock Officer",
+        "cashier": "Cashier",
+        "viewer": "Support Staff",
+    }
+    return role_map.get(role_key, "Support Staff")
+
+
+def normalize_staff_role(value: Any, *, fallback_role: Any = "viewer") -> str:
+    raw = normalize_text(value)
+    if raw in STAFF_WORK_ROLE_LABELS:
+        return raw
+    normalized = raw.lower()
+    for option_value, option_label in STAFF_WORK_ROLES:
+        if normalized in {option_value.lower(), option_label.lower()}:
+            return option_value
+    return default_staff_role_for_access_role(fallback_role)
+
+
+def staff_role_label(value: Any, *, fallback_role: Any = "viewer") -> str:
+    return normalize_staff_role(value, fallback_role=fallback_role)
+
+
 def access_keys_for_role(value: Any) -> set[str]:
     return set(ROLE_ACCESS_KEYS.get(normalize_role_key(value), ROLE_ACCESS_KEYS["viewer"]))
 
@@ -1035,6 +1075,7 @@ def module_amount_label(definition: ModuleDefinition) -> str:
         "salary_records": "Gross Pay",
         "knowledge_base": "Progress",
         "workforce_attendance": "Worked Hours",
+        "job_vacancies": "Openings",
     }.get(definition.key, "Amount")
 
 
@@ -1044,6 +1085,8 @@ def format_module_amount(definition: ModuleDefinition, value: Any) -> str:
         return f"{amount:.0f}%"
     if definition.key == "workforce_attendance":
         return f"{amount:,.2f} hrs"
+    if definition.key == "job_vacancies":
+        return f"{amount:.0f}"
     return format_currency(amount)
 
 
@@ -1080,6 +1123,7 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "recurring_controls": "category",
     "knowledge_base": "entryType",
     "workforce_attendance": "shiftType",
+    "job_vacancies": "employmentType",
 }
 
 MODULE_FILTER_CATEGORY_LABELS = {
@@ -1101,6 +1145,7 @@ MODULE_FILTER_CATEGORY_LABELS = {
     "dispatchType": "Dispatch Type",
     "entryType": "Entry Type",
     "shiftType": "Shift Type",
+    "employmentType": "Employment Type",
     "status": "Status",
 }
 
@@ -3484,18 +3529,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return normalize_text(getattr(user, "full_name", "")) or normalize_text(getattr(user, "username", "")) or "Staff"
 
     def attendance_staff_role_for_user(user: User | None) -> str:
-        role_key = normalize_role_key(getattr(user, "role", "viewer"))
-        role_map = {
-            "owner": "Manager",
-            "admin": "Manager",
-            "finance": "Finance Officer",
-            "operations": "Manager",
-            "apartment-manager": "Apartment Manager",
-            "sales-stock-operator": "Stock Officer",
-            "cashier": "Cashier",
-            "viewer": "Support Staff",
-        }
-        return role_map.get(role_key, "Support Staff")
+        if not user:
+            return default_staff_role_for_access_role("viewer")
+        return normalize_staff_role(getattr(user, "staff_role", ""), fallback_role=getattr(user, "role", "viewer"))
 
     def attendance_shift_type_for_timestamp(timestamp: datetime) -> str:
         hour = timestamp.hour
@@ -3782,6 +3818,49 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         items.sort(key=lambda item: (item["businessAreaLabel"], item["category"], item["name"]))
         return items
+
+    def serialize_public_vacancy(record: ModuleRecord) -> dict[str, Any] | None:
+        payload = dict(record.payload or {})
+        status = normalize_text(payload.get("vacancyStatus") or record.status)
+        if status not in PUBLIC_JOB_VACANCY_STATUSES:
+            return None
+        business_area_id = normalize_text(payload.get("businessAreaId") or record.business_area_id)
+        if not business_area_id:
+            business_area_id = "shared-operations"
+        staff_role = normalize_staff_role(payload.get("staffRole"), fallback_role="viewer")
+        openings = max(int(parse_amount(payload.get("openings"))), 1)
+        return {
+            "id": record.id,
+            "jobTitle": normalize_text(payload.get("jobTitle") or record.title),
+            "staffRole": staff_role,
+            "businessAreaId": business_area_id,
+            "businessAreaLabel": BUSINESS_AREA_LABELS.get(business_area_id, business_area_id),
+            "businessAreaShort": BUSINESS_AREA_SHORT.get(business_area_id, BUSINESS_AREA_LABELS.get(business_area_id, business_area_id)),
+            "employmentType": normalize_text(payload.get("employmentType")),
+            "vacancyStatus": status,
+            "openings": openings,
+            "location": normalize_text(payload.get("location")) or "Accra",
+            "postedDate": normalize_text(payload.get("postedDate")) or (record.record_date.isoformat() if record.record_date else ""),
+            "closingDate": normalize_text(payload.get("closingDate")),
+            "salaryRange": normalize_text(payload.get("salaryRange")),
+            "contactPerson": normalize_text(payload.get("contactPerson")),
+            "applicationPhone": normalize_text(payload.get("applicationPhone")),
+            "applicationEmail": normalize_text(payload.get("applicationEmail")) or app_config.support_email,
+            "applicationLink": normalize_text(payload.get("applicationLink")),
+            "summary": normalize_text(payload.get("summary")),
+            "requirements": normalize_text(payload.get("requirements")),
+            "howToApply": normalize_text(payload.get("howToApply")),
+            "notes": normalize_text(payload.get("notes")),
+        }
+
+    def build_public_vacancies() -> list[dict[str, Any]]:
+        records = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "job_vacancies")
+            .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+        vacancies = [serialize_public_vacancy(record) for record in records]
+        return [vacancy for vacancy in vacancies if vacancy]
 
     def build_catalog_lookup() -> dict[str, dict[str, Any]]:
         return {item["id"]: item for item in build_public_catalog()}
@@ -4346,6 +4425,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "fullName": user.full_name,
                 "username": user.username,
                 "role": user.role,
+                "staffRole": normalize_staff_role(user.staff_role, fallback_role=user.role),
                 "phone": user.phone,
                 "active": user.active,
                 "loginEnabled": user.login_enabled,
@@ -4737,6 +4817,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     for area in BUSINESS_AREAS
                     if is_orderable_area(area["id"])
                 ],
+            }
+        )
+
+    @app.route("/api/vacancies")
+    @app.route("/api/public/vacancies")
+    def public_vacancies_api():
+        vacancies = build_public_vacancies()
+        return jsonify(
+            {
+                "ok": True,
+                "items": vacancies,
+                "count": len(vacancies),
             }
         )
 
@@ -5493,6 +5585,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "full_name": editing_user.full_name if editing_user else "",
             "username": editing_user.username if editing_user else "",
             "role": normalize_role_key(editing_user.role) if editing_user else "viewer",
+            "staff_role": normalize_staff_role(editing_user.staff_role if editing_user else "", fallback_role=editing_user.role if editing_user else "viewer"),
             "phone": editing_user.phone if editing_user else "",
             "active": bool(editing_user.active) if editing_user else True,
             "login_enabled": bool(editing_user.login_enabled) if editing_user else True,
@@ -5506,6 +5599,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             full_name = normalize_text(request.form.get("full_name"))
             username = normalize_text(request.form.get("username")).lower()
             role = normalize_role_key(request.form.get("role"))
+            staff_role = normalize_staff_role(request.form.get("staff_role"), fallback_role=role)
             phone = normalize_text(request.form.get("phone"))
             active = request.form.get("active") == "on"
             login_enabled = request.form.get("login_enabled") == "on" and active
@@ -5517,6 +5611,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "full_name": full_name,
                 "username": username,
                 "role": role,
+                "staff_role": staff_role,
                 "phone": phone,
                 "active": active,
                 "login_enabled": login_enabled,
@@ -5551,6 +5646,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 user.full_name = full_name
                 user.username = username
                 user.role = role
+                user.staff_role = staff_role
                 user.phone = phone
                 user.active = active
                 user.login_enabled = login_enabled
@@ -5581,15 +5677,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         user.full_name or "",
                         user.username or "",
                         role_label(user.role),
+                        staff_role_label(user.staff_role, fallback_role=user.role),
                         user.phone or "",
                     ]
                 ).lower()
             ]
 
         role_counts: dict[str, int] = defaultdict(int)
+        staff_role_counts: dict[str, int] = defaultdict(int)
         for user in users:
             if user.active:
                 role_counts[normalize_role_key(user.role)] += 1
+                staff_role_counts[normalize_staff_role(user.staff_role, fallback_role=user.role)] += 1
 
         role_rows = sorted(
             [
@@ -5600,6 +5699,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "description": ROLE_DESCRIPTIONS.get(role_key, ""),
                 }
                 for role_key, count in role_counts.items()
+                if count > 0
+            ],
+            key=lambda item: (-item["count"], item["label"]),
+        )
+        staff_role_rows = sorted(
+            [
+                {
+                    "label": staff_role,
+                    "short": staff_role,
+                    "count": count,
+                }
+                for staff_role, count in staff_role_counts.items()
                 if count > 0
             ],
             key=lambda item: (-item["count"], item["label"]),
@@ -5623,8 +5734,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 short_key="short",
                 positive_color="var(--accent)",
             ),
+            staff_role_chart=build_chart_rows(
+                staff_role_rows,
+                label_key="label",
+                value_key="count",
+                short_key="short",
+                positive_color="var(--green)",
+            ),
             role_options=USER_ROLE_OPTIONS,
             role_descriptions=ROLE_DESCRIPTIONS,
+            staff_role_options=STAFF_WORK_ROLES,
         )
 
     @app.route("/app/users/<user_id>/delete", methods=["POST"])
@@ -7516,6 +7635,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "normalize_role_key": normalize_role_key,
             "user_role_label": role_label,
             "user_role_labels": USER_ROLE_LABELS,
+            "staff_role_label": staff_role_label,
+            "staff_role_labels": STAFF_WORK_ROLE_LABELS,
             "static_asset_version": current_static_asset_version(),
         }
 

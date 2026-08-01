@@ -32,6 +32,7 @@ class User(Base):
     username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
     full_name: Mapped[str] = mapped_column(String(200), default="")
     role: Mapped[str] = mapped_column(String(100), default="owner")
+    staff_role: Mapped[str] = mapped_column(String(100), default="")
     phone: Mapped[str] = mapped_column(String(50), default="")
     password_hash: Mapped[str] = mapped_column(String(255), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)

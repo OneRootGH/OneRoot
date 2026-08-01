@@ -7,6 +7,7 @@
   const state = {
     config: null,
     catalog: [],
+    vacancies: [],
     businessAreas: [],
     paymentMethods: [],
     cart: loadStoredCart(),
@@ -45,6 +46,8 @@
       "heroContactLine",
       "footerContactLine",
       "businessAreaGrid",
+      "vacancyMeta",
+      "vacancyGrid",
       "catalogMeta",
       "catalogSearchInput",
       "catalogAreaFilter",
@@ -121,6 +124,7 @@
 
   async function loadStorefront() {
     setText(elements.catalogMeta, "Loading OneRoot catalog...");
+    setText(elements.vacancyMeta, "Loading current job vacancies...");
 
     try {
       const [catalogResponse, configResponse] = await Promise.all([
@@ -158,6 +162,20 @@
       renderCatalog();
       renderCart();
       syncCartPanelLayout();
+
+      try {
+        const vacanciesResponse = await fetch("/api/public/vacancies", { cache: "no-store" });
+        if (!vacanciesResponse.ok) {
+          throw new Error(`Vacancies request failed with ${vacanciesResponse.status}.`);
+        }
+        const vacanciesPayload = await vacanciesResponse.json();
+        state.vacancies = Array.isArray(vacanciesPayload.items) ? vacanciesPayload.items : [];
+        renderVacancies();
+      } catch (vacancyError) {
+        console.error(vacancyError);
+        state.vacancies = [];
+        renderVacancies();
+      }
     } catch (error) {
       console.error(error);
       setText(
@@ -170,6 +188,15 @@
           <article class="catalog-card">
             <strong>Catalog unavailable</strong>
             <p>The OneRoot online ordering catalog could not be loaded.</p>
+          </article>
+        `;
+      }
+
+      if (elements.vacancyGrid) {
+        elements.vacancyGrid.innerHTML = `
+          <article class="vacancy-card vacancy-card-empty">
+            <strong>Vacancies unavailable</strong>
+            <p>Current job openings could not be loaded right now.</p>
           </article>
         `;
       }
@@ -272,6 +299,67 @@
       .join("");
   }
 
+  function renderVacancies() {
+    if (!elements.vacancyGrid) {
+      return;
+    }
+
+    const vacancies = [...state.vacancies];
+
+    if (elements.vacancyMeta) {
+      setText(
+        elements.vacancyMeta,
+        vacancies.length
+          ? `${vacancies.length} open role${vacancies.length === 1 ? "" : "s"} published by OneRoot right now.`
+          : "No vacancies are published right now, but this board updates as soon as roles open."
+      );
+    }
+
+    if (!vacancies.length) {
+      elements.vacancyGrid.innerHTML = `
+        <article class="vacancy-card vacancy-card-empty">
+          <strong>No open vacancies right now</strong>
+          <p>Check back soon for new opportunities across sales, service, operations, kitchen, delivery, and support.</p>
+        </article>
+      `;
+      return;
+    }
+
+    elements.vacancyGrid.innerHTML = vacancies
+      .map((vacancy) => {
+        const applyHref = buildVacancyApplyHref(vacancy);
+        const openingsValue = Math.max(Number(vacancy.openings || 1), 1);
+
+        return `
+          <article class="vacancy-card">
+            <div class="vacancy-card-head">
+              <div>
+                <span class="count-pill">${escapeHtml(vacancy.businessAreaShort || vacancy.businessAreaLabel || "OneRoot")}</span>
+                <strong>${escapeHtml(vacancy.jobTitle || vacancy.staffRole || "OneRoot Vacancy")}</strong>
+              </div>
+              <span class="vacancy-openings">${escapeHtml(`${openingsValue} opening${openingsValue === 1 ? "" : "s"}`)}</span>
+            </div>
+            <div class="vacancy-meta-row">
+              <span>${escapeHtml(vacancy.staffRole || "General Role")}</span>
+              <span>${escapeHtml(vacancy.employmentType || "Flexible")}</span>
+              <span>${escapeHtml(vacancy.location || "Accra")}</span>
+            </div>
+            <p>${escapeHtml(vacancy.summary || "Join OneRoot Essentials and help serve daily community needs.")}</p>
+            <div class="vacancy-detail-list">
+              <span>${escapeHtml(vacancy.closingDate ? `Apply by ${formatDate(vacancy.closingDate)}` : "Applications are open now")}</span>
+              ${vacancy.salaryRange ? `<span>${escapeHtml(vacancy.salaryRange)}</span>` : ""}
+            </div>
+            <div class="vacancy-actions">
+              <a class="button button-primary" href="${escapeHtml(applyHref)}" target="_blank" rel="noreferrer">
+                ${escapeHtml(buildVacancyApplyLabel(vacancy))}
+              </a>
+            </div>
+          </article>
+        `;
+      })
+      .join("");
+  }
+
   function renderCatalogQuickFilters() {
     if (!elements.catalogQuickFilters) {
       return;
@@ -322,6 +410,41 @@
       default:
         return "Order across the OneRoot essentials ecosystem in one checkout.";
     }
+  }
+
+  function buildVacancyApplyHref(vacancy) {
+    const directLink = normalizeText(vacancy.applicationLink);
+    if (directLink) {
+      return directLink;
+    }
+
+    const email = normalizeText(vacancy.applicationEmail || state.config?.supportEmail);
+    if (email) {
+      const subject = encodeURIComponent(`Application - ${vacancy.jobTitle || "OneRoot Vacancy"}`);
+      return `mailto:${email}?subject=${subject}`;
+    }
+
+    const whatsappNumber = normalizeWhatsappNumber(vacancy.applicationPhone || state.config?.whatsappNumber);
+    if (whatsappNumber) {
+      const message = encodeURIComponent(`Hello OneRoot, I want to apply for ${vacancy.jobTitle || "this vacancy"}.`);
+      return `https://wa.me/${whatsappNumber}?text=${message}`;
+    }
+
+    const supportPhone = normalizeDigits(state.config?.supportPhone);
+    return supportPhone ? `tel:${supportPhone}` : "#contact";
+  }
+
+  function buildVacancyApplyLabel(vacancy) {
+    if (normalizeText(vacancy.applicationLink)) {
+      return "Apply Online";
+    }
+    if (normalizeText(vacancy.applicationEmail || state.config?.supportEmail)) {
+      return "Apply By Email";
+    }
+    if (normalizeWhatsappNumber(vacancy.applicationPhone || state.config?.whatsappNumber)) {
+      return "Apply On WhatsApp";
+    }
+    return "Contact OneRoot";
   }
 
   function getFilteredCatalog() {
@@ -1207,6 +1330,24 @@
     return String(value || "")
       .replace(/\s+/g, " ")
       .trim();
+  }
+
+  function normalizeDigits(value) {
+    return normalizeText(value).replace(/[^\d]/g, "");
+  }
+
+  function normalizeWhatsappNumber(value) {
+    const digits = normalizeDigits(value);
+    if (digits.startsWith("233")) {
+      return digits;
+    }
+    if (digits.length === 10 && digits.startsWith("0")) {
+      return `233${digits.slice(1)}`;
+    }
+    if (digits.length === 9) {
+      return `233${digits}`;
+    }
+    return digits;
   }
 
   function escapeHtml(value) {

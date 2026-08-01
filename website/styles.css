@@ -404,7 +404,15 @@ main {
   margin-top: 1.25rem;
 }
 
+.vacancy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem;
+  margin-top: 1.25rem;
+}
+
 .area-card,
+.vacancy-card,
 .catalog-card,
 .promise-grid article,
 .cart-item,
@@ -423,11 +431,58 @@ main {
   padding: 1.2rem;
 }
 
+.vacancy-card {
+  display: grid;
+  gap: 0.85rem;
+  align-content: start;
+  min-height: 100%;
+  padding: 1.2rem;
+  box-shadow: 0 18px 34px rgba(16, 41, 31, 0.06);
+}
+
+.vacancy-card-empty {
+  place-items: start;
+}
+
 .area-card-top {
   display: flex;
   justify-content: space-between;
   gap: 0.75rem;
   align-items: center;
+}
+
+.vacancy-card-head,
+.vacancy-meta-row,
+.vacancy-detail-list,
+.vacancy-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.vacancy-card-head strong {
+  margin-top: 0.55rem;
+  font-size: 1.2rem;
+}
+
+.vacancy-openings,
+.vacancy-meta-row span,
+.vacancy-detail-list span {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.38rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(20, 58, 43, 0.08);
+  color: var(--forest-900);
+  font-size: 0.82rem;
+  font-weight: 800;
+}
+
+.vacancy-openings {
+  background: rgba(200, 133, 50, 0.16);
+  color: var(--gold-600);
 }
 
 .area-mark {
@@ -683,6 +738,7 @@ textarea {
 }
 
 .catalog-card p,
+.vacancy-card p,
 .catalog-meta,
 .cart-item p,
 .tracking-status p {

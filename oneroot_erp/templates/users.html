@@ -44,7 +44,8 @@
           <thead>
             <tr>
               <th>Name</th>
-              <th>Role</th>
+              <th>Access</th>
+              <th>Staff Role</th>
               <th>Status</th>
               <th>Updated</th>
               <th></th>
@@ -61,6 +62,7 @@
                   {{ user_role_label(user.role) }}
                   <span class="table-secondary">{{ role_descriptions.get(normalize_role_key(user.role), role_descriptions.get('viewer')) }}</span>
                 </td>
+                <td>{{ staff_role_label(user.staff_role, fallback_role=user.role) }}</td>
                 <td>
                   {% if user.active %}
                     <span class="status-chip">Active</span>
@@ -89,7 +91,7 @@
                 </td>
               </tr>
             {% else %}
-              <tr><td colspan="5">No users found.</td></tr>
+              <tr><td colspan="6">No users found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -114,10 +116,18 @@
           <input type="text" name="username" value="{{ form_user.get('username', '') }}" required>
         </label>
         <label>
-          <span>Role</span>
+          <span>Access Role</span>
           <select name="role">
             {% for value, label in role_options %}
               <option value="{{ value }}" {% if form_user.get('role') == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label>
+          <span>Staff Role</span>
+          <select name="staff_role">
+            {% for value, label in staff_role_options %}
+              <option value="{{ value }}" {% if form_user.get('staff_role') == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
         </label>
@@ -180,8 +190,36 @@
     <article class="card">
       <div class="card-header">
         <div>
+          <p class="eyebrow">Charts</p>
+          <h3>Active Staff Role Mix</h3>
+        </div>
+      </div>
+      {% if staff_role_chart %}
+        <div class="chart-stack">
+          {% for row in staff_role_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|int }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Staff role distribution will appear once active users are available.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
           <p class="eyebrow">Guide</p>
-          <h3>Role Access Summary</h3>
+          <h3>Access Role Summary</h3>
         </div>
       </div>
       <ul class="stack-list compact">
@@ -189,6 +227,23 @@
           <li>
             <strong>{{ label }}</strong>
             <span>{{ role_descriptions.get(value, '') }}</span>
+          </li>
+        {% endfor %}
+      </ul>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Guide</p>
+          <h3>Staff Role Summary</h3>
+        </div>
+      </div>
+      <ul class="stack-list compact">
+        {% for value, label in staff_role_options %}
+          <li>
+            <strong>{{ label }}</strong>
+            <span>Use this to reflect the staff member's actual day-to-day work assignment.</span>
           </li>
         {% endfor %}
       </ul>
