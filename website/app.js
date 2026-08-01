@@ -1,8 +1,6 @@
 (function initOneRootShop() {
   const SHOP_CART_STORAGE_KEY = "oneroot-shop:cart:v1";
   const SHOP_CUSTOMER_STORAGE_KEY = "oneroot-shop:customer:v1";
-  const INITIAL_VISIBLE_ITEM_COUNT = 48;
-  const VISIBLE_ITEM_STEP = 24;
 
   const state = {
     config: null,
@@ -17,7 +15,7 @@
       area: "",
       sort: "featured"
     },
-    visibleItemCount: INITIAL_VISIBLE_ITEM_COUNT,
+    visibleItemCount: 0,
     isCartOpen: false
   };
 
@@ -28,6 +26,7 @@
   function init() {
     captureElements();
     bindEvents();
+    resetVisibleCatalogCount();
     state.isCartOpen = !isCompactViewport();
     syncCartPanelLayout();
 
@@ -93,13 +92,13 @@
   function bindEvents() {
     elements.catalogSearchInput?.addEventListener("input", (event) => {
       state.filters.search = normalizeText(event.target.value);
-      state.visibleItemCount = INITIAL_VISIBLE_ITEM_COUNT;
+      resetVisibleCatalogCount();
       renderCatalog();
     });
 
     elements.catalogAreaFilter?.addEventListener("change", (event) => {
       state.filters.area = normalizeText(event.target.value);
-      state.visibleItemCount = INITIAL_VISIBLE_ITEM_COUNT;
+      resetVisibleCatalogCount();
       renderCatalog();
     });
 
@@ -600,7 +599,7 @@
           ${
             filteredItems.length > visibleItems.length
               ? escapeHtml(
-                  `Showing ${visibleItems.length} of ${filteredItems.length} items. Use filters or Show More to narrow faster.`
+                  `Showing ${visibleItems.length} of ${filteredItems.length} items. Search or choose an area to reach checkout faster.`
                 )
               : escapeHtml(`${filteredItems.length} item${filteredItems.length === 1 ? "" : "s"} shown.`)
           }
@@ -791,7 +790,7 @@
 
     if (areaFilterButton) {
       state.filters.area = normalizeText(areaFilterButton.dataset.filterArea);
-      state.visibleItemCount = INITIAL_VISIBLE_ITEM_COUNT;
+      resetVisibleCatalogCount();
 
       if (elements.catalogAreaFilter) {
         elements.catalogAreaFilter.value = state.filters.area;
@@ -815,7 +814,7 @@
     }
 
     if (event.target.closest("button[data-shop-action='show-more']")) {
-      state.visibleItemCount += VISIBLE_ITEM_STEP;
+      state.visibleItemCount += getVisibleItemStep();
       renderCatalog();
       return;
     }
@@ -824,7 +823,7 @@
 
     if (areaJumpButton) {
       state.filters.area = areaJumpButton.dataset.areaJump || "";
-      state.visibleItemCount = INITIAL_VISIBLE_ITEM_COUNT;
+      resetVisibleCatalogCount();
 
       if (elements.catalogAreaFilter) {
         elements.catalogAreaFilter.value = state.filters.area;
@@ -1286,7 +1285,7 @@
     state.filters.search = "";
     state.filters.area = "";
     state.filters.sort = "featured";
-    state.visibleItemCount = INITIAL_VISIBLE_ITEM_COUNT;
+    resetVisibleCatalogCount();
     setInputValue(elements.catalogSearchInput, "");
     setInputValue(elements.catalogAreaFilter, "");
     setInputValue(elements.catalogSortFilter, "featured");
@@ -1306,6 +1305,18 @@
 
   function isCompactViewport() {
     return window.matchMedia("(max-width: 1024px)").matches;
+  }
+
+  function getInitialVisibleItemCount() {
+    return isCompactViewport() ? 8 : 12;
+  }
+
+  function getVisibleItemStep() {
+    return isCompactViewport() ? 8 : 12;
+  }
+
+  function resetVisibleCatalogCount() {
+    state.visibleItemCount = getInitialVisibleItemCount();
   }
 
   function syncCartPanelLayout() {
