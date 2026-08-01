@@ -412,6 +412,63 @@
     }
   }
 
+  function getCatalogImageSrc(item) {
+    const directImage = normalizeText(item.imageUrl);
+    if (directImage) {
+      return directImage;
+    }
+
+    return buildCatalogPlaceholderImage(item);
+  }
+
+  function buildCatalogPlaceholderImage(item) {
+    const title = normalizeText(item.name) || "OneRoot Item";
+    const category = normalizeText(item.category) || "Product";
+    const areaLabel = getAreaLabel(item.businessAreaId) || "OneRoot";
+    const initials = getAreaMonogram(item.businessAreaId) || "OR";
+    const accent = getAreaColor(item.businessAreaId);
+    const svg = `
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" role="img" aria-label="${escapeHtml(title)}">
+        <defs>
+          <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
+            <stop offset="0%" stop-color="${accent}"/>
+            <stop offset="100%" stop-color="#f4ede1"/>
+          </linearGradient>
+        </defs>
+        <rect width="320" height="240" rx="28" fill="url(#g)"/>
+        <circle cx="248" cy="56" r="38" fill="rgba(255,255,255,0.18)"/>
+        <circle cx="72" cy="188" r="56" fill="rgba(255,255,255,0.12)"/>
+        <rect x="24" y="24" width="112" height="108" rx="22" fill="rgba(255,255,255,0.18)"/>
+        <text x="80" y="92" text-anchor="middle" font-family="Georgia, serif" font-size="46" font-weight="700" fill="#ffffff">${escapeHtml(initials)}</text>
+        <text x="24" y="172" font-family="Arial, sans-serif" font-size="14" letter-spacing="2" fill="rgba(255,255,255,0.92)">${escapeHtml(areaLabel.toUpperCase().slice(0, 24))}</text>
+        <text x="24" y="204" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">${escapeHtml(title.slice(0, 24))}</text>
+        <text x="24" y="224" font-family="Arial, sans-serif" font-size="13" fill="rgba(255,255,255,0.88)">${escapeHtml(category.slice(0, 30))}</text>
+      </svg>
+    `;
+    return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
+  }
+
+  function getAreaColor(areaId) {
+    switch (normalizeText(areaId)) {
+      case "water-equipment":
+        return "#2f6ea8";
+      case "cold-store-groceries":
+        return "#1f6b5b";
+      case "laundry-services":
+        return "#5f6fd8";
+      case "mobile-money":
+        return "#9a6a19";
+      case "rentals-apartments":
+        return "#8a4f74";
+      case "fresh-foods-drinks":
+        return "#ca5d27";
+      case "kitchen":
+        return "#8e5d23";
+      default:
+        return "#50606f";
+    }
+  }
+
   function buildVacancyApplyHref(vacancy) {
     const directLink = normalizeText(vacancy.applicationLink);
     if (directLink) {
@@ -584,9 +641,18 @@
   function buildCatalogCardMarkup(item) {
     const displayPrice = getItemPriceMarkup(item);
     const isQuoteItem = Number(item.salesPrice || 0) <= 0;
+    const imageSrc = getCatalogImageSrc(item);
 
     return `
       <article class="catalog-card ${isQuoteItem ? "catalog-card-quote" : ""}">
+        <div class="catalog-card-image-wrap">
+          <img
+            class="catalog-card-image"
+            src="${escapeHtml(imageSrc)}"
+            alt="${escapeHtml(item.name)}"
+            loading="lazy"
+          />
+        </div>
         <div class="catalog-card-header">
           <div class="catalog-card-identity">
             <span class="catalog-mark">${escapeHtml(getAreaMonogram(item.businessAreaId))}</span>
@@ -682,10 +748,15 @@
           <article class="cart-item">
             <div class="cart-item-row">
               <div class="cart-item-row-main">
-                <span class="cart-item-mark">${escapeHtml(getAreaMonogram(item.businessAreaId))}</span>
+                <img
+                  class="cart-item-thumb"
+                  src="${escapeHtml(getCatalogImageSrc(item))}"
+                  alt="${escapeHtml(item.name)}"
+                  loading="lazy"
+                />
                 <div>
-                <strong>${escapeHtml(item.name)}</strong>
-                <p>${escapeHtml(getAreaLabel(item.businessAreaId))} • ${escapeHtml(item.category || "General")}</p>
+                  <strong>${escapeHtml(item.name)}</strong>
+                  <p>${escapeHtml(getAreaLabel(item.businessAreaId))} • ${escapeHtml(item.category || "General")}</p>
                 </div>
               </div>
               <strong>${
@@ -799,6 +870,7 @@
         businessAreaId: item.businessAreaId,
         category: item.category || "General",
         itemType: item.itemType || "stock",
+        imageUrl: getCatalogImageSrc(item),
         unitPrice: Number(item.salesPrice || 0),
         quantity,
         notes: item.notes || ""
