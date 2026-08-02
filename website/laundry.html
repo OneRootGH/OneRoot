@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Send a dedicated OneRoot laundry request with service type, item count, pickup plan, and special instructions."
+    />
+    <meta name="theme-color" content="#143a2b" />
+    <title>Laundry Requests | OneRoot.shop</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/website/styles.css?v=20260802d" />
+  </head>
+  <body>
+    <div class="shop-shell">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
+          <span>
+            <strong>OneRoot.shop</strong>
+            <small>Laundry Request</small>
+          </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a href="/shop">Shop</a>
+          <a class="is-current" href="/services/laundry">Laundry</a>
+          <a href="/services/equipment-rentals">Equipment</a>
+          <a href="/track-order">Track Order</a>
+          <a href="/contact">Contact</a>
+          <a href="/operations/">Staff App</a>
+          <button class="button button-secondary site-install" type="button" data-install-app hidden>Install App</button>
+        </nav>
+      </header>
+
+      <main class="page-main">
+        <section class="page-hero">
+          <div>
+            <p class="eyebrow">Laundry Module</p>
+            <h1>Send a clear laundry request with the details OneRoot needs.</h1>
+            <p class="section-note">
+              Use this page for normal or express laundry requests. Add item
+              count, pickup timing, address, and special handling instructions
+              before staff confirm the service.
+            </p>
+          </div>
+          <div class="hero-tags" id="heroContactLine"></div>
+        </section>
+
+        <section class="service-form-layout">
+          <section class="tracking-card service-form-card">
+            <div class="section-heading">
+              <div>
+                <p class="eyebrow">Laundry Request</p>
+                <h2>Book laundry service</h2>
+              </div>
+              <p class="section-note">Normal and Express options are loaded from the OneRoot service catalog.</p>
+            </div>
+
+            <form id="laundryBookingForm" class="checkout-form" novalidate>
+              <div class="checkout-fields">
+                <label>
+                  <span>Service Type</span>
+                  <select id="laundryServiceSelect" required>
+                    <option value="">Loading laundry options...</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Item Count</span>
+                  <input id="laundryItemCountInput" type="number" min="1" step="1" value="1" required />
+                </label>
+                <label class="wide-field">
+                  <span>Items Summary</span>
+                  <input id="laundryItemSummaryInput" type="text" placeholder="Example: 4 shirts, 2 jeans, 1 bedsheet" />
+                </label>
+              </div>
+
+              <div class="checkout-fields">
+                <label>
+                  <span>Customer Name</span>
+                  <input id="laundryCustomerName" type="text" required />
+                </label>
+                <label>
+                  <span>Phone Number</span>
+                  <input id="laundryCustomerPhone" type="tel" required />
+                </label>
+                <label>
+                  <span>Email</span>
+                  <input id="laundryCustomerEmail" type="email" />
+                </label>
+              </div>
+
+              <div class="checkout-fields">
+                <label>
+                  <span>Pickup / Delivery Mode</span>
+                  <select id="laundryDeliveryModeInput">
+                    <option value="Pickup">Pickup</option>
+                    <option value="Delivery">Delivery</option>
+                    <option value="Call To Confirm">Call To Confirm</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Preferred Date</span>
+                  <input id="laundryPickupDateInput" type="date" />
+                </label>
+                <label>
+                  <span>Preferred Time</span>
+                  <input id="laundryPreferredTimeInput" type="time" />
+                </label>
+                <label>
+                  <span>Preferred Payment Method</span>
+                  <select id="laundryPaymentMethodInput"></select>
+                </label>
+                <label class="wide-field">
+                  <span>Pickup / Delivery Address</span>
+                  <textarea id="laundryAddressInput" rows="3" placeholder="Enter address or landmark"></textarea>
+                </label>
+                <label class="wide-field">
+                  <span>Special Instructions</span>
+                  <textarea id="laundryNotesInput" rows="4" placeholder="Express timing, delicate handling, starch, folding, ironing, or other notes"></textarea>
+                </label>
+              </div>
+
+              <button class="button button-primary button-wide" type="submit">
+                Send Laundry Request
+              </button>
+            </form>
+
+            <div id="laundryMessage" class="checkout-message hidden"></div>
+          </section>
+
+          <aside class="service-side-panel">
+            <article class="order-guide-card">
+              <p class="eyebrow">How It Works</p>
+              <h3>Capture the request first, then staff confirm price and timing.</h3>
+              <ul class="order-guide-list">
+                <li>Choose Normal or Express service.</li>
+                <li>Enter the item count and a short summary of what is included.</li>
+                <li>Staff follow up on turnaround, price, pickup, and delivery if needed.</li>
+              </ul>
+            </article>
+            <article class="order-guide-card order-guide-card-muted">
+              <p class="eyebrow">Need Another Page?</p>
+              <div class="inline-button-row">
+                <a class="button button-secondary" href="/services/equipment-rentals">Equipment Booking</a>
+                <a class="button button-secondary" href="/track-order">Track Request</a>
+              </div>
+            </article>
+          </aside>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div>
+          <strong>OneRoot Essentials</strong>
+          <p id="footerContactLine">Loading contact details...</p>
+        </div>
+        <div class="footer-links">
+          <a href="/services">Services</a>
+          <a href="/services/equipment-rentals">Equipment</a>
+          <a href="/track-order">Track Order</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="/website/app.js?v=20260802b"></script>
+    <script src="/website/pwa.js?v=20260801c"></script>
+  </body>
+</html>

@@ -1,14 +1,20 @@
-const CACHE_NAME = "oneroot-platform-v60";
+const CACHE_NAME = "oneroot-platform-v61";
 const APP_SHELL_ASSETS = [
   "/",
+  "/shop",
+  "/services",
+  "/services/laundry",
+  "/services/equipment-rentals",
+  "/vacancies",
+  "/contact",
+  "/track-order",
   "/operations/",
-  "/track-order.html",
   "/manifest.webmanifest",
   "/icon.svg",
   "/assets/oneroot-logo.png",
-  "/website/styles.css?v=20260725a",
-  "/website/app.js?v=20260721b",
-  "/website/pwa.js?v=20260725a",
+  "/website/styles.css?v=20260802d",
+  "/website/app.js?v=20260802b",
+  "/website/pwa.js?v=20260801c",
   "/static/app.css",
   "/static/oneroot-mark.svg"
 ];

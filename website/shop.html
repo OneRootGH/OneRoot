@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Browse groceries, frozen foods, kitchen items, drinks, and other OneRoot essentials in the dedicated shop page."
+    />
+    <meta name="theme-color" content="#143a2b" />
+    <title>Shop Essentials | OneRoot.shop</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/website/styles.css?v=20260802d" />
+  </head>
+  <body>
+    <div class="shop-shell">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
+          <span>
+            <strong>OneRoot.shop</strong>
+            <small>Shop Daily Essentials</small>
+          </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a class="is-current" href="/shop">Shop</a>
+          <a href="/services">Services</a>
+          <a href="/vacancies">Vacancies</a>
+          <a href="/track-order">Track Order</a>
+          <a href="/contact">Contact</a>
+          <a href="/operations/">Staff App</a>
+          <button class="button button-secondary site-install" type="button" data-install-app hidden>Install App</button>
+        </nav>
+
+        <button id="cartToggleBtn" class="cart-toggle" type="button">
+          <span>Cart</span>
+          <strong id="cartToggleCount">0</strong>
+        </button>
+      </header>
+
+      <main class="page-main">
+        <section class="page-hero">
+          <div>
+            <p class="eyebrow">Shop</p>
+            <h1>Order products and quick service lines from the OneRoot catalog.</h1>
+            <p class="section-note">
+              Search faster, filter by area, add items to cart, and submit one
+              clean order. Use the service pages when you want dedicated laundry
+              or equipment booking forms.
+            </p>
+          </div>
+          <div class="hero-tags" id="heroContactLine"></div>
+        </section>
+
+        <section class="shop-section" id="shop">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Order Workspace</p>
+              <h2>Build your order in one guided flow</h2>
+            </div>
+            <p id="catalogMeta" class="section-note">Loading OneRoot catalog...</p>
+          </div>
+
+          <div class="shop-layout">
+            <aside class="order-guide-panel">
+              <article class="order-guide-card">
+                <p class="eyebrow">Quick Start</p>
+                <h3>Choose an area, add items, and send one clear order.</h3>
+                <p>Use filters when you know the business area you want to shop first.</p>
+                <div id="catalogQuickFilters" class="filter-chip-row"></div>
+              </article>
+
+              <article class="order-guide-card order-guide-card-muted">
+                <p class="eyebrow">Need A Service?</p>
+                <ul class="order-guide-list">
+                  <li>Use the dedicated laundry page for normal and express service requests.</li>
+                  <li>Use the equipment rentals page when the customer needs booking details captured properly.</li>
+                  <li>Quoted items can still be added here and confirmed by staff later.</li>
+                </ul>
+                <div class="inline-button-row">
+                  <a class="button button-secondary" href="/services/laundry">Laundry Page</a>
+                  <a class="button button-secondary" href="/services/equipment-rentals">Equipment Page</a>
+                </div>
+              </article>
+            </aside>
+
+            <section class="catalog-panel">
+              <div class="catalog-toolbar">
+                <label class="wide-field">
+                  <span>Search</span>
+                  <input
+                    id="catalogSearchInput"
+                    type="search"
+                    placeholder="Search item, category, or business area"
+                  />
+                </label>
+                <label>
+                  <span>Area</span>
+                  <select id="catalogAreaFilter"></select>
+                </label>
+                <label>
+                  <span>Sort</span>
+                  <select id="catalogSortFilter">
+                    <option value="featured">Featured</option>
+                    <option value="price-asc">Price: Low to High</option>
+                    <option value="price-desc">Price: High to Low</option>
+                    <option value="name">Name</option>
+                  </select>
+                </label>
+                <button id="clearCatalogFiltersBtn" class="button button-secondary" type="button">
+                  Clear Filters
+                </button>
+              </div>
+
+              <div id="catalogResultsMeta" class="results-meta"></div>
+              <div id="catalogGrid" class="catalog-grid"></div>
+            </section>
+
+            <div id="cartScrim" class="cart-scrim hidden"></div>
+            <aside class="cart-panel" id="cartPanel">
+              <div class="cart-panel-head">
+                <div>
+                  <p class="eyebrow">Review & Send</p>
+                  <h3>Your Order</h3>
+                </div>
+                <button id="closeCartBtn" class="icon-button" type="button" aria-label="Close cart">
+                  ×
+                </button>
+              </div>
+
+              <p class="cart-panel-copy">Review the basket once, then leave your contact, delivery, and payment details below.</p>
+
+              <div class="order-snapshot-grid">
+                <article>
+                  <span>Items</span>
+                  <strong id="cartItemCountValue">0</strong>
+                </article>
+                <article>
+                  <span>Areas</span>
+                  <strong id="cartAreaCountValue">0</strong>
+                </article>
+                <article>
+                  <span>Quote Lines</span>
+                  <strong id="cartQuoteCountValue">0</strong>
+                </article>
+              </div>
+
+              <div id="cartItems" class="cart-items"></div>
+
+              <div class="cart-summary">
+                <div>
+                  <span>Subtotal</span>
+                  <strong id="cartSubtotalValue">GH¢0.00</strong>
+                </div>
+                <p class="cart-summary-note">
+                  Items with price confirmation stay in the order and are finalized by staff.
+                </p>
+              </div>
+
+              <form id="checkoutForm" class="checkout-form" novalidate>
+                <section class="checkout-block">
+                  <div class="checkout-block-head">
+                    <span class="step-number">1</span>
+                    <div>
+                      <strong>Your Details</strong>
+                      <p>Required so OneRoot can confirm and fulfill the order.</p>
+                    </div>
+                  </div>
+
+                  <div class="checkout-fields">
+                    <label>
+                      <span>Customer Name</span>
+                      <input id="customerNameInput" name="customerName" type="text" required />
+                    </label>
+
+                    <label>
+                      <span>Phone Number</span>
+                      <input id="customerPhoneInput" name="customerPhone" type="tel" required />
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Email</span>
+                      <input id="customerEmailInput" name="customerEmail" type="email" />
+                    </label>
+                  </div>
+                </section>
+
+                <section class="checkout-block">
+                  <div class="checkout-block-head">
+                    <span class="step-number">2</span>
+                    <div>
+                      <strong>Delivery Plan</strong>
+                      <p>Tell OneRoot whether this is for delivery, pickup, or a callback.</p>
+                    </div>
+                  </div>
+
+                  <div class="checkout-fields">
+                    <label>
+                      <span>Delivery Mode</span>
+                      <select id="deliveryModeInput" name="deliveryMode">
+                        <option value="Delivery">Delivery</option>
+                        <option value="Pickup">Pickup</option>
+                        <option value="Call To Confirm">Call To Confirm</option>
+                      </select>
+                    </label>
+
+                    <label>
+                      <span>Preferred Date</span>
+                      <input id="preferredDateInput" name="preferredDate" type="date" />
+                    </label>
+
+                    <label>
+                      <span>Preferred Time</span>
+                      <input id="preferredTimeInput" name="preferredTime" type="time" />
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Delivery Address or Pickup Note</span>
+                      <textarea id="deliveryAddressInput" name="deliveryAddress" rows="3"></textarea>
+                    </label>
+                  </div>
+                </section>
+
+                <section class="checkout-block">
+                  <div class="checkout-block-head">
+                    <span class="step-number">3</span>
+                    <div>
+                      <strong>Payment & Notes</strong>
+                      <p>Add the last details for quote items, special requests, or family orders.</p>
+                    </div>
+                  </div>
+
+                  <div class="checkout-fields">
+                    <label>
+                      <span>Payment Method</span>
+                      <select id="paymentMethodInput" name="paymentMethod"></select>
+                    </label>
+
+                    <label class="wide-field">
+                      <span>Notes</span>
+                      <textarea
+                        id="orderNotesInput"
+                        name="notes"
+                        rows="4"
+                        placeholder="Tell OneRoot any quantity detail, meal preference, delivery direction, or follow-up note."
+                      ></textarea>
+                    </label>
+                  </div>
+                </section>
+
+                <button id="submitOrderBtn" class="button button-primary button-wide" type="submit">
+                  Send Order For Confirmation
+                </button>
+              </form>
+
+              <div id="checkoutMessage" class="checkout-message hidden"></div>
+            </aside>
+          </div>
+
+          <button id="mobileCartBar" class="mobile-cart-bar hidden" type="button">
+            <span class="mobile-cart-bar-copy">
+              <small>Review order</small>
+              <strong id="mobileCartCount">0 items</strong>
+            </span>
+            <strong id="mobileCartTotal">GH¢0.00</strong>
+          </button>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div>
+          <strong>OneRoot Essentials</strong>
+          <p id="footerContactLine">Loading contact details...</p>
+        </div>
+        <div class="footer-links">
+          <a href="/services">Services</a>
+          <a href="/track-order">Track Order</a>
+          <a href="/contact">Contact</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="/website/app.js?v=20260802b"></script>
+    <script src="/website/pwa.js?v=20260801c"></script>
+  </body>
+</html>

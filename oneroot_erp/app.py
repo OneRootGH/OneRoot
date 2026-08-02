@@ -5059,14 +5059,47 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def public_service_worker():
         return send_from_directory(app_config.root_dir, "service-worker.js", max_age=0)
 
+    def public_page(filename: str):
+        return send_from_directory(Path(app_config.root_dir) / "website", filename, max_age=0)
+
     @app.route("/")
     def home():
-        return send_from_directory(Path(app_config.root_dir) / "website", "index.html", max_age=0)
+        return public_page("index.html")
+
+    @app.route("/shop")
+    @app.route("/shop.html")
+    def shop_page():
+        return public_page("shop.html")
+
+    @app.route("/services")
+    @app.route("/services.html")
+    def services_page():
+        return public_page("services.html")
+
+    @app.route("/services/laundry")
+    @app.route("/services/laundry.html")
+    def laundry_service_page():
+        return public_page("laundry.html")
+
+    @app.route("/services/equipment-rentals")
+    @app.route("/services/equipment-rentals.html")
+    def equipment_rentals_page():
+        return public_page("equipment-rentals.html")
+
+    @app.route("/vacancies")
+    @app.route("/vacancies.html")
+    def vacancies_page():
+        return public_page("vacancies.html")
+
+    @app.route("/contact")
+    @app.route("/contact.html")
+    def contact_page():
+        return public_page("contact.html")
 
     @app.route("/track-order")
     @app.route("/track-order.html")
     def track_order_page():
-        return send_from_directory(Path(app_config.root_dir) / "website", "track-order.html", max_age=0)
+        return public_page("track-order.html")
 
     @app.route("/operations")
     @app.route("/operations/")

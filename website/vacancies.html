@@ -3,8 +3,12 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="View open OneRoot Essentials vacancies with role summary, requirements, and how to apply."
+    />
     <meta name="theme-color" content="#143a2b" />
-    <title>Track Your Order | OneRoot.shop</title>
+    <title>Vacancies | OneRoot.shop</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -15,14 +19,14 @@
     />
     <link rel="stylesheet" href="/website/styles.css?v=20260802d" />
   </head>
-  <body class="tracking-page">
+  <body>
     <div class="shop-shell">
       <header class="site-header">
         <a class="brand" href="/">
           <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
           <span>
             <strong>OneRoot.shop</strong>
-            <small>Order Tracking</small>
+            <small>Open Vacancies</small>
           </span>
         </a>
 
@@ -30,43 +34,36 @@
           <a href="/">Home</a>
           <a href="/shop">Shop</a>
           <a href="/services">Services</a>
-          <a href="/vacancies">Vacancies</a>
-          <a class="is-current" href="/track-order">Track Order</a>
+          <a class="is-current" href="/vacancies">Vacancies</a>
+          <a href="/track-order">Track Order</a>
           <a href="/contact">Contact</a>
           <a href="/operations/">Staff App</a>
           <button class="button button-secondary site-install" type="button" data-install-app hidden>Install App</button>
         </nav>
       </header>
 
-      <main class="tracking-main">
-        <section class="tracking-card">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">Order Follow-Up</p>
-              <h1>Track your OneRoot order</h1>
-            </div>
+      <main class="page-main vacancy-main">
+        <section class="page-hero">
+          <div>
+            <p class="eyebrow">Careers</p>
+            <h1>Join the OneRoot Essentials team.</h1>
             <p class="section-note">
-              Enter the order number and the same phone number used when the
-              order was placed.
+              Browse current openings across sales, services, operations,
+              kitchen, delivery, apartments, and support.
             </p>
           </div>
+          <div class="hero-tags" id="heroContactLine"></div>
+        </section>
 
-          <form id="trackingForm" class="checkout-form" novalidate>
-            <label>
-              <span>Order Number</span>
-              <input id="trackingOrderNumber" type="text" placeholder="ORO-20260719-AB12" required />
-            </label>
-            <label>
-              <span>Phone Number</span>
-              <input id="trackingPhoneNumber" type="tel" placeholder="0547038092" required />
-            </label>
-            <button id="trackOrderBtn" class="button button-primary button-wide" type="submit">
-              Check Order Status
-            </button>
-          </form>
-
-          <div id="trackingMessage" class="checkout-message hidden"></div>
-          <div id="trackingResult" class="tracking-result hidden"></div>
+        <section class="page-section">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Published Roles</p>
+              <h2>Current vacancies</h2>
+            </div>
+            <p id="vacancyMeta" class="section-note">Loading current job vacancies...</p>
+          </div>
+          <div id="vacancyGrid" class="vacancy-grid"></div>
         </section>
       </main>
 

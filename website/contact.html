@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Contact OneRoot Essentials by phone, WhatsApp, or email for orders, follow-up, service requests, or support."
+    />
+    <meta name="theme-color" content="#143a2b" />
+    <title>Contact OneRoot | OneRoot.shop</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icon.svg" type="image/svg+xml" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/website/styles.css?v=20260802d" />
+  </head>
+  <body>
+    <div class="shop-shell">
+      <header class="site-header">
+        <a class="brand" href="/">
+          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
+          <span>
+            <strong>OneRoot.shop</strong>
+            <small>Contact & Support</small>
+          </span>
+        </a>
+
+        <nav class="site-nav" aria-label="Primary">
+          <a href="/">Home</a>
+          <a href="/shop">Shop</a>
+          <a href="/services">Services</a>
+          <a href="/vacancies">Vacancies</a>
+          <a href="/track-order">Track Order</a>
+          <a class="is-current" href="/contact">Contact</a>
+          <a href="/operations/">Staff App</a>
+          <button class="button button-secondary site-install" type="button" data-install-app hidden>Install App</button>
+        </nav>
+      </header>
+
+      <main class="page-main">
+        <section class="page-hero">
+          <div>
+            <p class="eyebrow">Contact OneRoot</p>
+            <h1>Get direct help for orders, services, and follow-up.</h1>
+            <p class="section-note">
+              Call, WhatsApp, or email the OneRoot team when you need support,
+              order clarification, or a service follow-up that should be
+              handled quickly.
+            </p>
+          </div>
+          <div class="hero-tags" id="heroContactLine"></div>
+        </section>
+
+        <section class="page-section">
+          <div class="contact-grid">
+            <article class="contact-card">
+              <span class="count-pill">Phone</span>
+              <strong>Call OneRoot Support</strong>
+              <p>Use direct phone support for urgent order follow-up or service coordination.</p>
+              <a id="contactPhoneLink" class="button button-primary" href="#">
+                <span id="contactPhoneText">Loading phone...</span>
+              </a>
+            </article>
+            <article class="contact-card">
+              <span class="count-pill">WhatsApp</span>
+              <strong>Chat On WhatsApp</strong>
+              <p>Use WhatsApp for quick questions, order follow-up, and image-based clarifications.</p>
+              <a id="contactWhatsappLink" class="button button-primary" href="#" target="_blank" rel="noreferrer">
+                <span id="contactWhatsappText">Loading WhatsApp...</span>
+              </a>
+            </article>
+            <article class="contact-card">
+              <span class="count-pill">Email</span>
+              <strong>Email OneRoot</strong>
+              <p>Use email when you want to share a detailed request or a documented follow-up.</p>
+              <a id="contactEmailLink" class="button button-secondary" href="#">
+                <span id="contactEmailText">Loading email...</span>
+              </a>
+            </article>
+            <article class="contact-card">
+              <span class="count-pill">Support Note</span>
+              <strong>Pickup, delivery, and price confirmation</strong>
+              <p id="contactPickupNote">Loading support note...</p>
+              <div class="inline-button-row">
+                <a class="button button-secondary" href="/shop">Go To Shop</a>
+                <a class="button button-secondary" href="/track-order">Track Order</a>
+              </div>
+            </article>
+          </div>
+        </section>
+      </main>
+
+      <footer class="site-footer">
+        <div>
+          <strong>OneRoot Essentials</strong>
+          <p id="footerContactLine">Loading contact details...</p>
+        </div>
+        <div class="footer-links">
+          <a href="/shop">Shop</a>
+          <a href="/services">Services</a>
+          <a href="/track-order">Track Order</a>
+        </div>
+      </footer>
+    </div>
+
+    <script src="/website/app.js?v=20260802b"></script>
+    <script src="/website/pwa.js?v=20260801c"></script>
+  </body>
+</html>

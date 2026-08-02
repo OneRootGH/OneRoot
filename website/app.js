@@ -25,6 +25,7 @@
 
   function init() {
     captureElements();
+    applyInitialFiltersFromLocation();
     bindEvents();
     resetVisibleCatalogCount();
     state.isCartOpen = !isCompactViewport();
@@ -32,10 +33,26 @@
 
     if (elements.checkoutForm) {
       restoreCustomerDraftIntoForm();
-      void loadStorefront();
     }
+    restoreServiceCustomerDraftIntoForms();
 
-    if (elements.trackingForm) {
+    const needsCatalogData = Boolean(
+      elements.checkoutForm ||
+      elements.vacancyGrid ||
+      elements.equipmentBookingForm ||
+      elements.laundryBookingForm
+    );
+    const needsPublicConfig = Boolean(
+      needsCatalogData ||
+      elements.heroContactLine ||
+      elements.footerContactLine ||
+      elements.contactPhoneLink ||
+      elements.trackingForm
+    );
+
+    if (needsCatalogData) {
+      void loadStorefront();
+    } else if (needsPublicConfig) {
       void loadPublicConfig();
     }
   }
@@ -83,7 +100,44 @@
       "trackingOrderNumber",
       "trackingPhoneNumber",
       "trackingMessage",
-      "trackingResult"
+      "trackingResult",
+      "equipmentBookingForm",
+      "equipmentItemSelect",
+      "equipmentCustomerName",
+      "equipmentCustomerPhone",
+      "equipmentCustomerEmail",
+      "equipmentQuantityInput",
+      "equipmentDurationInput",
+      "equipmentStartDateInput",
+      "equipmentPreferredTimeInput",
+      "equipmentDeliveryModeInput",
+      "equipmentAddressInput",
+      "equipmentSiteLocationInput",
+      "equipmentNeedOperatorInput",
+      "equipmentNotesInput",
+      "equipmentPaymentMethodInput",
+      "equipmentMessage",
+      "laundryBookingForm",
+      "laundryServiceSelect",
+      "laundryCustomerName",
+      "laundryCustomerPhone",
+      "laundryCustomerEmail",
+      "laundryItemCountInput",
+      "laundryPickupDateInput",
+      "laundryPreferredTimeInput",
+      "laundryDeliveryModeInput",
+      "laundryAddressInput",
+      "laundryItemSummaryInput",
+      "laundryNotesInput",
+      "laundryPaymentMethodInput",
+      "laundryMessage",
+      "contactPhoneLink",
+      "contactPhoneText",
+      "contactWhatsappLink",
+      "contactWhatsappText",
+      "contactEmailLink",
+      "contactEmailText",
+      "contactPickupNote"
     ].forEach((id) => {
       elements[id] = document.getElementById(id);
     });
@@ -110,8 +164,12 @@
     elements.clearCatalogFiltersBtn?.addEventListener("click", clearCatalogFilters);
     elements.checkoutForm?.addEventListener("submit", handleCheckoutSubmit);
     elements.trackingForm?.addEventListener("submit", handleTrackingSubmit);
+    elements.equipmentBookingForm?.addEventListener("submit", handleEquipmentBookingSubmit);
+    elements.laundryBookingForm?.addEventListener("submit", handleLaundryBookingSubmit);
 
     elements.checkoutForm?.addEventListener("input", persistCustomerDraftFromForm);
+    elements.equipmentBookingForm?.addEventListener("input", persistServiceCustomerDraftFromForms);
+    elements.laundryBookingForm?.addEventListener("input", persistServiceCustomerDraftFromForms);
     elements.cartToggleBtn?.addEventListener("click", toggleCartPanel);
     elements.mobileCartBar?.addEventListener("click", openCartPanel);
     elements.closeCartBtn?.addEventListener("click", closeCartPanel);
@@ -156,13 +214,19 @@
       populateAreaFilter();
       populatePaymentMethods();
       renderContactLines();
+      renderContactPage();
       renderBusinessAreas();
       renderCatalogQuickFilters();
       renderCatalog();
       renderCart();
+      populateEquipmentOptions();
+      populateLaundryOptions();
+      populateServicePaymentMethods();
+      restoreServiceCustomerDraftIntoForms();
       syncCartPanelLayout();
 
-      try {
+      if (elements.vacancyGrid) {
+        try {
         const vacanciesResponse = await fetch("/api/public/vacancies", { cache: "no-store" });
         if (!vacanciesResponse.ok) {
           throw new Error(`Vacancies request failed with ${vacanciesResponse.status}.`);
@@ -170,10 +234,11 @@
         const vacanciesPayload = await vacanciesResponse.json();
         state.vacancies = Array.isArray(vacanciesPayload.items) ? vacanciesPayload.items : [];
         renderVacancies();
-      } catch (vacancyError) {
-        console.error(vacancyError);
-        state.vacancies = [];
-        renderVacancies();
+        } catch (vacancyError) {
+          console.error(vacancyError);
+          state.vacancies = [];
+          renderVacancies();
+        }
       }
     } catch (error) {
       console.error(error);
@@ -212,6 +277,7 @@
 
       state.config = await response.json();
       renderContactLines();
+      renderContactPage();
     } catch (error) {
       console.error(error);
     }
@@ -249,6 +315,29 @@
     }
   }
 
+  function populateServicePaymentMethods() {
+    populateServicePaymentMethodSelect(elements.equipmentPaymentMethodInput);
+    populateServicePaymentMethodSelect(elements.laundryPaymentMethodInput);
+  }
+
+  function populateServicePaymentMethodSelect(selectNode) {
+    if (!selectNode) {
+      return;
+    }
+
+    const methods = state.paymentMethods.length
+      ? state.paymentMethods
+      : ["Call To Confirm", "Pay On Pickup", "Mobile Money", "Bank Transfer"];
+
+    selectNode.innerHTML = methods
+      .map((method) => `<option value="${escapeHtml(method)}">${escapeHtml(method)}</option>`)
+      .join("");
+
+    if (state.customerDraft.paymentMethod) {
+      selectNode.value = state.customerDraft.paymentMethod;
+    }
+  }
+
   function renderContactLines() {
     if (!state.config) {
       return;
@@ -270,6 +359,43 @@
 
     if (elements.footerContactLine) {
       elements.footerContactLine.textContent = contactParts.join(" • ");
+    }
+  }
+
+  function renderContactPage() {
+    if (!state.config) {
+      return;
+    }
+
+    const supportPhone = normalizeText(state.config.supportPhone);
+    const supportDigits = normalizeDigits(supportPhone);
+    const whatsappNumber = normalizeWhatsappNumber(state.config.whatsappNumber);
+    const supportEmail = normalizeText(state.config.supportEmail);
+    const pickupNote = normalizeText(state.config.pickupNote);
+
+    if (elements.contactPhoneLink) {
+      elements.contactPhoneLink.href = supportDigits ? `tel:${supportDigits}` : "#";
+    }
+    if (elements.contactPhoneText) {
+      elements.contactPhoneText.textContent = supportPhone || "Call OneRoot";
+    }
+    if (elements.contactWhatsappLink) {
+      elements.contactWhatsappLink.href = whatsappNumber
+        ? `https://wa.me/${whatsappNumber}?text=${encodeURIComponent("Hello OneRoot, I need support with my order or service request.")}`
+        : "#";
+    }
+    if (elements.contactWhatsappText) {
+      elements.contactWhatsappText.textContent = state.config.whatsappNumber || "Open WhatsApp";
+    }
+    if (elements.contactEmailLink) {
+      elements.contactEmailLink.href = supportEmail ? `mailto:${supportEmail}` : "#";
+    }
+    if (elements.contactEmailText) {
+      elements.contactEmailText.textContent = supportEmail || "Email OneRoot";
+    }
+    if (elements.contactPickupNote) {
+      elements.contactPickupNote.textContent =
+        pickupNote || "Pickup and delivery confirmation are handled by OneRoot after the order is received.";
     }
   }
 
@@ -381,6 +507,65 @@
       .join("");
   }
 
+  function getEquipmentCatalogItems() {
+    return state.catalog
+      .filter((item) => {
+        const areaId = normalizeText(item.businessAreaId);
+        const itemType = normalizeText(item.itemType).toLowerCase();
+        const category = normalizeText(item.category).toLowerCase();
+        return (
+          areaId === "water-equipment" &&
+          itemType === "service" &&
+          (category.includes("equipment rental") || normalizeText(item.id).startsWith("equipment-rental"))
+        );
+      })
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  function getLaundryCatalogItems() {
+    return state.catalog
+      .filter((item) => normalizeText(item.businessAreaId) === "laundry-services")
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  function populateEquipmentOptions() {
+    if (!elements.equipmentItemSelect) {
+      return;
+    }
+
+    const items = getEquipmentCatalogItems();
+    if (!items.length) {
+      elements.equipmentItemSelect.innerHTML = `<option value="">No equipment options available right now</option>`;
+      return;
+    }
+
+    elements.equipmentItemSelect.innerHTML = [
+      `<option value="">Select equipment item</option>`,
+      ...items.map(
+        (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
+      )
+    ].join("");
+  }
+
+  function populateLaundryOptions() {
+    if (!elements.laundryServiceSelect) {
+      return;
+    }
+
+    const items = getLaundryCatalogItems();
+    if (!items.length) {
+      elements.laundryServiceSelect.innerHTML = `<option value="">No laundry options available right now</option>`;
+      return;
+    }
+
+    elements.laundryServiceSelect.innerHTML = [
+      `<option value="">Select laundry service</option>`,
+      ...items.map(
+        (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
+      )
+    ].join("");
+  }
+
   function splitTextLines(value) {
     const text = normalizeText(value);
     if (!text) {
@@ -487,10 +672,10 @@
         <circle cx="248" cy="56" r="38" fill="rgba(255,255,255,0.18)"/>
         <circle cx="72" cy="188" r="56" fill="rgba(255,255,255,0.12)"/>
         <rect x="24" y="24" width="112" height="108" rx="22" fill="rgba(255,255,255,0.18)"/>
-        <text x="80" y="92" text-anchor="middle" font-family="Georgia, serif" font-size="46" font-weight="700" fill="#ffffff">${escapeHtml(initials)}</text>
-        <text x="24" y="172" font-family="Arial, sans-serif" font-size="14" letter-spacing="2" fill="rgba(255,255,255,0.92)">${escapeHtml(areaLabel.toUpperCase().slice(0, 24))}</text>
-        <text x="24" y="204" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">${escapeHtml(title.slice(0, 24))}</text>
-        <text x="24" y="224" font-family="Arial, sans-serif" font-size="13" fill="rgba(255,255,255,0.88)">${escapeHtml(category.slice(0, 30))}</text>
+        <text x="80" y="92" text-anchor="middle" font-family="Inter, Arial, sans-serif" font-size="46" font-weight="800" fill="#ffffff">${escapeHtml(initials)}</text>
+        <text x="24" y="172" font-family="Inter, Arial, sans-serif" font-size="14" letter-spacing="2" fill="rgba(255,255,255,0.92)">${escapeHtml(areaLabel.toUpperCase().slice(0, 24))}</text>
+        <text x="24" y="204" font-family="Inter, Arial, sans-serif" font-size="22" font-weight="800" fill="#ffffff">${escapeHtml(title.slice(0, 24))}</text>
+        <text x="24" y="224" font-family="Inter, Arial, sans-serif" font-size="13" fill="rgba(255,255,255,0.88)">${escapeHtml(category.slice(0, 30))}</text>
       </svg>
     `;
     return `data:image/svg+xml;charset=UTF-8,${encodeURIComponent(svg)}`;
@@ -993,25 +1178,8 @@
     renderCheckoutMessage("success", "Sending your OneRoot order...");
 
     try {
-      const response = await fetch("/api/orders", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(payload)
-      });
-      const result = await response.json();
-
-      if (!response.ok || !result.ok) {
-        throw new Error(Array.isArray(result.errors) ? result.errors[0] : "Unable to save order.");
-      }
-
-      const amountLine =
-        result.includesQuoteItems && Number(result.totalAmount || 0) > 0
-          ? `${formatCurrency(result.totalAmount)} plus quote-confirmed items`
-          : result.includesQuoteItems
-            ? "Quote request captured for staff confirmation"
-            : formatCurrency(result.totalAmount || 0);
+      const result = await submitPublicOrder(payload);
+      const amountLine = buildOrderAmountLine(result);
 
       renderCheckoutMessage(
         "success",
@@ -1034,6 +1202,180 @@
       renderCheckoutMessage(
         "error",
         normalizeText(error.message) || "The order could not be sent right now."
+      );
+    }
+  }
+
+  async function handleEquipmentBookingSubmit(event) {
+    event.preventDefault();
+
+    const itemId = normalizeText(elements.equipmentItemSelect?.value);
+    const catalogItem = state.catalog.find((item) => item.id === itemId);
+    const customerName = normalizeText(elements.equipmentCustomerName?.value);
+    const customerPhone = normalizeText(elements.equipmentCustomerPhone?.value);
+
+    if (!catalogItem) {
+      renderServiceMessage(elements.equipmentMessage, "error", "Choose the equipment item to book.");
+      return;
+    }
+    if (!customerName || !customerPhone) {
+      renderServiceMessage(elements.equipmentMessage, "error", "Customer name and phone number are required.");
+      return;
+    }
+
+    const quantity = Math.max(Number(elements.equipmentQuantityInput?.value || 1), 1);
+    const durationDays = Math.max(Number(elements.equipmentDurationInput?.value || 1), 1);
+    const preferredDate = normalizeText(elements.equipmentStartDateInput?.value);
+    const preferredTime = normalizeText(elements.equipmentPreferredTimeInput?.value);
+    const deliveryMode = normalizeText(elements.equipmentDeliveryModeInput?.value) || "Call To Confirm";
+    const address = normalizeText(elements.equipmentAddressInput?.value);
+    const siteLocation = normalizeText(elements.equipmentSiteLocationInput?.value);
+    const needOperator = Boolean(elements.equipmentNeedOperatorInput?.checked);
+    const notes = normalizeText(elements.equipmentNotesInput?.value);
+    const customerEmail = normalizeText(elements.equipmentCustomerEmail?.value);
+    const paymentMethod = normalizeText(elements.equipmentPaymentMethodInput?.value) || "Call To Confirm";
+
+    const orderNotes = [
+      "Equipment rental booking request",
+      `Equipment item: ${catalogItem.name}`,
+      `Quantity requested: ${quantity}`,
+      `Rental duration: ${durationDays} day(s)`,
+      preferredDate ? `Preferred start date: ${preferredDate}` : "",
+      preferredTime ? `Preferred time: ${preferredTime}` : "",
+      deliveryMode ? `Delivery mode: ${deliveryMode}` : "",
+      siteLocation ? `Site location: ${siteLocation}` : "",
+      needOperator ? "Customer requested staff guidance or operator support." : "",
+      notes ? `Additional notes: ${notes}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    renderServiceMessage(elements.equipmentMessage, "success", "Sending equipment booking...");
+
+    try {
+      const result = await submitPublicOrder({
+        customerName,
+        customerPhone,
+        customerEmail,
+        deliveryMode,
+        deliveryAddress: address || siteLocation,
+        preferredDate,
+        preferredTime,
+        paymentMethod,
+        notes: orderNotes,
+        items: [
+          {
+            id: catalogItem.id,
+            quantity,
+            unitPrice: Number(catalogItem.salesPrice || 0),
+            notes: orderNotes
+          }
+        ]
+      });
+
+      renderServiceMessage(
+        elements.equipmentMessage,
+        "success",
+        `Equipment booking received. Your order number is <strong>${escapeHtml(
+          result.orderNumber
+        )}</strong>. ${escapeHtml(buildOrderAmountLine(result))}. Track it later with the same phone number.`
+      );
+
+      if (elements.equipmentNotesInput) {
+        elements.equipmentNotesInput.value = "";
+      }
+      persistServiceCustomerDraftFromForms();
+    } catch (error) {
+      console.error(error);
+      renderServiceMessage(
+        elements.equipmentMessage,
+        "error",
+        normalizeText(error.message) || "The equipment booking could not be sent right now."
+      );
+    }
+  }
+
+  async function handleLaundryBookingSubmit(event) {
+    event.preventDefault();
+
+    const itemId = normalizeText(elements.laundryServiceSelect?.value);
+    const catalogItem = state.catalog.find((item) => item.id === itemId);
+    const customerName = normalizeText(elements.laundryCustomerName?.value);
+    const customerPhone = normalizeText(elements.laundryCustomerPhone?.value);
+
+    if (!catalogItem) {
+      renderServiceMessage(elements.laundryMessage, "error", "Choose the laundry service type first.");
+      return;
+    }
+    if (!customerName || !customerPhone) {
+      renderServiceMessage(elements.laundryMessage, "error", "Customer name and phone number are required.");
+      return;
+    }
+
+    const itemCount = Math.max(Number(elements.laundryItemCountInput?.value || 1), 1);
+    const deliveryMode = normalizeText(elements.laundryDeliveryModeInput?.value) || "Pickup";
+    const preferredDate = normalizeText(elements.laundryPickupDateInput?.value);
+    const preferredTime = normalizeText(elements.laundryPreferredTimeInput?.value);
+    const address = normalizeText(elements.laundryAddressInput?.value);
+    const itemSummary = normalizeText(elements.laundryItemSummaryInput?.value);
+    const notes = normalizeText(elements.laundryNotesInput?.value);
+    const customerEmail = normalizeText(elements.laundryCustomerEmail?.value);
+    const paymentMethod = normalizeText(elements.laundryPaymentMethodInput?.value) || "Call To Confirm";
+
+    const orderNotes = [
+      "Laundry service request",
+      `Laundry option: ${catalogItem.name}`,
+      `Item count: ${itemCount}`,
+      itemSummary ? `Items summary: ${itemSummary}` : "",
+      preferredDate ? `Preferred date: ${preferredDate}` : "",
+      preferredTime ? `Preferred time: ${preferredTime}` : "",
+      deliveryMode ? `Pickup / delivery mode: ${deliveryMode}` : "",
+      notes ? `Special instructions: ${notes}` : ""
+    ]
+      .filter(Boolean)
+      .join("\n");
+
+    renderServiceMessage(elements.laundryMessage, "success", "Sending laundry request...");
+
+    try {
+      const result = await submitPublicOrder({
+        customerName,
+        customerPhone,
+        customerEmail,
+        deliveryMode,
+        deliveryAddress: address,
+        preferredDate,
+        preferredTime,
+        paymentMethod,
+        notes: orderNotes,
+        items: [
+          {
+            id: catalogItem.id,
+            quantity: itemCount,
+            unitPrice: Number(catalogItem.salesPrice || 0),
+            notes: orderNotes
+          }
+        ]
+      });
+
+      renderServiceMessage(
+        elements.laundryMessage,
+        "success",
+        `Laundry request received. Your order number is <strong>${escapeHtml(
+          result.orderNumber
+        )}</strong>. ${escapeHtml(buildOrderAmountLine(result))}. Track it later with the same phone number.`
+      );
+
+      if (elements.laundryNotesInput) {
+        elements.laundryNotesInput.value = "";
+      }
+      persistServiceCustomerDraftFromForms();
+    } catch (error) {
+      console.error(error);
+      renderServiceMessage(
+        elements.laundryMessage,
+        "error",
+        normalizeText(error.message) || "The laundry request could not be sent right now."
       );
     }
   }
@@ -1171,11 +1513,7 @@
       return;
     }
 
-    elements.checkoutMessage.innerHTML = html;
-    elements.checkoutMessage.classList.remove("hidden", "checkout-message-success", "checkout-message-error");
-    elements.checkoutMessage.classList.add(
-      type === "error" ? "checkout-message-error" : "checkout-message-success"
-    );
+    renderServiceMessage(elements.checkoutMessage, type, html);
   }
 
   function renderTrackingMessage(type, html) {
@@ -1201,6 +1539,55 @@
 
   function persistCart() {
     window.localStorage.setItem(SHOP_CART_STORAGE_KEY, JSON.stringify(state.cart));
+  }
+
+  function persistServiceCustomerDraftFromForms() {
+    const nextDraft = {
+      ...state.customerDraft,
+      customerName: firstNonEmpty(
+        elements.equipmentCustomerName?.value,
+        elements.laundryCustomerName?.value,
+        state.customerDraft.customerName
+      ),
+      customerPhone: firstNonEmpty(
+        elements.equipmentCustomerPhone?.value,
+        elements.laundryCustomerPhone?.value,
+        state.customerDraft.customerPhone
+      ),
+      customerEmail: firstNonEmpty(
+        elements.equipmentCustomerEmail?.value,
+        elements.laundryCustomerEmail?.value,
+        state.customerDraft.customerEmail
+      ),
+      deliveryMode: firstNonEmpty(
+        elements.equipmentDeliveryModeInput?.value,
+        elements.laundryDeliveryModeInput?.value,
+        state.customerDraft.deliveryMode
+      ),
+      deliveryAddress: firstNonEmpty(
+        elements.equipmentAddressInput?.value,
+        elements.laundryAddressInput?.value,
+        state.customerDraft.deliveryAddress
+      ),
+      preferredDate: firstNonEmpty(
+        elements.equipmentStartDateInput?.value,
+        elements.laundryPickupDateInput?.value,
+        state.customerDraft.preferredDate
+      ),
+      preferredTime: firstNonEmpty(
+        elements.equipmentPreferredTimeInput?.value,
+        elements.laundryPreferredTimeInput?.value,
+        state.customerDraft.preferredTime
+      ),
+      paymentMethod: firstNonEmpty(
+        elements.equipmentPaymentMethodInput?.value,
+        elements.laundryPaymentMethodInput?.value,
+        state.customerDraft.paymentMethod
+      )
+    };
+
+    state.customerDraft = nextDraft;
+    window.localStorage.setItem(SHOP_CUSTOMER_STORAGE_KEY, JSON.stringify(nextDraft));
   }
 
   function loadStoredCart() {
@@ -1279,6 +1666,34 @@
     setInputValue(elements.preferredDateInput, state.customerDraft.preferredDate);
     setInputValue(elements.preferredTimeInput, state.customerDraft.preferredTime);
     setInputValue(elements.orderNotesInput, state.customerDraft.notes);
+  }
+
+  function restoreServiceCustomerDraftIntoForms() {
+    setInputValue(elements.equipmentCustomerName, state.customerDraft.customerName);
+    setInputValue(elements.equipmentCustomerPhone, state.customerDraft.customerPhone);
+    setInputValue(elements.equipmentCustomerEmail, state.customerDraft.customerEmail);
+    setInputValue(elements.equipmentAddressInput, state.customerDraft.deliveryAddress);
+    setInputValue(elements.equipmentStartDateInput, state.customerDraft.preferredDate);
+    setInputValue(elements.equipmentPreferredTimeInput, state.customerDraft.preferredTime);
+    if (elements.equipmentDeliveryModeInput && state.customerDraft.deliveryMode) {
+      elements.equipmentDeliveryModeInput.value = state.customerDraft.deliveryMode;
+    }
+    if (elements.equipmentPaymentMethodInput && state.customerDraft.paymentMethod) {
+      elements.equipmentPaymentMethodInput.value = state.customerDraft.paymentMethod;
+    }
+
+    setInputValue(elements.laundryCustomerName, state.customerDraft.customerName);
+    setInputValue(elements.laundryCustomerPhone, state.customerDraft.customerPhone);
+    setInputValue(elements.laundryCustomerEmail, state.customerDraft.customerEmail);
+    setInputValue(elements.laundryAddressInput, state.customerDraft.deliveryAddress);
+    setInputValue(elements.laundryPickupDateInput, state.customerDraft.preferredDate);
+    setInputValue(elements.laundryPreferredTimeInput, state.customerDraft.preferredTime);
+    if (elements.laundryDeliveryModeInput && state.customerDraft.deliveryMode) {
+      elements.laundryDeliveryModeInput.value = state.customerDraft.deliveryMode;
+    }
+    if (elements.laundryPaymentMethodInput && state.customerDraft.paymentMethod) {
+      elements.laundryPaymentMethodInput.value = state.customerDraft.paymentMethod;
+    }
   }
 
   function toggleCartPanel() {
@@ -1396,6 +1811,41 @@
     document.body.classList.toggle("cart-drawer-open", compact && state.isCartOpen);
   }
 
+  async function submitPublicOrder(payload) {
+    const response = await fetch("/api/orders", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+
+    if (!response.ok || !result.ok) {
+      throw new Error(Array.isArray(result.errors) ? result.errors[0] : "Unable to save order.");
+    }
+
+    return result;
+  }
+
+  function buildOrderAmountLine(result) {
+    return result.includesQuoteItems && Number(result.totalAmount || 0) > 0
+      ? `${formatCurrency(result.totalAmount)} plus quote-confirmed items`
+      : result.includesQuoteItems
+        ? "Quote request captured for staff confirmation"
+        : formatCurrency(result.totalAmount || 0);
+  }
+
+  function renderServiceMessage(targetNode, type, html) {
+    if (!targetNode) {
+      return;
+    }
+
+    targetNode.innerHTML = html;
+    targetNode.classList.remove("hidden", "checkout-message-success", "checkout-message-error");
+    targetNode.classList.add(type === "error" ? "checkout-message-error" : "checkout-message-success");
+  }
+
   function getStatusClassName(value) {
     return `status-${normalizeText(value).toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   }
@@ -1464,6 +1914,16 @@
       .trim();
   }
 
+  function firstNonEmpty(...values) {
+    for (const value of values) {
+      const normalized = normalizeText(value);
+      if (normalized) {
+        return normalized;
+      }
+    }
+    return "";
+  }
+
   function normalizeDigits(value) {
     return normalizeText(value).replace(/[^\d]/g, "");
   }
@@ -1511,5 +1971,12 @@
     if (element) {
       element.textContent = value;
     }
+  }
+
+  function applyInitialFiltersFromLocation() {
+    const params = new URLSearchParams(window.location.search);
+    state.filters.search = normalizeText(params.get("q"));
+    state.filters.area = normalizeText(params.get("area"));
+    state.filters.sort = normalizeText(params.get("sort")) || "featured";
   }
 })();
