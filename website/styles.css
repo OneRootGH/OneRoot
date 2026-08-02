@@ -15,8 +15,8 @@
   --white: #ffffff;
   --border-soft: rgba(20, 58, 43, 0.12);
   --shadow-soft: 0 24px 60px rgba(16, 41, 31, 0.12);
-  --font-sans: "Plus Jakarta Sans", "Segoe UI", sans-serif;
-  --font-display: "Fraunces", "Times New Roman", serif;
+  --font-sans: "Inter", "Segoe UI", sans-serif;
+  --font-display: "Inter", "Segoe UI", sans-serif;
 }
 
 * {
@@ -101,7 +101,8 @@ main {
 .brand strong {
   font-family: var(--font-display);
   font-size: 1.35rem;
-  letter-spacing: 0.015em;
+  font-weight: 800;
+  letter-spacing: -0.03em;
 }
 
 .brand small {

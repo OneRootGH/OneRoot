@@ -3379,6 +3379,48 @@ def category_performance_rows(db_session, month_value: str, area_id: str = "") -
     return rows
 
 
+def month_anchor_date(month_value: Any) -> date | None:
+    month_text = parse_month(month_value)
+    if not month_text:
+        return None
+    try:
+        return date.fromisoformat(f"{month_text}-01")
+    except ValueError:
+        return None
+
+
+def get_laundry_payment_date(payload: dict[str, Any]) -> date | None:
+    return parse_date(payload.get("paymentDate")) or parse_date(payload.get("ticketDate"))
+
+
+def get_equipment_payment_date(payload: dict[str, Any]) -> date | None:
+    return parse_date(payload.get("paymentDate")) or parse_date(payload.get("bookingDate"))
+
+
+def get_apartment_rent_payment_date(payload: dict[str, Any]) -> date | None:
+    return (
+        parse_date(payload.get("rentPaymentDate"))
+        or parse_date(payload.get("rentCoverageStartDate"))
+        or month_anchor_date(payload.get("month"))
+    )
+
+
+def get_apartment_bill_payment_date(payload: dict[str, Any]) -> date | None:
+    return (
+        parse_date(payload.get("billPaymentDate"))
+        or parse_date(payload.get("billDueDate"))
+        or month_anchor_date(payload.get("month"))
+    )
+
+
+def get_security_deposit_payment_date(payload: dict[str, Any]) -> date | None:
+    return parse_date(payload.get("depositPaymentDate")) or parse_date(payload.get("captureDate"))
+
+
+def get_security_charge_payment_date(payload: dict[str, Any]) -> date | None:
+    return parse_date(payload.get("chargePaymentDate")) or parse_date(payload.get("captureDate"))
+
+
 def search_target_for_module_record(record: ModuleRecord) -> str:
     if record.module_key == "online_orders":
         return url_for("online_orders_desk", order_id=record.id)
@@ -4195,41 +4237,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 continue
             totals[area_id] += round(quantity * unit_cost, 2)
         return {key: round(value, 2) for key, value in totals.items() if value > 0}
-
-    def month_anchor_date(month_value: Any) -> date | None:
-        month_text = parse_month(month_value)
-        if not month_text:
-            return None
-        try:
-            return date.fromisoformat(f"{month_text}-01")
-        except ValueError:
-            return None
-
-    def get_laundry_payment_date(payload: dict[str, Any]) -> date | None:
-        return parse_date(payload.get("paymentDate")) or parse_date(payload.get("ticketDate"))
-
-    def get_equipment_payment_date(payload: dict[str, Any]) -> date | None:
-        return parse_date(payload.get("paymentDate")) or parse_date(payload.get("bookingDate"))
-
-    def get_apartment_rent_payment_date(payload: dict[str, Any]) -> date | None:
-        return (
-            parse_date(payload.get("rentPaymentDate"))
-            or parse_date(payload.get("rentCoverageStartDate"))
-            or month_anchor_date(payload.get("month"))
-        )
-
-    def get_apartment_bill_payment_date(payload: dict[str, Any]) -> date | None:
-        return (
-            parse_date(payload.get("billPaymentDate"))
-            or parse_date(payload.get("billDueDate"))
-            or month_anchor_date(payload.get("month"))
-        )
-
-    def get_security_deposit_payment_date(payload: dict[str, Any]) -> date | None:
-        return parse_date(payload.get("depositPaymentDate")) or parse_date(payload.get("captureDate"))
-
-    def get_security_charge_payment_date(payload: dict[str, Any]) -> date | None:
-        return parse_date(payload.get("chargePaymentDate")) or parse_date(payload.get("captureDate"))
 
     def upsert_generated_sale(
         db_session,

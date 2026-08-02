@@ -277,7 +277,7 @@
               <span class="pos-product-meta">
                 <small class="pos-product-stock">${escapeHtml(product.stockLabel || (product.trackInventory ? `Stock ${product.quantityOnHand ?? 0}` : "Service"))}</small>
                 <small class="pos-product-area">${escapeHtml(product.category || "General")}</small>
-                ${selectedQuantity > 0 ? `<small class="pos-product-selected">In Cart ${escapeHtml(String(selectedQuantity))}</small>` : ""}
+                ${selectedQuantity > 0 ? `<small class="pos-product-selected">In Cart x${escapeHtml(String(selectedQuantity))}</small>` : ""}
               </span>
             </span>
             <strong class="pos-product-name">${escapeHtml(product.name)}</strong>
