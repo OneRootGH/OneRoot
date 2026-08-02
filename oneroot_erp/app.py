@@ -1093,6 +1093,7 @@ def format_module_amount(definition: ModuleDefinition, value: Any) -> str:
 SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
     "profits": ("Profit Center", "profits_page", None),
+    "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
@@ -3168,6 +3169,216 @@ def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: s
     return rows
 
 
+def category_performance_rows(db_session, month_value: str, area_id: str = "") -> list[dict[str, Any]]:
+    scoped_month = parse_month(month_value)
+    selected_area = normalize_text(area_id)
+    generated_source_types = {
+        "pos-summary",
+        "online-order-payments",
+        "laundry-payment",
+        "equipment-rental-payment",
+        "apartment-rent-payment",
+        "apartment-bill-payment",
+        "security-deposit-payment",
+        "tenant-charge-payment",
+    }
+    row_map: dict[tuple[str, str], dict[str, Any]] = {}
+
+    def in_month_scope(target_date: date | None) -> bool:
+        if not scoped_month:
+            return True
+        return bool(target_date and target_date.strftime("%Y-%m") == scoped_month)
+
+    def add_category_row(
+        *,
+        area_id_value: str,
+        category_label: str,
+        sales_amount: Any,
+        cost_amount: Any = 0.0,
+        transaction_count: Any = 1,
+        source_label: str = "",
+    ) -> None:
+        area_key = normalize_text(area_id_value) or "shared-operations"
+        if selected_area and area_key != selected_area:
+            return
+        category_key = normalize_text(category_label) or "Uncategorized"
+        clean_sales = round(parse_amount(sales_amount), 2)
+        clean_cost = round(parse_amount(cost_amount), 2)
+        if clean_sales <= 0 and clean_cost <= 0:
+            return
+        key = (area_key, category_key)
+        row = row_map.setdefault(
+            key,
+            {
+                "areaId": area_key,
+                "areaLabel": BUSINESS_AREA_LABELS.get(area_key, area_key),
+                "areaShort": BUSINESS_AREA_SHORT.get(area_key, area_key),
+                "categoryLabel": category_key,
+                "salesTotal": 0.0,
+                "costTotal": 0.0,
+                "profitTotal": 0.0,
+                "transactionCount": 0,
+                "sources": set(),
+            },
+        )
+        row["salesTotal"] = round(row["salesTotal"] + clean_sales, 2)
+        row["costTotal"] = round(row["costTotal"] + clean_cost, 2)
+        row["profitTotal"] = round(row["profitTotal"] + (clean_sales - clean_cost), 2)
+        row["transactionCount"] += max(int(parse_amount(transaction_count)), 1)
+        if source_label:
+            row["sources"].add(source_label)
+
+    pos_orders = db_session.scalars(select(PosOrder).options(selectinload(PosOrder.lines))).all()
+    for order in pos_orders:
+        if not in_month_scope(order.order_date):
+            continue
+        for line in order.lines:
+            add_category_row(
+                area_id_value=normalize_text(line.business_area_id),
+                category_label=normalize_text(line.category) or "Counter Sales",
+                sales_amount=line.total_amount,
+                cost_amount=line.cost_amount,
+                transaction_count=1,
+                source_label="POS",
+            )
+
+    online_orders = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "online_orders").order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+    ).all()
+    for record in online_orders:
+        payload = record.payload or {}
+        if normalize_text(payload.get("paymentStatus")).lower() != "paid":
+            continue
+        paid_amount = round(parse_amount(payload.get("paidAmount")), 2)
+        if paid_amount <= 0:
+            continue
+        payment_date = parse_date(payload.get("paymentDate")) or parse_date(payload.get("updatedAt")) or record.record_date
+        if not in_month_scope(payment_date):
+            continue
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        quoted_total = round(sum(parse_amount(item.get("lineTotal")) for item in items), 2)
+        ratio = paid_amount / quoted_total if quoted_total > 0 else 0.0
+        for item in items:
+            quantity = max(parse_amount(item.get("quantity")), 1.0)
+            line_total = round(parse_amount(item.get("lineTotal")) or (quantity * parse_amount(item.get("unitPrice"))), 2)
+            line_cost = round(quantity * parse_amount(item.get("costPrice")), 2)
+            sales_value = round(line_total * ratio if ratio else line_total, 2)
+            cost_value = round(line_cost * ratio if ratio else line_cost, 2)
+            add_category_row(
+                area_id_value=normalize_text(item.get("businessAreaId")),
+                category_label=normalize_text(item.get("category")) or "Online Order",
+                sales_amount=sales_value,
+                cost_amount=cost_value,
+                transaction_count=1,
+                source_label="Online Orders",
+            )
+
+    for module_key, default_area, category_field, source_label, date_getter in [
+        ("laundry_tickets", "laundry-services", "serviceCategory", "Laundry", get_laundry_payment_date),
+        ("equipment_rental_bookings", "water-equipment", "equipmentCategory", "Equipment Rental", get_equipment_payment_date),
+    ]:
+        service_records = db_session.scalars(
+            select(ModuleRecord).where(ModuleRecord.module_key == module_key).order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+        for record in service_records:
+            payload = record.payload or {}
+            category_value = (
+                normalize_text(payload.get(category_field))
+                or normalize_text(payload.get("serviceType"))
+                or normalize_text(payload.get("equipmentItem"))
+                or source_label
+            )
+            area_key = normalize_text(payload.get("businessAreaId")) or default_area
+            for payment in service_payment_summary(module_key, payload)["payments"]:
+                payment_date = parse_date(payment.get("paymentDate")) or date_getter(payload)
+                if not in_month_scope(payment_date):
+                    continue
+                add_category_row(
+                    area_id_value=area_key,
+                    category_label=category_value,
+                    sales_amount=payment.get("amountPaid"),
+                    cost_amount=payment.get("costAmount"),
+                    transaction_count=1,
+                    source_label=source_label,
+                )
+
+    apartment_records = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "apartments").order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+    ).all()
+    for record in apartment_records:
+        payload = record.payload or {}
+        apartment_area = normalize_text(payload.get("businessAreaId")) or "rentals-apartments"
+        if in_month_scope(get_apartment_rent_payment_date(payload)):
+            add_category_row(
+                area_id_value=apartment_area,
+                category_label="Rent",
+                sales_amount=payload.get("rentPaid"),
+                transaction_count=1,
+                source_label="Apartment Rent",
+            )
+        if in_month_scope(get_apartment_bill_payment_date(payload)):
+            add_category_row(
+                area_id_value=apartment_area,
+                category_label="Bills",
+                sales_amount=payload.get("billAmountPaid"),
+                transaction_count=1,
+                source_label="Apartment Bills",
+            )
+
+    deposit_records = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "security_deposit_records").order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+    ).all()
+    for record in deposit_records:
+        payload = record.payload or {}
+        apartment_area = normalize_text(payload.get("businessAreaId")) or "rentals-apartments"
+        if in_month_scope(get_security_deposit_payment_date(payload)):
+            add_category_row(
+                area_id_value=apartment_area,
+                category_label="Security Deposit",
+                sales_amount=payload.get("depositPaid"),
+                transaction_count=1,
+                source_label="Security Deposit",
+            )
+        if in_month_scope(get_security_charge_payment_date(payload)):
+            add_category_row(
+                area_id_value=apartment_area,
+                category_label="Tenant Charges",
+                sales_amount=payload.get("chargesPaid"),
+                transaction_count=1,
+                source_label="Tenant Charges",
+            )
+
+    sales_records = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "sales").order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+    ).all()
+    for record in sales_records:
+        payload = record.payload or {}
+        source_type = normalize_text(payload.get("sourceType")).lower() or "manual-sale"
+        if source_type in generated_source_types:
+            continue
+        if not record_in_month_scope(record, scoped_month or month_value) or not record_in_area_scope(record, selected_area):
+            continue
+        add_category_row(
+            area_id_value=normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")),
+            category_label=normalize_text(payload.get("category")) or normalize_text(payload.get("sourceLabel")) or "General Sales",
+            sales_amount=record.amount,
+            cost_amount=module_record_cost_amount(record),
+            transaction_count=payload.get("transactionCount") or 1,
+            source_label=normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type),
+        )
+
+    rows: list[dict[str, Any]] = []
+    for row in row_map.values():
+        row["marginPercent"] = round((row["profitTotal"] / row["salesTotal"]) * 100, 2) if row["salesTotal"] > 0 else 0.0
+        row["sourceCount"] = len(row["sources"])
+        row["sourceList"] = ", ".join(sorted(row["sources"])) if row["sources"] else "Direct"
+        row.pop("sources", None)
+        rows.append(row)
+
+    rows.sort(key=lambda item: (item["profitTotal"], item["salesTotal"], item["categoryLabel"]), reverse=True)
+    return rows
+
+
 def search_target_for_module_record(record: ModuleRecord) -> str:
     if record.module_key == "online_orders":
         return url_for("online_orders_desk", order_id=record.id)
@@ -3420,6 +3631,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         return jsonify({"ok": False, "error": "You do not have access to this area."}), 403
                     flash("You do not have access to that area.", "warning")
                     return redirect(url_for("dashboard"))
+                attendance_gate = attendance_gate_response_for_request(
+                    g.current_user,
+                    key,
+                    api=api or request.path.startswith("/app/api/"),
+                )
+                if attendance_gate is not None:
+                    return attendance_gate
                 return view(*args, **kwargs)
 
             return wrapped
@@ -3462,7 +3680,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     def enforce_module_access(module_key: str):
         if user_has_access(g.current_user, module_key):
-            return None
+            return attendance_gate_response_for_request(g.current_user, module_key)
         flash("You do not have access to that module.", "warning")
         return redirect(url_for("dashboard"))
 
@@ -3647,6 +3865,65 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "workedHours": worked_hours,
             "recordId": getattr(record, "id", ""),
         }
+
+    def attendance_gate_target_path() -> str:
+        return url_for("module_list", module_key="workforce_attendance")
+
+    def attendance_check_in_required(user: User | None) -> bool:
+        if not user or not user_has_access(user, "workforce_attendance"):
+            return False
+        return normalize_role_key(getattr(user, "role", "viewer")) not in {"owner", "admin"}
+
+    def attendance_is_checked_in(user: User | None, target_date: date | None = None) -> bool:
+        if not attendance_check_in_required(user):
+            return True
+        record = attendance_record_for_user(user, target_date or current_local_datetime().date())
+        if not record:
+            return False
+        payload = dict(record.payload or {})
+        check_in_time = normalize_text(payload.get("checkInTime"))
+        check_out_time = normalize_text(payload.get("checkOutTime"))
+        stored_status = normalize_text(payload.get("attendanceStatus")) or normalize_text(getattr(record, "status", ""))
+        if stored_status == "Off Duty" or check_out_time:
+            return False
+        return bool(check_in_time)
+
+    def attendance_path_allowed(path: Any) -> bool:
+        candidate = safe_next_path(path, attendance_gate_target_path())
+        attendance_index = attendance_gate_target_path()
+        attendance_form = url_for("module_form", module_key="workforce_attendance")
+        return (
+            candidate == attendance_index
+            or candidate.startswith(f"{attendance_index}?")
+            or candidate == attendance_form
+            or candidate.startswith(f"{attendance_form}?")
+            or candidate == url_for("logout")
+        )
+
+    def attendance_gate_response_for_request(user: User | None, module_key: str, *, api: bool = False):
+        if not attendance_check_in_required(user):
+            return None
+        if module_key == "workforce_attendance" or attendance_is_checked_in(user):
+            return None
+        message = "Check in from Attendance before opening the rest of the workspace."
+        if api:
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": message,
+                    "requiresCheckIn": True,
+                    "redirect": attendance_gate_target_path(),
+                }
+            ), 403
+        flash(message, "warning")
+        return redirect(attendance_gate_target_path())
+
+    def workspace_entry_path_for_user(user: User | None, next_value: Any = "") -> str:
+        fallback = url_for("dashboard")
+        next_path = safe_next_path(next_value, fallback)
+        if attendance_check_in_required(user) and not attendance_is_checked_in(user) and not attendance_path_allowed(next_path):
+            return attendance_gate_target_path()
+        return next_path
 
     def apartment_document_bundle(record_id: str) -> dict[str, Any] | None:
         record = g.db.get(ModuleRecord, record_id)
@@ -4919,7 +5196,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             session["user_id"] = user.id
             audit("access", "Access", "login", f"{user.full_name or user.username} signed in", user.id)
             g.db.commit()
-            return redirect(request.args.get("next") or url_for("dashboard"))
+            next_path = request.args.get("next")
+            redirect_target = workspace_entry_path_for_user(user, next_path)
+            if redirect_target == attendance_gate_target_path() and not attendance_path_allowed(next_path):
+                flash("Check in first before opening the rest of the workspace.", "warning")
+            return redirect(redirect_target)
         return render_template("login.html", page_title="Sign In")
 
     @app.route("/app/reconnecting")
@@ -4931,9 +5212,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if user and user.active and user.login_enabled:
                     session["user_id"] = user.id
                     session.pop("pending_login_user", None)
-                    return redirect(url_for("dashboard"))
+                    return redirect(workspace_entry_path_for_user(user))
             if session.get("user_id"):
-                return redirect(url_for("dashboard"))
+                return redirect(workspace_entry_path_for_user(g.current_user))
             return redirect(url_for("login"))
         return render_template(
             "workspace_reconnecting.html",
@@ -5395,6 +5676,97 @@ def create_app(config: AppConfig | None = None) -> Flask:
         ]
         return csv_download(
             f"oneroot-profits-{month_filter}{'-' + area_filter if area_filter else ''}.csv",
+            headers,
+            rows,
+        )
+
+    @app.route("/app/category-performance")
+    @access_required("category_performance")
+    def category_performance_page():
+        month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
+        area_filter = normalize_text(request.args.get("area"))
+        rows = category_performance_rows(g.db, month_filter, area_filter)
+
+        sales_total = round(sum(row["salesTotal"] for row in rows), 2)
+        cost_total = round(sum(row["costTotal"] for row in rows), 2)
+        profit_total = round(sum(row["profitTotal"] for row in rows), 2)
+        transaction_total = sum(row["transactionCount"] for row in rows)
+        margin_percent = round((profit_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
+        best_profit_row = rows[0] if rows else None
+        best_sales_row = max(rows, key=lambda item: item["salesTotal"]) if rows else None
+
+        def category_chart_label(row: dict[str, Any]) -> str:
+            return row["categoryLabel"] if area_filter else f"{row['categoryLabel']} · {row['areaShort']}"
+
+        sales_chart_rows = sorted(rows, key=lambda item: item["salesTotal"], reverse=True)[:12]
+        profit_chart_rows = sorted(rows, key=lambda item: item["profitTotal"], reverse=True)[:12]
+
+        return render_template(
+            "category_performance.html",
+            page_title="Category Performance",
+            month_filter=month_filter,
+            area_filter=area_filter,
+            business_area_options=BUSINESS_AREA_OPTIONS,
+            rows=rows,
+            sales_total=sales_total,
+            cost_total=cost_total,
+            profit_total=profit_total,
+            transaction_total=transaction_total,
+            margin_percent=margin_percent,
+            best_profit_row=best_profit_row,
+            best_sales_row=best_sales_row,
+            category_sales_chart=build_chart_rows(
+                [
+                    {
+                        "label": category_chart_label(row),
+                        "short": row["categoryLabel"],
+                        "amount": row["salesTotal"],
+                    }
+                    for row in sales_chart_rows
+                    if row["salesTotal"] > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--green)",
+            ),
+            category_profit_chart=build_chart_rows(
+                [
+                    {
+                        "label": category_chart_label(row),
+                        "short": row["categoryLabel"],
+                        "amount": row["profitTotal"],
+                    }
+                    for row in profit_chart_rows
+                    if abs(parse_amount(row["profitTotal"])) > 0
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--accent)",
+            ),
+        )
+
+    @app.route("/app/category-performance/export.csv")
+    @access_required("category_performance")
+    def category_performance_export():
+        month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
+        area_filter = normalize_text(request.args.get("area"))
+        rows = category_performance_rows(g.db, month_filter, area_filter)
+        headers = [
+            "areaId",
+            "areaLabel",
+            "categoryLabel",
+            "salesTotal",
+            "costTotal",
+            "profitTotal",
+            "marginPercent",
+            "transactionCount",
+            "sourceCount",
+            "sourceList",
+        ]
+        return csv_download(
+            f"oneroot-category-performance-{month_filter}{'-' + area_filter if area_filter else ''}.csv",
             headers,
             rows,
         )

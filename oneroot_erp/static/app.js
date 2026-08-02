@@ -108,6 +108,15 @@
     return state.cart.reduce((sum, item) => sum + item.quantity, 0);
   }
 
+  function getSelectedQuantity(productId) {
+    const productKey = String(productId || "");
+    if (!productKey) {
+      return 0;
+    }
+    const match = state.cart.find((item) => String(item.productId || "") === productKey);
+    return match ? Number(match.quantity || 0) : 0;
+  }
+
   function setLastReceipt(order) {
     if (lastOrderNode) {
       lastOrderNode.textContent = order?.orderNumber || "No receipt yet";
@@ -146,6 +155,9 @@
     cartContainer.innerHTML = "";
     if (!state.cart.length) {
       cartContainer.innerHTML = "<div class='muted'>No items in cart yet.</div>";
+      if (state.latestResults.length) {
+        renderResults(state.latestResults, { resetPage: false });
+      }
       return;
     }
 
@@ -195,6 +207,10 @@
 
       cartContainer.appendChild(line);
     });
+
+    if (state.latestResults.length) {
+      renderResults(state.latestResults, { resetPage: false });
+    }
   }
 
   function addProduct(product, quantity = 1) {
@@ -252,22 +268,26 @@
     }
 
     resultsContainer.innerHTML = visibleResults
-      .map((product) => `
-        <button class="pos-product-tile" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
-          <span class="pos-product-top">
-            <img class="product-thumb pos-product-thumb" src="${escapeHtml(product.imageUrl || "")}" alt="${escapeHtml(product.name)}">
-            <span class="pos-product-meta">
-              <small class="pos-product-stock">${escapeHtml(product.stockLabel || (product.trackInventory ? `Stock ${product.quantityOnHand ?? 0}` : "Service"))}</small>
-              <small class="pos-product-area">${escapeHtml(product.category || "General")}</small>
+      .map((product) => {
+        const selectedQuantity = getSelectedQuantity(product.id);
+        return `
+          <button class="pos-product-tile" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
+            <span class="pos-product-top">
+              <img class="product-thumb pos-product-thumb" src="${escapeHtml(product.imageUrl || "")}" alt="${escapeHtml(product.name)}">
+              <span class="pos-product-meta">
+                <small class="pos-product-stock">${escapeHtml(product.stockLabel || (product.trackInventory ? `Stock ${product.quantityOnHand ?? 0}` : "Service"))}</small>
+                <small class="pos-product-area">${escapeHtml(product.category || "General")}</small>
+                ${selectedQuantity > 0 ? `<small class="pos-product-selected">In Cart ${escapeHtml(String(selectedQuantity))}</small>` : ""}
+              </span>
             </span>
-          </span>
-          <strong class="pos-product-name">${escapeHtml(product.name)}</strong>
-          <span class="pos-product-footer">
-            <strong class="pos-product-price">${formatCurrency(product.salesPrice)}</strong>
-            <span class="pos-product-add">Add</span>
-          </span>
-        </button>
-      `)
+            <strong class="pos-product-name">${escapeHtml(product.name)}</strong>
+            <span class="pos-product-footer">
+              <strong class="pos-product-price">${formatCurrency(product.salesPrice)}</strong>
+              <span class="pos-product-add">Add</span>
+            </span>
+          </button>
+        `;
+      })
       .join("");
 
     resultsContainer.querySelectorAll("[data-product]").forEach((button) => {

@@ -1,0 +1,162 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Filters</p>
+        <h3>Category Scope</h3>
+      </div>
+      <a class="button subtle" href="{{ url_for('category_performance_export', month=month_filter, area=area_filter) }}">Export Category CSV</a>
+    </div>
+    <form class="form-grid">
+      <label>
+        <span>Month</span>
+        <input type="month" name="month" value="{{ month_filter }}">
+      </label>
+      <label>
+        <span>Business Area</span>
+        <select name="area">
+          <option value="">All Business Areas</option>
+          {% for value, label in business_area_options %}
+            <option value="{{ value }}" {% if area_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Apply Filter</button>
+        <a class="button subtle" href="{{ url_for('category_performance_page') }}">Reset</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Sales</span>
+      <strong>{{ sales_total|currency }}</strong>
+      <small>Captured sales in the selected category scope</small>
+    </article>
+    <article class="metric-card">
+      <span>Direct Cost</span>
+      <strong>{{ cost_total|currency }}</strong>
+      <small>Recognized stock and service cost behind those sales</small>
+    </article>
+    <article class="metric-card">
+      <span>Profit</span>
+      <strong>{{ profit_total|currency }}</strong>
+      <small>{{ margin_percent }}% blended category margin</small>
+    </article>
+    <article class="metric-card">
+      <span>Category Rows</span>
+      <strong>{{ rows|length }}</strong>
+      <small>{{ transaction_total }} captured entries in this view</small>
+    </article>
+  </section>
+
+  <section class="card-grid two">
+    <article class="metric-card">
+      <span>Highest Profit Category</span>
+      <strong>{{ best_profit_row.categoryLabel if best_profit_row else '—' }}</strong>
+      <small>{% if best_profit_row %}{{ best_profit_row.areaShort }} · {{ best_profit_row.profitTotal|currency }}{% else %}No paid category activity yet{% endif %}</small>
+    </article>
+    <article class="metric-card">
+      <span>Top Sales Category</span>
+      <strong>{{ best_sales_row.categoryLabel if best_sales_row else '—' }}</strong>
+      <small>{% if best_sales_row %}{{ best_sales_row.areaShort }} · {{ best_sales_row.salesTotal|currency }}{% else %}No paid category activity yet{% endif %}</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Sales Chart</p>
+          <h3>Top Categories By Sales</h3>
+        </div>
+      </div>
+      {% if category_sales_chart %}
+        <div class="chart-stack">
+          {% for row in category_sales_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Sales by category will appear once paid activity is captured.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Profit Chart</p>
+          <h3>Top Categories By Profit</h3>
+        </div>
+      </div>
+      {% if category_profit_chart %}
+        <div class="chart-stack">
+          {% for row in category_profit_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span class="{% if row.chartNegative %}negative-text{% endif %}">{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill {% if row.chartNegative %}negative{% endif %}" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Profit by category will appear once paid activity is captured.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Category Scorecard</p>
+        <h3>Sales, Profit, and Margin By Category</h3>
+      </div>
+    </div>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Category</th>
+            <th>Sales</th>
+            <th>Cost</th>
+            <th>Profit</th>
+            <th>Margin</th>
+            <th>Entries</th>
+            <th>Sources</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in rows %}
+            <tr>
+              <td>{{ row.areaShort }}</td>
+              <td>{{ row.categoryLabel }}</td>
+              <td>{{ row.salesTotal|currency }}</td>
+              <td>{{ row.costTotal|currency }}</td>
+              <td class="{% if row.profitTotal < 0 %}negative-text{% endif %}">{{ row.profitTotal|currency }}</td>
+              <td>{{ row.marginPercent }}%</td>
+              <td>{{ row.transactionCount }}</td>
+              <td>{{ row.sourceList }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8">No category performance rows are available for this filter yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}

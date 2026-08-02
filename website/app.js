@@ -343,7 +343,29 @@
               <span>${escapeHtml(vacancy.employmentType || "Flexible")}</span>
               <span>${escapeHtml(vacancy.location || "Accra")}</span>
             </div>
-            <p>${escapeHtml(vacancy.summary || "Join OneRoot Essentials and help serve daily community needs.")}</p>
+            <div class="vacancy-detail-stack">
+              <section class="vacancy-detail-section">
+                <strong>Role Summary</strong>
+                ${renderVacancyParagraph(
+                  vacancy.summary,
+                  "Join OneRoot Essentials and help deliver daily community needs with care, speed, and accountability."
+                )}
+              </section>
+              <section class="vacancy-detail-section">
+                <strong>Requirements</strong>
+                ${renderVacancyList(
+                  vacancy.requirements,
+                  "Relevant experience, reliability, communication skills, and willingness to serve customers well."
+                )}
+              </section>
+              <section class="vacancy-detail-section">
+                <strong>How To Apply</strong>
+                ${renderVacancyParagraph(
+                  vacancy.howToApply,
+                  "Use the apply button below or contact OneRoot with your name, role of interest, phone number, and brief experience summary."
+                )}
+              </section>
+            </div>
             <div class="vacancy-detail-list">
               <span>${escapeHtml(vacancy.closingDate ? `Apply by ${formatDate(vacancy.closingDate)}` : "Applications are open now")}</span>
               ${vacancy.salaryRange ? `<span>${escapeHtml(vacancy.salaryRange)}</span>` : ""}
@@ -357,6 +379,33 @@
         `;
       })
       .join("");
+  }
+
+  function splitTextLines(value) {
+    const text = normalizeText(value);
+    if (!text) {
+      return [];
+    }
+    return text
+      .split(/\r?\n|•|;/)
+      .map((item) => normalizeText(item).replace(/^[\-\u2022]\s*/, ""))
+      .filter(Boolean);
+  }
+
+  function renderVacancyParagraph(value, fallback) {
+    return `<p class="vacancy-copy">${escapeHtml(normalizeText(value) || fallback)}</p>`;
+  }
+
+  function renderVacancyList(value, fallback) {
+    const items = splitTextLines(value);
+    if (!items.length) {
+      return renderVacancyParagraph("", fallback);
+    }
+    return `
+      <ul class="vacancy-bullets">
+        ${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}
+      </ul>
+    `;
   }
 
   function renderCatalogQuickFilters() {
