@@ -1,8 +1,10 @@
-const CACHE_NAME = "oneroot-platform-v61";
+const CACHE_NAME = "oneroot-platform-v62";
 const APP_SHELL_ASSETS = [
   "/",
   "/shop",
   "/services",
+  "/laundry",
+  "/equipment",
   "/services/laundry",
   "/services/equipment-rentals",
   "/vacancies",

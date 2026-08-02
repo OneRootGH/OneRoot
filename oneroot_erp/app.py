@@ -5078,11 +5078,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     @app.route("/services/laundry")
     @app.route("/services/laundry.html")
+    @app.route("/laundry")
+    @app.route("/laundry.html")
     def laundry_service_page():
         return public_page("laundry.html")
 
     @app.route("/services/equipment-rentals")
     @app.route("/services/equipment-rentals.html")
+    @app.route("/equipment")
+    @app.route("/equipment.html")
     def equipment_rentals_page():
         return public_page("equipment-rentals.html")
 
