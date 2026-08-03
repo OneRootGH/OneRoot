@@ -431,6 +431,715 @@ def phones_match(left: Any, right: Any) -> bool:
     return bool(left_variants and right_variants and left_variants.intersection(right_variants))
 
 
+def normalize_email(value: Any) -> str:
+    return normalize_text(value).lower()
+
+
+def first_non_empty_text(*values: Any) -> str:
+    for value in values:
+        normalized = normalize_text(value)
+        if normalized:
+            return normalized
+    return ""
+
+
+def customer_reference_key(name: Any = "", phone: Any = "", email: Any = "") -> str:
+    phone_key = normalize_phone(phone)
+    if phone_key:
+        return f"customer|phone|{phone_key}"
+    email_key = normalize_email(email)
+    if email_key:
+        return f"customer|email|{email_key}"
+    name_key = normalize_text(name).lower()
+    if name_key:
+        return f"customer|name|{name_key.replace(' ', '-')}"
+    return ""
+
+
+def business_area_summary(area_ids: list[str] | set[str] | tuple[str, ...]) -> str:
+    clean_ids = [normalize_text(area_id) for area_id in area_ids if normalize_text(area_id)]
+    if not clean_ids:
+        return ""
+    ordered = sorted(set(clean_ids), key=lambda area_id: BUSINESS_AREA_SHORT.get(area_id, area_id))
+    return ", ".join(BUSINESS_AREA_SHORT.get(area_id, area_id) for area_id in ordered)
+
+
+def customer_cross_sell_area(area_id: str) -> str:
+    mapping = {
+        "cold-store-groceries": "laundry-services",
+        "laundry-services": "cold-store-groceries",
+        "water-equipment": "kitchen",
+        "fresh-foods-drinks": "cold-store-groceries",
+        "kitchen": "fresh-foods-drinks",
+        "mobile-money": "cold-store-groceries",
+        "rentals-apartments": "laundry-services",
+    }
+    return mapping.get(normalize_text(area_id), "cold-store-groceries")
+
+
+def customer_offer_copy(area_id: str) -> str:
+    offers = {
+        "cold-store-groceries": "weekly grocery restock offers and family essentials bundles",
+        "laundry-services": "pickup laundry offers for busy households and tenants",
+        "water-equipment": "water delivery and equipment support follow-up for homes and work sites",
+        "fresh-foods-drinks": "fast-moving drinks, frozen treats, and quick refreshment bundles",
+        "kitchen": "prepared meals, soups, and family kitchen packs",
+        "mobile-money": "mobile money support and convenience transaction follow-up",
+        "rentals-apartments": "tenant service bundles covering laundry, groceries, and support follow-up",
+    }
+    return offers.get(normalize_text(area_id), "OneRoot essentials bundles across daily needs")
+
+
+def marketing_lead_source(values: set[str]) -> str:
+    priority = [
+        "Referral",
+        "Website",
+        "Online Order",
+        "WhatsApp",
+        "Social Media",
+        "POS",
+        "Walk-in",
+        "Apartment",
+        "Laundry",
+        "Equipment Rental",
+    ]
+    for label in priority:
+        if label in values:
+            return label
+    return sorted(values)[0] if values else "Walk-in"
+
+
+def build_customer_growth_message(snapshot: dict[str, Any], *, support_phone: str = "") -> str:
+    customer_name = first_non_empty_text(snapshot.get("customerName"), "Customer")
+    action_tag = normalize_text(snapshot.get("automationTag"))
+    top_area_label = BUSINESS_AREA_SHORT.get(normalize_text(snapshot.get("topAreaId")), "OneRoot")
+    offer_copy = customer_offer_copy(snapshot.get("recommendedAreaId") or snapshot.get("topAreaId"))
+    support_line = f" Please call {support_phone} if you want us to help quickly." if normalize_text(support_phone) else ""
+    if action_tag == "pending-order":
+        return (
+            f"Hello {customer_name}, this is OneRoot Essentials following up on your recent {top_area_label} request. "
+            f"We are ready to help you complete the order whenever you are ready.{support_line}"
+        )
+    if action_tag == "new-lead":
+        return (
+            f"Hello {customer_name}, welcome to OneRoot Essentials. "
+            f"We would be glad to help you with {offer_copy}. "
+            f"Reply here and our team will support your first order or enquiry.{support_line}"
+        )
+    if action_tag == "win-back":
+        return (
+            f"Hello {customer_name}, we miss serving you at OneRoot Essentials. "
+            f"We currently have support available for {offer_copy}. "
+            f"Reply here if you would like us to help you place another order.{support_line}"
+        )
+    if action_tag == "cross-sell":
+        return (
+            f"Hello {customer_name}, thank you for choosing OneRoot Essentials for {top_area_label}. "
+            f"We can also help with {offer_copy}. "
+            f"Reply here if you want us to prepare an offer for you.{support_line}"
+        )
+    if action_tag == "vip-care":
+        return (
+            f"Hello {customer_name}, thank you for being one of OneRoot Essentials' valued customers. "
+            f"Our team is ready to support your next {top_area_label} order quickly.{support_line}"
+        )
+    return (
+        f"Hello {customer_name}, this is OneRoot Essentials checking in. "
+        f"We are available to support you with {offer_copy}.{support_line}"
+    )
+
+
+def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
+    snapshots: dict[str, dict[str, Any]] = {}
+
+    def ensure_bucket(
+        *,
+        name: Any = "",
+        phone: Any = "",
+        email: Any = "",
+        record_date: date | None = None,
+    ) -> dict[str, Any] | None:
+        reference = customer_reference_key(name, phone, email)
+        if not reference:
+            return None
+        bucket = snapshots.get(reference)
+        if not bucket:
+            bucket = {
+                "reference": reference,
+                "customerName": normalize_text(name),
+                "customerPhone": normalize_text(phone),
+                "customerEmail": normalize_text(email),
+                "preferredContact": "",
+                "leadSources": set(),
+                "businessAreaIds": set(),
+                "areaOrderCount": defaultdict(int),
+                "areaRevenue": defaultdict(float),
+                "orderCount": 0,
+                "paidOrderCount": 0,
+                "lifetimeValue": 0.0,
+                "pendingValue": 0.0,
+                "hasApartmentProfile": False,
+                "firstCaptureDate": record_date,
+                "lastActivityDate": record_date,
+                "lastOrderDate": None,
+                "manualStatus": "",
+                "manualFollowUpDate": None,
+                "manualNotes": "",
+                "crmRecordId": "",
+                "crmCreatedAt": "",
+                "leadSource": "",
+                "topAreaId": "",
+                "recommendedAreaId": "",
+                "recommendedOffer": "",
+                "businessAreaSummary": "",
+                "automationTag": "",
+                "automationLabel": "",
+                "daysSinceLastOrder": "",
+                "followUpDate": "",
+                "status": "Active",
+                "customerSegment": "Walk-in",
+                "whatsappUrl": "",
+                "reminderMessage": "",
+                "sortRank": 99,
+            }
+            snapshots[reference] = bucket
+        if normalize_text(name) and len(normalize_text(name)) >= len(normalize_text(bucket.get("customerName"))):
+            bucket["customerName"] = normalize_text(name)
+        if normalize_text(phone) and not normalize_text(bucket.get("customerPhone")):
+            bucket["customerPhone"] = normalize_text(phone)
+        if normalize_text(email) and not normalize_text(bucket.get("customerEmail")):
+            bucket["customerEmail"] = normalize_text(email)
+        if record_date:
+            existing_first = bucket.get("firstCaptureDate")
+            if not existing_first or record_date < existing_first:
+                bucket["firstCaptureDate"] = record_date
+            existing_last = bucket.get("lastActivityDate")
+            if not existing_last or record_date > existing_last:
+                bucket["lastActivityDate"] = record_date
+        return bucket
+
+    def register_order_activity(
+        *,
+        name: Any,
+        phone: Any,
+        email: Any,
+        activity_date: date | None,
+        lead_source: str,
+        area_ids: list[str] | set[str] | tuple[str, ...],
+        revenue_amount: float = 0.0,
+        pending_amount: float = 0.0,
+        count_order: bool = True,
+        count_paid_order: bool = False,
+        preferred_contact: str = "",
+        apartment_customer: bool = False,
+        notes: Any = "",
+    ) -> None:
+        bucket = ensure_bucket(name=name, phone=phone, email=email, record_date=activity_date)
+        if not bucket:
+            return
+        if lead_source:
+            bucket["leadSources"].add(lead_source)
+        if preferred_contact and not normalize_text(bucket.get("preferredContact")):
+            bucket["preferredContact"] = normalize_text(preferred_contact)
+        if apartment_customer:
+            bucket["hasApartmentProfile"] = True
+        if normalize_text(notes) and not normalize_text(bucket.get("manualNotes")):
+            bucket["manualNotes"] = normalize_text(notes)
+        clean_area_ids = [normalize_text(area_id) for area_id in area_ids if normalize_text(area_id)]
+        for area_id in clean_area_ids:
+            bucket["businessAreaIds"].add(area_id)
+            if count_order:
+                bucket["areaOrderCount"][area_id] += 1
+            if revenue_amount > 0:
+                bucket["areaRevenue"][area_id] += round(parse_amount(revenue_amount), 2)
+        if count_order:
+            bucket["orderCount"] += 1
+        if count_paid_order:
+            bucket["paidOrderCount"] += 1
+            bucket["lifetimeValue"] = round(bucket["lifetimeValue"] + parse_amount(revenue_amount), 2)
+        if pending_amount > 0:
+            bucket["pendingValue"] = round(bucket["pendingValue"] + parse_amount(pending_amount), 2)
+        if activity_date:
+            if count_order:
+                last_order_date = bucket.get("lastOrderDate")
+                if not last_order_date or activity_date > last_order_date:
+                    bucket["lastOrderDate"] = activity_date
+
+    crm_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "customer_crm")
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+    ).all()
+    for record in crm_records:
+        payload = dict(record.payload or {})
+        capture_date = parse_date(payload.get("captureDate")) or record.record_date
+        bucket = ensure_bucket(
+            name=payload.get("customerName"),
+            phone=payload.get("customerPhone"),
+            email=payload.get("customerEmail"),
+            record_date=capture_date,
+        )
+        if not bucket:
+            continue
+        if not bucket["crmRecordId"]:
+            bucket["crmRecordId"] = record.id
+            bucket["crmCreatedAt"] = normalize_text(payload.get("createdAt")) or record.created_at.isoformat()
+        manual_status = normalize_text(payload.get("status"))
+        if manual_status in {"Do Not Disturb", "Inactive"}:
+            bucket["manualStatus"] = manual_status
+        manual_follow_up = parse_date(payload.get("followUpDate"))
+        if manual_follow_up and (not bucket["manualFollowUpDate"] or manual_follow_up < bucket["manualFollowUpDate"]):
+            bucket["manualFollowUpDate"] = manual_follow_up
+        bucket["manualNotes"] = first_non_empty_text(bucket.get("manualNotes"), payload.get("notes"))
+        bucket["preferredContact"] = first_non_empty_text(bucket.get("preferredContact"), payload.get("preferredContact"))
+        bucket["leadSources"].add(normalize_text(payload.get("leadSource")) or "Walk-in")
+        if normalize_text(payload.get("businessAreaId")):
+            bucket["businessAreaIds"].add(normalize_text(payload.get("businessAreaId")))
+
+    pos_orders = db_session.scalars(select(PosOrder).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at))).all()
+    for order in pos_orders:
+        if not normalize_text(order.customer_name) and not normalize_text(order.customer_phone):
+            continue
+        register_order_activity(
+            name=order.customer_name,
+            phone=order.customer_phone,
+            email="",
+            activity_date=order.order_date,
+            lead_source="POS",
+            area_ids=order.business_area_ids or [],
+            revenue_amount=parse_amount(order.total_amount),
+            count_order=True,
+            count_paid_order=True,
+            preferred_contact="WhatsApp",
+        )
+
+    relevant_records = db_session.scalars(
+        select(ModuleRecord).where(
+            ModuleRecord.module_key.in_(
+                [
+                    "online_orders",
+                    "laundry_tickets",
+                    "equipment_rental_bookings",
+                    "apartments",
+                ]
+            )
+        )
+    ).all()
+    for record in relevant_records:
+        payload = dict(record.payload or {})
+        if record.module_key == "online_orders":
+            order_date = parse_date(payload.get("createdAt")) or record.record_date
+            payment_status = normalize_text(payload.get("paymentStatus")).lower()
+            order_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+            quoted_total = parse_amount(payload.get("quotedTotal"))
+            if quoted_total <= 0:
+                quoted_total = round(
+                    sum(
+                        (
+                            parse_amount(item.get("lineTotal"))
+                            or round(max(parse_amount(item.get("quantity")), 1.0) * parse_amount(item.get("unitPrice")), 2)
+                        )
+                        for item in order_items
+                    ),
+                    2,
+                )
+            paid_amount = parse_amount(payload.get("paidAmount"))
+            register_order_activity(
+                name=payload.get("customerName"),
+                phone=payload.get("customerPhone"),
+                email=payload.get("customerEmail"),
+                activity_date=order_date,
+                lead_source="Online Order",
+                area_ids=payload.get("businessAreaIds") if isinstance(payload.get("businessAreaIds"), list) else [],
+                revenue_amount=paid_amount if payment_status == "paid" and paid_amount > 0 else 0.0,
+                pending_amount=0.0 if payment_status == "paid" else quoted_total,
+                count_order=True,
+                count_paid_order=payment_status == "paid" and paid_amount > 0,
+                preferred_contact="WhatsApp",
+                notes=payload.get("orderNotes"),
+            )
+            continue
+        if record.module_key == "laundry_tickets":
+            payment_summary = service_payment_summary(record.module_key, payload)
+            register_order_activity(
+                name=payload.get("customerName"),
+                phone=payload.get("customerPhone"),
+                email="",
+                activity_date=parse_date(payload.get("ticketDate")) or record.record_date,
+                lead_source="Laundry",
+                area_ids=[normalize_text(payload.get("businessAreaId")) or "laundry-services"],
+                revenue_amount=payment_summary["paidTotal"],
+                pending_amount=payment_summary["balance"],
+                count_order=parse_amount(payload.get("amountDue")) > 0,
+                count_paid_order=payment_summary["paidTotal"] > 0,
+                preferred_contact="WhatsApp",
+                notes=payload.get("notes"),
+            )
+            continue
+        if record.module_key == "equipment_rental_bookings":
+            payment_summary = service_payment_summary(record.module_key, payload)
+            register_order_activity(
+                name=payload.get("customerName"),
+                phone=payload.get("customerPhone"),
+                email="",
+                activity_date=parse_date(payload.get("bookingDate")) or record.record_date,
+                lead_source="Equipment Rental",
+                area_ids=[normalize_text(payload.get("businessAreaId")) or "water-equipment"],
+                revenue_amount=payment_summary["paidTotal"],
+                pending_amount=payment_summary["balance"],
+                count_order=parse_amount(payload.get("rentalFee")) > 0,
+                count_paid_order=payment_summary["paidTotal"] > 0,
+                preferred_contact="WhatsApp",
+                notes=payload.get("notes"),
+            )
+            continue
+        if record.module_key == "apartments":
+            register_order_activity(
+                name=payload.get("tenantName"),
+                phone=payload.get("tenantPhone"),
+                email=payload.get("tenantEmail"),
+                activity_date=parse_date(payload.get("moveInDate")) or parse_date(payload.get("leaseStartDate")) or record.record_date,
+                lead_source="Apartment",
+                area_ids=["rentals-apartments"],
+                count_order=False,
+                preferred_contact="WhatsApp",
+                apartment_customer=True,
+                notes=payload.get("notes"),
+            )
+
+    today = date.today()
+    finalized: list[dict[str, Any]] = []
+    for bucket in snapshots.values():
+        lead_source = marketing_lead_source(bucket["leadSources"])
+        top_area_id = ""
+        if bucket["areaRevenue"]:
+            top_area_id = max(
+                bucket["areaRevenue"].items(),
+                key=lambda item: (parse_amount(item[1]), bucket["areaOrderCount"].get(item[0], 0), item[0]),
+            )[0]
+        elif bucket["areaOrderCount"]:
+            top_area_id = max(bucket["areaOrderCount"].items(), key=lambda item: (item[1], item[0]))[0]
+        elif bucket["businessAreaIds"]:
+            top_area_id = sorted(bucket["businessAreaIds"])[0]
+
+        days_since_last_order = ""
+        if bucket["lastOrderDate"]:
+            days_since_last_order = (today - bucket["lastOrderDate"]).days
+
+        segment = "Walk-in"
+        if bucket["hasApartmentProfile"]:
+            segment = "Apartment Tenant"
+        elif bucket["paidOrderCount"] == 0:
+            segment = "Lead"
+        elif bucket["paidOrderCount"] >= 6 or bucket["lifetimeValue"] >= 1500:
+            segment = "VIP"
+        elif days_since_last_order != "" and days_since_last_order >= 45:
+            segment = "Dormant"
+        elif bucket["paidOrderCount"] >= 2:
+            segment = "Repeat"
+        elif len(bucket["businessAreaIds"]) >= 3:
+            segment = "Community Account"
+
+        status = bucket["manualStatus"] or "Active"
+        automation_tag = "check-in"
+        automation_label = "Check in"
+        follow_up_date = bucket["manualFollowUpDate"]
+        if status != "Do Not Disturb":
+            if bucket["pendingValue"] > 0:
+                status = "Follow Up"
+                automation_tag = "pending-order"
+                automation_label = "Complete pending order"
+                follow_up_date = follow_up_date or today
+            elif bucket["paidOrderCount"] == 0:
+                status = "Follow Up"
+                automation_tag = "new-lead"
+                automation_label = "Welcome new lead"
+                follow_up_date = follow_up_date or min((bucket["firstCaptureDate"] or today) + timedelta(days=1), today + timedelta(days=2))
+            elif days_since_last_order != "" and days_since_last_order >= 45:
+                status = "Follow Up"
+                automation_tag = "win-back"
+                automation_label = "Win back dormant customer"
+                follow_up_date = follow_up_date or today
+            elif segment == "VIP" and days_since_last_order != "" and days_since_last_order >= 14:
+                status = "Follow Up"
+                automation_tag = "vip-care"
+                automation_label = "VIP care follow-up"
+                follow_up_date = follow_up_date or (today + timedelta(days=1))
+            elif bucket["paidOrderCount"] >= 2 and len(bucket["businessAreaIds"]) == 1:
+                status = "Follow Up"
+                automation_tag = "cross-sell"
+                automation_label = "Cross-sell another service"
+                follow_up_date = follow_up_date or (today + timedelta(days=2))
+
+        recommended_area_id = customer_cross_sell_area(top_area_id) if top_area_id else ""
+        reminder_message = build_customer_growth_message(
+            {
+                **bucket,
+                "topAreaId": top_area_id,
+                "recommendedAreaId": recommended_area_id,
+                "automationTag": automation_tag,
+            }
+        )
+        whatsapp_url = whatsapp_chat_url(bucket.get("customerPhone"), reminder_message) if bucket.get("customerPhone") else ""
+        business_summary = business_area_summary(bucket["businessAreaIds"])
+        finalized.append(
+            {
+                **bucket,
+                "leadSource": lead_source,
+                "topAreaId": top_area_id,
+                "recommendedAreaId": recommended_area_id,
+                "recommendedOffer": customer_offer_copy(recommended_area_id or top_area_id),
+                "businessAreaSummary": business_summary,
+                "automationTag": automation_tag,
+                "automationLabel": automation_label,
+                "followUpDate": follow_up_date.isoformat() if follow_up_date else "",
+                "status": status,
+                "customerSegment": segment,
+                "daysSinceLastOrder": days_since_last_order,
+                "whatsappUrl": whatsapp_url,
+                "reminderMessage": reminder_message,
+                "sortRank": {
+                    "pending-order": 1,
+                    "new-lead": 2,
+                    "win-back": 3,
+                    "cross-sell": 4,
+                    "vip-care": 5,
+                    "check-in": 6,
+                }.get(automation_tag, 9),
+            }
+        )
+
+    finalized.sort(
+        key=lambda item: (
+            item.get("sortRank", 99),
+            normalize_text(item.get("followUpDate")) or "9999-12-31",
+            -(parse_amount(item.get("lifetimeValue"))),
+            normalize_text(item.get("customerName")),
+        )
+    )
+    return finalized
+
+
+def sync_customer_crm_automation(db_session) -> None:
+    existing_records = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_crm")).all()
+    record_by_reference = {normalize_text(record.reference): record for record in existing_records if normalize_text(record.reference)}
+    seen_references: set[str] = set()
+
+    for snapshot in build_customer_activity_snapshots(db_session):
+        reference = normalize_text(snapshot.get("reference"))
+        if not reference:
+            continue
+        seen_references.add(reference)
+        record = record_by_reference.get(reference)
+        payload = dict(record.payload or {}) if record else {}
+        payload.update(
+            {
+                "id": payload.get("id") or (record.id if record else uuid4().hex),
+                "captureDate": normalize_text(payload.get("captureDate"))
+                or (snapshot.get("firstCaptureDate").isoformat() if snapshot.get("firstCaptureDate") else date.today().isoformat()),
+                "businessAreaId": normalize_text(payload.get("businessAreaId")) or normalize_text(snapshot.get("topAreaId")) or "shared-operations",
+                "customerName": snapshot.get("customerName"),
+                "customerPhone": snapshot.get("customerPhone"),
+                "customerEmail": snapshot.get("customerEmail"),
+                "customerSegment": snapshot.get("customerSegment"),
+                "leadSource": snapshot.get("leadSource"),
+                "preferredContact": first_non_empty_text(snapshot.get("preferredContact"), "WhatsApp" if snapshot.get("customerPhone") else "Email"),
+                "lastOrderDate": snapshot.get("lastOrderDate").isoformat() if snapshot.get("lastOrderDate") else "",
+                "followUpDate": snapshot.get("followUpDate"),
+                "lifetimeValue": round(parse_amount(snapshot.get("lifetimeValue")), 2),
+                "status": snapshot.get("status"),
+                "notes": first_non_empty_text(
+                    payload.get("notes"),
+                    snapshot.get("manualNotes"),
+                    f"Auto-updated from OneRoot activity. Focus: {snapshot.get('automationLabel')}."
+                    if snapshot.get("automationLabel")
+                    else "Auto-updated from OneRoot activity.",
+                ),
+                "orderCount": int(snapshot.get("orderCount", 0)),
+                "paidOrderCount": int(snapshot.get("paidOrderCount", 0)),
+                "pendingValue": round(parse_amount(snapshot.get("pendingValue")), 2),
+                "businessAreaSummary": snapshot.get("businessAreaSummary"),
+                "recommendedOffer": snapshot.get("recommendedOffer"),
+                "automationTag": snapshot.get("automationTag"),
+                "automationLabel": snapshot.get("automationLabel"),
+                "daysSinceLastOrder": snapshot.get("daysSinceLastOrder"),
+                "whatsappUrl": snapshot.get("whatsappUrl"),
+                "reminderMessage": snapshot.get("reminderMessage"),
+            }
+        )
+        if not record:
+            record = ModuleRecord(
+                id=payload["id"],
+                module_key="customer_crm",
+                created_at=datetime.utcnow(),
+            )
+            db_session.add(record)
+        set_module_record_metadata(record, MODULES["customer_crm"], payload)
+
+    for record in existing_records:
+        reference = normalize_text(record.reference)
+        if not reference:
+            continue
+        if reference in seen_references:
+            continue
+        payload = dict(record.payload or {})
+        if normalize_text(payload.get("status")) == "Do Not Disturb":
+            continue
+        payload["status"] = normalize_text(payload.get("status")) or "Inactive"
+        set_module_record_metadata(record, MODULES["customer_crm"], payload)
+
+
+def build_growth_automation_context(db_session, *, area_filter: str = "") -> dict[str, Any]:
+    crm_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "customer_crm")
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+    ).all()
+    if area_filter:
+        crm_records = [
+            record
+            for record in crm_records
+            if normalize_text((record.payload or {}).get("businessAreaId")) == normalize_text(area_filter)
+            or normalize_text(area_filter) in normalize_text((record.payload or {}).get("businessAreaSummary"))
+        ]
+
+    follow_up_rows: list[dict[str, Any]] = []
+    segment_counts: dict[str, int] = defaultdict(int)
+    source_counts: dict[str, int] = defaultdict(int)
+    active_promo_count = 0
+    ready_campaign_count = 0
+    sent_campaign_count = 0
+    for record in crm_records:
+        payload = dict(record.payload or {})
+        segment = normalize_text(payload.get("customerSegment")) or "Walk-in"
+        source = normalize_text(payload.get("leadSource")) or "Walk-in"
+        segment_counts[segment] += 1
+        source_counts[source] += 1
+        follow_up_rows.append(
+            {
+                "id": record.id,
+                "customerName": normalize_text(payload.get("customerName")) or record.title or "Customer",
+                "customerPhone": normalize_text(payload.get("customerPhone")),
+                "customerSegment": segment,
+                "status": normalize_text(payload.get("status")) or "Active",
+                "leadSource": source,
+                "followUpDate": normalize_text(payload.get("followUpDate")),
+                "automationLabel": normalize_text(payload.get("automationLabel")) or "Check in",
+                "automationTag": normalize_text(payload.get("automationTag")) or "check-in",
+                "lifetimeValue": parse_amount(payload.get("lifetimeValue")),
+                "pendingValue": parse_amount(payload.get("pendingValue")),
+                "orderCount": int(parse_amount(payload.get("orderCount"))),
+                "paidOrderCount": int(parse_amount(payload.get("paidOrderCount"))),
+                "businessAreaSummary": normalize_text(payload.get("businessAreaSummary")),
+                "recommendedOffer": normalize_text(payload.get("recommendedOffer")),
+                "whatsappUrl": normalize_text(payload.get("whatsappUrl")),
+            }
+        )
+
+    promotion_records = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "promotions")).all()
+    for record in promotion_records:
+        if area_filter and normalize_text((record.payload or {}).get("businessAreaId")) != normalize_text(area_filter):
+            continue
+        if normalize_text((record.payload or {}).get("status")) in {"Running", "Scheduled"}:
+            active_promo_count += 1
+
+    campaign_records = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "whatsapp_campaigns")).all()
+    for record in campaign_records:
+        if area_filter and normalize_text((record.payload or {}).get("businessAreaId")) != normalize_text(area_filter):
+            continue
+        status = normalize_text((record.payload or {}).get("status"))
+        if status == "Ready":
+            ready_campaign_count += 1
+        elif status == "Sent":
+            sent_campaign_count += 1
+
+    follow_up_rows.sort(
+        key=lambda item: (
+            {
+                "pending-order": 1,
+                "new-lead": 2,
+                "win-back": 3,
+                "cross-sell": 4,
+                "vip-care": 5,
+            }.get(item["automationTag"], 9),
+            item["followUpDate"] or "9999-12-31",
+            -(item["lifetimeValue"]),
+            item["customerName"],
+        )
+    )
+    counts = {
+        "contacts": len(crm_records),
+        "newLeads": sum(1 for item in follow_up_rows if item["automationTag"] == "new-lead"),
+        "pendingOrders": sum(1 for item in follow_up_rows if item["automationTag"] == "pending-order"),
+        "winBack": sum(1 for item in follow_up_rows if item["automationTag"] == "win-back"),
+        "crossSell": sum(1 for item in follow_up_rows if item["automationTag"] == "cross-sell"),
+        "vip": sum(1 for item in follow_up_rows if item["customerSegment"] == "VIP"),
+        "whatsappReady": sum(1 for item in follow_up_rows if item["whatsappUrl"]),
+        "activePromotions": active_promo_count,
+        "readyCampaigns": ready_campaign_count,
+        "sentCampaigns": sent_campaign_count,
+    }
+    playbooks = []
+    if counts["newLeads"] > 0:
+        playbooks.append(
+            {
+                "title": "Welcome New Leads",
+                "audience": f"{counts['newLeads']} fresh lead(s)",
+                "note": "Use WhatsApp or a quick call within 24 hours so first-time prospects do not go cold.",
+                "href": url_for("module_form", module_key="whatsapp_campaigns"),
+            }
+        )
+    if counts["winBack"] > 0:
+        playbooks.append(
+            {
+                "title": "Win Back Dormant Customers",
+                "audience": f"{counts['winBack']} dormant customer(s)",
+                "note": "Offer a simple restock, laundry pickup, or fresh-food follow-up to bring them back.",
+                "href": url_for("module_form", module_key="promotions"),
+            }
+        )
+    if counts["crossSell"] > 0:
+        playbooks.append(
+            {
+                "title": "Cross-Sell The Ecosystem",
+                "audience": f"{counts['crossSell']} one-area customer(s)",
+                "note": "Move customers from one OneRoot service into a second one to deepen repeat buying.",
+                "href": url_for("module_list", module_key="customer_crm"),
+            }
+        )
+    if counts["vip"] > 0:
+        playbooks.append(
+            {
+                "title": "VIP Retention Touch",
+                "audience": f"{counts['vip']} VIP customer(s)",
+                "note": "Give priority support, appreciation messages, and bundle offers to keep your best customers close.",
+                "href": url_for("module_form", module_key="whatsapp_campaigns"),
+            }
+        )
+
+    segment_chart = build_chart_rows(
+        [{"label": key, "short": key, "amount": value} for key, value in sorted(segment_counts.items()) if value > 0],
+        label_key="label",
+        value_key="amount",
+        short_key="short",
+        positive_color="var(--accent)",
+    )
+    source_chart = build_chart_rows(
+        [{"label": key, "short": key, "amount": value} for key, value in sorted(source_counts.items()) if value > 0],
+        label_key="label",
+        value_key="amount",
+        short_key="short",
+        positive_color="var(--warning)",
+    )
+    return {
+        "counts": counts,
+        "followUps": follow_up_rows[:12],
+        "playbooks": playbooks[:4],
+        "segmentChart": segment_chart,
+        "sourceChart": source_chart,
+    }
+
+
 def parse_amount(value: Any) -> float:
     try:
         return round(float(value or 0), 2)
@@ -5299,6 +6008,78 @@ def create_app(config: AppConfig | None = None) -> Flask:
             }
         )
 
+    @app.route("/api/leads", methods=["POST"])
+    @app.route("/api/public/leads", methods=["POST"])
+    def public_capture_lead():
+        payload = request.get_json(silent=True) or {}
+        customer_name = normalize_text(payload.get("customerName"))
+        customer_phone = normalize_text(payload.get("customerPhone"))
+        customer_email = normalize_text(payload.get("customerEmail"))
+        if not customer_name:
+            return jsonify({"ok": False, "errors": ["Customer name is required."]}), 400
+        if not customer_phone and not customer_email:
+            return jsonify({"ok": False, "errors": ["Phone number or email is required."]}), 400
+
+        reference = customer_reference_key(customer_name, customer_phone, customer_email)
+        if not reference:
+            return jsonify({"ok": False, "errors": ["A valid contact is required."]}), 400
+
+        lead_source = normalize_text(payload.get("leadSource")) or "Website"
+        preferred_contact = normalize_text(payload.get("preferredContact")) or ("WhatsApp" if customer_phone else "Email")
+        business_area_id = normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        interest_type = normalize_text(payload.get("interestType")) or "Website Interest"
+        referral_name = normalize_text(payload.get("referralName"))
+        existing = g.db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "customer_crm",
+                ModuleRecord.reference == reference,
+            )
+        )
+        notes_parts = [
+            "Captured from the public OneRoot website lead form.",
+            f"Interest: {interest_type}.",
+            f"Referred by: {referral_name}." if referral_name else "",
+            normalize_text(payload.get("notes")),
+        ]
+        crm_payload = dict(existing.payload or {}) if existing else {}
+        crm_payload.update(
+            {
+                "id": crm_payload.get("id") or (existing.id if existing else uuid4().hex),
+                "captureDate": crm_payload.get("captureDate") or date.today().isoformat(),
+                "businessAreaId": business_area_id,
+                "customerName": customer_name,
+                "customerPhone": customer_phone,
+                "customerEmail": customer_email,
+                "customerSegment": "Lead",
+                "leadSource": lead_source,
+                "preferredContact": preferred_contact,
+                "lastOrderDate": normalize_text(crm_payload.get("lastOrderDate")),
+                "followUpDate": date.today().isoformat(),
+                "lifetimeValue": parse_amount(crm_payload.get("lifetimeValue")),
+                "status": "Follow Up",
+                "notes": " ".join(part for part in notes_parts if part),
+            }
+        )
+        record = existing or ModuleRecord(
+            id=crm_payload["id"],
+            module_key="customer_crm",
+            created_at=datetime.utcnow(),
+        )
+        if not existing:
+            g.db.add(record)
+        set_module_record_metadata(record, MODULES["customer_crm"], crm_payload)
+        sync_customer_crm_automation(g.db)
+        audit(
+            "customer_crm",
+            "Customer CRM",
+            "create" if not existing else "update",
+            customer_name or "Website Lead",
+            record.id,
+            f"{lead_source} lead · {interest_type}",
+        )
+        g.db.commit()
+        return jsonify({"ok": True, "message": "Lead captured.", "contactName": customer_name})
+
     @app.route("/api/orders", methods=["POST"])
     @app.route("/api/public/orders", methods=["POST"])
     def public_create_order():
@@ -5320,6 +6101,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return jsonify({"ok": False, "errors": [str(error)]}), 400
 
         g.db.add(record)
+        g.db.flush()
+        sync_customer_crm_automation(g.db)
         order = serialize_online_order(record)
         audit(
             "online_orders",
@@ -5516,10 +6299,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/")
     @access_required("dashboard")
     def dashboard():
+        if user_has_access(g.current_user, "customer_crm"):
+            sync_customer_crm_automation(g.db)
+            g.db.commit()
         all_records = g.db.scalars(select(ModuleRecord)).all()
         current_month = date.today().strftime("%Y-%m")
         latest_suite_profiles = latest_apartment_suite_profiles(all_records, support_phone=app_config.support_phone)
         tenant_reminders = build_tenant_reminder_queue(latest_suite_profiles)
+        growth_context = build_growth_automation_context(g.db)
         target_progress_rows = build_target_progress_rows(all_records, current_month)
         low_stock_items = g.db.scalars(
             select(Product)
@@ -5638,6 +6425,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             apartment_watch=apartment_watch,
             tenant_reminders=tenant_reminders[:8],
             tenant_reminder_count=len(tenant_reminders),
+            growth_context=growth_context,
             monthly_sales_by_area=monthly_sales_by_area,
             monthly_sales_chart=build_chart_rows(
                 monthly_sales_by_area,
@@ -6590,6 +7378,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         set_module_record_metadata(record, MODULES["online_orders"], payload)
         sync_online_order_sales(record)
         post_online_order_inventory_if_needed(record)
+        sync_customer_crm_automation(g.db)
         audit(
             "online_orders",
             "Online Orders",
@@ -6619,6 +7408,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        growth_context: dict[str, Any] | None = None
+        if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
+            sync_customer_crm_automation(g.db)
+            g.db.commit()
         search = normalize_text(request.args.get("q"))
         if module_key == "apartments":
             month_filter = parse_month(request.args.get("month"))
@@ -6839,6 +7632,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
         module_quick_actions = []
         automated_tenant_reminders: list[dict[str, Any]] = []
         automated_tenant_counts: dict[str, int] = {}
+        if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
+            growth_context = build_growth_automation_context(g.db, area_filter=area_filter)
+            if user_has_access(g.current_user, "customer_crm"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Customer CRM",
+                        "href": url_for("module_list", module_key="customer_crm"),
+                        "note": "Work the live customer follow-up queue and identify repeat, VIP, and win-back contacts.",
+                    }
+                )
+            if user_has_access(g.current_user, "whatsapp_campaigns"):
+                module_quick_actions.append(
+                    {
+                        "label": "New WhatsApp Campaign",
+                        "href": url_for("module_form", module_key="whatsapp_campaigns"),
+                        "note": "Turn a segment or playbook into a tracked WhatsApp campaign record.",
+                    }
+                )
+            if user_has_access(g.current_user, "promotions"):
+                module_quick_actions.append(
+                    {
+                        "label": "New Promotion",
+                        "href": url_for("module_form", module_key="promotions"),
+                        "note": "Capture the offer, expected revenue, and target segment before launch.",
+                    }
+                )
         if module_key == "recurring_controls":
             full_tenant_reminder_queue = build_tenant_reminder_queue(
                 latest_apartment_suite_profiles(g.db.scalars(select(ModuleRecord)).all(), support_phone=app_config.support_phone)
@@ -6912,6 +7731,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             target_month=target_month,
             automated_tenant_reminders=automated_tenant_reminders,
             automated_tenant_counts=automated_tenant_counts,
+            growth_context=growth_context,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")
@@ -7043,6 +7863,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 g.db.add(record)
             set_module_record_metadata(record, definition, payload)
             sync_generated_sales_for_module_record(record)
+            if module_key in {"customer_crm", "apartments", "laundry_tickets", "equipment_rental_bookings", "delivery_dispatch"}:
+                sync_customer_crm_automation(g.db)
             audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
             g.db.commit()
             flash(f"{definition.label} saved.", "success")
@@ -8076,6 +8898,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.flush()
         sync_generated_sales_for_pos(order_date, order.business_area_ids)
         sync_existing_pos_closeouts(order_date, order.business_area_ids)
+        sync_customer_crm_automation(g.db)
         audit("pos", "POS", "create", f"{order.order_number} saved", order.id, f"{order.item_count:g} items · {format_currency(order.total_amount)}")
         g.db.commit()
         saved_order = {
@@ -8137,6 +8960,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         sync_generated_sales_for_pos(order_date, sorted(affected_area_ids))
         sync_existing_pos_closeouts(order_date, sorted(affected_area_ids))
+        sync_customer_crm_automation(g.db)
         audit(
             "pos",
             "POS",

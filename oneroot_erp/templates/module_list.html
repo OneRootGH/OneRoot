@@ -132,6 +132,145 @@
     </section>
   {% endif %}
 
+  {% if growth_context %}
+    <section class="card-grid four">
+      <article class="metric-card">
+        <span>Contacts</span>
+        <strong>{{ growth_context.counts.get('contacts', 0) }}</strong>
+        <small>Total live customer profiles in the automation view</small>
+      </article>
+      <article class="metric-card warning">
+        <span>New Leads</span>
+        <strong>{{ growth_context.counts.get('newLeads', 0) }}</strong>
+        <small>Fresh prospects who should be contacted first</small>
+      </article>
+      <article class="metric-card warning">
+        <span>Win-Back Queue</span>
+        <strong>{{ growth_context.counts.get('winBack', 0) }}</strong>
+        <small>Dormant customers ready for reactivation</small>
+      </article>
+      <article class="metric-card">
+        <span>WhatsApp Ready</span>
+        <strong>{{ growth_context.counts.get('whatsappReady', 0) }}</strong>
+        <small>Customers with direct WhatsApp follow-up available</small>
+      </article>
+    </section>
+
+    <section class="split-grid">
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Growth Automation</p>
+            <h3>Live Customer Follow-Up Queue</h3>
+          </div>
+          <p class="muted list-summary">{{ growth_context.followUps|length }} customer{% if growth_context.followUps|length != 1 %}s{% endif %} ready for action.</p>
+        </div>
+        <ul class="stack-list compact reminder-stack">
+          {% for item in growth_context.followUps %}
+            <li class="stack-list-item-row">
+              <div class="stack-list-copy">
+                <strong>{{ item.customerName }}</strong>
+                <span>{{ item.automationLabel }} · {{ item.customerSegment }} · {{ item.leadSource }}</span>
+                <span>{{ item.businessAreaSummary or 'Shared Operations' }} · Orders {{ item.orderCount }} · Paid {{ item.paidOrderCount }}</span>
+                <span>{% if item.followUpDate %}Follow up {{ item.followUpDate }}{% else %}No follow-up date saved{% endif %} · Value {{ item.lifetimeValue|currency }}</span>
+              </div>
+              <div class="stack-list-actions">
+                <a class="button subtle button-small" href="{{ url_for('module_form', module_key='customer_crm', record_id=item.id) }}">Open</a>
+                {% if item.whatsappUrl %}
+                  <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
+                {% endif %}
+              </div>
+            </li>
+          {% else %}
+            <li><span>No automated customer follow-up rows are ready yet.</span></li>
+          {% endfor %}
+        </ul>
+      </article>
+
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Playbooks</p>
+            <h3>Campaign Ideas To Run Next</h3>
+          </div>
+          <p class="muted list-summary">{{ growth_context.counts.get('activePromotions', 0) }} promotions active · {{ growth_context.counts.get('readyCampaigns', 0) }} campaigns ready</p>
+        </div>
+        <div class="card-grid two">
+          {% for item in growth_context.playbooks %}
+            <article class="metric-card module-action-card">
+              <span>{{ item.title }}</span>
+              <strong>{{ item.audience }}</strong>
+              <small>{{ item.note }}</small>
+              <a class="button subtle button-small" href="{{ item.href }}">Open</a>
+            </article>
+          {% else %}
+            <article class="metric-card module-action-card">
+              <span>Campaign Playbooks</span>
+              <strong>No urgent playbooks right now</strong>
+              <small>As customer activity grows, the app will keep suggesting the next campaign move here.</small>
+            </article>
+          {% endfor %}
+        </div>
+      </article>
+    </section>
+
+    {% if growth_context.segmentChart or growth_context.sourceChart %}
+      <section class="split-grid">
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <p class="eyebrow">Customer Mix</p>
+              <h3>Segments In View</h3>
+            </div>
+          </div>
+          {% if growth_context.segmentChart %}
+            <div class="chart-stack">
+              {% for row in growth_context.segmentChart %}
+                <div class="chart-row">
+                  <div class="chart-row-header">
+                    <strong>{{ row.chartLabel }}</strong>
+                    <span>{{ row.chartValue }}</span>
+                  </div>
+                  <div class="chart-track">
+                    <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="muted">No segment mix is available yet.</p>
+          {% endif %}
+        </article>
+
+        <article class="card">
+          <div class="card-header">
+            <div>
+              <p class="eyebrow">Lead Sources</p>
+              <h3>Where Customers Are Coming From</h3>
+            </div>
+          </div>
+          {% if growth_context.sourceChart %}
+            <div class="chart-stack">
+              {% for row in growth_context.sourceChart %}
+                <div class="chart-row">
+                  <div class="chart-row-header">
+                    <strong>{{ row.chartLabel }}</strong>
+                    <span>{{ row.chartValue }}</span>
+                  </div>
+                  <div class="chart-track">
+                    <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+                  </div>
+                </div>
+              {% endfor %}
+            </div>
+          {% else %}
+            <p class="muted">No lead-source mix is available yet.</p>
+          {% endif %}
+        </article>
+      </section>
+    {% endif %}
+  {% endif %}
+
   {% if module_quick_actions %}
     <section class="card-grid two">
       {% for action in module_quick_actions %}
@@ -332,6 +471,14 @@
                   <span class="table-secondary">{{ record.payload.get('entryType', 'Entry') }} · {{ record.payload.get('audienceRole', 'All Staff') }}</span>
                 {% elif definition.key == 'workforce_attendance' %}
                   <span class="table-secondary">{{ record.payload.get('shiftType', 'Shift') }} · OT {{ record.payload.get('overtimeHours', 0) }} hrs · Late {{ record.payload.get('lateMinutes', 0) }} min</span>
+                {% elif definition.key == 'customer_crm' %}
+                  <span class="table-secondary">{{ record.payload.get('customerSegment', 'Customer') }} · {{ record.payload.get('leadSource', 'Walk-in') }} · Orders {{ record.payload.get('paidOrderCount', record.payload.get('orderCount', 0)) }}{% if record.payload.get('followUpDate') %} · Follow Up {{ record.payload.get('followUpDate') }}{% endif %}</span>
+                {% elif definition.key == 'promotions' %}
+                  <span class="table-secondary">{{ record.payload.get('promotionType', 'Offer') }} · {{ record.payload.get('targetSegment', 'All Customers') }} · Budget {{ (record.payload.get('budgetAmount', 0))|currency }}</span>
+                {% elif definition.key == 'whatsapp_campaigns' %}
+                  <span class="table-secondary">{{ record.payload.get('channelType', 'WhatsApp') }} · {{ record.payload.get('audienceSegment', 'All Customers') }} · Sent {{ record.payload.get('sentCount', 0) }}</span>
+                {% elif definition.key == 'campaign_roi' %}
+                  <span class="table-secondary">{{ record.payload.get('channelType', 'Channel') }} · Leads {{ record.payload.get('leadsCount', 0) }} · ROI {{ (record.payload.get('roiPercent', 0)) }}%</span>
                 {% endif %}
               </td>
               <td>{{ record.updated_at }}</td>
@@ -341,6 +488,9 @@
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit</a>
                     {% if definition.key == 'salary_records' %}
                       <a class="table-link" href="{{ url_for('salary_payslip', record_id=record.id) }}">Payslip</a>
+                    {% endif %}
+                    {% if definition.key == 'customer_crm' and record.payload.get('whatsappUrl') %}
+                      <a class="table-link" href="{{ record.payload.get('whatsappUrl') }}" target="_blank" rel="noopener">WhatsApp</a>
                     {% endif %}
                     <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=record.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
                       <input type="hidden" name="q" value="{{ search }}">

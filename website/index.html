@@ -17,7 +17,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/website/styles.css?v=20260803a" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260803b" />
   </head>
   <body>
     <div class="shop-shell">
@@ -127,6 +127,115 @@
           </div>
         </section>
 
+        <section class="page-section growth-capture-section">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Customer Growth</p>
+              <h2>Get weekly offers, bulk support, and referral follow-up.</h2>
+            </div>
+            <p class="section-note">Leave your details once and the OneRoot team can follow up on repeat supply, family orders, community orders, and referrals.</p>
+          </div>
+
+          <div class="lead-capture-layout">
+            <article class="lead-capture-card">
+              <span class="count-pill">Grow With OneRoot</span>
+              <h3>More than a one-time order.</h3>
+              <p>Join the customer follow-up list when you want weekly essentials updates, bulk restock support, laundry reminders, equipment planning, or a simple callback from the OneRoot team.</p>
+              <div class="lead-offer-grid">
+                <article>
+                  <strong>Weekly Offers</strong>
+                  <p>Receive updates on fast-moving groceries, drinks, fresh foods, and seasonal deals.</p>
+                </article>
+                <article>
+                  <strong>Bulk & Community Orders</strong>
+                  <p>Request support for family events, repeat household supply, work sites, tenants, or neighborhood groups.</p>
+                </article>
+                <article>
+                  <strong>Referral Growth</strong>
+                  <p>Refer a friend, tenant, team member, or household and help OneRoot reach more customers quickly.</p>
+                </article>
+              </div>
+              <button id="leadReferralShareBtn" class="button button-secondary" type="button">Share OneRoot On WhatsApp</button>
+            </article>
+
+            <section class="lead-capture-card">
+              <div class="section-heading">
+                <div>
+                  <p class="eyebrow">Lead Capture</p>
+                  <h3>Ask OneRoot to follow up</h3>
+                </div>
+                <p class="section-note">Use this form for weekly offers, bulk buying, business supply, repeat orders, or a referral introduction.</p>
+              </div>
+
+              <form id="leadCaptureForm" class="checkout-form" novalidate>
+                <div class="checkout-fields">
+                  <label>
+                    <span>Name</span>
+                    <input id="leadCustomerName" type="text" required />
+                  </label>
+                  <label>
+                    <span>Phone Number</span>
+                    <input id="leadCustomerPhone" type="tel" required />
+                  </label>
+                  <label>
+                    <span>Email</span>
+                    <input id="leadCustomerEmail" type="email" />
+                  </label>
+                </div>
+
+                <div class="checkout-fields">
+                  <label>
+                    <span>Area Of Interest</span>
+                    <select id="leadBusinessArea">
+                      <option value="cold-store-groceries">Cold Store & Groceries</option>
+                      <option value="laundry-services">Laundry Services</option>
+                      <option value="water-equipment">Water & Equipment</option>
+                      <option value="fresh-foods-drinks">Fresh Foods & Drinks</option>
+                      <option value="kitchen">Kitchen</option>
+                      <option value="rentals-apartments">Apartments & Tenant Support</option>
+                      <option value="mobile-money">Mobile Money Services</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Need</span>
+                    <select id="leadInterestType">
+                      <option value="Weekly Offers">Weekly Offers</option>
+                      <option value="Bulk / Community Order">Bulk / Community Order</option>
+                      <option value="Repeat Supply Follow-Up">Repeat Supply Follow-Up</option>
+                      <option value="Referral Introduction">Referral Introduction</option>
+                      <option value="Call Back Request">Call Back Request</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Preferred Contact</span>
+                    <select id="leadPreferredContact">
+                      <option value="WhatsApp">WhatsApp</option>
+                      <option value="Call">Call</option>
+                      <option value="SMS">SMS</option>
+                      <option value="Email">Email</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div class="checkout-fields">
+                  <label>
+                    <span>Referral Name (Optional)</span>
+                    <input id="leadReferralName" type="text" placeholder="Who referred you or who should we follow up with?" />
+                  </label>
+                  <label class="wide-field">
+                    <span>Notes</span>
+                    <textarea id="leadNotes" rows="4" placeholder="Tell OneRoot what you need, how often you buy, or how we can help you faster."></textarea>
+                  </label>
+                </div>
+
+                <button class="button button-primary button-wide" type="submit">Save My Follow-Up</button>
+              </form>
+
+              <div id="leadMessage" class="checkout-message hidden"></div>
+            </section>
+          </div>
+        </section>
+
         <section class="promise-section">
           <div class="promise-card">
             <p class="eyebrow">OneRoot Promise</p>
@@ -169,7 +278,7 @@
       </footer>
     </div>
 
-    <script src="/website/app.js?v=20260802b"></script>
+    <script src="/website/app.js?v=20260803b"></script>
     <script src="/website/pwa.js?v=20260801c"></script>
   </body>
 </html>

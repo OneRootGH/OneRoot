@@ -493,6 +493,7 @@ PLANNING_TYPES = [
     ("Operations Plan", "Operations Plan"),
 ]
 CUSTOMER_SEGMENTS = [
+    ("Lead", "Lead"),
     ("Walk-in", "Walk-in"),
     ("Repeat", "Repeat"),
     ("VIP", "VIP"),
@@ -507,8 +508,11 @@ CUSTOMER_STATUSES = [
     ("Inactive", "Inactive"),
 ]
 LEAD_SOURCES = [
+    ("Website", "Website"),
     ("POS", "POS"),
     ("Online Order", "Online Order"),
+    ("Laundry", "Laundry"),
+    ("Equipment Rental", "Equipment Rental"),
     ("WhatsApp", "WhatsApp"),
     ("Referral", "Referral"),
     ("Walk-in", "Walk-in"),

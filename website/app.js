@@ -35,6 +35,7 @@
       restoreCustomerDraftIntoForm();
     }
     restoreServiceCustomerDraftIntoForms();
+    restoreLeadCaptureIntoForm();
 
     const needsCatalogData = Boolean(
       elements.checkoutForm ||
@@ -137,7 +138,18 @@
       "contactWhatsappText",
       "contactEmailLink",
       "contactEmailText",
-      "contactPickupNote"
+      "contactPickupNote",
+      "leadCaptureForm",
+      "leadCustomerName",
+      "leadCustomerPhone",
+      "leadCustomerEmail",
+      "leadBusinessArea",
+      "leadInterestType",
+      "leadPreferredContact",
+      "leadReferralName",
+      "leadNotes",
+      "leadMessage",
+      "leadReferralShareBtn"
     ].forEach((id) => {
       elements[id] = document.getElementById(id);
     });
@@ -166,10 +178,13 @@
     elements.trackingForm?.addEventListener("submit", handleTrackingSubmit);
     elements.equipmentBookingForm?.addEventListener("submit", handleEquipmentBookingSubmit);
     elements.laundryBookingForm?.addEventListener("submit", handleLaundryBookingSubmit);
+    elements.leadCaptureForm?.addEventListener("submit", handleLeadCaptureSubmit);
 
     elements.checkoutForm?.addEventListener("input", persistCustomerDraftFromForm);
     elements.equipmentBookingForm?.addEventListener("input", persistServiceCustomerDraftFromForms);
     elements.laundryBookingForm?.addEventListener("input", persistServiceCustomerDraftFromForms);
+    elements.leadCaptureForm?.addEventListener("input", persistLeadCaptureDraft);
+    elements.leadReferralShareBtn?.addEventListener("click", handleLeadReferralShare);
     elements.cartToggleBtn?.addEventListener("click", toggleCartPanel);
     elements.mobileCartBar?.addEventListener("click", openCartPanel);
     elements.closeCartBtn?.addEventListener("click", closeCartPanel);
@@ -1415,6 +1430,81 @@
     }
   }
 
+  async function handleLeadCaptureSubmit(event) {
+    event.preventDefault();
+
+    const customerName = normalizeText(elements.leadCustomerName?.value);
+    const customerPhone = normalizeText(elements.leadCustomerPhone?.value);
+    const customerEmail = normalizeText(elements.leadCustomerEmail?.value);
+    const businessAreaId = normalizeText(elements.leadBusinessArea?.value) || "shared-operations";
+    const interestType = normalizeText(elements.leadInterestType?.value) || "Website Interest";
+    const preferredContact = normalizeText(elements.leadPreferredContact?.value) || "WhatsApp";
+    const referralName = normalizeText(elements.leadReferralName?.value);
+    const notes = normalizeText(elements.leadNotes?.value);
+
+    if (!customerName) {
+      renderServiceMessage(elements.leadMessage, "error", "Enter your name so OneRoot can follow up correctly.");
+      return;
+    }
+    if (!customerPhone && !customerEmail) {
+      renderServiceMessage(elements.leadMessage, "error", "Enter a phone number or email so OneRoot can reach you.");
+      return;
+    }
+
+    renderServiceMessage(elements.leadMessage, "success", "Saving your follow-up request...");
+
+    try {
+      const result = await submitLeadCapture({
+        customerName,
+        customerPhone,
+        customerEmail,
+        businessAreaId,
+        interestType,
+        preferredContact,
+        referralName,
+        notes,
+        leadSource: interestType === "Referral Introduction" ? "Referral" : "Website"
+      });
+
+      renderServiceMessage(
+        elements.leadMessage,
+        "success",
+        `${escapeHtml(result.contactName || customerName)}, your request has been saved. OneRoot will follow up through ${escapeHtml(preferredContact)}.`
+      );
+      persistLeadCaptureDraft();
+      if (elements.leadReferralName) {
+        elements.leadReferralName.value = "";
+      }
+      if (elements.leadNotes) {
+        elements.leadNotes.value = "";
+      }
+    } catch (error) {
+      console.error(error);
+      renderServiceMessage(
+        elements.leadMessage,
+        "error",
+        normalizeText(error.message) || "The follow-up request could not be saved right now."
+      );
+    }
+  }
+
+  function handleLeadReferralShare() {
+    const customerName = normalizeText(elements.leadCustomerName?.value);
+    const interestType = normalizeText(elements.leadInterestType?.value) || "Weekly Offers";
+    const areaLabel = getAreaLabel(normalizeText(elements.leadBusinessArea?.value)) || "OneRoot Essentials";
+    const supportPhone = normalizeText(state.config?.supportPhone);
+    const message = [
+      customerName ? `${customerName} recommends OneRoot.shop for daily essentials.` : "Try OneRoot.shop for daily essentials.",
+      `OneRoot supports ${areaLabel.toLowerCase()}, groceries, laundry, equipment, and community needs.`,
+      `Ask them about ${interestType.toLowerCase()}.`,
+      supportPhone ? `Call ${supportPhone}` : "",
+      `or visit ${window.location.origin}`
+    ]
+      .filter(Boolean)
+      .join(" ");
+    window.open(`https://wa.me/?text=${encodeURIComponent(message)}`, "_blank", "noopener");
+  }
+
   function renderTrackingResult(order) {
     if (!elements.trackingResult) {
       return;
@@ -1590,6 +1680,18 @@
     window.localStorage.setItem(SHOP_CUSTOMER_STORAGE_KEY, JSON.stringify(nextDraft));
   }
 
+  function persistLeadCaptureDraft() {
+    const nextDraft = {
+      ...state.customerDraft,
+      customerName: firstNonEmpty(elements.leadCustomerName?.value, state.customerDraft.customerName),
+      customerPhone: firstNonEmpty(elements.leadCustomerPhone?.value, state.customerDraft.customerPhone),
+      customerEmail: firstNonEmpty(elements.leadCustomerEmail?.value, state.customerDraft.customerEmail)
+    };
+
+    state.customerDraft = nextDraft;
+    window.localStorage.setItem(SHOP_CUSTOMER_STORAGE_KEY, JSON.stringify(nextDraft));
+  }
+
   function loadStoredCart() {
     try {
       const raw = window.localStorage.getItem(SHOP_CART_STORAGE_KEY);
@@ -1694,6 +1796,12 @@
     if (elements.laundryPaymentMethodInput && state.customerDraft.paymentMethod) {
       elements.laundryPaymentMethodInput.value = state.customerDraft.paymentMethod;
     }
+  }
+
+  function restoreLeadCaptureIntoForm() {
+    setInputValue(elements.leadCustomerName, state.customerDraft.customerName);
+    setInputValue(elements.leadCustomerPhone, state.customerDraft.customerPhone);
+    setInputValue(elements.leadCustomerEmail, state.customerDraft.customerEmail);
   }
 
   function toggleCartPanel() {
@@ -1823,6 +1931,23 @@
 
     if (!response.ok || !result.ok) {
       throw new Error(Array.isArray(result.errors) ? result.errors[0] : "Unable to save order.");
+    }
+
+    return result;
+  }
+
+  async function submitLeadCapture(payload) {
+    const response = await fetch("/api/public/leads", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify(payload)
+    });
+    const result = await response.json();
+
+    if (!response.ok || !result.ok) {
+      throw new Error(Array.isArray(result.errors) ? result.errors[0] : "Unable to save follow-up request.");
     }
 
     return result;

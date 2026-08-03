@@ -96,6 +96,31 @@
     </section>
   {% endif %}
 
+  {% if growth_context %}
+    <section class="card-grid four">
+      <article class="metric-card">
+        <span>Growth Contacts</span>
+        <strong>{{ growth_context.counts.get('contacts', 0) }}</strong>
+        <small>Customer profiles available for follow-up</small>
+      </article>
+      <article class="metric-card warning">
+        <span>New Leads</span>
+        <strong>{{ growth_context.counts.get('newLeads', 0) }}</strong>
+        <small>New prospects that should be welcomed first</small>
+      </article>
+      <article class="metric-card warning">
+        <span>Win-Back</span>
+        <strong>{{ growth_context.counts.get('winBack', 0) }}</strong>
+        <small>Dormant customers ready for reactivation</small>
+      </article>
+      <article class="metric-card">
+        <span>WhatsApp Ready</span>
+        <strong>{{ growth_context.counts.get('whatsappReady', 0) }}</strong>
+        <small>Direct message follow-up available now</small>
+      </article>
+    </section>
+  {% endif %}
+
   <section class="split-grid">
     <article class="card">
       <div class="card-header">
@@ -307,6 +332,31 @@
           {% endfor %}
         </ul>
       </div>
+
+      {% if growth_context %}
+        <div class="dashboard-subsection">
+          <p class="eyebrow">Customer Growth Queue</p>
+          <ul class="stack-list compact reminder-stack">
+            {% for item in growth_context.followUps[:6] %}
+              <li class="stack-list-item-row">
+                <div class="stack-list-copy">
+                  <strong>{{ item.customerName }}</strong>
+                  <span>{{ item.automationLabel }} · {{ item.customerSegment }} · {{ item.leadSource }}</span>
+                  <span>{{ item.businessAreaSummary or 'Shared Operations' }} · Orders {{ item.orderCount }} · Value {{ item.lifetimeValue|currency }}</span>
+                </div>
+                <div class="stack-list-actions">
+                  <a class="button subtle button-small" href="{{ url_for('module_form', module_key='customer_crm', record_id=item.id) }}">Open</a>
+                  {% if item.whatsappUrl %}
+                    <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
+                  {% endif %}
+                </div>
+              </li>
+            {% else %}
+              <li><span>No customer growth follow-up is ready right now.</span></li>
+            {% endfor %}
+          </ul>
+        </div>
+      {% endif %}
     </article>
   </section>
 
