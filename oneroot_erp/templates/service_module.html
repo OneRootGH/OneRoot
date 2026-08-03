@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card module-hero service-hero">
-    <div class="card-header">
+  <section class="card module-hero service-hero compact-module-hero">
+    <div class="card-header compact-header">
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }}</h3>
-        <p class="muted">{{ service_context.intro }}</p>
+        <p class="muted compact-copy">{{ service_context.intro }}</p>
       </div>
-      <div class="toolbar">
+      <div class="toolbar compact-toolbar">
         <a class="button subtle" href="{{ url_for('module_export', module_key=definition.key, q=search, status=status_filter, category=category_filter, date_from=date_from, date_to=date_to) }}">Export CSV</a>
         {% if definition.editable %}
           <a class="button primary" href="{{ url_for('module_form', module_key=definition.key) }}">New Record</a>
@@ -15,7 +15,7 @@
       </div>
     </div>
 
-    <form method="get" class="form-grid module-filter-grid">
+    <form method="get" class="form-grid module-filter-grid compact-filter-grid">
       <label class="span-2">
         <span>Search</span>
         <input type="search" name="q" placeholder="Search {{ definition.label|lower }}" value="{{ search }}">
@@ -46,7 +46,7 @@
         <span>Date To</span>
         <input type="date" name="date_to" value="{{ date_to }}">
       </label>
-      <div class="form-actions span-2">
+      <div class="form-actions span-2 compact-filter-actions">
         <button class="button primary" type="submit">Apply Filters</button>
         <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Reset</a>
       </div>

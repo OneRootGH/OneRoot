@@ -1,17 +1,17 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card">
-    <div class="card-header">
+  <section class="card compact-module-hero">
+    <div class="card-header compact-header">
       <div>
         <p class="eyebrow">Property Workspace</p>
         <h3>Apartment Control Center</h3>
       </div>
-      <div class="toolbar">
+      <div class="toolbar compact-toolbar">
         <a class="button subtle" href="{{ url_for('module_export', module_key='apartments', q=search, month=month_filter, status=status_filter, alert=alert_filter) }}">Export CSV</a>
         <a class="button subtle" href="{{ url_for('apartment_report_print', q=search, month=month_filter, status=status_filter, alert=alert_filter) }}" target="_blank" rel="noopener">Print Report</a>
         <a class="button subtle" href="{{ url_for('module_list', module_key='security_deposit_records') }}">Deposits & Charges</a>
         <a class="button subtle" href="{{ url_for('module_list', module_key='maintenance_records') }}">Maintenance</a>
-        <form method="post" action="{{ url_for('apartment_apply_monthly_bills') }}" class="toolbar-inline-form">
+        <form method="post" action="{{ url_for('apartment_apply_monthly_bills') }}" class="toolbar-inline-form compact-inline-form">
           <input type="hidden" name="q" value="{{ search }}">
           <input type="hidden" name="status" value="{{ status_filter }}">
           <input type="hidden" name="alert" value="{{ alert_filter }}">
@@ -28,7 +28,7 @@
         <a class="button primary" href="{{ url_for('module_form', module_key='apartments') }}">New Apartment Entry</a>
       </div>
     </div>
-    <form method="get" class="form-grid apartment-filter-grid">
+    <form method="get" class="form-grid apartment-filter-grid compact-filter-grid">
       <label>
         <span>Search</span>
         <input type="search" name="q" value="{{ search }}" placeholder="Search suite, tenant, phone, ID, notes">
@@ -54,7 +54,7 @@
           {% endfor %}
         </select>
       </label>
-      <div class="form-actions span-2">
+      <div class="form-actions span-2 compact-filter-actions">
         <button class="button primary" type="submit">Apply Filters</button>
         <a class="button subtle" href="{{ url_for('module_list', module_key='apartments') }}">Reset</a>
       </div>
@@ -104,6 +104,11 @@
       <span>Bills Collected</span>
       <strong>{{ total_bills_collected|currency }}</strong>
       <small>Filtered bills payments captured</small>
+    </article>
+    <article class="metric-card">
+      <span>WhatsApp Ready</span>
+      <strong>{{ whatsapp_ready_count }}</strong>
+      <small>Suites with balances and tenant phone saved</small>
     </article>
   </section>
 
@@ -221,6 +226,9 @@
                     <a class="table-link" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open</a>
                     <a class="table-link" href="{{ url_for('apartment_statement', record_id=item.id) }}" target="_blank" rel="noopener">Statement</a>
                     <a class="table-link" href="{{ url_for('apartment_agreement', record_id=item.id) }}" target="_blank" rel="noopener">Agreement</a>
+                    {% if item.whatsappUrl %}
+                      <a class="table-link" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
+                    {% endif %}
                   </div>
                 </td>
               </tr>
@@ -245,6 +253,12 @@
             <strong>{{ item.suite }} · {{ item.tenant }}</strong>
             <span>{{ item.alertLabel }} · {{ item.outstanding|currency }} open</span>
             <span>{% if item.nextRentDueDate %}Next rent due {{ item.nextRentDueDate }}{% elif item.billDueDate %}Bills due {{ item.billDueDate }}{% else %}No due date saved{% endif %}</span>
+            {% if item.whatsappUrl %}
+              <div class="row-actions">
+                <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open Suite</a>
+                <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp Reminder</a>
+              </div>
+            {% endif %}
           </li>
         {% else %}
           <li><span>No overdue or due-soon suites are in this view right now.</span></li>
@@ -273,6 +287,34 @@
       </div>
     </article>
   </section>
+
+  {% if tenant_reminders %}
+    <section class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Monthly Follow-Up</p>
+          <h3>Tenant WhatsApp Reminder Queue</h3>
+        </div>
+        <p class="muted list-summary">{{ tenant_reminders|length }} ready for quick follow-up.</p>
+      </div>
+      <ul class="stack-list compact reminder-stack">
+        {% for item in tenant_reminders %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy">
+              <strong>{{ item.suite }} · {{ item.tenant }}</strong>
+              <span>{{ item.reminderType }} · {{ item.outstanding|currency }} open</span>
+              <span>{% if item.primaryDueLabel %}{{ item.primaryDueLabel }}{% elif item.dueSummary %}{{ item.dueSummary }}{% else %}No due date saved{% endif %}</span>
+              <span>{{ item.balanceSummary }}</span>
+            </div>
+            <div class="stack-list-actions">
+              <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open Suite</a>
+              <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
 
   <article class="card">
     <div class="card-header">

@@ -1,13 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card module-hero">
-    <div class="card-header">
+  <section class="card module-hero compact-module-hero">
+    <div class="card-header compact-header">
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }}</h3>
-        <p class="muted">Use the filters, categories, and date range below to find records quickly without extra typing.</p>
+        <p class="muted compact-copy">Search, filter, and export without leaving this page.</p>
       </div>
-      <div class="toolbar">
+      <div class="toolbar compact-toolbar">
         <a class="button subtle" href="{{ url_for('module_export', module_key=definition.key, q=search, area=area_filter, status=status_filter, category=category_filter, month=month_filter, date_from=date_from, date_to=date_to) }}">Export CSV</a>
         {% if definition.editable %}
           <a class="button primary" href="{{ url_for('module_form', module_key=definition.key) }}">New Record</a>
@@ -15,7 +15,7 @@
       </div>
     </div>
 
-    <form method="get" class="form-grid module-filter-grid">
+    <form method="get" class="form-grid module-filter-grid compact-filter-grid">
       <label class="span-2">
         <span>Search</span>
         <input type="search" name="q" placeholder="Search {{ definition.label|lower }}" value="{{ search }}">
@@ -69,12 +69,68 @@
           <input type="date" name="date_to" value="{{ date_to }}">
         </label>
       {% endif %}
-      <div class="form-actions span-2">
+      <div class="form-actions span-2 compact-filter-actions">
         <button class="button primary" type="submit">Apply Filters</button>
         <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Reset</a>
       </div>
     </form>
   </section>
+
+  {% if definition.key == 'recurring_controls' %}
+    <section class="card-grid four">
+      <article class="metric-card warning">
+        <span>WhatsApp Queue</span>
+        <strong>{{ automated_tenant_counts.get('whatsappReady', 0) }}</strong>
+        <small>Tenants ready for follow-up now</small>
+      </article>
+      <article class="metric-card warning">
+        <span>Overdue</span>
+        <strong>{{ automated_tenant_counts.get('overdue', 0) }}</strong>
+        <small>Rent or bills already past due</small>
+      </article>
+      <article class="metric-card">
+        <span>Due Soon</span>
+        <strong>{{ automated_tenant_counts.get('dueSoon', 0) }}</strong>
+        <small>Upcoming suites needing reminder</small>
+      </article>
+      <article class="metric-card">
+        <span>Monthly Bills</span>
+        <strong>{{ automated_tenant_counts.get('monthlyBills', 0) }}</strong>
+        <small>Reminder rows that include monthly bills</small>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Automated Queue</p>
+          <h3>Tenant WhatsApp Reminders</h3>
+        </div>
+        <p class="muted list-summary">{{ automated_tenant_counts.get('total', 0) }} reminder{% if automated_tenant_counts.get('total', 0) != 1 %}s{% endif %} ready from apartment balances.</p>
+      </div>
+      <ul class="stack-list compact reminder-stack">
+        {% for item in automated_tenant_reminders %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy">
+              <strong>{{ item.suite }} · {{ item.tenant }}</strong>
+              <span>{{ item.reminderType }} · {{ item.outstanding|currency }} open</span>
+              <span>{% if item.primaryDueLabel %}{{ item.primaryDueLabel }}{% elif item.dueSummary %}{{ item.dueSummary }}{% else %}No due date saved{% endif %}</span>
+              <span>{{ item.balanceSummary }}</span>
+            </div>
+            <div class="stack-list-actions">
+              <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open Suite</a>
+              {% if item.whatsappUrl %}
+                <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+        {% if not automated_tenant_reminders %}
+          <li><span>No tenant arrears reminders are ready right now.</span></li>
+        {% endif %}
+      </ul>
+    </section>
+  {% endif %}
 
   {% if module_quick_actions %}
     <section class="card-grid two">

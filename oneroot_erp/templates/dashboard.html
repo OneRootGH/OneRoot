@@ -52,7 +52,7 @@
     <article class="metric-card warning">
       <span>Due Reminders</span>
       <strong>{{ recurring_due_count }}</strong>
-      <small>{{ low_stock_count }} low stock items flagged</small>
+      <small>{{ tenant_reminder_count }} tenant WhatsApp reminders ready</small>
     </article>
     <article class="metric-card">
       <span>Open Work Orders</span>
@@ -255,6 +255,27 @@
             </li>
           {% else %}
             <li><span>No apartment balances are currently outstanding.</span></li>
+          {% endfor %}
+        </ul>
+      </div>
+
+      <div class="dashboard-subsection">
+        <p class="eyebrow">Tenant WhatsApp Queue</p>
+        <ul class="stack-list compact reminder-stack">
+          {% for item in tenant_reminders %}
+            <li class="stack-list-item-row">
+              <div class="stack-list-copy">
+                <strong>{{ item.suite }} · {{ item.tenant }}</strong>
+                <span>{{ item.reminderType }} · {{ item.outstanding|currency }} open</span>
+                <span>{% if item.primaryDueLabel %}{{ item.primaryDueLabel }}{% elif item.dueSummary %}{{ item.dueSummary }}{% else %}No due date saved{% endif %}</span>
+              </div>
+              <div class="stack-list-actions">
+                <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open</a>
+                <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
+              </div>
+            </li>
+          {% else %}
+            <li><span>No tenant reminders are ready right now.</span></li>
           {% endfor %}
         </ul>
       </div>

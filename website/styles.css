@@ -114,10 +114,12 @@ main {
   display: flex;
   justify-content: center;
   gap: 0.85rem;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  align-items: center;
 }
 
 .site-nav a,
+.site-nav-summary,
 .cart-toggle,
 .button,
 .icon-button {
@@ -127,19 +129,79 @@ main {
   box-shadow: 0 10px 24px rgba(20, 58, 43, 0.06);
 }
 
-.site-nav a {
+.site-nav a,
+.site-nav-summary {
   padding: 0.72rem 1rem;
   color: var(--forest-900);
   font-weight: 700;
   font-size: 0.92rem;
   letter-spacing: 0.01em;
+  white-space: nowrap;
 }
 
-.site-nav a.is-current {
+.site-nav a.is-current,
+.site-nav-menu.is-current > .site-nav-summary,
+.site-nav-menu[open] > .site-nav-summary {
   background: var(--forest-900);
   color: var(--white);
   border-color: transparent;
   box-shadow: 0 14px 30px rgba(20, 58, 43, 0.18);
+}
+
+.site-nav-menu {
+  position: relative;
+}
+
+.site-nav-summary {
+  list-style: none;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.45rem;
+}
+
+.site-nav-summary::-webkit-details-marker {
+  display: none;
+}
+
+.site-nav-summary::after {
+  content: "▾";
+  font-size: 0.76rem;
+}
+
+.site-nav-dropdown {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 0.45rem);
+  min-width: 13rem;
+  padding: 0.55rem;
+  border-radius: 1.1rem;
+  border: 1px solid var(--border-soft);
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 20px 34px rgba(20, 58, 43, 0.12);
+  display: grid;
+  gap: 0.4rem;
+  z-index: 24;
+}
+
+.site-nav-dropdown a {
+  border: 0;
+  border-radius: 0.95rem;
+  background: transparent;
+  box-shadow: none;
+  padding: 0.72rem 0.82rem;
+}
+
+.site-nav-dropdown a.is-current {
+  background: rgba(20, 58, 43, 0.1);
+  color: var(--forest-900);
+  border-color: transparent;
+  box-shadow: none;
+}
+
+.site-install {
+  display: none !important;
 }
 
 .cart-toggle {
@@ -277,6 +339,7 @@ main {
 
 .button:hover,
 .site-nav a:hover,
+.site-nav-summary:hover,
 .cart-toggle:hover,
 .icon-button:hover {
   transform: translateY(-1px);
@@ -1306,6 +1369,13 @@ textarea {
     flex-wrap: nowrap;
     overflow-x: auto;
     padding-bottom: 0.2rem;
+  }
+
+  .site-nav-dropdown {
+    position: fixed;
+    right: 0.75rem;
+    left: auto;
+    min-width: 12rem;
   }
 
   .catalog-toolbar,

@@ -14,6 +14,7 @@ from io import BytesIO, StringIO
 from pathlib import Path
 from threading import Lock
 from typing import Any
+from urllib.parse import quote
 from uuid import uuid4
 from zipfile import ZIP_DEFLATED, ZipFile
 from zoneinfo import ZoneInfo
@@ -396,6 +397,20 @@ def normalize_phone(value: Any) -> str:
     if digits.startswith("233") and len(digits) == 12:
         return f"0{digits[3:]}"
     return digits
+
+
+def whatsapp_phone_target(value: Any) -> str:
+    normalized = normalize_phone(value)
+    if normalized.startswith("0") and len(normalized) == 10:
+        return f"233{normalized[1:]}"
+    return normalized
+
+
+def whatsapp_chat_url(phone_number: Any, message: str) -> str:
+    target = whatsapp_phone_target(phone_number)
+    if not target:
+        return ""
+    return f"https://wa.me/{target}?text={quote(normalize_text(message))}"
 
 
 def phone_variants(value: Any) -> set[str]:
@@ -2568,6 +2583,137 @@ def apartment_profile_matches_alert(profile: dict[str, Any], alert_filter: str) 
     if selected == "balance-open":
         return profile["outstanding"] > 0
     return profile["alertKey"] == selected
+
+
+def apartment_due_entries(profile: dict[str, Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    if parse_amount(profile.get("rentBalance")) > 0:
+        entries.append(
+            {
+                "label": "Rent",
+                "amount": round(parse_amount(profile.get("rentBalance")), 2),
+                "dueDate": parse_date(profile.get("nextRentDueDate")),
+                "dueLabel": normalize_text(profile.get("nextRentDueDate")),
+            }
+        )
+    if parse_amount(profile.get("billsBalance")) > 0:
+        entries.append(
+            {
+                "label": "Monthly Bills",
+                "amount": round(parse_amount(profile.get("billsBalance")), 2),
+                "dueDate": parse_date(profile.get("billDueDate")),
+                "dueLabel": normalize_text(profile.get("billDueDate")),
+            }
+        )
+    return entries
+
+
+def apartment_reminder_message(profile: dict[str, Any], *, support_phone: str = "") -> str:
+    due_entries = apartment_due_entries(profile)
+    suite = normalize_text(profile.get("suite")) or "your suite"
+    tenant = normalize_text(profile.get("tenant")) or "Tenant"
+    amount_parts = [f"{entry['label']} {format_currency(entry['amount'])}" for entry in due_entries if entry["amount"] > 0]
+    amount_summary = ", ".join(amount_parts) if amount_parts else format_currency(profile.get("outstanding"))
+    due_parts = []
+    for entry in due_entries:
+        if entry["dueDate"]:
+            due_parts.append(f"{entry['label']} due {format_display_date(entry['dueDate'], long_month=True)}")
+    due_summary = ". ".join(due_parts)
+    contact_line = f" Please contact {support_phone} if you need any clarification." if normalize_text(support_phone) else ""
+    return (
+        f"Hello {tenant}, this is a reminder from OneRoot Essentials for {suite}. "
+        f"Our records show an outstanding balance of {format_currency(profile.get('outstanding'))}"
+        f" ({amount_summary})."
+        f"{(' ' + due_summary + '.') if due_summary else ''} "
+        f"Kindly make payment or reach out to confirm your plan.{contact_line}"
+    ).strip()
+
+
+def decorate_apartment_follow_up(profile: dict[str, Any], *, support_phone: str = "") -> dict[str, Any]:
+    due_entries = apartment_due_entries(profile)
+    primary_due = min(
+        [entry for entry in due_entries if entry["dueDate"]],
+        key=lambda entry: entry["dueDate"],
+        default=None,
+    )
+    balance_parts = [f"{entry['label']} {format_currency(entry['amount'])}" for entry in due_entries if entry["amount"] > 0]
+    balance_summary = " • ".join(balance_parts) if balance_parts else format_currency(profile.get("outstanding"))
+    due_summary = " • ".join(
+        f"{entry['label']} {format_display_date(entry['dueDate'], long_month=True)}"
+        for entry in due_entries
+        if entry["dueDate"]
+    )
+    reminder_message = apartment_reminder_message(profile, support_phone=support_phone)
+    whatsapp_url = ""
+    if normalize_phone(profile.get("tenantPhone")) and parse_amount(profile.get("outstanding")) > 0:
+        whatsapp_url = whatsapp_chat_url(profile.get("tenantPhone"), reminder_message)
+
+    reminder_type = {
+        "rent-bills-overdue": "Rent & Bills Overdue",
+        "rent-overdue": "Rent Overdue",
+        "bills-overdue": "Monthly Bills Overdue",
+        "rent-bills-due-soon": "Rent & Bills Due Soon",
+        "rent-due-soon": "Rent Due Soon",
+        "bills-due-soon": "Monthly Bills Due Soon",
+        "open-balance": "Open Balance",
+    }.get(profile.get("alertKey"), profile.get("alertLabel") or "Open Balance")
+
+    return {
+        **profile,
+        "balanceSummary": balance_summary,
+        "dueEntries": due_entries,
+        "dueSummary": due_summary,
+        "primaryDueLabel": (
+            f"{primary_due['label']} {format_display_date(primary_due['dueDate'], long_month=True)}"
+            if primary_due and primary_due.get("dueDate")
+            else ""
+        ),
+        "primaryDueDate": primary_due["dueDate"].isoformat() if primary_due and primary_due.get("dueDate") else "",
+        "whatsappUrl": whatsapp_url,
+        "reminderMessage": reminder_message,
+        "reminderType": reminder_type,
+        "whatsappReady": bool(whatsapp_url),
+    }
+
+
+def latest_apartment_suite_profiles(records: list[ModuleRecord], *, support_phone: str = "") -> list[dict[str, Any]]:
+    suite_latest: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if record.module_key != "apartments":
+            continue
+        profile = decorate_apartment_follow_up(apartment_profile(record), support_phone=support_phone)
+        current = suite_latest.get(profile["suite"])
+        if not current or apartment_record_sort_key(profile["record"]) > apartment_record_sort_key(current["record"]):
+            suite_latest[profile["suite"]] = profile
+    return sorted(
+        suite_latest.values(),
+        key=lambda item: (
+            item["alertRank"],
+            item["primaryDueDate"] or item["alertDate"] or "9999-12-31",
+            -parse_amount(item["outstanding"]),
+            item["suite"],
+        ),
+    )
+
+
+def build_tenant_reminder_queue(profiles: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    reminder_rows = [
+        profile
+        for profile in profiles
+        if profile.get("occupancyKey") in {"occupied", "reserved"}
+        and parse_amount(profile.get("outstanding")) > 0
+        and profile.get("whatsappReady")
+        and profile.get("alertKey") not in {"current", "vacant", "maintenance"}
+    ]
+    return sorted(
+        reminder_rows,
+        key=lambda item: (
+            item["alertRank"],
+            item["primaryDueDate"] or item["alertDate"] or "9999-12-31",
+            -parse_amount(item["outstanding"]),
+            item["suite"],
+        ),
+    )
 
 
 def format_display_date(value: Any, *, long_month: bool = False) -> str:
@@ -5372,6 +5518,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def dashboard():
         all_records = g.db.scalars(select(ModuleRecord)).all()
         current_month = date.today().strftime("%Y-%m")
+        latest_suite_profiles = latest_apartment_suite_profiles(all_records, support_phone=app_config.support_phone)
+        tenant_reminders = build_tenant_reminder_queue(latest_suite_profiles)
         target_progress_rows = build_target_progress_rows(all_records, current_month)
         low_stock_items = g.db.scalars(
             select(Product)
@@ -5391,7 +5539,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if record.module_key == "sales" and record.record_date == date.today()
         )
         petty_cash_total = sum(record.amount for record in all_records if record.module_key == "petty_cash")
-        apartment_due = sum(apartment_outstanding(record.payload or {}) for record in all_records if record.module_key == "apartments")
+        apartment_due = round(sum(parse_amount(profile["outstanding"]) for profile in latest_suite_profiles), 2)
         supplier_balance = sum(
             supplier_outstanding(record.payload or {}) for record in all_records if record.module_key == "suppliers"
         )
@@ -5418,19 +5566,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for record in all_records
             if record.module_key == "workforce_attendance" and record.record_date == date.today()
         ]
-        apartment_watch = sorted(
-            [
-                {
-                    "suite": normalize_text(record.payload.get("suite")) or record.title,
-                    "tenant": normalize_text(record.payload.get("tenantName")) or "No tenant",
-                    "outstanding": apartment_outstanding(record.payload or {}),
-                }
-                for record in all_records
-                if record.module_key == "apartments" and apartment_outstanding(record.payload or {}) > 0
-            ],
-            key=lambda item: item["outstanding"],
-            reverse=True,
-        )[:8]
+        apartment_watch = [
+            profile
+            for profile in latest_suite_profiles
+            if parse_amount(profile["outstanding"]) > 0
+        ][:8]
         sales_by_area_map: dict[str, float] = defaultdict(float)
         profit_by_area_map: dict[str, float] = defaultdict(float)
         for record in all_records:
@@ -5488,7 +5628,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             petty_cash_total=petty_cash_total,
             apartment_due=apartment_due,
             supplier_balance=supplier_balance,
-            recurring_due_count=len(recurring_due),
+            recurring_due_count=len(recurring_due) + len(tenant_reminders),
             recurring_due=recurring_due[:8],
             maintenance_open_count=len(maintenance_open),
             maintenance_open=maintenance_open[:8],
@@ -5496,6 +5636,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             training_due=training_due[:8],
             attendance_today_count=len(attendance_today),
             apartment_watch=apartment_watch,
+            tenant_reminders=tenant_reminders[:8],
+            tenant_reminder_count=len(tenant_reminders),
             monthly_sales_by_area=monthly_sales_by_area,
             monthly_sales_chart=build_chart_rows(
                 monthly_sales_by_area,
@@ -6511,6 +6653,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     item["suite"],
                 ),
             )
+            suite_profiles = [
+                decorate_apartment_follow_up(profile, support_phone=app_config.support_phone)
+                for profile in suite_profiles
+            ]
 
             history_rows = sorted(
                 apartment_profiles,
@@ -6559,6 +6705,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 for profile in suite_profiles
                 if profile["alertKey"] not in {"current", "vacant", "maintenance", "reserved"}
             ][:10]
+            tenant_reminders = build_tenant_reminder_queue(suite_profiles)[:10]
 
             return render_template(
                 "apartments.html",
@@ -6593,6 +6740,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 total_credit=round(sum(item["creditBalance"] for item in suite_profiles), 2),
                 total_rent_collected=round(sum(item["rentPaid"] for item in history_rows), 2),
                 total_bills_collected=round(sum(item["billsPaid"] for item in history_rows), 2),
+                tenant_reminders=tenant_reminders,
+                whatsapp_ready_count=sum(1 for item in suite_profiles if item["whatsappReady"]),
             )
 
         if module_key in SERVICE_MODULE_AREA_IDS:
@@ -6688,6 +6837,44 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         module_overview = build_module_overview(definition, records)
         module_quick_actions = []
+        automated_tenant_reminders: list[dict[str, Any]] = []
+        automated_tenant_counts: dict[str, int] = {}
+        if module_key == "recurring_controls":
+            full_tenant_reminder_queue = build_tenant_reminder_queue(
+                latest_apartment_suite_profiles(g.db.scalars(select(ModuleRecord)).all(), support_phone=app_config.support_phone)
+            )
+            automated_tenant_reminders = full_tenant_reminder_queue[:12]
+            automated_tenant_counts = {
+                "total": len(full_tenant_reminder_queue),
+                "overdue": sum(
+                    1
+                    for item in full_tenant_reminder_queue
+                    if item["alertKey"] in {"rent-overdue", "bills-overdue", "rent-bills-overdue"}
+                ),
+                "dueSoon": sum(
+                    1
+                    for item in full_tenant_reminder_queue
+                    if item["alertKey"] in {"rent-due-soon", "bills-due-soon", "rent-bills-due-soon"}
+                ),
+                "monthlyBills": sum(1 for item in full_tenant_reminder_queue if parse_amount(item.get("billsBalance")) > 0),
+                "whatsappReady": sum(1 for item in full_tenant_reminder_queue if item.get("whatsappReady")),
+            }
+            if user_has_access(g.current_user, "apartments"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Apartments",
+                        "href": url_for("module_list", module_key="apartments", alert="overdue"),
+                        "note": "Open the suites that need payment follow-up now.",
+                    }
+                )
+            if user_has_access(g.current_user, "whatsapp_campaigns"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open WhatsApp Campaigns",
+                        "href": url_for("module_list", module_key="whatsapp_campaigns"),
+                        "note": "Keep manual campaign records and scripted follow-up in one place.",
+                    }
+                )
         if user_has_access(g.current_user, "sales"):
             module_quick_actions.append(
                 {
@@ -6723,6 +6910,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             business_area_options=BUSINESS_AREA_OPTIONS,
             target_progress_rows=build_target_progress_rows(g.db.scalars(select(ModuleRecord)).all(), target_month, area_filter=target_area) if target_area else [],
             target_month=target_month,
+            automated_tenant_reminders=automated_tenant_reminders,
+            automated_tenant_counts=automated_tenant_counts,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")

@@ -17,7 +17,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/website/styles.css?v=20260802d" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260803a" />
   </head>
   <body>
     <div class="shop-shell">
@@ -35,11 +35,15 @@
           <a href="/shop">Shop</a>
           <a href="/laundry">Laundry</a>
           <a href="/equipment">Equipment</a>
-          <a class="is-current" href="/vacancies">Vacancies</a>
           <a href="/track-order">Track Order</a>
-          <a href="/contact">Contact</a>
-          <a href="/operations/">Staff App</a>
-          <button class="button button-secondary site-install" type="button" data-install-app hidden>Install App</button>
+          <details class="site-nav-menu is-current" open>
+            <summary class="site-nav-summary">More</summary>
+            <div class="site-nav-dropdown">
+              <a class="is-current" href="/vacancies">Vacancies</a>
+              <a href="/contact">Contact</a>
+              <a href="/operations/">Staff App</a>
+            </div>
+          </details>
         </nav>
       </header>
 
