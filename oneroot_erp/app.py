@@ -2943,6 +2943,10 @@ def apply_module_record_metadata(record: ModuleRecord, definition: ModuleDefinit
     record.updated_at = datetime.utcnow()
 
 
+def set_module_record_metadata(record: ModuleRecord, definition: ModuleDefinition, payload: dict[str, Any]) -> None:
+    apply_module_record_metadata(record, definition, payload)
+
+
 def migrate_planning_workspace(db_session) -> None:
     planning_definition = MODULES.get("forecast_plans")
     if not planning_definition:
