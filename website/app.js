@@ -10,6 +10,8 @@
     paymentMethods: [],
     cart: loadStoredCart(),
     customerDraft: loadStoredCustomerDraft(),
+    equipmentSelections: [],
+    laundrySelections: [],
     filters: {
       search: "",
       area: "",
@@ -104,6 +106,8 @@
       "trackingResult",
       "equipmentBookingForm",
       "equipmentItemSelect",
+      "equipmentAddItemBtn",
+      "equipmentSelectedItems",
       "equipmentCustomerName",
       "equipmentCustomerPhone",
       "equipmentCustomerEmail",
@@ -120,6 +124,8 @@
       "equipmentMessage",
       "laundryBookingForm",
       "laundryServiceSelect",
+      "laundryAddItemBtn",
+      "laundrySelectedItems",
       "laundryCustomerName",
       "laundryCustomerPhone",
       "laundryCustomerEmail",
@@ -179,6 +185,12 @@
     elements.equipmentBookingForm?.addEventListener("submit", handleEquipmentBookingSubmit);
     elements.laundryBookingForm?.addEventListener("submit", handleLaundryBookingSubmit);
     elements.leadCaptureForm?.addEventListener("submit", handleLeadCaptureSubmit);
+    elements.equipmentAddItemBtn?.addEventListener("click", () => {
+      addEquipmentSelectionFromInputs();
+    });
+    elements.laundryAddItemBtn?.addEventListener("click", () => {
+      addLaundrySelectionFromInputs();
+    });
 
     elements.checkoutForm?.addEventListener("input", persistCustomerDraftFromForm);
     elements.equipmentBookingForm?.addEventListener("input", persistServiceCustomerDraftFromForms);
@@ -236,6 +248,8 @@
       renderCart();
       populateEquipmentOptions();
       populateLaundryOptions();
+      renderEquipmentSelections();
+      renderLaundrySelections();
       populateServicePaymentMethods();
       restoreServiceCustomerDraftIntoForms();
       syncCartPanelLayout();
@@ -358,9 +372,10 @@
       return;
     }
 
+    const whatsappNumbers = getWhatsappDisplayNumbers();
     const contactParts = [
       state.config.supportPhone ? `Phone: ${state.config.supportPhone}` : "",
-      state.config.whatsappNumber ? `WhatsApp: ${state.config.whatsappNumber}` : "",
+      whatsappNumbers.length ? `WhatsApp: ${whatsappNumbers.join(" / ")}` : "",
       state.config.supportEmail ? `Email: ${state.config.supportEmail}` : "",
       state.config.pickupNote || ""
     ].filter(Boolean);
@@ -384,7 +399,8 @@
 
     const supportPhone = normalizeText(state.config.supportPhone);
     const supportDigits = normalizeDigits(supportPhone);
-    const whatsappNumber = normalizeWhatsappNumber(state.config.whatsappNumber);
+    const whatsappNumbers = getWhatsappDisplayNumbers();
+    const whatsappNumber = normalizeWhatsappNumber(whatsappNumbers[0]);
     const supportEmail = normalizeText(state.config.supportEmail);
     const pickupNote = normalizeText(state.config.pickupNote);
 
@@ -400,7 +416,8 @@
         : "#";
     }
     if (elements.contactWhatsappText) {
-      elements.contactWhatsappText.textContent = state.config.whatsappNumber || "Open WhatsApp";
+      elements.contactWhatsappText.textContent =
+        whatsappNumbers.join(" / ") || "Open WhatsApp";
     }
     if (elements.contactEmailLink) {
       elements.contactEmailLink.href = supportEmail ? `mailto:${supportEmail}` : "#";
@@ -509,7 +526,7 @@
             </div>
             <div class="vacancy-detail-list">
               <span>${escapeHtml(vacancy.closingDate ? `Apply by ${formatDate(vacancy.closingDate)}` : "Applications are open now")}</span>
-              ${vacancy.salaryRange ? `<span>${escapeHtml(vacancy.salaryRange)}</span>` : ""}
+              ${vacancy.salaryRange ? `<span>${escapeHtml(`Salary: ${vacancy.salaryRange}`)}</span>` : ""}
             </div>
             <div class="vacancy-actions">
               <a class="button button-primary" href="${escapeHtml(applyHref)}" target="_blank" rel="noreferrer">
@@ -560,6 +577,7 @@
         (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
       )
     ].join("");
+    renderEquipmentSelections();
   }
 
   function populateLaundryOptions() {
@@ -579,6 +597,192 @@
         (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
       )
     ].join("");
+    renderLaundrySelections();
+  }
+
+  function getWhatsappDisplayNumbers() {
+    return [...new Set([
+      normalizeText(state.config?.whatsappNumber),
+      normalizeText(state.config?.alternateWhatsappNumber)
+    ].filter(Boolean))];
+  }
+
+  function createClientSelectionId(prefix) {
+    if (window.crypto && typeof window.crypto.randomUUID === "function") {
+      return `${prefix}-${window.crypto.randomUUID()}`;
+    }
+
+    return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  }
+
+  function getCatalogItemById(itemId) {
+    return state.catalog.find((item) => normalizeText(item.id) === normalizeText(itemId)) || null;
+  }
+
+  function buildEquipmentSelectionFromInputs() {
+    const itemId = normalizeText(elements.equipmentItemSelect?.value);
+    const catalogItem = getCatalogItemById(itemId);
+
+    if (!catalogItem) {
+      return { error: "Choose the equipment item to add." };
+    }
+
+    const quantity = Math.max(Number(elements.equipmentQuantityInput?.value || 1), 1);
+    const durationDays = Math.max(Number(elements.equipmentDurationInput?.value || 1), 1);
+    const unitPrice = Number(catalogItem.salesPrice || 0);
+
+    return {
+      selection: {
+        selectionId: createClientSelectionId("equipment"),
+        id: catalogItem.id,
+        name: catalogItem.name,
+        quantity,
+        durationDays,
+        unitPrice,
+        lineTotal: Number((unitPrice * quantity * durationDays).toFixed(2))
+      }
+    };
+  }
+
+  function addEquipmentSelectionFromInputs() {
+    const { selection, error } = buildEquipmentSelectionFromInputs();
+
+    if (!selection) {
+      renderServiceMessage(elements.equipmentMessage, "error", error || "Choose an equipment item first.");
+      return false;
+    }
+
+    state.equipmentSelections.push(selection);
+    renderEquipmentSelections();
+    renderServiceMessage(elements.equipmentMessage, "success", `${escapeHtml(selection.name)} added to this customer request.`);
+    return true;
+  }
+
+  function renderEquipmentSelections() {
+    if (!elements.equipmentSelectedItems) {
+      return;
+    }
+
+    if (!state.equipmentSelections.length) {
+      elements.equipmentSelectedItems.innerHTML = `
+        <article class="service-selected-empty">
+          <strong>No equipment items added yet</strong>
+          <p>Select an item, set quantity and rental days, then add it to this request.</p>
+        </article>
+      `;
+      return;
+    }
+
+    elements.equipmentSelectedItems.innerHTML = state.equipmentSelections
+      .map(
+        (selection) => `
+          <article class="service-selected-item">
+            <div>
+              <strong>${escapeHtml(selection.name)}</strong>
+              <p>${escapeHtml(
+                `${selection.quantity} item${selection.quantity === 1 ? "" : "s"} for ${selection.durationDays} day${
+                  selection.durationDays === 1 ? "" : "s"
+                }`
+              )}</p>
+            </div>
+            <div class="service-selected-item-side">
+              <strong>${selection.unitPrice > 0 ? escapeHtml(formatCurrency(selection.lineTotal)) : "Quote"}</strong>
+              <button
+                class="button button-secondary"
+                data-service-action="remove-equipment-selection"
+                data-selection-id="${escapeHtml(selection.selectionId)}"
+                type="button"
+              >
+                Remove
+              </button>
+            </div>
+          </article>
+        `
+      )
+      .join("");
+  }
+
+  function buildLaundrySelectionFromInputs() {
+    const itemId = normalizeText(elements.laundryServiceSelect?.value);
+    const catalogItem = getCatalogItemById(itemId);
+
+    if (!catalogItem) {
+      return { error: "Choose the laundry service to add." };
+    }
+
+    const itemCount = Math.max(Number(elements.laundryItemCountInput?.value || 1), 1);
+    const itemSummary = normalizeText(elements.laundryItemSummaryInput?.value);
+    const unitPrice = Number(catalogItem.salesPrice || 0);
+
+    return {
+      selection: {
+        selectionId: createClientSelectionId("laundry"),
+        id: catalogItem.id,
+        name: catalogItem.name,
+        itemCount,
+        itemSummary,
+        unitPrice,
+        lineTotal: Number((unitPrice * itemCount).toFixed(2))
+      }
+    };
+  }
+
+  function addLaundrySelectionFromInputs() {
+    const { selection, error } = buildLaundrySelectionFromInputs();
+
+    if (!selection) {
+      renderServiceMessage(elements.laundryMessage, "error", error || "Choose a laundry service first.");
+      return false;
+    }
+
+    state.laundrySelections.push(selection);
+    renderLaundrySelections();
+    renderServiceMessage(elements.laundryMessage, "success", `${escapeHtml(selection.name)} added to this customer request.`);
+    return true;
+  }
+
+  function renderLaundrySelections() {
+    if (!elements.laundrySelectedItems) {
+      return;
+    }
+
+    if (!state.laundrySelections.length) {
+      elements.laundrySelectedItems.innerHTML = `
+        <article class="service-selected-empty">
+          <strong>No laundry lines added yet</strong>
+          <p>Choose the service, enter the item count, then add the line to this request.</p>
+        </article>
+      `;
+      return;
+    }
+
+    elements.laundrySelectedItems.innerHTML = state.laundrySelections
+      .map(
+        (selection) => `
+          <article class="service-selected-item">
+            <div>
+              <strong>${escapeHtml(selection.name)}</strong>
+              <p>${escapeHtml(
+                `${selection.itemCount} item${selection.itemCount === 1 ? "" : "s"}${
+                  selection.itemSummary ? ` • ${selection.itemSummary}` : ""
+                }`
+              )}</p>
+            </div>
+            <div class="service-selected-item-side">
+              <strong>${selection.unitPrice > 0 ? escapeHtml(formatCurrency(selection.lineTotal)) : "Quote"}</strong>
+              <button
+                class="button button-secondary"
+                data-service-action="remove-laundry-selection"
+                data-selection-id="${escapeHtml(selection.selectionId)}"
+                type="button"
+              >
+                Remove
+              </button>
+            </div>
+          </article>
+        `
+      )
+      .join("");
   }
 
   function splitTextLines(value) {
@@ -1035,6 +1239,28 @@
   }
 
   function handleBodyClick(event) {
+    const serviceActionButton = event.target.closest("button[data-service-action]");
+
+    if (serviceActionButton) {
+      const selectionId = normalizeText(serviceActionButton.dataset.selectionId);
+
+      if (serviceActionButton.dataset.serviceAction === "remove-equipment-selection") {
+        state.equipmentSelections = state.equipmentSelections.filter(
+          (selection) => selection.selectionId !== selectionId
+        );
+        renderEquipmentSelections();
+      }
+
+      if (serviceActionButton.dataset.serviceAction === "remove-laundry-selection") {
+        state.laundrySelections = state.laundrySelections.filter(
+          (selection) => selection.selectionId !== selectionId
+        );
+        renderLaundrySelections();
+      }
+
+      return;
+    }
+
     const areaFilterButton = event.target.closest("button[data-filter-area]");
 
     if (areaFilterButton) {
@@ -1224,22 +1450,19 @@
   async function handleEquipmentBookingSubmit(event) {
     event.preventDefault();
 
-    const itemId = normalizeText(elements.equipmentItemSelect?.value);
-    const catalogItem = state.catalog.find((item) => item.id === itemId);
     const customerName = normalizeText(elements.equipmentCustomerName?.value);
     const customerPhone = normalizeText(elements.equipmentCustomerPhone?.value);
 
-    if (!catalogItem) {
-      renderServiceMessage(elements.equipmentMessage, "error", "Choose the equipment item to book.");
-      return;
-    }
     if (!customerName || !customerPhone) {
       renderServiceMessage(elements.equipmentMessage, "error", "Customer name and phone number are required.");
       return;
     }
 
-    const quantity = Math.max(Number(elements.equipmentQuantityInput?.value || 1), 1);
-    const durationDays = Math.max(Number(elements.equipmentDurationInput?.value || 1), 1);
+    if (!state.equipmentSelections.length && !addEquipmentSelectionFromInputs()) {
+      return;
+    }
+
+    const selections = [...state.equipmentSelections];
     const preferredDate = normalizeText(elements.equipmentStartDateInput?.value);
     const preferredTime = normalizeText(elements.equipmentPreferredTimeInput?.value);
     const deliveryMode = normalizeText(elements.equipmentDeliveryModeInput?.value) || "Call To Confirm";
@@ -1252,9 +1475,14 @@
 
     const orderNotes = [
       "Equipment rental booking request",
-      `Equipment item: ${catalogItem.name}`,
-      `Quantity requested: ${quantity}`,
-      `Rental duration: ${durationDays} day(s)`,
+      `Equipment items: ${selections
+        .map(
+          (selection) =>
+            `${selection.name} x${selection.quantity} for ${selection.durationDays} day${
+              selection.durationDays === 1 ? "" : "s"
+            }`
+        )
+        .join("; ")}`,
       preferredDate ? `Preferred start date: ${preferredDate}` : "",
       preferredTime ? `Preferred time: ${preferredTime}` : "",
       deliveryMode ? `Delivery mode: ${deliveryMode}` : "",
@@ -1278,14 +1506,16 @@
         preferredTime,
         paymentMethod,
         notes: orderNotes,
-        items: [
-          {
-            id: catalogItem.id,
-            quantity,
-            unitPrice: Number(catalogItem.salesPrice || 0),
-            notes: orderNotes
-          }
-        ]
+        items: selections.map((selection) => ({
+          id: selection.id,
+          quantity: selection.quantity,
+          unitPrice: selection.unitPrice,
+          pricingMultiplier: selection.durationDays,
+          requestedDays: selection.durationDays,
+          notes: `${selection.name} x${selection.quantity} for ${selection.durationDays} day${
+            selection.durationDays === 1 ? "" : "s"
+          }\n${orderNotes}`
+        }))
       });
 
       renderServiceMessage(
@@ -1299,6 +1529,8 @@
       if (elements.equipmentNotesInput) {
         elements.equipmentNotesInput.value = "";
       }
+      state.equipmentSelections = [];
+      renderEquipmentSelections();
       persistServiceCustomerDraftFromForms();
     } catch (error) {
       console.error(error);
@@ -1313,21 +1545,19 @@
   async function handleLaundryBookingSubmit(event) {
     event.preventDefault();
 
-    const itemId = normalizeText(elements.laundryServiceSelect?.value);
-    const catalogItem = state.catalog.find((item) => item.id === itemId);
     const customerName = normalizeText(elements.laundryCustomerName?.value);
     const customerPhone = normalizeText(elements.laundryCustomerPhone?.value);
 
-    if (!catalogItem) {
-      renderServiceMessage(elements.laundryMessage, "error", "Choose the laundry service type first.");
-      return;
-    }
     if (!customerName || !customerPhone) {
       renderServiceMessage(elements.laundryMessage, "error", "Customer name and phone number are required.");
       return;
     }
 
-    const itemCount = Math.max(Number(elements.laundryItemCountInput?.value || 1), 1);
+    if (!state.laundrySelections.length && !addLaundrySelectionFromInputs()) {
+      return;
+    }
+
+    const selections = [...state.laundrySelections];
     const deliveryMode = normalizeText(elements.laundryDeliveryModeInput?.value) || "Pickup";
     const preferredDate = normalizeText(elements.laundryPickupDateInput?.value);
     const preferredTime = normalizeText(elements.laundryPreferredTimeInput?.value);
@@ -1339,9 +1569,15 @@
 
     const orderNotes = [
       "Laundry service request",
-      `Laundry option: ${catalogItem.name}`,
-      `Item count: ${itemCount}`,
-      itemSummary ? `Items summary: ${itemSummary}` : "",
+      `Laundry lines: ${selections
+        .map(
+          (selection) =>
+            `${selection.name} • ${selection.itemCount} item${selection.itemCount === 1 ? "" : "s"}${
+              selection.itemSummary ? ` • ${selection.itemSummary}` : ""
+            }`
+        )
+        .join("; ")}`,
+      itemSummary ? `General item notes: ${itemSummary}` : "",
       preferredDate ? `Preferred date: ${preferredDate}` : "",
       preferredTime ? `Preferred time: ${preferredTime}` : "",
       deliveryMode ? `Pickup / delivery mode: ${deliveryMode}` : "",
@@ -1363,14 +1599,14 @@
         preferredTime,
         paymentMethod,
         notes: orderNotes,
-        items: [
-          {
-            id: catalogItem.id,
-            quantity: itemCount,
-            unitPrice: Number(catalogItem.salesPrice || 0),
-            notes: orderNotes
-          }
-        ]
+        items: selections.map((selection) => ({
+          id: selection.id,
+          quantity: selection.itemCount,
+          unitPrice: selection.unitPrice,
+          notes: `${selection.name} • ${selection.itemCount} item${selection.itemCount === 1 ? "" : "s"}${
+            selection.itemSummary ? ` • ${selection.itemSummary}` : ""
+          }\n${orderNotes}`
+        }))
       });
 
       renderServiceMessage(
@@ -1384,6 +1620,8 @@
       if (elements.laundryNotesInput) {
         elements.laundryNotesInput.value = "";
       }
+      state.laundrySelections = [];
+      renderLaundrySelections();
       persistServiceCustomerDraftFromForms();
     } catch (error) {
       console.error(error);
@@ -1494,7 +1732,7 @@
     const areaLabel = getAreaLabel(normalizeText(elements.leadBusinessArea?.value)) || "OneRoot Essentials";
     const supportPhone = normalizeText(state.config?.supportPhone);
     const message = [
-      customerName ? `${customerName} recommends OneRoot.shop for daily essentials.` : "Try OneRoot.shop for daily essentials.",
+      customerName ? `${customerName} recommends OneRoot Essentials for daily essentials.` : "Try OneRoot Essentials for daily essentials.",
       `OneRoot supports ${areaLabel.toLowerCase()}, groceries, laundry, equipment, and community needs.`,
       `Ask them about ${interestType.toLowerCase()}.`,
       supportPhone ? `Call ${supportPhone}` : "",

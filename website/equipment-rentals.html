@@ -8,7 +8,7 @@
       content="Book OneRoot equipment rentals with item, quantity, start date, rental duration, and site details."
     />
     <meta name="theme-color" content="#143a2b" />
-    <title>Equipment Rentals | OneRoot.shop</title>
+    <title>Equipment Rentals | OneRoot Essentials</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -17,15 +17,15 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/website/styles.css?v=20260803b" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260805a" />
   </head>
   <body>
     <div class="shop-shell">
       <header class="site-header">
         <a class="brand" href="/">
-          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
+          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials mark" />
           <span>
-            <strong>OneRoot.shop</strong>
+            <strong>OneRoot Essentials</strong>
             <small>Equipment Rentals</small>
           </span>
         </a>
@@ -55,8 +55,8 @@
             <p class="section-note">
               Reserve wheelbarrows, concrete vibrators, cutting machines, head
               pans, shovels, impact drills, and related support equipment.
-              Share quantity, rental days, and location so OneRoot can confirm
-              availability quickly.
+              Share quantity, rental days, and location, and add several items
+              to one customer request so OneRoot can confirm availability quickly.
             </p>
           </div>
           <div class="hero-tags" id="heroContactLine"></div>
@@ -69,41 +69,55 @@
                 <p class="eyebrow">Equipment Booking</p>
                 <h2>Send rental request</h2>
               </div>
-              <p class="section-note">Rental options are loaded from the OneRoot service catalog.</p>
+              <p class="section-note">Rental options are loaded from the OneRoot service catalog, and one request can now include several equipment lines.</p>
             </div>
 
             <form id="equipmentBookingForm" class="checkout-form" novalidate>
-              <div class="checkout-fields">
-                <label>
-                  <span>Equipment Item</span>
-                  <select id="equipmentItemSelect" required>
-                    <option value="">Loading equipment options...</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Quantity Needed</span>
-                  <input id="equipmentQuantityInput" type="number" min="1" step="1" value="1" required />
-                </label>
-                <label>
-                  <span>Rental Duration (Days)</span>
-                  <input id="equipmentDurationInput" type="number" min="1" step="1" value="1" required />
-                </label>
-                <label>
-                  <span>Preferred Start Date</span>
-                  <input id="equipmentStartDateInput" type="date" />
-                </label>
-                <label>
-                  <span>Preferred Time</span>
-                  <input id="equipmentPreferredTimeInput" type="time" />
-                </label>
-                <label>
-                  <span>Delivery Mode</span>
-                  <select id="equipmentDeliveryModeInput">
-                    <option value="Pickup">Pickup</option>
-                    <option value="Delivery">Delivery</option>
-                    <option value="Call To Confirm">Call To Confirm</option>
-                  </select>
-                </label>
+              <div class="service-request-builder">
+                <div class="service-request-head">
+                  <div>
+                    <span class="count-pill">Build Request</span>
+                    <strong>Add several equipment items for one customer before sending.</strong>
+                  </div>
+                  <button id="equipmentAddItemBtn" class="button button-secondary" type="button">
+                    Add Equipment Item
+                  </button>
+                </div>
+
+                <div class="checkout-fields">
+                  <label>
+                    <span>Equipment Item</span>
+                    <select id="equipmentItemSelect" required>
+                      <option value="">Loading equipment options...</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Quantity Needed</span>
+                    <input id="equipmentQuantityInput" type="number" min="1" step="1" value="1" required />
+                  </label>
+                  <label>
+                    <span>Rental Duration (Days)</span>
+                    <input id="equipmentDurationInput" type="number" min="1" step="1" value="1" required />
+                  </label>
+                  <label>
+                    <span>Preferred Start Date</span>
+                    <input id="equipmentStartDateInput" type="date" />
+                  </label>
+                  <label>
+                    <span>Preferred Time</span>
+                    <input id="equipmentPreferredTimeInput" type="time" />
+                  </label>
+                  <label>
+                    <span>Delivery Mode</span>
+                    <select id="equipmentDeliveryModeInput">
+                      <option value="Pickup">Pickup</option>
+                      <option value="Delivery">Delivery</option>
+                      <option value="Call To Confirm">Call To Confirm</option>
+                    </select>
+                  </label>
+                </div>
+
+                <div id="equipmentSelectedItems" class="service-selected-list"></div>
               </div>
 
               <div class="checkout-fields">
@@ -183,7 +197,7 @@
       </footer>
     </div>
 
-    <script src="/website/app.js?v=20260803b"></script>
+    <script src="/website/app.js?v=20260805a"></script>
     <script src="/website/pwa.js?v=20260801c"></script>
   </body>
 </html>

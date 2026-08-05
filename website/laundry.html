@@ -8,7 +8,7 @@
       content="Book OneRoot laundry pickup, washing, drying, ironing, and folding services with normal or express options."
     />
     <meta name="theme-color" content="#143a2b" />
-    <title>Laundry Services | OneRoot.shop</title>
+    <title>Laundry Services | OneRoot Essentials</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -17,15 +17,15 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/website/styles.css?v=20260803b" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260805a" />
   </head>
   <body>
     <div class="shop-shell">
       <header class="site-header">
         <a class="brand" href="/">
-          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials logo" />
+          <img src="/assets/oneroot-logo.png" alt="OneRoot Essentials mark" />
           <span>
-            <strong>OneRoot.shop</strong>
+            <strong>OneRoot Essentials</strong>
             <small>Laundry Services</small>
           </span>
         </a>
@@ -54,8 +54,8 @@
             <h1>Fresh laundry, ready when you need it.</h1>
             <p class="section-note">
               Book normal or express laundry, enter the number of items, choose
-              pickup or delivery, and add any special care instructions before
-              the OneRoot team confirms the service.
+              pickup or delivery, and add multiple laundry lines for one
+              customer before the OneRoot team confirms the service.
             </p>
           </div>
           <div class="hero-tags" id="heroContactLine"></div>
@@ -68,25 +68,39 @@
                 <p class="eyebrow">Laundry Request</p>
                 <h2>Book laundry service</h2>
               </div>
-              <p class="section-note">Normal and Express options are available from the OneRoot service catalog.</p>
+              <p class="section-note">Normal and Express options are available from the OneRoot service catalog, and one booking can include several laundry lines.</p>
             </div>
 
             <form id="laundryBookingForm" class="checkout-form" novalidate>
-              <div class="checkout-fields">
-                <label>
-                  <span>Service Type</span>
-                  <select id="laundryServiceSelect" required>
-                    <option value="">Loading laundry options...</option>
-                  </select>
-                </label>
-                <label>
-                  <span>Item Count</span>
-                  <input id="laundryItemCountInput" type="number" min="1" step="1" value="1" required />
-                </label>
-                <label class="wide-field">
-                  <span>Items Summary</span>
-                  <input id="laundryItemSummaryInput" type="text" placeholder="Example: 4 shirts, 2 jeans, 1 bedsheet" />
-                </label>
+              <div class="service-request-builder">
+                <div class="service-request-head">
+                  <div>
+                    <span class="count-pill">Build Request</span>
+                    <strong>Add more than one laundry line for one customer.</strong>
+                  </div>
+                  <button id="laundryAddItemBtn" class="button button-secondary" type="button">
+                    Add Laundry Line
+                  </button>
+                </div>
+
+                <div class="checkout-fields">
+                  <label>
+                    <span>Service Type</span>
+                    <select id="laundryServiceSelect" required>
+                      <option value="">Loading laundry options...</option>
+                    </select>
+                  </label>
+                  <label>
+                    <span>Item Count</span>
+                    <input id="laundryItemCountInput" type="number" min="1" step="1" value="1" required />
+                  </label>
+                  <label class="wide-field">
+                    <span>Items Summary</span>
+                    <input id="laundryItemSummaryInput" type="text" placeholder="Example: 4 shirts, 2 jeans, 1 bedsheet" />
+                  </label>
+                </div>
+
+                <div id="laundrySelectedItems" class="service-selected-list"></div>
               </div>
 
               <div class="checkout-fields">
@@ -177,7 +191,7 @@
       </footer>
     </div>
 
-    <script src="/website/app.js?v=20260803b"></script>
+    <script src="/website/app.js?v=20260805a"></script>
     <script src="/website/pwa.js?v=20260801c"></script>
   </body>
 </html>

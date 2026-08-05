@@ -11823,6 +11823,690 @@ function normalizeEquipmentCondition(value) {
   return matched || "Good";
 }
 
+function parseStructuredLineItems(rawValue) {
+  if (Array.isArray(rawValue)) {
+    return rawValue;
+  }
+
+  if (!rawValue || typeof rawValue !== "string") {
+    return [];
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch (error) {
+    console.error(error);
+    return [];
+  }
+}
+
+function getInventoryItemById(itemId) {
+  const normalizedId = normalizeText(itemId);
+  const inventoryItems = Array.isArray(state.inventoryItems) ? state.inventoryItems : [];
+
+  if (!normalizedId) {
+    return null;
+  }
+
+  return inventoryItems.find((item) => normalizeText(item.id) === normalizedId) || null;
+}
+
+function buildDateOffsetValue(baseDate, dayCount) {
+  const normalizedBaseDate = normalizeDateInput(baseDate);
+  const offsetDays = Math.max(parsePositiveInteger(dayCount), 0);
+
+  if (!normalizedBaseDate) {
+    return "";
+  }
+
+  const [year, month, day] = normalizedBaseDate.split("-").map((value) => Number(value || 0));
+
+  if (!year || !month || !day) {
+    return "";
+  }
+
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + offsetDays);
+
+  return [
+    String(date.getUTCFullYear()),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0")
+  ].join("-");
+}
+
+function getLaundryCatalogServiceItems() {
+  const inventoryItems = Array.isArray(state.inventoryItems) ? state.inventoryItems : [];
+
+  return inventoryItems
+    .filter((item) => item.businessAreaId === "laundry-services")
+    .filter((item) => item.itemType === "service")
+    .filter((item) => item.active)
+    .sort((left, right) => {
+      if (left.category !== right.category) {
+        return left.category.localeCompare(right.category);
+      }
+
+      return left.name.localeCompare(right.name);
+    });
+}
+
+function sanitizeLaundryLineItem(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const inventoryItem = getInventoryItemById(item.itemId || item.inventoryItemId || item.productId);
+  const itemName = normalizeText(item.itemName || item.name || inventoryItem?.name);
+  const quantity = Math.max(parsePositiveInteger(item.quantity || item.pieces || 1), 1);
+  const unitPrice = Number(
+    parseOptionalAmount(item.unitPrice ?? item.price ?? inventoryItem?.salesPrice).toFixed(2)
+  );
+
+  if (!itemName || unitPrice <= 0) {
+    return null;
+  }
+
+  return {
+    lineId: normalizeText(item.lineId) || generateId(),
+    itemId: normalizeText(item.itemId || item.inventoryItemId || item.productId || inventoryItem?.id),
+    itemName,
+    category: normalizeText(item.category || inventoryItem?.category),
+    quantity,
+    unitPrice,
+    lineTotal: Number((quantity * unitPrice).toFixed(2))
+  };
+}
+
+function buildLaundryLineItemsFromRecord(record) {
+  const storedItems = parseStructuredLineItems(record?.lineItems)
+    .map(sanitizeLaundryLineItem)
+    .filter(Boolean);
+
+  if (storedItems.length > 0) {
+    return storedItems;
+  }
+
+  const itemSummary = normalizeText(record?.itemSummary || record?.items || record?.description);
+  const pieces = Math.max(parsePositiveInteger(record?.pieces || record?.quantity || 1), 1);
+  const amountDue = parseOptionalAmount(record?.amountDue || record?.totalAmount || record?.amount);
+
+  if (!itemSummary || amountDue <= 0) {
+    return [];
+  }
+
+  const matchedInventoryItem =
+    getLaundryCatalogServiceItems().find(
+      (item) => normalizeText(item.name).toLowerCase() === itemSummary.toLowerCase()
+    ) || null;
+
+  return (
+    [
+      sanitizeLaundryLineItem({
+        itemId: matchedInventoryItem?.id || "",
+        itemName: matchedInventoryItem?.name || itemSummary,
+        category: matchedInventoryItem?.category || "",
+        quantity: pieces,
+        unitPrice: pieces > 0 ? amountDue / pieces : amountDue
+      })
+    ].filter(Boolean) || []
+  );
+}
+
+function summarizeLaundryLineItems(lineItems) {
+  const items = (Array.isArray(lineItems) ? lineItems : [])
+    .map(sanitizeLaundryLineItem)
+    .filter(Boolean);
+  const pieces = items.reduce((sum, item) => sum + item.quantity, 0);
+  const amountDue = Number(items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2));
+  const itemSummary = items
+    .map((item) => `${item.quantity > 1 ? `${item.quantity} x ` : ""}${item.itemName}`)
+    .join(" • ");
+
+  return {
+    items,
+    pieces,
+    amountDue,
+    itemSummary
+  };
+}
+
+function renderLaundryLineItemsList(root, lineItems) {
+  if (!root) {
+    return;
+  }
+
+  const items = summarizeLaundryLineItems(lineItems).items;
+
+  root.innerHTML =
+    items.length === 0
+      ? `
+          <div class="service-selected-empty">
+            <strong>No laundry lines added yet</strong>
+            <p>Select a laundry service item, set the quantity, then add it to this ticket.</p>
+          </div>
+        `
+      : items
+          .map(
+            (item) => `
+              <article class="service-selected-item">
+                <div>
+                  <strong>${escapeHtml(item.itemName)}</strong>
+                  <p>${escapeHtml(item.category || "Laundry service")} • Qty ${escapeHtml(
+                    String(item.quantity)
+                  )} • ${escapeHtml(formatCurrency(item.unitPrice))} each</p>
+                </div>
+                <div class="service-selected-item-side">
+                  <strong>${escapeHtml(formatCurrency(item.lineTotal))}</strong>
+                  <button class="service-selected-action" data-laundry-line-remove="${escapeHtml(
+                    item.lineId
+                  )}" type="button">Remove</button>
+                </div>
+              </article>
+            `
+          )
+          .join("");
+}
+
+function syncLaundryLineItemFields(form, lineItems) {
+  if (!form) {
+    return;
+  }
+
+  const summary = summarizeLaundryLineItems(lineItems);
+  const hiddenInput = form.querySelector("#laundryLineItemsJson");
+  const itemSummaryInput = form.querySelector("#laundryItemSummary");
+  const piecesInput = form.querySelector("#laundryPieces");
+  const amountDueInput = form.querySelector("#laundryAmountDue");
+
+  if (hiddenInput) {
+    hiddenInput.value = JSON.stringify(summary.items);
+  }
+
+  if (itemSummaryInput) {
+    itemSummaryInput.value = summary.itemSummary;
+  }
+
+  if (piecesInput) {
+    piecesInput.value = summary.items.length > 0 ? String(summary.pieces) : "";
+  }
+
+  if (amountDueInput) {
+    amountDueInput.value = summary.items.length > 0 ? formatAmountInputValue(summary.amountDue) : "";
+  }
+}
+
+function bindLaundryLineItemBuilder(record) {
+  const form = document.getElementById("laundryTicketForm");
+  const addLineButton = document.getElementById("laundryAddLineBtn");
+  const itemSelect = document.getElementById("laundryCatalogItem");
+  const quantityInput = document.getElementById("laundryLineQuantity");
+  const selectedItemsRoot = document.getElementById("laundrySelectedItems");
+  const serviceTypeSelect = document.getElementById("laundryServiceType");
+
+  if (!form || !addLineButton || !itemSelect || !quantityInput || !selectedItemsRoot) {
+    return;
+  }
+
+  let lineItems = buildLaundryLineItemsFromRecord(record);
+
+  const syncView = () => {
+    syncLaundryLineItemFields(form, lineItems);
+    renderLaundryLineItemsList(selectedItemsRoot, lineItems);
+
+    if (
+      serviceTypeSelect &&
+      lineItems.length > 0 &&
+      lineItems.every((item) => normalizeText(item.itemName).toLowerCase().includes("express"))
+    ) {
+      serviceTypeSelect.value = "Express";
+    }
+  };
+
+  const addLineItem = () => {
+    const selectedItem = getInventoryItemById(itemSelect.value);
+    const quantity = Math.max(parsePositiveInteger(quantityInput.value), 1);
+
+    if (!selectedItem) {
+      showToast("Choose the laundry service item first.");
+      itemSelect.focus();
+      return;
+    }
+
+    const existingLine = lineItems.find((item) => item.itemId === selectedItem.id);
+
+    if (existingLine) {
+      existingLine.quantity += quantity;
+      existingLine.lineTotal = Number((existingLine.quantity * existingLine.unitPrice).toFixed(2));
+    } else {
+      lineItems = [
+        ...lineItems,
+        sanitizeLaundryLineItem({
+          itemId: selectedItem.id,
+          itemName: selectedItem.name,
+          category: selectedItem.category,
+          quantity,
+          unitPrice: selectedItem.salesPrice
+        })
+      ].filter(Boolean);
+    }
+
+    quantityInput.value = "1";
+    syncView();
+    showToast(`${selectedItem.name} added to this laundry ticket.`);
+  };
+
+  addLineButton.addEventListener("click", addLineItem);
+
+  quantityInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") {
+      return;
+    }
+
+    event.preventDefault();
+    addLineItem();
+  });
+
+  selectedItemsRoot.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-laundry-line-remove]");
+
+    if (!removeButton) {
+      return;
+    }
+
+    const lineId = normalizeText(removeButton.dataset.laundryLineRemove);
+    lineItems = lineItems.filter((item) => item.lineId !== lineId);
+    syncView();
+  });
+
+  syncView();
+}
+
+function calculateDateDaySpan(startDate, endDate) {
+  const normalizedStart = normalizeDateInput(startDate);
+  const normalizedEnd = normalizeDateInput(endDate);
+
+  if (!normalizedStart || !normalizedEnd) {
+    return 0;
+  }
+
+  const [startYear, startMonth, startDay] = normalizedStart.split("-").map((value) => Number(value || 0));
+  const [endYear, endMonth, endDay] = normalizedEnd.split("-").map((value) => Number(value || 0));
+
+  if (!startYear || !startMonth || !startDay || !endYear || !endMonth || !endDay) {
+    return 0;
+  }
+
+  const startValue = Date.UTC(startYear, startMonth - 1, startDay);
+  const endValue = Date.UTC(endYear, endMonth - 1, endDay);
+  const difference = Math.round((endValue - startValue) / 86400000);
+
+  return difference > 0 ? difference : 0;
+}
+
+function getEquipmentRentalChoiceOptions() {
+  const assetRecords = Array.isArray(state.assetRecords) ? state.assetRecords : [];
+  const equipmentRentalBookings = Array.isArray(state.equipmentRentalBookings)
+    ? state.equipmentRentalBookings
+    : [];
+  const assetNames = assetRecords
+    .filter((record) => record.businessAreaId === "water-equipment")
+    .map((record) => record.assetName);
+  const savedBookingNames = equipmentRentalBookings
+    .flatMap((record) => [
+      normalizeText(record.equipmentItem),
+      ...buildEquipmentLineItemsFromRecord(record).map((item) => item.itemName)
+    ])
+    .filter(Boolean);
+
+  return mergeUniqueOptions(EQUIPMENT_RENTAL_ITEM_OPTIONS, [...assetNames, ...savedBookingNames]).map((name) => ({
+    value: name,
+    label: name
+  }));
+}
+
+function sanitizeEquipmentLineItem(item) {
+  if (!item || typeof item !== "object") {
+    return null;
+  }
+
+  const itemName = normalizeText(item.itemName || item.name || item.equipmentItem);
+  const quantity = Math.max(parsePositiveInteger(item.quantity || item.pieces || 1), 1);
+  const requestedDays = Math.max(
+    parsePositiveInteger(item.requestedDays || item.days || item.durationDays || 1),
+    1
+  );
+  const dailyRate = Number(
+    parseOptionalAmount(item.dailyRate ?? item.unitPrice ?? item.rate ?? item.rentalRate).toFixed(2)
+  );
+
+  if (!itemName || dailyRate <= 0) {
+    return null;
+  }
+
+  return {
+    lineId: normalizeText(item.lineId) || generateId(),
+    itemName,
+    quantity,
+    requestedDays,
+    dailyRate,
+    lineTotal: Number((quantity * requestedDays * dailyRate).toFixed(2))
+  };
+}
+
+function buildEquipmentLineItemsFromRecord(record) {
+  const storedItems = parseStructuredLineItems(record?.lineItems)
+    .map(sanitizeEquipmentLineItem)
+    .filter(Boolean);
+
+  if (storedItems.length > 0) {
+    return storedItems;
+  }
+
+  const equipmentItem = normalizeText(record?.equipmentItem || record?.item);
+  const rentalFee = parseOptionalAmount(record?.rentalFee || record?.amountDue || record?.amount);
+  const quantity = Math.max(parsePositiveInteger(record?.quantity || 1), 1);
+  const requestedDays = Math.max(
+    parsePositiveInteger(record?.requestedDays || calculateDateDaySpan(record?.outDate, record?.dueDate) || 1),
+    1
+  );
+
+  if (!equipmentItem || rentalFee <= 0) {
+    return [];
+  }
+
+  return (
+    [
+      sanitizeEquipmentLineItem({
+        itemName: equipmentItem,
+        quantity,
+        requestedDays,
+        dailyRate: rentalFee / Math.max(quantity * requestedDays, 1)
+      })
+    ].filter(Boolean) || []
+  );
+}
+
+function getEquipmentRentalDailyRate(itemName) {
+  const normalizedItemName = normalizeText(itemName).toLowerCase();
+  const equipmentRentalBookings = Array.isArray(state.equipmentRentalBookings)
+    ? state.equipmentRentalBookings
+    : [];
+
+  if (!normalizedItemName) {
+    return 0;
+  }
+
+  const sortedRecords = [...equipmentRentalBookings].sort((left, right) =>
+    (right.updatedAt || "").localeCompare(left.updatedAt || "")
+  );
+
+  for (const record of sortedRecords) {
+    const matchedItem = buildEquipmentLineItemsFromRecord(record).find(
+      (lineItem) => normalizeText(lineItem.itemName).toLowerCase() === normalizedItemName
+    );
+
+    if (matchedItem?.dailyRate > 0) {
+      return matchedItem.dailyRate;
+    }
+  }
+
+  return 0;
+}
+
+function summarizeEquipmentLineItems(lineItems) {
+  const items = (Array.isArray(lineItems) ? lineItems : [])
+    .map(sanitizeEquipmentLineItem)
+    .filter(Boolean);
+  const totalQuantity = items.reduce((sum, item) => sum + item.quantity, 0);
+  const totalAmount = Number(items.reduce((sum, item) => sum + item.lineTotal, 0).toFixed(2));
+  const maxDays = items.reduce((maxValue, item) => Math.max(maxValue, item.requestedDays), 0);
+  const equipmentSummary = items
+    .map(
+      (item) =>
+        `${item.quantity > 1 ? `${item.quantity} x ` : ""}${item.itemName} (${item.requestedDays} day${
+          item.requestedDays === 1 ? "" : "s"
+        })`
+    )
+    .join(" • ");
+
+  return {
+    items,
+    totalQuantity,
+    totalAmount,
+    maxDays,
+    equipmentSummary
+  };
+}
+
+function renderEquipmentLineItemsList(root, lineItems) {
+  if (!root) {
+    return;
+  }
+
+  const items = summarizeEquipmentLineItems(lineItems).items;
+
+  root.innerHTML =
+    items.length === 0
+      ? `
+          <div class="service-selected-empty">
+            <strong>No rental lines added yet</strong>
+            <p>Choose an item, set quantity, days, and daily rate, then add it to this customer booking.</p>
+          </div>
+        `
+      : items
+          .map(
+            (item) => `
+              <article class="service-selected-item">
+                <div>
+                  <strong>${escapeHtml(item.itemName)}</strong>
+                  <p>Qty ${escapeHtml(String(item.quantity))} • ${escapeHtml(
+                    String(item.requestedDays)
+                  )} day${item.requestedDays === 1 ? "" : "s"} • ${escapeHtml(
+                    formatCurrency(item.dailyRate)
+                  )} per day</p>
+                </div>
+                <div class="service-selected-item-side">
+                  <strong>${escapeHtml(formatCurrency(item.lineTotal))}</strong>
+                  <button class="service-selected-action" data-equipment-line-remove="${escapeHtml(
+                    item.lineId
+                  )}" type="button">Remove</button>
+                </div>
+              </article>
+            `
+          )
+          .join("");
+}
+
+function syncEquipmentLineItemFields(form, lineItems) {
+  if (!form) {
+    return;
+  }
+
+  const summary = summarizeEquipmentLineItems(lineItems);
+  const hiddenInput = form.querySelector("#equipmentLineItemsJson");
+  const equipmentSummaryInput = form.querySelector("#equipmentItem");
+  const rentalFeeInput = form.querySelector("#equipmentRentalFee");
+  const outDateInput = form.querySelector("#equipmentOutDate");
+  const bookingDateInput = form.querySelector("#equipmentBookingDate");
+  const dueDateInput = form.querySelector("#equipmentDueDate");
+  const baseDate = normalizeDateInput(outDateInput?.value) || normalizeDateInput(bookingDateInput?.value);
+  const suggestedDueDate = summary.maxDays > 0 ? buildDateOffsetValue(baseDate, summary.maxDays) : "";
+
+  if (hiddenInput) {
+    hiddenInput.value = JSON.stringify(summary.items);
+  }
+
+  if (equipmentSummaryInput) {
+    equipmentSummaryInput.value = summary.equipmentSummary;
+  }
+
+  if (rentalFeeInput) {
+    rentalFeeInput.value = summary.items.length > 0 ? formatAmountInputValue(summary.totalAmount) : "";
+  }
+
+  if (dueDateInput) {
+    const shouldAutoFill =
+      dueDateInput.dataset.autoDerived !== "false" || normalizeDateInput(dueDateInput.value) === "";
+
+    if (suggestedDueDate && shouldAutoFill) {
+      dueDateInput.value = suggestedDueDate;
+      dueDateInput.dataset.autoDerived = "true";
+    } else if (!suggestedDueDate && dueDateInput.dataset.autoDerived === "true") {
+      dueDateInput.value = "";
+      dueDateInput.dataset.autoDerived = "true";
+    }
+  }
+}
+
+function bindEquipmentLineItemBuilder(record) {
+  const form = document.getElementById("equipmentRentalForm");
+  const addLineButton = document.getElementById("equipmentAddLineBtn");
+  const itemSelect = document.getElementById("equipmentLineItem");
+  const quantityInput = document.getElementById("equipmentLineQuantity");
+  const daysInput = document.getElementById("equipmentLineDays");
+  const dailyRateInput = document.getElementById("equipmentLineDailyRate");
+  const selectedItemsRoot = document.getElementById("equipmentSelectedItems");
+  const dueDateInput = document.getElementById("equipmentDueDate");
+  const outDateInput = document.getElementById("equipmentOutDate");
+  const bookingDateInput = document.getElementById("equipmentBookingDate");
+
+  if (
+    !form ||
+    !addLineButton ||
+    !itemSelect ||
+    !quantityInput ||
+    !daysInput ||
+    !dailyRateInput ||
+    !selectedItemsRoot
+  ) {
+    return;
+  }
+
+  let lineItems = buildEquipmentLineItemsFromRecord(record);
+
+  const syncView = () => {
+    syncEquipmentLineItemFields(form, lineItems);
+    renderEquipmentLineItemsList(selectedItemsRoot, lineItems);
+  };
+
+  const applySuggestedRate = () => {
+    const suggestedRate = getEquipmentRentalDailyRate(itemSelect.value);
+    const currentRate = parseOptionalAmount(dailyRateInput.value);
+
+    if (suggestedRate > 0 && (currentRate <= 0 || dailyRateInput.dataset.autoDerived === "true")) {
+      dailyRateInput.value = formatAmountInputValue(suggestedRate);
+      dailyRateInput.dataset.autoDerived = "true";
+    }
+  };
+
+  const addLineItem = () => {
+    const itemName = normalizeText(itemSelect.value);
+    const quantity = Math.max(parsePositiveInteger(quantityInput.value), 1);
+    const requestedDays = Math.max(parsePositiveInteger(daysInput.value), 1);
+    const dailyRate = Number(parseOptionalAmount(dailyRateInput.value).toFixed(2));
+
+    if (!itemName) {
+      showToast("Choose the equipment item first.");
+      itemSelect.focus();
+      return;
+    }
+
+    if (dailyRate <= 0) {
+      showToast("Enter the equipment daily rate before adding the rental line.");
+      dailyRateInput.focus();
+      return;
+    }
+
+    const existingLine = lineItems.find(
+      (item) =>
+        item.itemName.toLowerCase() === itemName.toLowerCase() &&
+        item.requestedDays === requestedDays &&
+        item.dailyRate === dailyRate
+    );
+
+    if (existingLine) {
+      existingLine.quantity += quantity;
+      existingLine.lineTotal = Number(
+        (existingLine.quantity * existingLine.requestedDays * existingLine.dailyRate).toFixed(2)
+      );
+    } else {
+      lineItems = [
+        ...lineItems,
+        sanitizeEquipmentLineItem({
+          itemName,
+          quantity,
+          requestedDays,
+          dailyRate
+        })
+      ].filter(Boolean);
+    }
+
+    quantityInput.value = "1";
+    daysInput.value = "1";
+    syncView();
+    showToast(`${itemName} added to this rental booking.`);
+  };
+
+  addLineButton.addEventListener("click", addLineItem);
+  itemSelect.addEventListener("change", applySuggestedRate);
+  dailyRateInput.addEventListener("input", () => {
+    dailyRateInput.dataset.autoDerived = "false";
+  });
+
+  [quantityInput, daysInput, dailyRateInput].forEach((control) => {
+    control.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter") {
+        return;
+      }
+
+      event.preventDefault();
+      addLineItem();
+    });
+  });
+
+  if (dueDateInput) {
+    dueDateInput.addEventListener("input", () => {
+      dueDateInput.dataset.autoDerived = "false";
+    });
+  }
+
+  [outDateInput, bookingDateInput].forEach((control) => {
+    if (!control) {
+      return;
+    }
+
+    control.addEventListener("change", syncView);
+  });
+
+  selectedItemsRoot.addEventListener("click", (event) => {
+    const removeButton = event.target.closest("[data-equipment-line-remove]");
+
+    if (!removeButton) {
+      return;
+    }
+
+    const lineId = normalizeText(removeButton.dataset.equipmentLineRemove);
+    lineItems = lineItems.filter((item) => item.lineId !== lineId);
+    syncView();
+  });
+
+  if (dueDateInput && normalizeDateInput(dueDateInput.value)) {
+    const currentAutoDueDate = buildDateOffsetValue(
+      normalizeDateInput(outDateInput?.value) || normalizeDateInput(bookingDateInput?.value),
+      summarizeEquipmentLineItems(lineItems).maxDays
+    );
+    dueDateInput.dataset.autoDerived =
+      currentAutoDueDate && currentAutoDueDate === normalizeDateInput(dueDateInput.value)
+        ? "true"
+        : "false";
+  }
+
+  applySuggestedRate();
+  syncView();
+}
+
 function normalizeSecurityDepositStatus(value) {
   const normalized = normalizeText(value).toLowerCase();
   const matched = SECURITY_DEPOSIT_STATUS_OPTIONS.find((option) => option.toLowerCase() === normalized);
@@ -12328,20 +13012,25 @@ function createEmptyLaundryTicketDraft() {
     readyDate: "",
     deliveryMode: "Walk-in",
     status: "Received",
+    lineItems: [],
     notes: ""
   };
 }
 
 function buildLaundryTicketDraftFromForm(formData) {
+  const lineItems = summarizeLaundryLineItems(
+    parseStructuredLineItems(formData.get("laundryLineItemsJson"))
+  );
+
   return {
     ticketDate: normalizeDateInput(formData.get("laundryTicketDate")),
     businessAreaId: "laundry-services",
     customerName: normalizeText(formData.get("laundryCustomerName")),
     customerPhone: normalizeText(formData.get("laundryCustomerPhone")),
     serviceType: normalizeLaundryServiceType(formData.get("laundryServiceType")),
-    itemSummary: normalizeText(formData.get("laundryItemSummary")),
-    pieces: Math.max(parsePositiveInteger(formData.get("laundryPieces")), 1),
-    amountDue: parseOptionalAmount(formData.get("laundryAmountDue")),
+    itemSummary: lineItems.itemSummary || normalizeText(formData.get("laundryItemSummary")),
+    pieces: lineItems.pieces > 0 ? lineItems.pieces : Math.max(parsePositiveInteger(formData.get("laundryPieces")), 1),
+    amountDue: lineItems.amountDue > 0 ? lineItems.amountDue : parseOptionalAmount(formData.get("laundryAmountDue")),
     amountPaid: parseOptionalAmount(formData.get("laundryAmountPaid")),
     paymentDate: normalizeDateInput(formData.get("laundryPaymentDate")),
     paymentMethod: normalizeText(formData.get("laundryPaymentMethod")),
@@ -12350,6 +13039,7 @@ function buildLaundryTicketDraftFromForm(formData) {
     readyDate: normalizeDateInput(formData.get("laundryReadyDate")),
     deliveryMode: normalizeLaundryDeliveryMode(formData.get("laundryDeliveryMode")),
     status: normalizeLaundryStatus(formData.get("laundryStatus")),
+    lineItems: lineItems.items,
     notes: normalizeText(formData.get("laundryNotes"))
   };
 }
@@ -12365,7 +13055,9 @@ function validateLaundryTicket(record) {
     errors.push("Add the customer name.");
   }
 
-  if (!record.itemSummary) {
+  if (Array.isArray(record.lineItems) && record.lineItems.length === 0) {
+    errors.push("Add at least one laundry service line before saving this ticket.");
+  } else if (!record.itemSummary) {
     errors.push("Describe the laundry items received.");
   }
 
@@ -12471,6 +13163,11 @@ function renderLaundryPage() {
 
   const editingRecord = state.laundryTickets.find((item) => item.id === state.editingLaundryTicketId) || null;
   const draft = editingRecord || createEmptyLaundryTicketDraft();
+  const draftLineSummary = summarizeLaundryLineItems(buildLaundryLineItemsFromRecord(draft));
+  const laundryItemOptions = getLaundryCatalogServiceItems().map((item) => ({
+    value: item.id,
+    label: `${item.name} • ${item.category} • ${formatCurrency(item.salesPrice)}`
+  }));
   const records = getFilteredLaundryTickets();
   const alerts = buildLaundryAlerts(records);
   const outstandingValue = records.reduce((sum, record) => sum + getLaundryBalance(record), 0);
@@ -12505,15 +13202,38 @@ function renderLaundryPage() {
               draft.serviceType,
               "Choose service"
             )}</select></label>
+            <div class="service-request-builder wide-field">
+              <div class="service-request-head">
+                <div>
+                  <strong>Laundry Request Builder</strong>
+                  <p class="muted-text">Add each laundry service line here and let the ticket total calculate automatically.</p>
+                </div>
+                <button class="button button-secondary" id="laundryAddLineBtn" type="button">Add Line</button>
+              </div>
+              <input id="laundryLineItemsJson" name="laundryLineItemsJson" type="hidden" value="${escapeHtml(
+                JSON.stringify(draftLineSummary.items)
+              )}" />
+              <div class="mini-form-grid">
+                <label class="wide-field"><span>Service Item</span><select id="laundryCatalogItem">${buildSelectMarkup(
+                  laundryItemOptions,
+                  "",
+                  "Choose laundry item"
+                )}</select></label>
+                <label><span>Line Quantity</span><input id="laundryLineQuantity" type="number" min="1" step="1" value="1" /></label>
+              </div>
+              <div id="laundrySelectedItems" class="service-selected-list"></div>
+            </div>
             <label class="wide-field"><span>Items</span><input id="laundryItemSummary" name="laundryItemSummary" type="text" value="${escapeHtml(
-              draft.itemSummary
-            )}" required /></label>
+              draftLineSummary.itemSummary || draft.itemSummary
+            )}" readonly required /></label>
             <label><span>Pieces</span><input id="laundryPieces" name="laundryPieces" type="number" min="1" step="1" value="${escapeHtml(
-              String(draft.pieces || 1)
-            )}" /></label>
+              draftLineSummary.pieces > 0 ? String(draftLineSummary.pieces) : ""
+            )}" readonly /></label>
             <label><span>Amount Due</span><input id="laundryAmountDue" name="laundryAmountDue" type="number" min="0" step="0.01" value="${escapeHtml(
-              formatAmountInputValue(draft.amountDue)
-            )}" required /></label>
+              draftLineSummary.amountDue > 0
+                ? formatAmountInputValue(draftLineSummary.amountDue)
+                : formatAmountInputValue(draft.amountDue)
+            )}" readonly required /></label>
             <label><span>Amount Paid</span><input id="laundryAmountPaid" name="laundryAmountPaid" type="number" min="0" step="0.01" value="${escapeHtml(
               formatAmountInputValue(draft.amountPaid)
             )}" /></label>
@@ -12671,6 +13391,8 @@ function renderLaundryPage() {
       </div>
     </section>
   `;
+
+  bindLaundryLineItemBuilder(draft);
 }
 
 function handleLaundryTicketSubmit(event) {
@@ -12798,18 +13520,23 @@ function createEmptyEquipmentRentalDraft() {
     conditionOut: "Good",
     conditionIn: "Good",
     reference: "",
+    lineItems: [],
     notes: ""
   };
 }
 
 function buildEquipmentRentalDraftFromForm(formData) {
+  const lineItems = summarizeEquipmentLineItems(
+    parseStructuredLineItems(formData.get("equipmentLineItemsJson"))
+  );
+
   return {
     bookingDate: normalizeDateInput(formData.get("equipmentBookingDate")),
     businessAreaId: "water-equipment",
-    equipmentItem: normalizeText(formData.get("equipmentItem")),
+    equipmentItem: lineItems.equipmentSummary || normalizeText(formData.get("equipmentItem")),
     customerName: normalizeText(formData.get("equipmentCustomerName")),
     customerPhone: normalizeText(formData.get("equipmentCustomerPhone")),
-    rentalFee: parseOptionalAmount(formData.get("equipmentRentalFee")),
+    rentalFee: lineItems.totalAmount > 0 ? lineItems.totalAmount : parseOptionalAmount(formData.get("equipmentRentalFee")),
     amountPaid: parseOptionalAmount(formData.get("equipmentAmountPaid")),
     paymentDate: normalizeDateInput(formData.get("equipmentPaymentDate")),
     paymentMethod: normalizeText(formData.get("equipmentPaymentMethod")),
@@ -12823,6 +13550,7 @@ function buildEquipmentRentalDraftFromForm(formData) {
     conditionOut: normalizeEquipmentCondition(formData.get("equipmentConditionOut")),
     conditionIn: normalizeEquipmentCondition(formData.get("equipmentConditionIn")),
     reference: normalizeText(formData.get("equipmentReference")),
+    lineItems: lineItems.items,
     notes: normalizeText(formData.get("equipmentNotes"))
   };
 }
@@ -12834,7 +13562,9 @@ function validateEquipmentRental(record) {
     errors.push("Add the equipment booking date.");
   }
 
-  if (!record.equipmentItem) {
+  if (Array.isArray(record.lineItems) && record.lineItems.length === 0) {
+    errors.push("Add at least one equipment rental line before saving this booking.");
+  } else if (!record.equipmentItem) {
     errors.push("Choose or enter the equipment item.");
   }
 
@@ -12927,6 +13657,8 @@ function renderEquipmentRentalsPage() {
   const editingRecord =
     state.equipmentRentalBookings.find((item) => item.id === state.editingEquipmentRentalId) || null;
   const draft = editingRecord || createEmptyEquipmentRentalDraft();
+  const equipmentLineSummary = summarizeEquipmentLineItems(buildEquipmentLineItemsFromRecord(draft));
+  const equipmentItemOptions = getEquipmentRentalChoiceOptions();
   const records = getFilteredEquipmentRentalBookings();
   const alerts = buildEquipmentRentalAlerts(records);
 
@@ -12948,18 +13680,43 @@ function renderEquipmentRentalsPage() {
             <label><span>Booking Date</span><input id="equipmentBookingDate" name="equipmentBookingDate" type="date" value="${escapeHtml(
               draft.bookingDate
             )}" required /></label>
-            <label><span>Equipment Item</span><input list="equipmentItemOptions" id="equipmentItem" name="equipmentItem" type="text" value="${escapeHtml(
-              draft.equipmentItem
-            )}" required /></label>
             <label><span>Customer Name</span><input id="equipmentCustomerName" name="equipmentCustomerName" type="text" value="${escapeHtml(
               draft.customerName
             )}" required /></label>
             <label><span>Customer Phone</span><input id="equipmentCustomerPhone" name="equipmentCustomerPhone" type="tel" value="${escapeHtml(
               draft.customerPhone
             )}" /></label>
+            <div class="service-request-builder wide-field">
+              <div class="service-request-head">
+                <div>
+                  <strong>Equipment Rental Builder</strong>
+                  <p class="muted-text">Add each item once with quantity, days, and daily rate. Rental fee updates automatically.</p>
+                </div>
+                <button class="button button-secondary" id="equipmentAddLineBtn" type="button">Add Item</button>
+              </div>
+              <input id="equipmentLineItemsJson" name="equipmentLineItemsJson" type="hidden" value="${escapeHtml(
+                JSON.stringify(equipmentLineSummary.items)
+              )}" />
+              <div class="mini-form-grid rental-form-grid">
+                <label><span>Equipment Item</span><select id="equipmentLineItem">${buildSelectMarkup(
+                  equipmentItemOptions,
+                  "",
+                  "Choose equipment item"
+                )}</select></label>
+                <label><span>Quantity</span><input id="equipmentLineQuantity" type="number" min="1" step="1" value="1" /></label>
+                <label><span>Days</span><input id="equipmentLineDays" type="number" min="1" step="1" value="1" /></label>
+                <label><span>Daily Rate</span><input id="equipmentLineDailyRate" type="number" min="0" step="0.01" value="" placeholder="Auto or enter rate" /></label>
+              </div>
+              <div id="equipmentSelectedItems" class="service-selected-list"></div>
+            </div>
+            <label class="wide-field"><span>Equipment Summary</span><input id="equipmentItem" name="equipmentItem" type="text" value="${escapeHtml(
+              equipmentLineSummary.equipmentSummary || draft.equipmentItem
+            )}" readonly required /></label>
             <label><span>Rental Fee</span><input id="equipmentRentalFee" name="equipmentRentalFee" type="number" min="0" step="0.01" value="${escapeHtml(
-              formatAmountInputValue(draft.rentalFee)
-            )}" required /></label>
+              equipmentLineSummary.totalAmount > 0
+                ? formatAmountInputValue(equipmentLineSummary.totalAmount)
+                : formatAmountInputValue(draft.rentalFee)
+            )}" readonly required /></label>
             <label><span>Amount Paid</span><input id="equipmentAmountPaid" name="equipmentAmountPaid" type="number" min="0" step="0.01" value="${escapeHtml(
               formatAmountInputValue(draft.amountPaid)
             )}" /></label>
@@ -13009,9 +13766,6 @@ function renderEquipmentRentalsPage() {
               draft.notes
             )}</textarea></label>
           </div>
-          <datalist id="equipmentItemOptions">
-            ${EQUIPMENT_RENTAL_ITEM_OPTIONS.map((option) => `<option value="${escapeHtml(option)}"></option>`).join("")}
-          </datalist>
           <div class="form-actions">
             <button class="button button-primary" id="submitEquipmentRentalBtn" type="submit">${editingRecord ? "Update Rental Booking" : "Save Rental Booking"}</button>
             <button class="button button-secondary" id="resetEquipmentRentalBtn" type="button">Clear Form</button>
@@ -13136,6 +13890,8 @@ function renderEquipmentRentalsPage() {
       </div>
     </section>
   `;
+
+  bindEquipmentLineItemBuilder(draft);
 }
 
 function handleEquipmentRentalSubmit(event) {
@@ -25690,8 +26446,12 @@ function sanitizeStoredPurchaseOrder(record) {
 function sanitizeStoredLaundryTicket(record) {
   const ticketDate = normalizeDateInput(record.ticketDate || record.date);
   const customerName = normalizeText(record.customerName || record.customer);
-  const itemSummary = normalizeText(record.itemSummary || record.items || record.description);
-  const amountDue = parseOptionalAmount(record.amountDue || record.totalAmount || record.amount);
+  const lineItems = buildLaundryLineItemsFromRecord(record);
+  const lineSummary = summarizeLaundryLineItems(lineItems);
+  const itemSummary =
+    lineSummary.itemSummary || normalizeText(record.itemSummary || record.items || record.description);
+  const fallbackAmountDue = parseOptionalAmount(record.amountDue || record.totalAmount || record.amount);
+  const amountDue = lineSummary.amountDue > 0 ? lineSummary.amountDue : fallbackAmountDue;
 
   if (!ticketDate || !customerName || !itemSummary || amountDue <= 0) {
     return null;
@@ -25707,8 +26467,8 @@ function sanitizeStoredLaundryTicket(record) {
     customerPhone: normalizeText(record.customerPhone || record.phone),
     serviceType: normalizeLaundryServiceType(record.serviceType || record.service),
     itemSummary,
-    pieces: Math.max(parsePositiveInteger(record.pieces || record.quantity), 1),
-    amountDue,
+    pieces: lineSummary.pieces > 0 ? lineSummary.pieces : Math.max(parsePositiveInteger(record.pieces || record.quantity), 1),
+    amountDue: lineSummary.amountDue > 0 ? lineSummary.amountDue : amountDue,
     amountPaid: parseOptionalAmount(record.amountPaid || record.paidAmount),
     paymentDate: normalizeDateInput(record.paymentDate),
     paymentMethod: normalizeText(record.paymentMethod),
@@ -25717,15 +26477,19 @@ function sanitizeStoredLaundryTicket(record) {
     readyDate: normalizeDateInput(record.readyDate),
     deliveryMode: normalizeLaundryDeliveryMode(record.deliveryMode || record.delivery),
     status: normalizeLaundryStatus(record.status),
+    lineItems: lineSummary.items,
     notes: normalizeText(record.notes)
   };
 }
 
 function sanitizeStoredEquipmentRentalBooking(record) {
   const bookingDate = normalizeDateInput(record.bookingDate || record.date);
-  const equipmentItem = normalizeText(record.equipmentItem || record.item);
+  const lineItems = buildEquipmentLineItemsFromRecord(record);
+  const lineSummary = summarizeEquipmentLineItems(lineItems);
+  const equipmentItem = lineSummary.equipmentSummary || normalizeText(record.equipmentItem || record.item);
   const customerName = normalizeText(record.customerName || record.customer);
-  const rentalFee = parseOptionalAmount(record.rentalFee || record.amountDue || record.amount);
+  const fallbackRentalFee = parseOptionalAmount(record.rentalFee || record.amountDue || record.amount);
+  const rentalFee = lineSummary.totalAmount > 0 ? lineSummary.totalAmount : fallbackRentalFee;
 
   if (!bookingDate || !equipmentItem || !customerName || rentalFee <= 0) {
     return null;
@@ -25740,7 +26504,7 @@ function sanitizeStoredEquipmentRentalBooking(record) {
     equipmentItem,
     customerName,
     customerPhone: normalizeText(record.customerPhone || record.phone),
-    rentalFee,
+    rentalFee: lineSummary.totalAmount > 0 ? lineSummary.totalAmount : rentalFee,
     amountPaid: parseOptionalAmount(record.amountPaid || record.paidAmount),
     paymentDate: normalizeDateInput(record.paymentDate),
     paymentMethod: normalizeText(record.paymentMethod),
@@ -25754,6 +26518,7 @@ function sanitizeStoredEquipmentRentalBooking(record) {
     conditionOut: normalizeEquipmentCondition(record.conditionOut),
     conditionIn: normalizeEquipmentCondition(record.conditionIn),
     reference: normalizeText(record.reference || record.ref),
+    lineItems: lineSummary.items,
     notes: normalizeText(record.notes)
   };
 }

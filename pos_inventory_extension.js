@@ -4075,6 +4075,92 @@
     showToast(`${item.name} stock updated.`);
   }
 
+  function applyInventoryQuickScanAdjustment(event) {
+    event.preventDefault();
+
+    const codeInput = document.getElementById("inventoryQuickScanCode");
+    const modeInput = document.getElementById("inventoryQuickScanMode");
+    const quantityInput = document.getElementById("inventoryQuickScanQuantity");
+    const scannedCode = normalizeText(codeInput?.value);
+    const mode = normalizeText(modeInput?.value).toLowerCase() || "add";
+    const quantityValue = parseOptionalAmount(quantityInput?.value);
+
+    if (!scannedCode) {
+      showToast("Scan or type a barcode or SKU first.");
+      uiFocusState.inventory = "inventoryQuickScanCode";
+      focusControlById("inventoryQuickScanCode");
+      return;
+    }
+
+    if (!Number.isFinite(quantityValue) || quantityValue < 0 || (mode !== "set" && quantityValue <= 0)) {
+      showToast("Enter a valid stock quantity before applying the update.");
+      uiFocusState.inventory = "inventoryQuickScanQuantity";
+      focusControlById("inventoryQuickScanQuantity");
+      return;
+    }
+
+    const item = findInventoryItemByScannedCode(scannedCode, { activeOnly: false });
+
+    if (!item) {
+      showToast(`No inventory item matches ${scannedCode}. Save the barcode or SKU on the item first.`);
+      uiFocusState.inventory = "inventoryQuickScanCode";
+      focusControlById("inventoryQuickScanCode");
+      return;
+    }
+
+    if (item.itemType === "service" || !item.trackInventory) {
+      showToast("This item is a service or not stock-tracked, so barcode stock update is not available for it.");
+      return;
+    }
+
+    const currentQuantity = parseOptionalAmount(item.quantityOnHand);
+    let nextQuantity = currentQuantity;
+    let actionLabel = "set";
+
+    if (mode === "remove") {
+      nextQuantity = Math.max(Number((currentQuantity - quantityValue).toFixed(2)), 0);
+      actionLabel = "removed";
+    } else if (mode === "set") {
+      nextQuantity = Number(quantityValue.toFixed(2));
+      actionLabel = "set";
+    } else {
+      nextQuantity = Number((currentQuantity + quantityValue).toFixed(2));
+      actionLabel = "added";
+    }
+
+    state.inventoryItems = sortInventoryItems(
+      state.inventoryItems.map((record) =>
+        record.id === item.id
+          ? {
+              ...record,
+              quantityOnHand: nextQuantity,
+              quantityKnown: true,
+              updatedAt: new Date().toISOString()
+            }
+          : record
+      )
+    );
+
+    if (typeof appendAuditEntry === "function") {
+      appendAuditEntry({
+        moduleKey: "inventory",
+        moduleLabel: "Inventory",
+        action: mode === "set" ? "set-stock" : "adjust-stock",
+        title: "Inventory stock updated by barcode",
+        detail: `${item.name} ${actionLabel} ${formatInventoryQuantity(quantityValue)}. New stock ${formatInventoryQuantity(
+          nextQuantity
+        )}.`,
+        recordId: item.id,
+        view: "inventory"
+      });
+    }
+
+    persistInventoryItems();
+    uiFocusState.inventory = "inventoryQuickScanCode";
+    renderInventoryPage();
+    showToast(`${item.name} stock updated to ${formatInventoryQuantity(nextQuantity)}.`);
+  }
+
   function resetInventoryDraft(options = {}) {
     state.editingInventoryItemId = null;
     state.inventoryDraft = {
@@ -5136,6 +5222,58 @@
           Search quickly, restock from the low-stock desk, or open an item into the editor when pricing or details change. Press <strong>/</strong> to jump into inventory search.
         </p>
 
+        <section class="quick-panel-card">
+          <div class="inventory-low-stock-head">
+            <div>
+              <p class="kicker">Barcode Update</p>
+              <h3>Quick Stock Scan</h3>
+            </div>
+            <button class="button button-secondary" id="inventoryQuickFocusBtn" type="button">
+              Focus Barcode
+            </button>
+          </div>
+          <p class="muted-text">
+            Scan or type a barcode or SKU, choose whether you are adding, removing, or setting stock, then apply it instantly without opening the editor.
+          </p>
+          <form id="inventoryQuickScanForm" class="inventory-quick-scan-form" novalidate>
+            <label>
+              <span>Barcode / SKU</span>
+              <input
+                id="inventoryQuickScanCode"
+                type="text"
+                value=""
+                placeholder="Scan or type code"
+                autocomplete="off"
+                spellcheck="false"
+              />
+            </label>
+
+            <label>
+              <span>Mode</span>
+              <select id="inventoryQuickScanMode">
+                ${buildSelectMarkup(
+                  [
+                    { value: "add", label: "Add To Stock" },
+                    { value: "remove", label: "Remove From Stock" },
+                    { value: "set", label: "Set Exact Stock" }
+                  ],
+                  "add",
+                  "Choose mode"
+                )}
+              </select>
+            </label>
+
+            <label>
+              <span>Quantity</span>
+              <input id="inventoryQuickScanQuantity" type="number" min="0" step="0.01" value="1" />
+            </label>
+
+            <div class="inventory-quick-scan-actions">
+              <button class="button button-primary" type="submit">Apply Update</button>
+            </div>
+          </form>
+        </section>
+
         <div class="filter-grid">
           <label>
             <span>Search</span>
@@ -5512,6 +5650,20 @@
         </div>
       </section>
     `;
+
+    const inventoryQuickScanForm = document.getElementById("inventoryQuickScanForm");
+    const inventoryQuickFocusBtn = document.getElementById("inventoryQuickFocusBtn");
+
+    if (inventoryQuickScanForm) {
+      inventoryQuickScanForm.addEventListener("submit", applyInventoryQuickScanAdjustment);
+    }
+
+    if (inventoryQuickFocusBtn) {
+      inventoryQuickFocusBtn.addEventListener("click", () => {
+        uiFocusState.inventory = "inventoryQuickScanCode";
+        focusControlById("inventoryQuickScanCode");
+      });
+    }
 
     restoreModuleFocus("inventory");
   }

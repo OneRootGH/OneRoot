@@ -1623,6 +1623,85 @@ td {
   font-size: 0.9rem;
 }
 
+.service-request-builder {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(35, 54, 41, 0.08);
+}
+
+.service-request-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: start;
+  justify-content: space-between;
+  gap: 0.8rem;
+}
+
+.service-request-head > div {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.service-request-head strong {
+  font-size: 1rem;
+  color: var(--ink-950);
+}
+
+.service-selected-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.service-selected-item,
+.service-selected-empty {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.85rem;
+  padding: 0.9rem 1rem;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(35, 54, 41, 0.08);
+}
+
+.service-selected-item > div,
+.service-selected-empty {
+  min-width: 0;
+}
+
+.service-selected-item strong,
+.service-selected-empty strong {
+  display: block;
+  color: var(--ink-950);
+}
+
+.service-selected-item p,
+.service-selected-empty p {
+  margin: 0.25rem 0 0;
+  color: rgba(18, 33, 24, 0.66);
+  line-height: 1.5;
+}
+
+.service-selected-item-side {
+  display: grid;
+  gap: 0.45rem;
+  justify-items: end;
+  text-align: right;
+}
+
+.service-selected-action {
+  border: 0;
+  border-radius: 999px;
+  padding: 0.5rem 0.8rem;
+  background: rgba(182, 106, 57, 0.12);
+  color: var(--clay-500);
+  font-weight: 700;
+}
+
 .checkbox-field {
   flex-direction: row;
   align-items: center;
@@ -1662,6 +1741,20 @@ td {
   border-radius: 22px;
   background: rgba(255, 255, 255, 0.58);
   border: 1px solid rgba(35, 54, 41, 0.08);
+}
+
+.inventory-quick-scan-form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 0.85rem;
+  align-items: end;
+}
+
+.inventory-quick-scan-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  align-items: center;
 }
 
 .quick-chip-row {
@@ -2114,6 +2207,21 @@ td {
     grid-template-columns: 1fr;
   }
 
+  .service-selected-item,
+  .service-selected-empty {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .service-selected-item-side {
+    justify-items: start;
+    text-align: left;
+  }
+
+  .inventory-quick-scan-form {
+    grid-template-columns: 1fr 1fr;
+  }
+
   .pos-product-row-price,
   .pos-product-row-actions,
   .pos-history-summary-meta {
@@ -2184,6 +2292,10 @@ td {
   }
 
   .pos-counter-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .inventory-quick-scan-form {
     grid-template-columns: 1fr;
   }
 

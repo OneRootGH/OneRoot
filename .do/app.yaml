@@ -22,10 +22,13 @@ services:
         value: OneRoot.shop
         scope: RUN_TIME
       - key: ONEROOT_SUPPORT_PHONE
-        value: 0246497301
+        value: 0544995005
         scope: RUN_TIME
       - key: ONEROOT_WHATSAPP_NUMBER
         value: 0242847065
+        scope: RUN_TIME
+      - key: ONEROOT_ALT_WHATSAPP_NUMBER
+        value: 0544995005
         scope: RUN_TIME
       - key: ONEROOT_SUPPORT_EMAIL
         value: orders@oneroot.shop

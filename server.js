@@ -2134,8 +2134,10 @@ function buildPublicConfig() {
   return {
     brandName: "OneRoot Essentials",
     domain: normalizeText(process.env.ONEROOT_PUBLIC_DOMAIN) || "OneRoot.shop",
-    supportPhone: normalizeText(process.env.ONEROOT_SUPPORT_PHONE) || "0547038092",
-    whatsappNumber: normalizeText(process.env.ONEROOT_WHATSAPP_NUMBER) || "233547038092",
+    supportPhone: normalizeText(process.env.ONEROOT_SUPPORT_PHONE) || "0544995005",
+    whatsappNumber: normalizeText(process.env.ONEROOT_WHATSAPP_NUMBER) || "0242847065",
+    alternateWhatsappNumber:
+      normalizeText(process.env.ONEROOT_ALT_WHATSAPP_NUMBER) || "0544995005",
     supportEmail: normalizeText(process.env.ONEROOT_SUPPORT_EMAIL) || "orders@oneroot.shop",
     pickupNote:
       normalizeText(process.env.ONEROOT_PICKUP_NOTE) ||
@@ -2150,12 +2152,15 @@ function sanitizePublicOrderItem(item) {
   const businessAreaId = normalizeText(item?.businessAreaId);
   const quantity = Math.max(Number(item?.quantity || 0), 0);
   const unitPrice = Number(item?.unitPrice || item?.salesPrice || 0);
+  const pricingMultiplier = Math.max(Number(item?.pricingMultiplier || 1), 1);
+  const requestedDays = Math.max(Number(item?.requestedDays || pricingMultiplier || 1), 1);
 
   if (!name || !businessAreaId || !Number.isFinite(quantity) || quantity <= 0) {
     return null;
   }
 
   const safeUnitPrice = Number.isFinite(unitPrice) && unitPrice >= 0 ? unitPrice : 0;
+  const safeLineTotal = Number((safeUnitPrice * quantity * pricingMultiplier).toFixed(2));
 
   return {
     id: normalizeText(item?.id || item?.sku || item?.name),
@@ -2166,8 +2171,10 @@ function sanitizePublicOrderItem(item) {
     category: normalizeText(item?.category) || "General",
     itemType: normalizeText(item?.itemType).toLowerCase() === "service" ? "service" : "stock",
     quantity,
+    pricingMultiplier,
+    requestedDays,
     unitPrice: Number(safeUnitPrice.toFixed(2)),
-    lineTotal: Number((safeUnitPrice * quantity).toFixed(2)),
+    lineTotal: safeLineTotal,
     notes: normalizeText(item?.notes)
   };
 }
