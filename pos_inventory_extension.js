@@ -911,6 +911,14 @@
         focusControlById("posDraftProductSearch");
       }
 
+      if (action === "open-barcode-stock") {
+        navigateTo("inventory", { syncHash: true });
+        uiFocusState.inventory = "inventoryQuickScanCode";
+        window.requestAnimationFrame(() => {
+          focusControlById("inventoryQuickScanCode");
+        });
+      }
+
       if (action === "focus-order-search") {
         uiFocusState.pos = "posFilterSearch";
         focusControlById("posFilterSearch");
@@ -971,6 +979,11 @@
       if (action === "focus-search") {
         uiFocusState.inventory = "inventoryFilterSearch";
         focusControlById("inventoryFilterSearch");
+      }
+
+      if (action === "focus-barcode") {
+        uiFocusState.inventory = "inventoryQuickScanCode";
+        focusControlById("inventoryQuickScanCode");
       }
 
       if (action === "clear-filters") {
@@ -4666,6 +4679,9 @@
               <button class="button button-ghost" data-pos-action="focus-search" type="button">
                 Focus Search
               </button>
+              <button class="button button-ghost" data-pos-action="open-barcode-stock" type="button">
+                Barcode Stock
+              </button>
               <button class="button button-ghost" data-pos-action="reset-draft" type="button">
                 New Order
               </button>
@@ -5200,6 +5216,9 @@
           <div class="module-actions">
             <button class="button button-secondary" data-inventory-action="focus-search" type="button">
               Focus Search
+            </button>
+            <button class="button button-secondary" data-inventory-action="focus-barcode" type="button">
+              Barcode Stock
             </button>
             <button class="button button-ghost" data-inventory-action="clear-filters" type="button">
               Clear Filters

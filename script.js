@@ -501,8 +501,8 @@ const VIEW_META = {
   },
   inventory: {
     eyebrow: "Stock Control",
-    title: "Inventory",
-    summary: "Track product stock, adjustments, pricing, categories, and fast lookups from one inventory workspace."
+    title: "Inventory & Barcode",
+    summary: "Track product stock, barcode updates, pricing, categories, and fast lookups from one inventory workspace."
   },
   "mobile-money": {
     eyebrow: "Reconciliation",
