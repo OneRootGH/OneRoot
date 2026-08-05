@@ -54,6 +54,9 @@
 
     <form method="post" class="service-form-stack">
       <input type="hidden" name="businessAreaId" value="{{ payload.get('businessAreaId', '') }}">
+      {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] %}
+        <input type="hidden" name="lineItemsJson" id="service-line-items-json">
+      {% endif %}
       {% for section in section_fields %}
         <section class="form-section">
           <div class="card-header compact">
@@ -115,6 +118,29 @@
               </label>
             {% endfor %}
           </div>
+          {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] and loop.index == 2 %}
+            <div class="service-line-builder">
+              <div class="service-line-builder-head">
+                <div>
+                  <p class="eyebrow">Request Items</p>
+                  <h3>Build One Customer Request</h3>
+                </div>
+                <p class="muted">Add multiple laundry or equipment items for the same customer before you save.</p>
+              </div>
+              <div class="form-grid service-line-builder-grid">
+                {% if definition.key == 'equipment_rental_bookings' %}
+                  <label>
+                    <span>Item Quantity</span>
+                    <input id="equipment-item-quantity" type="number" min="1" step="1" value="1">
+                  </label>
+                {% endif %}
+                <div class="form-actions {% if definition.key == 'laundry_tickets' %}span-2{% endif %}">
+                  <button class="button subtle" type="button" id="service-add-item">Add Item To Request</button>
+                </div>
+              </div>
+              <div id="service-line-items" class="service-line-items"></div>
+            </div>
+          {% endif %}
         </section>
       {% endfor %}
       <div class="form-actions">
@@ -157,9 +183,7 @@
       (function () {
         const serviceKey = {{ definition.key|tojson }};
         const catalog = {{ reference_product_catalog|tojson }};
-        if (!Array.isArray(catalog) || !catalog.length) {
-          return;
-        }
+        const existingLineItems = {{ existing_line_items|tojson }};
 
         const fields = {
           item: document.getElementById(serviceKey === "laundry_tickets" ? "laundry-item" : "equipment-item"),
@@ -171,8 +195,13 @@
           rentalFee: document.getElementById("equipment-rental-fee"),
           outDate: document.getElementById("equipment-out-date"),
           dueDate: document.getElementById("equipment-due-date"),
+          equipmentQuantity: document.getElementById("equipment-item-quantity"),
+          addItemButton: document.getElementById("service-add-item"),
+          lineItemsJson: document.getElementById("service-line-items-json"),
+          lineItemsContainer: document.getElementById("service-line-items"),
+          form: document.querySelector(".service-form-stack"),
         };
-        if (!fields.item || !fields.costAmount) {
+        if (!fields.item || !fields.costAmount || !fields.lineItemsJson || !fields.lineItemsContainer || !fields.form) {
           return;
         }
 
@@ -187,6 +216,14 @@
 
         function formatAmount(value) {
           return Number.isFinite(value) ? value.toFixed(2) : "";
+        }
+
+        function formatCurrency(value) {
+          return new Intl.NumberFormat("en-GH", {
+            style: "currency",
+            currency: "GHS",
+            minimumFractionDigits: 2,
+          }).format(Number.isFinite(value) ? value : 0);
         }
 
         function ensureSelectValue(select, value) {
@@ -204,7 +241,7 @@
         }
 
         const catalogMap = new Map(
-          catalog.map((item) => [
+          (Array.isArray(catalog) ? catalog : []).map((item) => [
             normalize(item.name),
             {
               name: item.name,
@@ -214,6 +251,7 @@
             },
           ]),
         );
+        const lineItems = Array.isArray(existingLineItems) ? existingLineItems.map((item) => ({ ...item })) : [];
 
         function deriveRentalDays() {
           if (!fields.outDate || !fields.dueDate || !fields.rentalDays) {
@@ -250,20 +288,183 @@
 
         function applyCatalogPricing() {
           const match = catalogMap.get(normalize(fields.item.value));
-          currentUnits();
           if (!match) {
             return;
           }
           const units = currentUnits();
+          const quantity = serviceKey === "equipment_rental_bookings"
+            ? Math.max(Math.round(parseNumber(fields.equipmentQuantity ? fields.equipmentQuantity.value : "1")), 1)
+            : 1;
           ensureSelectValue(fields.category, match.category);
-          fields.costAmount.value = formatAmount(match.costPrice * units);
+          fields.costAmount.value = formatAmount(match.costPrice * units * quantity);
           if (serviceKey === "laundry_tickets" && fields.amountDue) {
             fields.amountDue.value = formatAmount(match.salesPrice * units);
           }
           if (serviceKey === "equipment_rental_bookings" && fields.rentalFee) {
-            fields.rentalFee.value = formatAmount(match.salesPrice * units);
+            fields.rentalFee.value = formatAmount(match.salesPrice * units * quantity);
           }
         }
+
+        function draftLineItem() {
+          const itemName = String(fields.item.value || "").trim();
+          if (!itemName) {
+            return null;
+          }
+          if (serviceKey === "laundry_tickets") {
+            const pieces = Math.max(Math.round(parseNumber(fields.pieces ? fields.pieces.value : "1")), 1);
+            const amountDue = parseNumber(fields.amountDue ? fields.amountDue.value : "0");
+            const costAmount = parseNumber(fields.costAmount ? fields.costAmount.value : "0");
+            return {
+              name: itemName,
+              category: String(fields.category ? fields.category.value : "").trim(),
+              quantity: pieces,
+              unitPrice: pieces > 0 ? amountDue / pieces : amountDue,
+              costPrice: pieces > 0 ? costAmount / pieces : costAmount,
+              rentalDays: 1,
+              lineTotal: amountDue,
+              lineCost: costAmount,
+            };
+          }
+          const quantity = Math.max(Math.round(parseNumber(fields.equipmentQuantity ? fields.equipmentQuantity.value : "1")), 1);
+          const rentalDays = Math.max(Math.round(parseNumber(fields.rentalDays ? fields.rentalDays.value : currentUnits() || 1)), 1);
+          const rentalFee = parseNumber(fields.rentalFee ? fields.rentalFee.value : "0");
+          const costAmount = parseNumber(fields.costAmount ? fields.costAmount.value : "0");
+          const divisor = Math.max(quantity * rentalDays, 1);
+          return {
+            name: itemName,
+            category: String(fields.category ? fields.category.value : "").trim(),
+            quantity,
+            unitPrice: rentalFee / divisor,
+            costPrice: costAmount / divisor,
+            rentalDays,
+            lineTotal: rentalFee,
+            lineCost: costAmount,
+          };
+        }
+
+        function clearDraftInputs() {
+          fields.item.value = "";
+          if (serviceKey === "laundry_tickets" && fields.pieces) {
+            fields.pieces.value = "1";
+          }
+          if (serviceKey === "equipment_rental_bookings" && fields.equipmentQuantity) {
+            fields.equipmentQuantity.value = "1";
+          }
+          if (fields.amountDue) {
+            fields.amountDue.value = "";
+          }
+          if (fields.rentalFee) {
+            fields.rentalFee.value = "";
+          }
+          if (fields.costAmount) {
+            fields.costAmount.value = "";
+          }
+        }
+
+        function syncRequiredState() {
+          if (!fields.item) {
+            return;
+          }
+          fields.item.required = lineItems.length === 0;
+        }
+
+        function recalcTotals() {
+          const categories = [...new Set(lineItems.map((item) => String(item.category || "").trim()).filter(Boolean))];
+          const totalCost = lineItems.reduce((sum, item) => sum + parseNumber(item.lineCost), 0);
+          if (serviceKey === "laundry_tickets") {
+            const totalDue = lineItems.reduce((sum, item) => sum + parseNumber(item.lineTotal), 0);
+            const totalPieces = lineItems.reduce((sum, item) => sum + Math.max(Math.round(parseNumber(item.quantity)), 0), 0) || 1;
+            if (fields.amountDue) {
+              fields.amountDue.value = formatAmount(totalDue);
+            }
+            if (fields.pieces) {
+              fields.pieces.value = String(totalPieces);
+            }
+            if (fields.category) {
+              ensureSelectValue(fields.category, categories.length === 1 ? categories[0] : "Mixed Items");
+            }
+          } else {
+            const totalRentalFee = lineItems.reduce((sum, item) => sum + parseNumber(item.lineTotal), 0);
+            if (fields.rentalFee) {
+              fields.rentalFee.value = formatAmount(totalRentalFee);
+            }
+            if (fields.category) {
+              ensureSelectValue(fields.category, categories.length === 1 ? categories[0] : "Mixed Equipment");
+            }
+          }
+          fields.costAmount.value = formatAmount(totalCost);
+          fields.lineItemsJson.value = JSON.stringify(lineItems);
+          syncRequiredState();
+        }
+
+        function renderLineItems() {
+          if (!lineItems.length) {
+            fields.lineItemsContainer.innerHTML = `
+              <article class="service-line-empty">
+                <strong>No request items added yet.</strong>
+                <p>Use the item fields above, then tap <em>Add Item To Request</em>.</p>
+              </article>
+            `;
+            fields.lineItemsJson.value = "[]";
+            syncRequiredState();
+            return;
+          }
+          fields.lineItemsContainer.innerHTML = lineItems
+            .map((item, index) => {
+              const quantityText = serviceKey === "laundry_tickets"
+                ? `${item.quantity} piece${item.quantity === 1 ? "" : "s"}`
+                : `${item.quantity} unit${item.quantity === 1 ? "" : "s"} · ${item.rentalDays} day${item.rentalDays === 1 ? "" : "s"}`;
+              return `
+                <article class="service-line-item">
+                  <div>
+                    <strong>${item.name}</strong>
+                    <span>${item.category || "Uncategorized"} · ${quantityText}</span>
+                    <span>Total ${formatCurrency(parseNumber(item.lineTotal))} · Cost ${formatCurrency(parseNumber(item.lineCost))}</span>
+                  </div>
+                  <button class="text-button danger-text" type="button" data-line-remove="${index}">Remove</button>
+                </article>
+              `;
+            })
+            .join("");
+          recalcTotals();
+        }
+
+        function addDraftItem() {
+          const draft = draftLineItem();
+          if (!draft) {
+            return;
+          }
+          const existingIndex = lineItems.findIndex(
+            (item) =>
+              normalize(item.name) === normalize(draft.name) &&
+              normalize(item.category) === normalize(draft.category) &&
+              Math.round(parseNumber(item.rentalDays || 1)) === Math.round(parseNumber(draft.rentalDays || 1))
+          );
+          if (existingIndex >= 0) {
+            const existing = lineItems[existingIndex];
+            existing.quantity = Math.max(Math.round(parseNumber(existing.quantity)), 1) + Math.max(Math.round(parseNumber(draft.quantity)), 1);
+            existing.lineTotal = parseNumber(existing.lineTotal) + parseNumber(draft.lineTotal);
+            existing.lineCost = parseNumber(existing.lineCost) + parseNumber(draft.lineCost);
+          } else {
+            lineItems.push(draft);
+          }
+          clearDraftInputs();
+          renderLineItems();
+        }
+
+        fields.addItemButton?.addEventListener("click", addDraftItem);
+        fields.lineItemsContainer.addEventListener("click", (event) => {
+          const removeButton = event.target.closest("[data-line-remove]");
+          if (!removeButton) {
+            return;
+          }
+          const index = Number.parseInt(removeButton.dataset.lineRemove || "-1", 10);
+          if (!Number.isInteger(index) || index < 0 || index >= lineItems.length) {
+            return;
+          }
+          lineItems.splice(index, 1);
+          renderLineItems();
+        });
 
         [
           fields.item,
@@ -271,12 +472,23 @@
           fields.rentalDays,
           fields.outDate,
           fields.dueDate,
+          fields.equipmentQuantity,
         ].filter(Boolean).forEach((field) => {
           field.addEventListener("input", applyCatalogPricing);
           field.addEventListener("change", applyCatalogPricing);
         });
 
+        fields.form.addEventListener("submit", () => {
+          if (fields.item.value.trim()) {
+            addDraftItem();
+          } else {
+            fields.lineItemsJson.value = JSON.stringify(lineItems);
+          }
+        });
+
         applyCatalogPricing();
+        renderLineItems();
+        syncRequiredState();
       })();
     </script>
   {% endif %}

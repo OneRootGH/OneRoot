@@ -33,6 +33,7 @@ class AppConfig:
     public_domain: str
     support_phone: str
     whatsapp_number: str
+    alternate_whatsapp_number: str
     support_email: str
     pickup_note: str
 
@@ -78,8 +79,12 @@ def load_config() -> AppConfig:
         admin_username=admin_username,
         admin_password=admin_password,
         public_domain=(os.getenv("ONEROOT_PUBLIC_DOMAIN") or "OneRoot.shop").strip() or "OneRoot.shop",
-        support_phone=(os.getenv("ONEROOT_SUPPORT_PHONE") or "0246497301").strip() or "0246497301",
+        support_phone=(os.getenv("ONEROOT_SUPPORT_PHONE") or "0544995005").strip() or "0544995005",
         whatsapp_number=(os.getenv("ONEROOT_WHATSAPP_NUMBER") or "0242847065").strip() or "0242847065",
+        alternate_whatsapp_number=(
+            os.getenv("ONEROOT_ALT_WHATSAPP_NUMBER") or "0544995005"
+        ).strip()
+        or "0544995005",
         support_email=(os.getenv("ONEROOT_SUPPORT_EMAIL") or "orders@oneroot.shop").strip() or "orders@oneroot.shop",
         pickup_note=(
             os.getenv("ONEROOT_PICKUP_NOTE")

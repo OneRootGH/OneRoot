@@ -58,6 +58,7 @@ DATABASE_INIT_RETRIES = 1
 DATABASE_INIT_DELAY_SECONDS = 1
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
 SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
+SERVICE_LINE_ITEMS_KEY = "lineItems"
 SERVICE_ITEM_FIELD_MAP = {
     "laundry_tickets": "laundryItem",
     "equipment_rental_bookings": "equipmentItem",
@@ -1264,6 +1265,9 @@ def service_cost_field_name(module_key: str) -> str:
 
 
 def service_total_due(module_key: str, payload: dict[str, Any]) -> float:
+    line_items = service_line_items(module_key, payload)
+    if line_items:
+        return round(sum(parse_amount(item.get("lineTotal")) for item in line_items), 2)
     if module_key == "laundry_tickets":
         return round(parse_amount(payload.get("amountDue")), 2)
     if module_key == "equipment_rental_bookings":
@@ -1272,6 +1276,9 @@ def service_total_due(module_key: str, payload: dict[str, Any]) -> float:
 
 
 def service_cost_amount(module_key: str, payload: dict[str, Any]) -> float:
+    line_items = service_line_items(module_key, payload)
+    if line_items:
+        return round(sum(parse_amount(item.get("lineCost")) for item in line_items), 2)
     return round(parse_amount(payload.get(service_cost_field_name(module_key))), 2)
 
 
@@ -1299,6 +1306,145 @@ def service_pricing_multiplier(module_key: str, payload: dict[str, Any]) -> floa
         payload["rentalDays"] = rental_days
         return float(rental_days)
     return 1.0
+
+
+def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_items = payload.get(SERVICE_LINE_ITEMS_KEY) if isinstance(payload.get(SERVICE_LINE_ITEMS_KEY), list) else []
+    normalized_items: list[dict[str, Any]] = []
+    rental_days = equipment_rental_days(payload) if module_key == "equipment_rental_bookings" else 1
+
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        item_name = normalize_text(
+            raw_item.get("name")
+            or raw_item.get("item")
+            or raw_item.get("laundryItem")
+            or raw_item.get("equipmentItem")
+        )
+        if not item_name:
+            continue
+        quantity = max(int(round(parse_amount(raw_item.get("quantity") or raw_item.get("pieces") or 1))), 1)
+        unit_price = round(parse_amount(raw_item.get("unitPrice") or raw_item.get("salesPrice")), 2)
+        cost_price = round(parse_amount(raw_item.get("costPrice")), 2)
+        days = max(int(round(parse_amount(raw_item.get("rentalDays") or rental_days or 1))), 1)
+        line_total = round(parse_amount(raw_item.get("lineTotal")), 2)
+        line_cost = round(parse_amount(raw_item.get("lineCost") or raw_item.get("costAmount")), 2)
+        if line_total <= 0 and unit_price > 0:
+            line_total = round(unit_price * quantity * (days if module_key == "equipment_rental_bookings" else 1), 2)
+        if line_cost <= 0 and cost_price > 0:
+            line_cost = round(cost_price * quantity * (days if module_key == "equipment_rental_bookings" else 1), 2)
+        normalized_items.append(
+            {
+                "name": item_name,
+                "category": normalize_text(raw_item.get("category")),
+                "quantity": quantity,
+                "unitPrice": unit_price,
+                "costPrice": cost_price,
+                "rentalDays": days if module_key == "equipment_rental_bookings" else 1,
+                "lineTotal": line_total,
+                "lineCost": line_cost,
+            }
+        )
+
+    if normalized_items:
+        return normalized_items
+
+    if module_key == "laundry_tickets":
+        item_name = normalize_text(payload.get("laundryItem")) or normalize_text(payload.get("itemSummary"))
+        if not item_name:
+            return []
+        quantity = laundry_piece_count(payload)
+        total_due = round(parse_amount(payload.get("amountDue")), 2)
+        total_cost = round(parse_amount(payload.get("costAmount")), 2)
+        divisor = quantity if quantity > 0 else 1
+        return [
+            {
+                "name": item_name,
+                "category": normalize_text(payload.get("serviceCategory")),
+                "quantity": quantity,
+                "unitPrice": round(total_due / divisor, 2) if total_due > 0 else 0.0,
+                "costPrice": round(total_cost / divisor, 2) if total_cost > 0 else 0.0,
+                "rentalDays": 1,
+                "lineTotal": total_due,
+                "lineCost": total_cost,
+            }
+        ]
+
+    if module_key == "equipment_rental_bookings":
+        item_name = normalize_text(payload.get("equipmentItem"))
+        if not item_name:
+            return []
+        quantity = max(int(round(parse_amount(payload.get("itemQuantityTotal") or 1))), 1)
+        days = rental_days
+        total_due = round(parse_amount(payload.get("rentalFee")), 2)
+        total_cost = round(parse_amount(payload.get("costAmount")), 2)
+        divisor = max(quantity * days, 1)
+        return [
+            {
+                "name": item_name,
+                "category": normalize_text(payload.get("equipmentCategory")),
+                "quantity": quantity,
+                "unitPrice": round(total_due / divisor, 2) if total_due > 0 else 0.0,
+                "costPrice": round(total_cost / divisor, 2) if total_cost > 0 else 0.0,
+                "rentalDays": days,
+                "lineTotal": total_due,
+                "lineCost": total_cost,
+            }
+        ]
+
+    return []
+
+
+def service_line_items_brief(module_key: str, payload: dict[str, Any], *, max_items: int = 2) -> str:
+    items = service_line_items(module_key, payload)
+    if not items:
+        return "No items selected"
+    visible_items = items[:max_items]
+    parts = [
+        f"{item['quantity']} x {item['name']}"
+        if module_key == "laundry_tickets"
+        else f"{item['quantity']} x {item['name']}"
+        for item in visible_items
+    ]
+    if len(items) > max_items:
+        parts.append(f"+{len(items) - max_items} more")
+    return ", ".join(parts)
+
+
+def sync_service_line_item_rollup(module_key: str, payload: dict[str, Any]) -> None:
+    items = service_line_items(module_key, payload)
+    if not items:
+        payload.pop(SERVICE_LINE_ITEMS_KEY, None)
+        return
+
+    payload[SERVICE_LINE_ITEMS_KEY] = items
+    categories = [normalize_text(item.get("category")) for item in items if normalize_text(item.get("category"))]
+
+    if module_key == "laundry_tickets":
+        payload["pieces"] = sum(max(int(parse_amount(item.get("quantity"))), 0) for item in items) or 1
+        payload["amountDue"] = round(sum(parse_amount(item.get("lineTotal")) for item in items), 2)
+        payload["costAmount"] = round(sum(parse_amount(item.get("lineCost")) for item in items), 2)
+        payload["laundryItem"] = (
+            items[0]["name"]
+            if len(items) == 1
+            else f"{items[0]['name']} (+{len(items) - 1} more)"
+        )
+        payload["serviceCategory"] = categories[0] if len(set(categories)) == 1 and categories else "Mixed Items"
+        return
+
+    if module_key == "equipment_rental_bookings":
+        rental_days = equipment_rental_days(payload)
+        payload["rentalDays"] = rental_days
+        payload["itemQuantityTotal"] = sum(max(int(parse_amount(item.get("quantity"))), 0) for item in items) or 1
+        payload["rentalFee"] = round(sum(parse_amount(item.get("lineTotal")) for item in items), 2)
+        payload["costAmount"] = round(sum(parse_amount(item.get("lineCost")) for item in items), 2)
+        payload["equipmentItem"] = (
+            items[0]["name"]
+            if len(items) == 1
+            else f"{items[0]['name']} (+{len(items) - 1} more)"
+        )
+        payload["equipmentCategory"] = categories[0] if len(set(categories)) == 1 and categories else "Mixed Equipment"
 
 
 def service_reference_products(db_session, module_key: str) -> list[Product]:
@@ -1422,6 +1568,44 @@ def apply_service_payment_rollup(module_key: str, payload: dict[str, Any]) -> No
 
 
 def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str, Any]) -> None:
+    line_items = service_line_items(module_key, payload)
+    if line_items:
+        products = service_reference_products(db_session, module_key)
+        matched_by_name = {
+            normalize_text(product.name).lower(): product
+            for product in products
+        }
+        rental_days = equipment_rental_days(payload) if module_key == "equipment_rental_bookings" else 1
+        hydrated_items: list[dict[str, Any]] = []
+        for item in line_items:
+            match = matched_by_name.get(normalize_text(item.get("name")).lower())
+            quantity = max(int(round(parse_amount(item.get("quantity")))), 1)
+            unit_price = round(parse_amount(item.get("unitPrice")), 2)
+            cost_price = round(parse_amount(item.get("costPrice")), 2)
+            category = normalize_text(item.get("category"))
+            if match:
+                unit_price = round(parse_amount(match.sales_price), 2)
+                cost_price = round(parse_amount(match.cost_price), 2)
+                category = normalize_text(match.category) or category
+            item_days = max(int(round(parse_amount(item.get("rentalDays") or rental_days))), 1)
+            line_total = round(unit_price * quantity * (item_days if module_key == "equipment_rental_bookings" else 1), 2)
+            line_cost = round(cost_price * quantity * (item_days if module_key == "equipment_rental_bookings" else 1), 2)
+            hydrated_items.append(
+                {
+                    "name": normalize_text(item.get("name")),
+                    "category": category,
+                    "quantity": quantity,
+                    "unitPrice": unit_price,
+                    "costPrice": cost_price,
+                    "rentalDays": item_days if module_key == "equipment_rental_bookings" else 1,
+                    "lineTotal": line_total,
+                    "lineCost": line_cost,
+                }
+            )
+        payload[SERVICE_LINE_ITEMS_KEY] = hydrated_items
+        sync_service_line_item_rollup(module_key, payload)
+        return
+
     cost_field = service_cost_field_name(module_key)
     multiplier = service_pricing_multiplier(module_key, payload)
     item_name = normalize_text(payload.get(service_item_field_name(module_key)))
@@ -1440,6 +1624,7 @@ def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str,
         payload["rentalFee"] = round(parse_amount(match.sales_price) * multiplier, 2)
         if normalize_text(match.category):
             payload["equipmentCategory"] = normalize_text(match.category)
+    sync_service_line_item_rollup(module_key, payload)
 
 
 def sales_cost_amount(payload: dict[str, Any]) -> float:
@@ -1821,6 +2006,7 @@ SIDEBAR_LINK_LABELS = {
     "reports": ("Management Reporting", "reports_page", None),
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
+    "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
     "pos": ("POS", "pos_page", None),
     "workbook": ("Excel Workbook", "download_workbook", None),
     "audit": ("Audit Trail", "audit_page", None),
@@ -2046,6 +2232,7 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
     today = date.today()
     for record in records:
         payload = record.payload or {}
+        line_items = service_line_items("laundry_tickets", payload)
         payment_summary = service_payment_summary("laundry_tickets", payload)
         amount_due = payment_summary["totalDue"]
         amount_paid = payment_summary["paidTotal"]
@@ -2055,10 +2242,12 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
         ready_date = parse_date(payload.get("readyDate"))
         laundry_item = normalize_text(payload.get("laundryItem"))
         item_detail = normalize_text(payload.get("itemSummary"))
-        item_summary = laundry_item or item_detail or "Laundry Job"
-        if item_detail == item_summary:
-            item_detail = ""
-        pieces = int(parse_amount(payload.get("pieces"))) if parse_amount(payload.get("pieces")) else 0
+        item_summary = service_line_items_brief("laundry_tickets", payload) if line_items else (laundry_item or item_detail or "Laundry Job")
+        pieces = (
+            sum(max(int(parse_amount(item.get("quantity"))), 0) for item in line_items)
+            if line_items
+            else (int(parse_amount(payload.get("pieces"))) if parse_amount(payload.get("pieces")) else 0)
+        )
         rows.append(
             {
                 "record": record,
@@ -2071,6 +2260,8 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "itemSummary": item_summary,
                 "itemDetail": item_detail,
                 "pieces": pieces,
+                "lineItems": line_items,
+                "lineItemCount": len(line_items),
                 "ticketDate": parse_date(payload.get("ticketDate")),
                 "dueDate": due_date,
                 "readyDate": ready_date,
@@ -2099,6 +2290,7 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
     today = date.today()
     for record in records:
         payload = record.payload or {}
+        line_items = service_line_items("equipment_rental_bookings", payload)
         rental_fee = round(parse_amount(payload.get("rentalFee")), 2)
         payment_summary = service_payment_summary("equipment_rental_bookings", payload)
         amount_paid = payment_summary["paidTotal"]
@@ -2114,7 +2306,7 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
             {
                 "record": record,
                 "id": record.id,
-                "equipmentItem": normalize_text(payload.get("equipmentItem")) or record.title or "Equipment Rental",
+                "equipmentItem": service_line_items_brief("equipment_rental_bookings", payload) if line_items else (normalize_text(payload.get("equipmentItem")) or record.title or "Equipment Rental"),
                 "equipmentCategory": normalize_text(payload.get("equipmentCategory")) or "Construction Support",
                 "customerName": normalize_text(payload.get("customerName")) or "Customer",
                 "customerPhone": normalize_phone(payload.get("customerPhone")),
@@ -2125,6 +2317,9 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
                 "reference": normalize_text(payload.get("reference")),
                 "status": status,
                 "rentalDays": rental_days,
+                "itemQuantityTotal": sum(max(int(parse_amount(item.get("quantity"))), 0) for item in line_items) if line_items else max(int(parse_amount(payload.get("itemQuantityTotal") or 1)), 1),
+                "lineItems": line_items,
+                "lineItemCount": len(line_items),
                 "rentalFee": rental_fee,
                 "damageCharge": damage_charge,
                 "depositAmount": deposit_amount,
@@ -4930,6 +5125,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "domain": app_config.public_domain,
             "supportPhone": app_config.support_phone,
             "whatsappNumber": app_config.whatsapp_number,
+            "alternateWhatsappNumber": app_config.alternate_whatsapp_number,
             "supportEmail": app_config.support_email,
             "pickupNote": app_config.pickup_note,
             "paymentMethods": [
@@ -5379,7 +5575,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             unit_price = parse_amount(raw_item.get("unitPrice"))
             if unit_price <= 0:
                 unit_price = parse_amount(catalog_item.get("salesPrice"))
-            line_total = round(quantity * unit_price, 2)
+            pricing_multiplier = max(parse_amount(raw_item.get("pricingMultiplier") or 1), 1.0)
+            line_total = round(quantity * unit_price * pricing_multiplier, 2)
             order_items.append(
                 {
                     "productId": catalog_item["id"],
@@ -5391,6 +5588,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "trackInventory": bool(catalog_item.get("trackInventory")),
                     "quantity": quantity,
                     "unitPrice": unit_price,
+                    "pricingMultiplier": pricing_multiplier,
+                    "requestedDays": max(int(round(parse_amount(raw_item.get("requestedDays") or 0))), 0),
                     "costPrice": parse_amount(catalog_item.get("costPrice")),
                     "lineTotal": line_total,
                     "notes": normalize_text(raw_item.get("notes")),
@@ -7837,8 +8036,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if module_key == "apartments":
                 payload["businessAreaId"] = "rentals-apartments"
             elif module_key in SERVICE_MODULE_AREA_IDS:
+                raw_line_items = normalize_text(request.form.get("lineItemsJson"))
+                if raw_line_items:
+                    try:
+                        parsed_line_items = json.loads(raw_line_items)
+                    except json.JSONDecodeError:
+                        parsed_line_items = []
+                    if isinstance(parsed_line_items, list):
+                        payload[SERVICE_LINE_ITEMS_KEY] = parsed_line_items
                 payload["businessAreaId"] = SERVICE_MODULE_AREA_IDS[module_key]
                 hydrate_service_cost_payload(g.db, module_key, payload)
+                sync_service_line_item_rollup(module_key, payload)
                 apply_service_payment_rollup(module_key, payload)
             elif module_key == "forecast_plans":
                 planning_rollup(payload)
@@ -7911,6 +8119,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("businessAreaId", SERVICE_MODULE_AREA_IDS[module_key])
             default_status = "Received" if module_key == "laundry_tickets" else "Booked"
             record_payload.setdefault(definition.status_field, default_status)
+            sync_service_line_item_rollup(module_key, record_payload)
             service_area = SERVICE_MODULE_AREA_IDS[module_key]
             inventory_reference_products = service_reference_products(g.db, module_key)
             module_quick_actions = []
@@ -7948,6 +8157,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     }
                     for product in inventory_reference_products
                 ],
+                existing_line_items=service_line_items(module_key, record_payload),
                 service_payment_summary=service_payment_summary(module_key, record_payload),
             )
         module_quick_actions = []
@@ -8642,6 +8852,80 @@ def create_app(config: AppConfig | None = None) -> Flask:
             stock_value=stock_value,
             product_image_src=product_image_src,
             product_tracks_inventory=product_tracks_inventory,
+            format_product_stock_badge=format_product_stock_badge,
+        )
+
+    @app.route("/app/inventory/barcode", methods=["GET", "POST"])
+    @access_required("inventory_barcode")
+    def inventory_barcode():
+        barcode_value = normalize_text(request.values.get("barcode"))
+        action_type = normalize_text(request.values.get("actionType")).lower() or "add"
+        quantity_value = round(parse_amount(request.values.get("quantity")), 2) or 1.0
+        note_value = normalize_text(request.values.get("note"))
+        matching_product = None
+
+        if barcode_value:
+            matching_product = g.db.scalar(
+                select(Product).where(
+                    or_(
+                        Product.barcode.ilike(barcode_value),
+                        Product.sku.ilike(barcode_value),
+                    )
+                )
+            )
+
+        if request.method == "POST":
+            if not barcode_value:
+                flash("Scan or enter a barcode first.", "error")
+            elif not matching_product:
+                flash("No stock item matched that barcode or SKU.", "error")
+            elif not product_tracks_inventory(matching_product):
+                flash("That item is saved as a service item and does not use stock quantity.", "warning")
+            else:
+                previous_quantity = round(parse_amount(matching_product.quantity_on_hand), 2)
+                quantity_value = max(quantity_value, 0)
+                if action_type == "set":
+                    new_quantity = quantity_value
+                    action_label = "set"
+                elif action_type == "remove":
+                    new_quantity = max(previous_quantity - quantity_value, 0)
+                    action_label = "reduced"
+                else:
+                    new_quantity = previous_quantity + quantity_value
+                    action_label = "added"
+                matching_product.quantity_on_hand = round(new_quantity, 2)
+                matching_product.quantity_known = True
+                audit(
+                    "inventory",
+                    "Inventory",
+                    "update",
+                    matching_product.name,
+                    matching_product.id,
+                    f"Barcode stock update {action_label} {quantity_value:,.2f}. {previous_quantity:,.2f} -> {new_quantity:,.2f}. {note_value}".strip(),
+                )
+                g.db.commit()
+                flash(
+                    f"{matching_product.name} updated from {previous_quantity:,.2f} to {new_quantity:,.2f}.",
+                    "success",
+                )
+                return redirect(url_for("inventory_barcode"))
+
+        recent_stock_items = g.db.scalars(
+            select(Product)
+            .where(Product.track_inventory.is_(True), Product.active.is_(True))
+            .order_by(desc(Product.updated_at), Product.name.asc())
+            .limit(12)
+        ).all()
+        return render_template(
+            "inventory_barcode.html",
+            page_title="Barcode Stock Update",
+            barcode_value=barcode_value,
+            action_type=action_type,
+            quantity_value=quantity_value,
+            note_value=note_value,
+            matching_product=matching_product,
+            recent_stock_items=recent_stock_items,
+            business_area_short=BUSINESS_AREA_SHORT,
             format_product_stock_badge=format_product_stock_badge,
         )
 

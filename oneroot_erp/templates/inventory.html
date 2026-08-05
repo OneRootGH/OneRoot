@@ -51,6 +51,7 @@
             </select>
             <button class="button subtle" type="submit">Search</button>
           </form>
+          <a class="button subtle" href="{{ url_for('inventory_barcode') }}">Barcode Update</a>
           <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter) }}">Export CSV</a>
         </div>
       </div>

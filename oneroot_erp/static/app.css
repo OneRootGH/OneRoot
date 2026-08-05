@@ -1239,6 +1239,15 @@ textarea { resize: vertical; }
   display: grid;
   gap: 0.18rem;
 }
+.barcode-stock-form {
+  align-items: end;
+}
+.barcode-preview {
+  align-items: flex-start;
+}
+.barcode-preview > div {
+  gap: 0.28rem;
+}
 .inventory-editor-hero {
   display: flex;
   gap: 0.9rem;
@@ -1586,6 +1595,52 @@ textarea { resize: vertical; }
 .service-form-stack {
   display: grid;
   gap: 1rem;
+}
+.service-line-builder {
+  margin-top: 1rem;
+  padding: 1rem;
+  border: 1px solid var(--line);
+  border-radius: 1rem;
+  background: #fffaf3;
+  display: grid;
+  gap: 0.9rem;
+}
+.service-line-builder-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.9rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.service-line-builder-grid {
+  align-items: end;
+}
+.service-line-items {
+  display: grid;
+  gap: 0.7rem;
+}
+.service-line-item,
+.service-line-empty {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  align-items: flex-start;
+  padding: 0.9rem 1rem;
+  border-radius: 0.9rem;
+  border: 1px solid #e1d7c7;
+  background: #fff;
+}
+.service-line-item > div,
+.service-line-empty {
+  min-width: 0;
+  display: grid;
+  gap: 0.18rem;
+}
+.service-line-item span,
+.service-line-empty p {
+  color: var(--muted);
+  font-size: 0.84rem;
+  margin: 0;
 }
 
 thead th {

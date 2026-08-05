@@ -56,10 +56,30 @@
           <li><strong>Service</strong><span>{{ service_row.itemSummary }} · {{ service_row.serviceCategory }} · {{ service_row.serviceType }}</span></li>
           <li><strong>Pricing</strong><span>{{ service_row.pieces or 1 }} piece{% if (service_row.pieces or 1) != 1 %}s{% endif %} @ {{ service_row.unitRate|currency }}</span></li>
           <li><strong>Dates</strong><span>Ticket {{ service_row.ticketDate or '—' }} · Due {{ service_row.dueDate or '—' }} · Ready {{ service_row.readyDate or '—' }}</span></li>
+          {% if service_row.lineItems %}
+            <li>
+              <strong>Items</strong>
+              <span>
+                {% for item in service_row.lineItems %}
+                  {{ item.quantity }} x {{ item.name }}{% if item.category %} ({{ item.category }}){% endif %}{% if not loop.last %} · {% endif %}
+                {% endfor %}
+              </span>
+            </li>
+          {% endif %}
         {% else %}
           <li><strong>Customer</strong><span>{{ service_row.customerName }}{% if service_row.customerPhone %} · {{ service_row.customerPhone }}{% endif %}</span></li>
-          <li><strong>Rental</strong><span>{{ service_row.equipmentCategory }} · {{ service_row.rentalDays }} day{% if service_row.rentalDays != 1 %}s{% endif %} @ {{ service_row.dailyRate|currency }}</span></li>
+          <li><strong>Rental</strong><span>{{ service_row.equipmentCategory }} · {{ service_row.rentalDays }} day{% if service_row.rentalDays != 1 %}s{% endif %} @ {{ service_row.dailyRate|currency }}{% if service_row.itemQuantityTotal %} · {{ service_row.itemQuantityTotal }} unit{% if service_row.itemQuantityTotal != 1 %}s{% endif %}{% endif %}</span></li>
           <li><strong>Dates</strong><span>Due {{ service_row.dueDate or '—' }} · Return {{ service_row.returnDate or '—' }}</span></li>
+          {% if service_row.lineItems %}
+            <li>
+              <strong>Items</strong>
+              <span>
+                {% for item in service_row.lineItems %}
+                  {{ item.quantity }} x {{ item.name }}{% if item.category %} ({{ item.category }}){% endif %}{% if not loop.last %} · {% endif %}
+                {% endfor %}
+              </span>
+            </li>
+          {% endif %}
         {% endif %}
         <li><strong>Status</strong><span>{{ service_row.status }}</span></li>
         <li><strong>Service Cost</strong><span>{{ service_row.costAmount|currency }}</span></li>

@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card module-hero compact-module-hero">
+    <div class="card-header compact-header">
+      <div>
+        <p class="eyebrow">Stock</p>
+        <h3>Barcode Stock Update</h3>
+        <p class="muted compact-copy">Scan a barcode, choose how stock should move, save, and stay on the same screen for the next item.</p>
+      </div>
+      <div class="toolbar compact-toolbar">
+        <a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Scan Action</span>
+      <strong>{{ action_type|title }}</strong>
+      <small>Current stock movement mode</small>
+    </article>
+    <article class="metric-card">
+      <span>Quantity</span>
+      <strong>{{ "%.2f"|format(quantity_value or 1) }}</strong>
+      <small>Applied per scan save</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Matched Item</span>
+      <strong>{{ matching_product.name if matching_product else "Waiting" }}</strong>
+      <small>{% if matching_product %}{{ business_area_short.get(matching_product.business_area_id, matching_product.business_area_id) }}{% else %}Scan or type a barcode{% endif %}</small>
+    </article>
+    <article class="metric-card">
+      <span>Live Stock</span>
+      <strong>{% if matching_product %}{{ format_product_stock_badge(matching_product) }}{% else %}—{% endif %}</strong>
+      <small>Current saved quantity</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Scanner Desk</p>
+          <h3>Fast Update</h3>
+        </div>
+      </div>
+      <form method="post" class="form-grid barcode-stock-form">
+        <label class="span-2">
+          <span>Barcode / SKU</span>
+          <input type="text" name="barcode" value="{{ barcode_value }}" placeholder="Scan or type barcode and press save" autofocus autocomplete="off">
+        </label>
+        <label>
+          <span>Action</span>
+          <select name="actionType">
+            <option value="add" {% if action_type == 'add' %}selected{% endif %}>Add Stock</option>
+            <option value="remove" {% if action_type == 'remove' %}selected{% endif %}>Reduce Stock</option>
+            <option value="set" {% if action_type == 'set' %}selected{% endif %}>Set Exact Stock</option>
+          </select>
+        </label>
+        <label>
+          <span>Quantity</span>
+          <input type="number" step="0.01" min="0" name="quantity" value="{{ quantity_value or 1 }}">
+        </label>
+        <label class="span-2">
+          <span>Note</span>
+          <input type="text" name="note" value="{{ note_value }}" placeholder="Optional reason, source, or count note">
+        </label>
+        <div class="form-actions span-2">
+          <button class="button primary" type="submit">Save Stock Update</button>
+        </div>
+      </form>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Matched Item</p>
+          <h3>Scan Preview</h3>
+        </div>
+      </div>
+      {% if matching_product %}
+        <div class="inventory-item-summary barcode-preview">
+          <img class="product-thumb product-thumb-large" src="{{ product_image_src(matching_product) }}" alt="{{ matching_product.name }}">
+          <div>
+            <strong>{{ matching_product.name }}</strong>
+            <span>{{ business_area_short.get(matching_product.business_area_id, matching_product.business_area_id) }} · {{ matching_product.category or "No category" }}</span>
+            <span>SKU {{ matching_product.sku or "—" }} · Barcode {{ matching_product.barcode or "—" }}</span>
+            <span>Sales {{ matching_product.sales_price|currency }} · Cost {{ matching_product.cost_price|currency }}</span>
+            <span>Stock {{ format_product_stock_badge(matching_product) }}</span>
+          </div>
+        </div>
+      {% else %}
+        <p class="muted">As soon as a product matches the scanned barcode or SKU, it will appear here before you save.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header compact">
+      <div>
+        <p class="eyebrow">Recent Stock Items</p>
+        <h3>Quick Repeats</h3>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Item</th>
+            <th>Area</th>
+            <th>SKU / Barcode</th>
+            <th>Stock</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in recent_stock_items %}
+            <tr>
+              <td>{{ item.name }}</td>
+              <td>{{ business_area_short.get(item.business_area_id, item.business_area_id) }}</td>
+              <td>{{ item.sku or "—" }}{% if item.barcode %}<span class="table-secondary">{{ item.barcode }}</span>{% endif %}</td>
+              <td>{{ format_product_stock_badge(item) }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="4">No tracked stock items were found.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
