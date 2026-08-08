@@ -80,7 +80,7 @@
       </div>
       {% if matching_product %}
         <div class="inventory-item-summary barcode-preview">
-          <img class="product-thumb product-thumb-large" src="{{ product_image_src(matching_product) }}" alt="{{ matching_product.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-logo.png') }}'">
+          <img class="product-thumb product-thumb-large" src="{{ product_image_src(matching_product) }}" alt="{{ matching_product.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
           <div>
             <strong>{{ matching_product.name }}</strong>
             <span>{{ business_area_short.get(matching_product.business_area_id, matching_product.business_area_id) }} · {{ matching_product.category or "No category" }}</span>

@@ -8,11 +8,11 @@
     </filter>
   </defs>
   <image
-    href="/assets/oneroot-logo.png"
-    x="26"
-    y="92"
-    width="460"
-    height="328"
+    href="/assets/oneroot-icon-transparent.png"
+    x="96"
+    y="36"
+    width="320"
+    height="440"
     preserveAspectRatio="xMidYMid meet"
     filter="url(#shadow)"
   />

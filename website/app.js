@@ -627,7 +627,7 @@
 
   function resolveCatalogImageSrc(item) {
     const raw = normalizeText(item?.imageUrl);
-    return raw || "/assets/oneroot-logo.png";
+    return raw || "/assets/oneroot-icon-transparent.png";
   }
 
   function renderServiceItemPreview(container, item, emptyTitle, emptyBody) {
@@ -1216,7 +1216,7 @@
             src="${escapeHtml(imageSrc)}"
             alt="${escapeHtml(item.name)}"
             loading="lazy"
-            onerror="this.src='/assets/oneroot-logo.png'"
+            onerror="this.src='/assets/oneroot-icon-transparent.png'"
           />
         </div>
         <div class="catalog-card-header">
@@ -1319,7 +1319,7 @@
                   src="${escapeHtml(getCatalogImageSrc(item))}"
                   alt="${escapeHtml(item.name)}"
                   loading="lazy"
-                  onerror="this.src='/assets/oneroot-logo.png'"
+                  onerror="this.src='/assets/oneroot-icon-transparent.png'"
                 />
                 <div>
                   <strong>${escapeHtml(item.name)}</strong>

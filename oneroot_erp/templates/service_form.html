@@ -230,7 +230,7 @@
 
         function resolveImageUrl(item) {
           const raw = String(item?.imageUrl || "").trim();
-          return raw || "/assets/oneroot-logo.png";
+          return raw || "/assets/oneroot-icon-transparent.png";
         }
 
         function ensureSelectValue(select, value) {
@@ -294,7 +294,7 @@
           const costLabel = costPrice > 0 ? formatCurrency(costPrice) : "Cost not saved yet";
           fields.previewContainer.innerHTML = `
             <article class="service-item-preview-card">
-              <img class="product-thumb product-thumb-large" src="${resolveImageUrl(match)}" alt="${typedName.replace(/"/g, "&quot;")}" onerror="this.src='/assets/oneroot-logo.png'">
+              <img class="product-thumb product-thumb-large" src="${resolveImageUrl(match)}" alt="${typedName.replace(/"/g, "&quot;")}" onerror="this.src='/assets/oneroot-icon-transparent.png'">
               <div class="service-item-preview-copy">
                 <strong>${typedName}</strong>
                 <span>${category}</span>
@@ -475,7 +475,7 @@
               return `
                 <article class="service-line-item">
                   <div class="stack-list-media">
-                    <img class="product-thumb product-thumb-square" src="${resolveImageUrl(item)}" alt="${item.name.replace(/"/g, "&quot;")}" onerror="this.src='/assets/oneroot-logo.png'">
+                    <img class="product-thumb product-thumb-square" src="${resolveImageUrl(item)}" alt="${item.name.replace(/"/g, "&quot;")}" onerror="this.src='/assets/oneroot-icon-transparent.png'">
                     <div>
                       <strong>${item.name}</strong>
                       <span>${item.category || "Uncategorized"} · ${quantityText}</span>

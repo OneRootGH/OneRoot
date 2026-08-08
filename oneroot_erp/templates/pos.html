@@ -110,7 +110,7 @@
           {% for product in top_products %}
             <button class="pos-product-tile" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product_tracks_inventory(product), "itemType": normalized_product_item_type(product.item_type, product.track_inventory), "stockLabel": format_product_stock_badge(product), "imageUrl": product_image_src(product), "sku": product.sku, "barcode": product.barcode}|tojson }}'>
               <span class="pos-product-top">
-                <img class="product-thumb pos-product-thumb" src="{{ product_image_src(product) }}" alt="{{ product.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-logo.png') }}'">
+                <img class="product-thumb pos-product-thumb" src="{{ product_image_src(product) }}" alt="{{ product.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
                 <span class="pos-product-meta">
                   <small class="pos-product-stock">{{ format_product_stock_badge(product) }}</small>
                   <small class="pos-product-area">{{ product.category or 'General' }}</small>

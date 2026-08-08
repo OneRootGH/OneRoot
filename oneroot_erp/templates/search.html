@@ -70,7 +70,7 @@
           {% for item in product_results %}
             <li>
               <div class="stack-list-media">
-                <img class="product-thumb" src="{{ item.imageUrl }}" alt="{{ item.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-logo.png') }}'">
+                <img class="product-thumb" src="{{ item.imageUrl }}" alt="{{ item.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
                 <div>
                   <a class="table-link" href="{{ item.target }}">{{ item.name }}</a>
                   <span>{{ item.area }} · {{ item.category or 'No category' }}</span>

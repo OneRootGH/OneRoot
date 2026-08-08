@@ -73,7 +73,7 @@
               <tr>
                 <td>
                   <div class="inventory-item-summary">
-                    <img class="product-thumb product-thumb-square" src="{{ product_image_src(item) }}" alt="{{ item.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-logo.png') }}'">
+                    <img class="product-thumb product-thumb-square" src="{{ product_image_src(item) }}" alt="{{ item.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
                     <div>
                       <strong>{{ item.name }}</strong>
                       <span>{{ item.category or 'No category' }}</span>
@@ -119,7 +119,7 @@
       <form method="post" enctype="multipart/form-data" class="form-grid single">
         <input type="hidden" name="id" value="{{ editing_product.id if editing_product else '' }}">
         <div class="inventory-editor-hero">
-          <img class="product-thumb product-thumb-large" src="{{ product_image_src(editing_product or {}) }}" alt="{{ editing_product.name if editing_product else 'New inventory item' }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-logo.png') }}'">
+          <img class="product-thumb product-thumb-large" src="{{ product_image_src(editing_product or {}) }}" alt="{{ editing_product.name if editing_product else 'New inventory item' }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
           <div class="inventory-editor-copy">
             <strong>{{ editing_product.name if editing_product else 'Item photo ready' }}</strong>
             <span>Upload an image file or paste an image URL. If you skip this, OneRoot will show a branded item picture automatically.</span>
