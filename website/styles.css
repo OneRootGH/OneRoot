@@ -84,13 +84,15 @@ main {
 }
 
 .brand img {
-  width: 3.3rem;
-  height: 3.3rem;
-  border-radius: 1rem;
+  width: clamp(8.75rem, 11vw, 11.5rem);
+  height: auto;
+  max-height: 3.8rem;
   object-fit: contain;
-  background: rgba(255, 255, 255, 0.72);
-  box-shadow: 0 10px 24px rgba(20, 58, 43, 0.1);
-  padding: 0.3rem;
+  background: transparent;
+  filter:
+    drop-shadow(0 10px 22px rgba(20, 58, 43, 0.14))
+    drop-shadow(0 0 12px rgba(36, 87, 66, 0.12));
+  flex: 0 0 auto;
 }
 
 .brand span {
@@ -1549,6 +1551,23 @@ textarea {
 }
 
 @media (max-width: 760px) {
+  .brand {
+    gap: 0.65rem;
+  }
+
+  .brand img {
+    width: clamp(7.2rem, 34vw, 9rem);
+    max-height: 3rem;
+  }
+
+  .brand strong {
+    font-size: 1.05rem;
+  }
+
+  .brand small {
+    font-size: 0.74rem;
+  }
+
   .site-header {
     grid-template-columns: 1fr auto;
     align-items: start;
