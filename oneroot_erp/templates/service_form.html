@@ -138,6 +138,7 @@
                   <button class="button subtle" type="button" id="service-add-item">Add Item To Request</button>
                 </div>
               </div>
+              <div id="service-item-preview" class="service-item-preview"></div>
               <div id="service-line-items" class="service-line-items"></div>
             </div>
           {% endif %}
@@ -199,6 +200,7 @@
           addItemButton: document.getElementById("service-add-item"),
           lineItemsJson: document.getElementById("service-line-items-json"),
           lineItemsContainer: document.getElementById("service-line-items"),
+          previewContainer: document.getElementById("service-item-preview"),
           form: document.querySelector(".service-form-stack"),
         };
         if (!fields.item || !fields.costAmount || !fields.lineItemsJson || !fields.lineItemsContainer || !fields.form) {
@@ -226,6 +228,11 @@
           }).format(Number.isFinite(value) ? value : 0);
         }
 
+        function resolveImageUrl(item) {
+          const raw = String(item?.imageUrl || "").trim();
+          return raw || "/assets/oneroot-logo.png";
+        }
+
         function ensureSelectValue(select, value) {
           if (!select || !value) {
             return;
@@ -244,14 +251,56 @@
           (Array.isArray(catalog) ? catalog : []).map((item) => [
             normalize(item.name),
             {
+              id: item.id || "",
               name: item.name,
               category: item.category || "",
               salesPrice: parseNumber(item.salesPrice),
               costPrice: parseNumber(item.costPrice),
+              imageUrl: item.imageUrl || "",
+              notes: item.notes || "",
             },
           ]),
         );
         const lineItems = Array.isArray(existingLineItems) ? existingLineItems.map((item) => ({ ...item })) : [];
+
+        function currentCatalogMatch() {
+          return catalogMap.get(normalize(fields.item.value));
+        }
+
+        function renderPreview() {
+          if (!fields.previewContainer) {
+            return;
+          }
+          const typedName = String(fields.item.value || "").trim();
+          const match = currentCatalogMatch();
+          if (!typedName) {
+            fields.previewContainer.innerHTML = `
+              <article class="service-item-preview-card is-empty">
+                <strong>No item selected yet.</strong>
+                <p>Choose a laundry or equipment item above to preview price, cost, and image before adding it to the request.</p>
+              </article>
+            `;
+            return;
+          }
+
+          const category = match?.category || String(fields.category?.value || "").trim() || "Uncategorized";
+          const salesPrice = parseNumber(match?.salesPrice);
+          const costPrice = parseNumber(match?.costPrice);
+          const notes = String(match?.notes || "").trim();
+          const priceLabel = salesPrice > 0 ? formatCurrency(salesPrice) : "Price not saved yet";
+          const costLabel = costPrice > 0 ? formatCurrency(costPrice) : "Cost not saved yet";
+          fields.previewContainer.innerHTML = `
+            <article class="service-item-preview-card">
+              <img class="product-thumb product-thumb-large" src="${resolveImageUrl(match)}" alt="${typedName.replace(/"/g, "&quot;")}" onerror="this.src='/assets/oneroot-logo.png'">
+              <div class="service-item-preview-copy">
+                <strong>${typedName}</strong>
+                <span>${category}</span>
+                <span>Price ${priceLabel} · Cost ${costLabel}</span>
+                ${notes ? `<p>${notes}</p>` : `<p>${serviceKey === "laundry_tickets" ? "Saved laundry pricing will multiply by item count." : "Saved rental pricing will multiply by quantity and rental days."}</p>`}
+              </div>
+            </article>
+          `;
+        }
 
         function deriveRentalDays() {
           if (!fields.outDate || !fields.dueDate || !fields.rentalDays) {
@@ -287,8 +336,9 @@
         }
 
         function applyCatalogPricing() {
-          const match = catalogMap.get(normalize(fields.item.value));
+          const match = currentCatalogMatch();
           if (!match) {
+            renderPreview();
             return;
           }
           const units = currentUnits();
@@ -303,6 +353,7 @@
           if (serviceKey === "equipment_rental_bookings" && fields.rentalFee) {
             fields.rentalFee.value = formatAmount(match.salesPrice * units * quantity);
           }
+          renderPreview();
         }
 
         function draftLineItem() {
@@ -310,6 +361,7 @@
           if (!itemName) {
             return null;
           }
+          const match = currentCatalogMatch();
           if (serviceKey === "laundry_tickets") {
             const pieces = Math.max(Math.round(parseNumber(fields.pieces ? fields.pieces.value : "1")), 1);
             const amountDue = parseNumber(fields.amountDue ? fields.amountDue.value : "0");
@@ -323,6 +375,7 @@
               rentalDays: 1,
               lineTotal: amountDue,
               lineCost: costAmount,
+              imageUrl: resolveImageUrl(match),
             };
           }
           const quantity = Math.max(Math.round(parseNumber(fields.equipmentQuantity ? fields.equipmentQuantity.value : "1")), 1);
@@ -339,6 +392,7 @@
             rentalDays,
             lineTotal: rentalFee,
             lineCost: costAmount,
+            imageUrl: resolveImageUrl(match),
           };
         }
 
@@ -359,6 +413,7 @@
           if (fields.costAmount) {
             fields.costAmount.value = "";
           }
+          renderPreview();
         }
 
         function syncRequiredState() {
@@ -416,10 +471,13 @@
                 : `${item.quantity} unit${item.quantity === 1 ? "" : "s"} · ${item.rentalDays} day${item.rentalDays === 1 ? "" : "s"}`;
               return `
                 <article class="service-line-item">
-                  <div>
-                    <strong>${item.name}</strong>
-                    <span>${item.category || "Uncategorized"} · ${quantityText}</span>
-                    <span>Total ${formatCurrency(parseNumber(item.lineTotal))} · Cost ${formatCurrency(parseNumber(item.lineCost))}</span>
+                  <div class="stack-list-media">
+                    <img class="product-thumb product-thumb-square" src="${resolveImageUrl(item)}" alt="${item.name.replace(/"/g, "&quot;")}" onerror="this.src='/assets/oneroot-logo.png'">
+                    <div>
+                      <strong>${item.name}</strong>
+                      <span>${item.category || "Uncategorized"} · ${quantityText}</span>
+                      <span>Total ${formatCurrency(parseNumber(item.lineTotal))} · Cost ${formatCurrency(parseNumber(item.lineCost))}</span>
+                    </div>
                   </div>
                   <button class="text-button danger-text" type="button" data-line-remove="${index}">Remove</button>
                 </article>
@@ -445,6 +503,7 @@
             existing.quantity = Math.max(Math.round(parseNumber(existing.quantity)), 1) + Math.max(Math.round(parseNumber(draft.quantity)), 1);
             existing.lineTotal = parseNumber(existing.lineTotal) + parseNumber(draft.lineTotal);
             existing.lineCost = parseNumber(existing.lineCost) + parseNumber(draft.lineCost);
+            existing.imageUrl = existing.imageUrl || draft.imageUrl || "";
           } else {
             lineItems.push(draft);
           }
@@ -488,6 +547,7 @@
 
         applyCatalogPricing();
         renderLineItems();
+        renderPreview();
         syncRequiredState();
       })();
     </script>

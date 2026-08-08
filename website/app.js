@@ -106,6 +106,7 @@
       "trackingResult",
       "equipmentBookingForm",
       "equipmentItemSelect",
+      "equipmentItemPreview",
       "equipmentAddItemBtn",
       "equipmentSelectedItems",
       "equipmentCustomerName",
@@ -124,6 +125,7 @@
       "equipmentMessage",
       "laundryBookingForm",
       "laundryServiceSelect",
+      "laundryServicePreview",
       "laundryAddItemBtn",
       "laundrySelectedItems",
       "laundryCustomerName",
@@ -191,6 +193,8 @@
     elements.laundryAddItemBtn?.addEventListener("click", () => {
       addLaundrySelectionFromInputs();
     });
+    elements.equipmentItemSelect?.addEventListener("change", renderEquipmentItemPreview);
+    elements.laundryServiceSelect?.addEventListener("change", renderLaundryItemPreview);
 
     elements.checkoutForm?.addEventListener("input", persistCustomerDraftFromForm);
     elements.equipmentBookingForm?.addEventListener("input", persistServiceCustomerDraftFromForms);
@@ -577,6 +581,7 @@
         (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
       )
     ].join("");
+    renderEquipmentItemPreview();
     renderEquipmentSelections();
   }
 
@@ -597,6 +602,7 @@
         (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
       )
     ].join("");
+    renderLaundryItemPreview();
     renderLaundrySelections();
   }
 
@@ -619,6 +625,60 @@
     return state.catalog.find((item) => normalizeText(item.id) === normalizeText(itemId)) || null;
   }
 
+  function resolveCatalogImageSrc(item) {
+    const raw = normalizeText(item?.imageUrl);
+    return raw || "/assets/oneroot-logo.png";
+  }
+
+  function renderServiceItemPreview(container, item, emptyTitle, emptyBody) {
+    if (!container) {
+      return;
+    }
+
+    if (!item) {
+      container.innerHTML = `
+        <article class="service-preview-card service-preview-card-empty">
+          <strong>${escapeHtml(emptyTitle)}</strong>
+          <p>${escapeHtml(emptyBody)}</p>
+        </article>
+      `;
+      return;
+    }
+
+    const salesPrice = Number(item.salesPrice || 0);
+    const priceLabel = salesPrice > 0 ? formatCurrency(salesPrice) : "Quote";
+    const note = normalizeText(item.notes);
+    container.innerHTML = `
+      <article class="service-preview-card">
+        <img class="service-preview-thumb" src="${escapeHtml(resolveCatalogImageSrc(item))}" alt="${escapeHtml(item.name)}">
+        <div class="service-preview-copy">
+          <strong>${escapeHtml(item.name)}</strong>
+          <span>${escapeHtml(item.category || "Service Item")}</span>
+          <span>${escapeHtml(priceLabel)}</span>
+          <p>${escapeHtml(note || "OneRoot staff will confirm the final service details after submission.")}</p>
+        </div>
+      </article>
+    `;
+  }
+
+  function renderEquipmentItemPreview() {
+    renderServiceItemPreview(
+      elements.equipmentItemPreview,
+      getCatalogItemById(normalizeText(elements.equipmentItemSelect?.value)),
+      "No equipment selected yet.",
+      "Choose an equipment item to preview the image and saved pricing before adding it to the request."
+    );
+  }
+
+  function renderLaundryItemPreview() {
+    renderServiceItemPreview(
+      elements.laundryServicePreview,
+      getCatalogItemById(normalizeText(elements.laundryServiceSelect?.value)),
+      "No laundry service selected yet.",
+      "Choose a laundry service to preview the image and saved pricing before adding it to the request."
+    );
+  }
+
   function buildEquipmentSelectionFromInputs() {
     const itemId = normalizeText(elements.equipmentItemSelect?.value);
     const catalogItem = getCatalogItemById(itemId);
@@ -636,6 +696,8 @@
         selectionId: createClientSelectionId("equipment"),
         id: catalogItem.id,
         name: catalogItem.name,
+        category: catalogItem.category || "",
+        imageUrl: resolveCatalogImageSrc(catalogItem),
         quantity,
         durationDays,
         unitPrice,
@@ -677,13 +739,17 @@
       .map(
         (selection) => `
           <article class="service-selected-item">
-            <div>
-              <strong>${escapeHtml(selection.name)}</strong>
-              <p>${escapeHtml(
-                `${selection.quantity} item${selection.quantity === 1 ? "" : "s"} for ${selection.durationDays} day${
-                  selection.durationDays === 1 ? "" : "s"
-                }`
-              )}</p>
+            <div class="service-selected-item-main">
+              <img class="service-selected-thumb" src="${escapeHtml(resolveCatalogImageSrc(selection))}" alt="${escapeHtml(selection.name)}">
+              <div>
+                <strong>${escapeHtml(selection.name)}</strong>
+                <p>${escapeHtml(
+                  `${selection.quantity} item${selection.quantity === 1 ? "" : "s"} for ${selection.durationDays} day${
+                    selection.durationDays === 1 ? "" : "s"
+                  }`
+                )}</p>
+                <p>${escapeHtml(selection.category || "Equipment Rental")}</p>
+              </div>
             </div>
             <div class="service-selected-item-side">
               <strong>${selection.unitPrice > 0 ? escapeHtml(formatCurrency(selection.lineTotal)) : "Quote"}</strong>
@@ -719,6 +785,8 @@
         selectionId: createClientSelectionId("laundry"),
         id: catalogItem.id,
         name: catalogItem.name,
+        category: catalogItem.category || "",
+        imageUrl: resolveCatalogImageSrc(catalogItem),
         itemCount,
         itemSummary,
         unitPrice,
@@ -760,13 +828,17 @@
       .map(
         (selection) => `
           <article class="service-selected-item">
-            <div>
-              <strong>${escapeHtml(selection.name)}</strong>
-              <p>${escapeHtml(
-                `${selection.itemCount} item${selection.itemCount === 1 ? "" : "s"}${
-                  selection.itemSummary ? ` • ${selection.itemSummary}` : ""
-                }`
-              )}</p>
+            <div class="service-selected-item-main">
+              <img class="service-selected-thumb" src="${escapeHtml(resolveCatalogImageSrc(selection))}" alt="${escapeHtml(selection.name)}">
+              <div>
+                <strong>${escapeHtml(selection.name)}</strong>
+                <p>${escapeHtml(
+                  `${selection.itemCount} item${selection.itemCount === 1 ? "" : "s"}${
+                    selection.itemSummary ? ` • ${selection.itemSummary}` : ""
+                  }`
+                )}</p>
+                <p>${escapeHtml(selection.category || "Laundry Service")}</p>
+              </div>
             </div>
             <div class="service-selected-item-side">
               <strong>${selection.unitPrice > 0 ? escapeHtml(formatCurrency(selection.lineTotal)) : "Quote"}</strong>
@@ -1103,6 +1175,7 @@
             src="${escapeHtml(imageSrc)}"
             alt="${escapeHtml(item.name)}"
             loading="lazy"
+            onerror="this.src='/assets/oneroot-logo.png'"
           />
         </div>
         <div class="catalog-card-header">
@@ -1205,6 +1278,7 @@
                   src="${escapeHtml(getCatalogImageSrc(item))}"
                   alt="${escapeHtml(item.name)}"
                   loading="lazy"
+                  onerror="this.src='/assets/oneroot-logo.png'"
                 />
                 <div>
                   <strong>${escapeHtml(item.name)}</strong>

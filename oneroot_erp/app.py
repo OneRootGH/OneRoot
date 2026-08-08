@@ -90,6 +90,7 @@ PRODUCT_IMAGE_AREA_COLORS = {
     "kitchen": "#8e5d23",
     "shared-operations": "#50606f",
 }
+ICONIFY_API_BASE = "https://api.iconify.design"
 PUBLIC_JOB_VACANCY_STATUSES = {
     status for status, _label in JOB_VACANCY_STATUSES if status not in {"Draft", "Filled", "Closed"}
 }
@@ -347,6 +348,87 @@ def product_placeholder_svg_payload(name: str, category: str, area_id: str) -> s
 </svg>"""
 
 
+def iconify_svg_url(icon_name: str, *, color: str = "", width: int = 320, height: int = 240) -> str:
+    query_parts = [f"width={max(int(width), 64)}", f"height={max(int(height), 64)}"]
+    if normalize_text(color):
+        query_parts.append(f"color={quote(normalize_text(color), safe='')}")
+    return f"{ICONIFY_API_BASE}/{quote(icon_name, safe=':-')}.svg?{'&'.join(query_parts)}"
+
+
+def mapped_online_product_image(name: str, category: str, area_id: str, item_type: str = "") -> str:
+    text_blob = " ".join(
+        value.lower()
+        for value in (
+            normalize_text(name),
+            normalize_text(category),
+            normalize_text(area_id),
+            normalize_text(item_type),
+        )
+        if normalize_text(value)
+    )
+    if not text_blob:
+        return ""
+
+    if "sim" in text_blob:
+        return iconify_svg_url("material-symbols-light:sim-card-outline", color="#12803b")
+    if any(keyword in text_blob for keyword in ("momo", "mobile money", "wallet", "ewallet", "top-up", "top - up", "cash in", "cash out", "transfer")):
+        return iconify_svg_url("flat-color-icons:money-transfer", width=288, height=216)
+
+    if "wheelbarrow" in text_blob:
+        return iconify_svg_url("game-icons:wheelbarrow", color="#2f6ea8")
+    if any(keyword in text_blob for keyword in ("drill", "impact")):
+        return iconify_svg_url("game-icons:drill", color="#2f6ea8")
+    if any(keyword in text_blob for keyword in ("shovel", "head pan", "headpan", "nails", "concrete", "cutting machine", "cutter", "vibrator", "equipment rental")):
+        return iconify_svg_url("fa6-solid:trowel", color="#2f6ea8")
+    if "water" in text_blob and area_id == "water-equipment":
+        return iconify_svg_url("fa6-solid:bottle-water", color="#2f6ea8")
+
+    if any(keyword in text_blob for keyword in ("shirt", "dress", "trouser", "suit", "jacket", "t-shirt", "t shirt", "clothes", "garment")):
+        return iconify_svg_url("game-icons:shirt", color="#5f6fd8")
+    if area_id == "laundry-services" or any(
+        keyword in text_blob
+        for keyword in (
+            "laundry",
+            "washing",
+            "bedsheet",
+            "blanket",
+            "duvet",
+            "pillow",
+            "curtain",
+            "carpet",
+            "rug",
+            "shoe",
+            "bag",
+            "towel",
+            "mattress",
+        )
+    ):
+        return iconify_svg_url("streamline-freehand-color:laundry-washing-machine", width=288, height=216)
+
+    if any(keyword in text_blob for keyword in ("baby", "diaper", "wipes")):
+        return iconify_svg_url("fxemoji:babybottle", width=288, height=216)
+    if any(keyword in text_blob for keyword in ("fish", "meat", "gizzard", "sausage", "sausages", "chicken", "protein", "frozen")):
+        return iconify_svg_url("fa-solid:fish", color="#1f6b5b")
+    if any(keyword in text_blob for keyword in ("ice cream", "ice-cream", "frozen treats")):
+        return iconify_svg_url("fa-solid:ice-cream", color="#ca5d27")
+    if any(keyword in text_blob for keyword in ("bread", "groceries", "pantry", "groundnut", "shea butter", "oil", "rice", "sugar", "salt", "milk", "cereal")):
+        return iconify_svg_url("game-icons:bread", color="#1f6b5b")
+    if any(keyword in text_blob for keyword in ("drink", "refreshment", "water", "sobolo", "juice", "voltic", "beverage", "bottle")):
+        return iconify_svg_url("fa6-solid:bottle-water", color="#2f6ea8")
+    if any(keyword in text_blob for keyword in ("soap", "clean", "detergent", "bleach", "tissue", "sanitary", "personal care", "household")):
+        return iconify_svg_url("fa-solid:soap", color="#1f6b5b")
+    if any(keyword in text_blob for keyword in ("school", "stationery", "pen", "pencil", "exercise book", "book")):
+        return iconify_svg_url("material-symbols:school-outline", color="#50606f")
+    if any(keyword in text_blob for keyword in ("gift card", "gift")):
+        return iconify_svg_url("tabler:gift-card-filled", color="#8e5d23")
+    if area_id == "kitchen":
+        return iconify_svg_url("game-icons:bread", color="#8e5d23")
+    if area_id == "fresh-foods-drinks":
+        return iconify_svg_url("fa6-solid:bottle-water", color="#ca5d27")
+
+    return ""
+
+
 def product_image_src(item_or_payload: Product | dict[str, Any]) -> str:
     if isinstance(item_or_payload, Product):
         image_url = normalize_text(item_or_payload.image_url)
@@ -354,14 +436,19 @@ def product_image_src(item_or_payload: Product | dict[str, Any]) -> str:
         name = item_or_payload.name
         category = item_or_payload.category
         area_id = item_or_payload.business_area_id
+        item_type = normalize_text(item_or_payload.item_type)
     else:
         image_url = normalize_text(item_or_payload.get("imageUrl") or item_or_payload.get("image_url"))
         product_id = normalize_text(item_or_payload.get("id"))
         name = normalize_text(item_or_payload.get("name"))
         category = normalize_text(item_or_payload.get("category"))
         area_id = normalize_text(item_or_payload.get("businessAreaId") or item_or_payload.get("business_area_id"))
+        item_type = normalize_text(item_or_payload.get("itemType") or item_or_payload.get("item_type"))
     if image_url:
         return image_url
+    online_image = mapped_online_product_image(name, category, area_id, item_type)
+    if online_image:
+        return online_image
     if product_id:
         return url_for("product_placeholder_image", product_id=product_id)
     svg = product_placeholder_svg_payload(name, category, area_id)
@@ -375,6 +462,7 @@ PROFIT_SOURCE_LABELS = {
     "online-order-payments": "Online Orders",
     "laundry-payment": "Laundry Payments",
     "equipment-rental-payment": "Equipment Rentals",
+    "mobile-money-transaction": "Mobile Money",
     "apartment-rent-payment": "Apartment Rent",
     "apartment-bill-payment": "Apartment Bills",
     "security-deposit-payment": "Security Deposits",
@@ -1312,6 +1400,7 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
     raw_items = payload.get(SERVICE_LINE_ITEMS_KEY) if isinstance(payload.get(SERVICE_LINE_ITEMS_KEY), list) else []
     normalized_items: list[dict[str, Any]] = []
     rental_days = equipment_rental_days(payload) if module_key == "equipment_rental_bookings" else 1
+    service_area = SERVICE_MODULE_AREA_IDS.get(module_key, "")
 
     for raw_item in raw_items:
         if not isinstance(raw_item, dict):
@@ -1334,16 +1423,26 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
             line_total = round(unit_price * quantity * (days if module_key == "equipment_rental_bookings" else 1), 2)
         if line_cost <= 0 and cost_price > 0:
             line_cost = round(cost_price * quantity * (days if module_key == "equipment_rental_bookings" else 1), 2)
+        category_value = normalize_text(raw_item.get("category"))
+        image_url = normalize_text(raw_item.get("imageUrl")) or product_image_src(
+            {
+                "name": item_name,
+                "category": category_value,
+                "businessAreaId": service_area or normalize_text(payload.get("businessAreaId")),
+                "itemType": "service",
+            }
+        )
         normalized_items.append(
             {
                 "name": item_name,
-                "category": normalize_text(raw_item.get("category")),
+                "category": category_value,
                 "quantity": quantity,
                 "unitPrice": unit_price,
                 "costPrice": cost_price,
                 "rentalDays": days if module_key == "equipment_rental_bookings" else 1,
                 "lineTotal": line_total,
                 "lineCost": line_cost,
+                "imageUrl": image_url,
             }
         )
 
@@ -1368,6 +1467,14 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
                 "rentalDays": 1,
                 "lineTotal": total_due,
                 "lineCost": total_cost,
+                "imageUrl": product_image_src(
+                    {
+                        "name": item_name,
+                        "category": normalize_text(payload.get("serviceCategory")),
+                        "businessAreaId": "laundry-services",
+                        "itemType": "service",
+                    }
+                ),
             }
         ]
 
@@ -1390,6 +1497,14 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
                 "rentalDays": days,
                 "lineTotal": total_due,
                 "lineCost": total_cost,
+                "imageUrl": product_image_src(
+                    {
+                        "name": item_name,
+                        "category": normalize_text(payload.get("equipmentCategory")),
+                        "businessAreaId": "water-equipment",
+                        "itemType": "service",
+                    }
+                ),
             }
         ]
 
@@ -1600,6 +1715,18 @@ def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str,
                     "rentalDays": item_days if module_key == "equipment_rental_bookings" else 1,
                     "lineTotal": line_total,
                     "lineCost": line_cost,
+                    "imageUrl": (
+                        product_image_src(match)
+                        if match
+                        else product_image_src(
+                            {
+                                "name": normalize_text(item.get("name")),
+                                "category": category,
+                                "businessAreaId": SERVICE_MODULE_AREA_IDS.get(module_key, ""),
+                                "itemType": "service",
+                            }
+                        )
+                    ),
                 }
             )
         payload[SERVICE_LINE_ITEMS_KEY] = hydrated_items
@@ -2018,6 +2145,7 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "expenses": "category",
     "petty_cash": "transactionTypeId",
     "cashbook_entries": "entryType",
+    "mobile_money_transactions": "serviceType",
     "laundry_tickets": "serviceCategory",
     "equipment_rental_bookings": "equipmentCategory",
     "mobile_money_reconciliations": "provider",
@@ -2603,6 +2731,27 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
             {"label": "Cost", "value": format_currency(total_cost), "note": "Linked item or service cost in this view"},
             {"label": "Profit", "value": format_currency(total_profit), "note": "Realized gross profit in this view"},
         ]
+    elif definition.key == "mobile_money_transactions":
+        principal_total = round(sum(parse_amount((record.payload or {}).get("transactionValue")) for record in records), 2)
+        total_cost = round(sum(parse_amount((record.payload or {}).get("costAmount")) for record in records), 2)
+        total_profit = round(sum(parse_amount((record.payload or {}).get("profitAmount")) for record in records), 2)
+        completed_count = sum(1 for record in records if normalize_text((record.payload or {}).get("status")) == "Completed")
+        cards = [
+            {"label": "MoMo Transactions", "value": f"{len(records)}", "note": "Customer transactions captured in this view"},
+            {"label": "Handled Value", "value": format_currency(principal_total), "note": "Transaction face value processed"},
+            {"label": "Fees Earned", "value": format_currency(total_amount), "note": f"Completed transactions: {completed_count}"},
+            {"label": "Profit", "value": format_currency(total_profit), "note": f"Direct service cost: {format_currency(total_cost)}"},
+        ]
+    elif definition.key == "mobile_money_reconciliations":
+        expected_total = round(sum(mobile_money_expected_closing(record.payload or {}) for record in records), 2)
+        fee_total = round(sum(parse_amount((record.payload or {}).get("serviceFees")) for record in records), 2)
+        balanced_count = sum(1 for record in records if mobile_money_status(record.payload or {}) == "Balanced")
+        cards = [
+            {"label": "Reconciliation Days", "value": f"{len(records)}", "note": "Saved daily float closeouts in this view"},
+            {"label": "Service Fees", "value": format_currency(fee_total), "note": "Fees recorded on reconciliation rows"},
+            {"label": "Expected Closing", "value": format_currency(expected_total), "note": "Computed expected closing cash across these rows"},
+            {"label": "Balanced Days", "value": f"{balanced_count}", "note": f"Variance total: {format_currency(total_amount)}"},
+        ]
     elif definition.key == "forecast_plans":
         total_target = round(sum(parse_amount((record.payload or {}).get("revenueTarget")) for record in records), 2)
         total_budget = round(sum(planning_total_budget(record.payload or {}) for record in records), 2)
@@ -2870,6 +3019,13 @@ APARTMENT_FORM_SECTIONS = [
 def title_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
     if definition.key == "forecast_plans":
         return planning_name(payload)
+    if definition.key == "mobile_money_transactions":
+        return (
+            normalize_text(payload.get("customerName"))
+            or normalize_text(payload.get("serviceType"))
+            or normalize_text(payload.get("provider"))
+            or definition.label
+        )
     for candidate in (
         definition.title_field,
         "title",
@@ -4023,6 +4179,8 @@ def workbook_download_path(app_config: AppConfig) -> Path:
 
 
 def generated_sales_references_for_module_record(record: ModuleRecord) -> list[str]:
+    if record.module_key == "mobile_money_transactions":
+        return [f"mobile-money-transaction|{record.id}"]
     if record.module_key == "apartments":
         return [
             f"apartment-rent-payment|{record.id}",
@@ -5185,7 +5343,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "quantityKnown": bool(item.get("quantityKnown", False)),
                     "itemType": normalize_text(item.get("itemType")) or "service",
                     "trackInventory": bool(item.get("trackInventory", False)),
-                    "imageUrl": normalize_text(item.get("imageUrl")),
+                    "imageUrl": product_image_src(
+                        {
+                            "id": normalize_text(item.get("id")) or uuid4().hex,
+                            "name": normalize_text(item.get("name")),
+                            "businessAreaId": business_area_id,
+                            "category": normalize_text(item.get("category")) or "Services",
+                            "itemType": normalize_text(item.get("itemType")) or "service",
+                            "imageUrl": normalize_text(item.get("imageUrl")),
+                        }
+                    ),
                     "notes": normalize_text(item.get("notes")),
                     "source": "service-offer",
                 }
@@ -5306,6 +5473,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         source_label: str,
         note: str,
         transaction_count: int = 1,
+        category: str = "",
     ) -> None:
         record = db_session.scalar(
             select(ModuleRecord).where(
@@ -5328,6 +5496,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "amount": clean_amount,
             "costAmount": clean_cost,
             "profitAmount": clean_profit,
+            "category": normalize_text(category),
             "notes": note,
             "sourceType": source_type,
             "sourceLabel": source_label,
@@ -5347,6 +5516,27 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def sync_generated_sales_for_module_record(record: ModuleRecord, db_session=None) -> None:
         db = db_session or g.db
         payload = dict(record.payload or {})
+
+        if record.module_key == "mobile_money_transactions":
+            provider = normalize_text(payload.get("provider")) or "MTN Mobile Money"
+            service_type = normalize_text(payload.get("serviceType")) or "Mobile Money Service"
+            customer = normalize_text(payload.get("customerName")) or "Walk-in Customer"
+            status = normalize_text(payload.get("status")) or "Completed"
+            sale_amount = parse_amount(payload.get("salesAmount")) if status == "Completed" else 0.0
+            upsert_generated_sale(
+                db,
+                reference=f"mobile-money-transaction|{record.id}",
+                sale_date=parse_date(payload.get("date")),
+                business_area_id="mobile-money",
+                amount=sale_amount,
+                cost_amount=parse_amount(payload.get("costAmount")) if sale_amount > 0 else 0.0,
+                profit_amount=parse_amount(payload.get("profitAmount")) if sale_amount > 0 else 0.0,
+                source_type="mobile-money-transaction",
+                source_label="Mobile Money Transaction",
+                category=service_type,
+                note=f"[MoMo Sync] {service_type} for {customer} via {provider}.",
+            )
+            return
 
         if record.module_key == "apartments":
             suite = normalize_text(payload.get("suite")) or "Suite"
@@ -5995,6 +6185,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "laundry_tickets",
                         "equipment_rental_bookings",
                         "security_deposit_records",
+                        "mobile_money_transactions",
                     ]
                 )
             )
@@ -7835,6 +8026,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
         module_quick_actions = []
         automated_tenant_reminders: list[dict[str, Any]] = []
         automated_tenant_counts: dict[str, int] = {}
+        if module_key == "mobile_money_transactions":
+            if user_has_access(g.current_user, "mobile_money_reconciliations"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Mobile Money Reconciliation",
+                        "href": url_for("module_list", module_key="mobile_money_reconciliations"),
+                        "note": "Close float and compare expected versus counted cash after recording transactions.",
+                    }
+                )
+        if module_key == "mobile_money_reconciliations":
+            if user_has_access(g.current_user, "mobile_money_transactions"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Mobile Money Sales",
+                        "href": url_for("module_list", module_key="mobile_money_transactions"),
+                        "note": "Capture MTN MoMo and SIM service fees before closing the daily reconciliation.",
+                    }
+                )
         if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
             growth_context = build_growth_automation_context(g.db, area_filter=area_filter)
             if user_has_access(g.current_user, "customer_crm"):
@@ -8066,6 +8275,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 campaign_roi_rollup(payload)
             elif module_key == "delivery_dispatch":
                 delivery_dispatch_rollup(payload)
+            elif module_key == "mobile_money_reconciliations":
+                payload["businessAreaId"] = "mobile-money"
+            elif module_key == "mobile_money_transactions":
+                payload["businessAreaId"] = "mobile-money"
+                payload["profitAmount"] = round(parse_amount(payload.get("salesAmount")) - parse_amount(payload.get("costAmount")), 2)
             elif module_key == "sales":
                 payload["sourceType"] = normalize_text(payload.get("sourceType")) or "manual-sale"
                 payload["profitAmount"] = round(parse_amount(payload.get("amount")) - parse_amount(payload.get("costAmount")), 2)
@@ -8093,6 +8307,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             knowledge_rollup(record_payload)
         elif module_key == "workforce_attendance":
             workforce_rollup(record_payload)
+        elif module_key == "mobile_money_reconciliations":
+            record_payload.setdefault("businessAreaId", "mobile-money")
+            record_payload.setdefault("date", date.today().isoformat())
+            record_payload.setdefault("provider", "MTN Mobile Money")
+        elif module_key == "mobile_money_transactions":
+            record_payload.setdefault("businessAreaId", "mobile-money")
+            record_payload.setdefault("date", date.today().isoformat())
+            record_payload.setdefault("provider", "MTN Mobile Money")
+            record_payload.setdefault("floatImpact", "No Cash Movement")
+            record_payload.setdefault("status", "Completed")
+            record_payload["profitAmount"] = round(parse_amount(record_payload.get("salesAmount")) - parse_amount(record_payload.get("costAmount")), 2)
         if module_key == "apartments":
             record_payload.setdefault("businessAreaId", "rentals-apartments")
             field_map = {field.name: field for field in definition.fields}
@@ -8150,10 +8375,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 reference_product_options=[product.name for product in inventory_reference_products],
                 reference_product_catalog=[
                     {
+                        "id": product.id,
                         "name": product.name,
                         "category": product.category,
                         "salesPrice": round(parse_amount(product.sales_price), 2),
                         "costPrice": round(parse_amount(product.cost_price), 2),
+                        "imageUrl": product_image_src(product),
+                        "notes": normalize_text(product.notes),
                     }
                     for product in inventory_reference_products
                 ],
@@ -8348,6 +8576,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             in {
                 "pos-summary",
                 "online-order-payments",
+                "mobile-money-transaction",
                 "apartment-rent-payment",
                 "apartment-bill-payment",
                 "laundry-payment",

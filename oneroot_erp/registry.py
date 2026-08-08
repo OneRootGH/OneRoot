@@ -107,6 +107,7 @@ ROLE_ACCESS_KEYS = {
         "petty_cash",
         "petty_cash_budgets",
         "cashbook_entries",
+        "mobile_money_transactions",
         "mobile_money_reconciliations",
         "apartments",
         "security_deposit_records",
@@ -146,6 +147,7 @@ ROLE_ACCESS_KEYS = {
         "petty_cash",
         "petty_cash_budgets",
         "cashbook_entries",
+        "mobile_money_transactions",
         "mobile_money_reconciliations",
         "apartments",
         "security_deposit_records",
@@ -180,6 +182,7 @@ ROLE_ACCESS_KEYS = {
         "petty_cash",
         "petty_cash_budgets",
         "cashbook_entries",
+        "mobile_money_transactions",
         "mobile_money_reconciliations",
         "salary_records",
         "workforce_attendance",
@@ -204,6 +207,7 @@ ROLE_ACCESS_KEYS = {
         "online_orders",
         "delivery_dispatch",
         "sales",
+        "mobile_money_transactions",
         "laundry_tickets",
         "equipment_rental_bookings",
         "maintenance_records",
@@ -240,6 +244,7 @@ ROLE_ACCESS_KEYS = {
         "online_orders",
         "delivery_dispatch",
         "sales",
+        "mobile_money_transactions",
         "laundry_tickets",
         "equipment_rental_bookings",
         "workforce_attendance",
@@ -255,6 +260,7 @@ ROLE_ACCESS_KEYS = {
         "pos",
         "sales",
         "online_orders",
+        "mobile_money_transactions",
     },
     "viewer": {
         "dashboard",
@@ -351,6 +357,27 @@ MOBILE_MONEY_PROVIDERS = [
     ("Telecel Cash", "Telecel Cash"),
     ("AirtelTigo Money", "AirtelTigo Money"),
     ("Other / Custom", "Other / Custom"),
+]
+MOBILE_MONEY_SERVICE_TYPES = [
+    ("Cash In", "Cash In"),
+    ("Cash Out", "Cash Out"),
+    ("Send Money", "Send Money"),
+    ("Merchant Pay / Bill Pay", "Merchant Pay / Bill Pay"),
+    ("Airtime / Data", "Airtime / Data"),
+    ("SIM Sale / Replacement", "SIM Sale / Replacement"),
+    ("Wallet Top-Up", "Wallet Top-Up"),
+    ("Other Service", "Other Service"),
+]
+MOBILE_MONEY_FLOAT_IMPACTS = [
+    ("Cash In", "Cash In"),
+    ("Cash Out", "Cash Out"),
+    ("No Cash Movement", "No Cash Movement"),
+]
+MOBILE_MONEY_TRANSACTION_STATUSES = [
+    ("Completed", "Completed"),
+    ("Pending", "Pending"),
+    ("Reversed", "Reversed"),
+    ("Cancelled", "Cancelled"),
 ]
 PETTY_CASH_TRANSACTION_TYPES = [
     ("Float Top-Up", "Float Top-Up"),
@@ -1005,6 +1032,31 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "mobile_money_transactions": ModuleDefinition(
+        key="mobile_money_transactions",
+        label="Mobile Money Sales",
+        legacy_collection="mobileMoneyTransactions",
+        menu_group="Finance",
+        amount_field="salesAmount",
+        date_field="date",
+        title_field="customerName",
+        status_field="status",
+        fields=[
+            FieldDefinition("date", "Date", "date", True),
+            FieldDefinition("provider", "Provider", "select", True, MOBILE_MONEY_PROVIDERS),
+            FieldDefinition("serviceType", "Service Type", "select", True, MOBILE_MONEY_SERVICE_TYPES),
+            FieldDefinition("customerName", "Customer Name", "text"),
+            FieldDefinition("customerPhone", "Customer Phone", "text"),
+            FieldDefinition("momoNumber", "MoMo / SIM Number", "text"),
+            FieldDefinition("transactionValue", "Transaction Value", "number"),
+            FieldDefinition("salesAmount", "Fee / Sales Amount", "number", True),
+            FieldDefinition("costAmount", "Direct Cost", "number"),
+            FieldDefinition("floatImpact", "Float Impact", "select", False, MOBILE_MONEY_FLOAT_IMPACTS),
+            FieldDefinition("reference", "Reference", "text"),
+            FieldDefinition("status", "Status", "select", True, MOBILE_MONEY_TRANSACTION_STATUSES),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
     "suppliers": ModuleDefinition(
         key="suppliers",
         label="Suppliers",
@@ -1409,7 +1461,7 @@ MENU_GROUPS = [
         "Finance",
         [
             ("Sales & Spend", ["sales", "expenses", "petty_cash", "petty_cash_budgets"]),
-            ("Cash & Reconciliation", ["cashbook_entries", "mobile_money_reconciliations"]),
+            ("Cash & Reconciliation", ["cashbook_entries", "mobile_money_transactions", "mobile_money_reconciliations"]),
         ],
     ),
     (
