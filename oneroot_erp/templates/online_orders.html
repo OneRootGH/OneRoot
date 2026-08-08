@@ -131,6 +131,22 @@
           </article>
         </div>
 
+        {% if selected_order.servicePaymentsManaged %}
+          <article class="mini-card">
+            <p class="eyebrow">Service Desk Sync</p>
+            <strong>Laundry and equipment website requests now open linked service records automatically.</strong>
+            <span class="muted">Update payment from the linked service payment screen so balances, profit, and daily sales stay in one place.</span>
+            <div class="row-actions">
+              {% if selected_order.linkedLaundryTicketId %}
+                <a class="button subtle" href="{{ url_for('service_payment_form', module_key='laundry_tickets', record_id=selected_order.linkedLaundryTicketId) }}">Open Laundry Payment</a>
+              {% endif %}
+              {% if selected_order.linkedEquipmentBookingId %}
+                <a class="button subtle" href="{{ url_for('service_payment_form', module_key='equipment_rental_bookings', record_id=selected_order.linkedEquipmentBookingId) }}">Open Equipment Payment</a>
+              {% endif %}
+            </div>
+          </article>
+        {% endif %}
+
         <form method="post" action="{{ url_for('online_order_update', record_id=selected_order.id) }}" class="form-grid order-desk-form">
           <input type="hidden" name="q" value="{{ query_text }}">
           <input type="hidden" name="status_filter" value="{{ status_filter }}">
@@ -144,26 +160,34 @@
               {% endfor %}
             </select>
           </label>
-          <label>
-            <span>Payment Status</span>
-            <select name="payment_status">
-              {% for option in payment_status_options %}
-                <option value="{{ option }}" {% if selected_order.paymentStatus == option %}selected{% endif %}>{{ option|replace('-', ' ')|title }}</option>
-              {% endfor %}
-            </select>
-          </label>
-          <label>
-            <span>Confirmed Order Total</span>
-            <input type="number" min="0" step="0.01" name="quoted_total" value="{{ '%.2f'|format(selected_order.totalAmount) }}">
-          </label>
-          <label>
-            <span>Amount Paid</span>
-            <input type="number" min="0" step="0.01" name="paid_amount" value="{{ '%.2f'|format(selected_order.paidAmount) }}">
-          </label>
-          <label>
-            <span>Payment Date</span>
-            <input type="date" name="payment_date" value="{{ selected_order.paymentDate[:10] if selected_order.paymentDate else '' }}">
-          </label>
+          {% if selected_order.servicePaymentsManaged %}
+            <article class="mini-card">
+              <strong>Payment {{ selected_order.paymentStatus|replace('-', ' ')|title }}</strong>
+              <span class="muted">Quoted {{ selected_order.totalAmount|currency }}</span>
+              <span class="muted">Paid {{ selected_order.paidAmount|currency }}{% if selected_order.paymentDate %} · {{ selected_order.paymentDate[:10] }}{% endif %}</span>
+            </article>
+          {% else %}
+            <label>
+              <span>Payment Status</span>
+              <select name="payment_status">
+                {% for option in payment_status_options %}
+                  <option value="{{ option }}" {% if selected_order.paymentStatus == option %}selected{% endif %}>{{ option|replace('-', ' ')|title }}</option>
+                {% endfor %}
+              </select>
+            </label>
+            <label>
+              <span>Confirmed Order Total</span>
+              <input type="number" min="0" step="0.01" name="quoted_total" value="{{ '%.2f'|format(selected_order.totalAmount) }}">
+            </label>
+            <label>
+              <span>Amount Paid</span>
+              <input type="number" min="0" step="0.01" name="paid_amount" value="{{ '%.2f'|format(selected_order.paidAmount) }}">
+            </label>
+            <label>
+              <span>Payment Date</span>
+              <input type="date" name="payment_date" value="{{ selected_order.paymentDate[:10] if selected_order.paymentDate else '' }}">
+            </label>
+          {% endif %}
           <label>
             <span>Staff Notes</span>
             <input type="text" name="staff_notes" value="{{ selected_order.staffNotes }}" placeholder="Internal handling note">

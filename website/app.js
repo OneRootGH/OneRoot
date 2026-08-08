@@ -714,7 +714,28 @@
       return false;
     }
 
-    state.equipmentSelections.push(selection);
+    const existingSelection = state.equipmentSelections.find(
+      (entry) => entry.id === selection.id && Number(entry.durationDays || 1) === Number(selection.durationDays || 1)
+    );
+    if (existingSelection) {
+      existingSelection.quantity = Number(existingSelection.quantity || 0) + Number(selection.quantity || 0);
+      existingSelection.lineTotal = Number(
+        (
+          Number(existingSelection.unitPrice || 0) *
+          Number(existingSelection.quantity || 0) *
+          Number(existingSelection.durationDays || 1)
+        ).toFixed(2)
+      );
+    } else {
+      state.equipmentSelections.push(selection);
+    }
+    if (elements.equipmentItemSelect) {
+      elements.equipmentItemSelect.value = "";
+    }
+    if (elements.equipmentQuantityInput) {
+      elements.equipmentQuantityInput.value = "1";
+    }
+    renderEquipmentItemPreview();
     renderEquipmentSelections();
     renderServiceMessage(elements.equipmentMessage, "success", `${escapeHtml(selection.name)} added to this customer request.`);
     return true;
@@ -803,7 +824,27 @@
       return false;
     }
 
-    state.laundrySelections.push(selection);
+    const existingSelection = state.laundrySelections.find(
+      (entry) => entry.id === selection.id && normalizeText(entry.itemSummary) === normalizeText(selection.itemSummary)
+    );
+    if (existingSelection) {
+      existingSelection.itemCount = Number(existingSelection.itemCount || 0) + Number(selection.itemCount || 0);
+      existingSelection.lineTotal = Number(
+        (Number(existingSelection.unitPrice || 0) * Number(existingSelection.itemCount || 0)).toFixed(2)
+      );
+    } else {
+      state.laundrySelections.push(selection);
+    }
+    if (elements.laundryServiceSelect) {
+      elements.laundryServiceSelect.value = "";
+    }
+    if (elements.laundryItemCountInput) {
+      elements.laundryItemCountInput.value = "1";
+    }
+    if (elements.laundryItemSummaryInput) {
+      elements.laundryItemSummaryInput.value = "";
+    }
+    renderLaundryItemPreview();
     renderLaundrySelections();
     renderServiceMessage(elements.laundryMessage, "success", `${escapeHtml(selection.name)} added to this customer request.`);
     return true;

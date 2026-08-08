@@ -262,6 +262,9 @@
           ]),
         );
         const lineItems = Array.isArray(existingLineItems) ? existingLineItems.map((item) => ({ ...item })) : [];
+        if (lineItems.length) {
+          fields.item.value = "";
+        }
 
         function currentCatalogMatch() {
           return catalogMap.get(normalize(fields.item.value));
@@ -538,7 +541,7 @@
         });
 
         fields.form.addEventListener("submit", () => {
-          if (fields.item.value.trim()) {
+          if (String(fields.item.value || "").trim()) {
             addDraftItem();
           } else {
             fields.lineItemsJson.value = JSON.stringify(lineItems);

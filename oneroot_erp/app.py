@@ -2404,6 +2404,8 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
                 "payments": payment_summary["payments"],
                 "balance": balance,
+                "linkedOnlineOrderId": normalize_text(payload.get("linkedOnlineOrderId")),
+                "linkedOnlineOrderNumber": normalize_text(payload.get("linkedOnlineOrderNumber")),
                 "isReady": status == "Ready",
                 "isDelivered": status == "Delivered",
                 "isOverdue": bool(balance > 0 and due_date and due_date < today and status not in {"Delivered", "Cancelled"}),
@@ -2460,6 +2462,8 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
                 "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
                 "payments": payment_summary["payments"],
                 "balance": balance,
+                "linkedOnlineOrderId": normalize_text(payload.get("linkedOnlineOrderId")),
+                "linkedOnlineOrderNumber": normalize_text(payload.get("linkedOnlineOrderNumber")),
                 "isOut": status == "Out",
                 "isDueToday": bool(status in {"Booked", "Out"} and due_date == today and not return_date),
                 "isOverdue": bool(status == "Out" and due_date and due_date < today and not return_date),
@@ -5266,6 +5270,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "createdAt": normalize_text(payload.get("createdAt")) or record.created_at.isoformat(),
             "updatedAt": normalize_text(payload.get("updatedAt")) or record.updated_at.isoformat(),
             "inventoryPostedAt": normalize_text(payload.get("inventoryPostedAt")),
+            "linkedLaundryTicketId": normalize_text(payload.get("linkedLaundryTicketId")),
+            "linkedEquipmentBookingId": normalize_text(payload.get("linkedEquipmentBookingId")),
+            "servicePaymentsManaged": bool(
+                normalize_text(payload.get("linkedLaundryTicketId"))
+                or normalize_text(payload.get("linkedEquipmentBookingId"))
+            ),
         }
 
     def load_service_offers() -> list[dict[str, Any]]:
@@ -5408,6 +5418,337 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     def build_public_order_number() -> str:
         return f"ORO-{datetime.utcnow().strftime('%Y%m%d')}-{uuid4().hex[:4].upper()}"
+
+    def linked_service_payload_key(module_key: str) -> str:
+        if module_key == "laundry_tickets":
+            return "linkedLaundryTicketId"
+        if module_key == "equipment_rental_bookings":
+            return "linkedEquipmentBookingId"
+        return ""
+
+    def online_order_item_matches_equipment_service(item: dict[str, Any]) -> bool:
+        if normalize_text(item.get("businessAreaId")) != "water-equipment":
+            return False
+        category = normalize_text(item.get("category")).lower()
+        item_id = normalize_text(item.get("productId") or item.get("id")).lower()
+        name = normalize_text(item.get("name")).lower()
+        item_type = normalize_text(item.get("itemType")).lower()
+        equipment_keywords = (
+            "equipment rental",
+            "wheelbarrow",
+            "drill",
+            "shovel",
+            "head pan",
+            "headpan",
+            "vibrator",
+            "cutting machine",
+            "cutter",
+            "impact drill",
+        )
+        return (
+            item_id.startswith("equipment-rental")
+            or "equipment rental" in category
+            or (
+                item_type == "service"
+                and any(keyword in f"{name} {category}" for keyword in equipment_keywords)
+            )
+        )
+
+    def online_order_items_for_service_module(payload: dict[str, Any], module_key: str) -> list[dict[str, Any]]:
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        if module_key == "laundry_tickets":
+            return [
+                dict(item)
+                for item in items
+                if isinstance(item, dict) and normalize_text(item.get("businessAreaId")) == "laundry-services"
+            ]
+        if module_key == "equipment_rental_bookings":
+            return [
+                dict(item)
+                for item in items
+                if isinstance(item, dict) and online_order_item_matches_equipment_service(item)
+            ]
+        return []
+
+    def online_order_sales_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        filtered_items: list[dict[str, Any]] = []
+        for item in items:
+            if not isinstance(item, dict):
+                continue
+            if normalize_text(item.get("businessAreaId")) == "laundry-services":
+                continue
+            if online_order_item_matches_equipment_service(item):
+                continue
+            filtered_items.append(item)
+        return filtered_items
+
+    def online_order_to_laundry_delivery_mode(value: Any) -> str:
+        delivery_mode = normalize_text(value).lower()
+        if delivery_mode == "pickup":
+            return "Pickup"
+        if delivery_mode == "delivery":
+            return "Delivery"
+        if delivery_mode:
+            return "Pickup / Delivery"
+        return "Walk-in"
+
+    def laundry_status_from_online_order_status(value: Any) -> str:
+        status = normalize_text(value).lower()
+        return {
+            "preparing": "In Progress",
+            "ready": "Ready",
+            "fulfilled": "Delivered",
+            "completed": "Delivered",
+            "cancelled": "Cancelled",
+        }.get(status, "Received")
+
+    def equipment_status_from_online_order_status(value: Any) -> str:
+        return "Cancelled" if normalize_text(value).lower() == "cancelled" else "Booked"
+
+    def online_order_status_from_service_status(module_key: str, payload: dict[str, Any]) -> str:
+        status = normalize_text(payload.get("status")).lower()
+        if module_key == "laundry_tickets":
+            return {
+                "in progress": "preparing",
+                "ready": "ready",
+                "delivered": "fulfilled",
+                "cancelled": "cancelled",
+            }.get(status, "")
+        if module_key == "equipment_rental_bookings":
+            return {
+                "out": "preparing",
+                "returned": "fulfilled",
+                "cancelled": "cancelled",
+            }.get(status, "")
+        return ""
+
+    def infer_laundry_service_type(order_payload: dict[str, Any], line_items: list[dict[str, Any]]) -> str:
+        text_blob = " ".join(
+            [
+                normalize_text(order_payload.get("orderNotes")),
+                *[normalize_text(item.get("name")) for item in line_items],
+                *[normalize_text(item.get("category")) for item in line_items],
+            ]
+        ).lower()
+        return "Express" if "express" in text_blob else "Normal"
+
+    def build_service_note_from_online_order(order_payload: dict[str, Any], module_key: str) -> str:
+        order_number = normalize_text(order_payload.get("orderNumber"))
+        lines = [
+            f"Auto-created from website order {order_number}.".strip(),
+            normalize_text(order_payload.get("orderNotes")),
+        ]
+        if module_key == "equipment_rental_bookings":
+            preferred_time = normalize_text(order_payload.get("preferredTime"))
+            delivery_address = normalize_text(order_payload.get("deliveryAddress"))
+            if preferred_time:
+                lines.append(f"Preferred time: {preferred_time}")
+            if delivery_address:
+                lines.append(f"Site / address: {delivery_address}")
+        else:
+            delivery_address = normalize_text(order_payload.get("deliveryAddress"))
+            if delivery_address:
+                lines.append(f"Pickup / delivery address: {delivery_address}")
+        return "\n".join(line for line in lines if line)
+
+    def build_service_line_items_from_online_order(db_session, module_key: str, order_payload: dict[str, Any]) -> list[dict[str, Any]]:
+        order_items = online_order_items_for_service_module(order_payload, module_key)
+        if not order_items:
+            return []
+        products = service_reference_products(db_session, module_key)
+        matched_products = {normalize_text(product.name).lower(): product for product in products}
+        service_area = SERVICE_MODULE_AREA_IDS.get(module_key, "")
+        normalized_items: list[dict[str, Any]] = []
+        for raw_item in order_items:
+            item_name = normalize_text(raw_item.get("name"))
+            if not item_name:
+                continue
+            match = matched_products.get(item_name.lower())
+            quantity = max(int(round(parse_amount(raw_item.get("quantity")))), 1)
+            rental_days = (
+                max(int(round(parse_amount(raw_item.get("requestedDays") or raw_item.get("pricingMultiplier") or 1))), 1)
+                if module_key == "equipment_rental_bookings"
+                else 1
+            )
+            unit_price = round(parse_amount(raw_item.get("unitPrice")), 2)
+            cost_price = round(parse_amount(raw_item.get("costPrice")), 2)
+            if match:
+                if unit_price <= 0:
+                    unit_price = round(parse_amount(match.sales_price), 2)
+                if cost_price <= 0:
+                    cost_price = round(parse_amount(match.cost_price), 2)
+            category = normalize_text(match.category) if match and normalize_text(match.category) else normalize_text(raw_item.get("category"))
+            line_total = round(parse_amount(raw_item.get("lineTotal")), 2)
+            if line_total <= 0 and unit_price > 0:
+                line_total = round(unit_price * quantity * (rental_days if module_key == "equipment_rental_bookings" else 1), 2)
+            line_cost = round(cost_price * quantity * (rental_days if module_key == "equipment_rental_bookings" else 1), 2)
+            image_url = normalize_text(raw_item.get("imageUrl")) or (
+                product_image_src(match)
+                if match
+                else product_image_src(
+                    {
+                        "name": item_name,
+                        "category": category,
+                        "businessAreaId": service_area,
+                        "itemType": "service",
+                    }
+                )
+            )
+            normalized_items.append(
+                {
+                    "name": item_name,
+                    "category": category,
+                    "quantity": quantity,
+                    "unitPrice": unit_price,
+                    "costPrice": cost_price,
+                    "rentalDays": rental_days,
+                    "lineTotal": line_total,
+                    "lineCost": line_cost,
+                    "imageUrl": image_url,
+                }
+            )
+        return normalized_items
+
+    def sync_linked_online_order_from_service_record(service_record: ModuleRecord, module_key: str, db_session=None) -> None:
+        db = db_session or g.db
+        service_payload = dict(service_record.payload or {})
+        linked_order_id = normalize_text(service_payload.get("linkedOnlineOrderId"))
+        if not linked_order_id:
+            return
+        order_record = db.get(ModuleRecord, linked_order_id)
+        if not order_record or order_record.module_key != "online_orders":
+            return
+        order_payload = dict(order_record.payload or {})
+        payment_summary = service_payment_summary(module_key, service_payload)
+        total_due = round(payment_summary["totalDue"], 2)
+        paid_total = round(payment_summary["paidTotal"], 2)
+        last_payment = payment_summary["payments"][-1] if payment_summary["payments"] else {}
+        if total_due > 0:
+            order_payload["quotedTotal"] = total_due
+        order_payload["paidAmount"] = paid_total
+        order_payload["paymentDate"] = normalize_text(last_payment.get("paymentDate"))
+        order_payload["paymentMethod"] = normalize_text(last_payment.get("paymentMethod")) or normalize_text(order_payload.get("paymentMethod"))
+        if paid_total <= 0:
+            order_payload["paymentStatus"] = "pending"
+        elif total_due > 0 and paid_total + 0.009 < total_due:
+            order_payload["paymentStatus"] = "part-paid"
+        else:
+            order_payload["paymentStatus"] = "paid"
+        mapped_status = online_order_status_from_service_status(module_key, service_payload)
+        if mapped_status:
+            order_payload["status"] = mapped_status
+        link_key = linked_service_payload_key(module_key)
+        if link_key:
+            order_payload[link_key] = service_record.id
+        set_module_record_metadata(order_record, MODULES["online_orders"], order_payload)
+        sync_online_order_sales(order_record, db_session=db)
+
+    def upsert_service_record_from_online_order(order_record: ModuleRecord, module_key: str, db_session=None) -> ModuleRecord | None:
+        db = db_session or g.db
+        definition = MODULES.get(module_key)
+        if not definition:
+            return None
+        order_payload = dict(order_record.payload or {})
+        order_number = normalize_text(order_payload.get("orderNumber"))
+        link_key = linked_service_payload_key(module_key)
+        existing_record = None
+        existing_record_id = normalize_text(order_payload.get(link_key)) if link_key else ""
+        if existing_record_id:
+            existing_record = db.get(ModuleRecord, existing_record_id)
+            if existing_record and existing_record.module_key != module_key:
+                existing_record = None
+        if not existing_record and order_number:
+            existing_record = db.scalar(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == module_key,
+                    ModuleRecord.reference == order_number,
+                )
+            )
+
+        line_items = build_service_line_items_from_online_order(db, module_key, order_payload)
+        if not line_items and not existing_record:
+            return None
+
+        created_date = parse_date(order_payload.get("createdAt")) or order_record.record_date or date.today()
+        preferred_date = parse_date(order_payload.get("preferredDate"))
+        preferred_date_value = preferred_date.isoformat() if preferred_date else ""
+        auto_note = build_service_note_from_online_order(order_payload, module_key)
+
+        if existing_record:
+            service_payload = dict(existing_record.payload or {})
+        else:
+            service_payload = {
+                "id": uuid4().hex,
+                "createdAt": datetime.utcnow().isoformat(),
+                "status": (
+                    laundry_status_from_online_order_status(order_payload.get("status"))
+                    if module_key == "laundry_tickets"
+                    else equipment_status_from_online_order_status(order_payload.get("status"))
+                ),
+            }
+
+        service_payload["businessAreaId"] = SERVICE_MODULE_AREA_IDS[module_key]
+        service_payload["customerName"] = normalize_text(order_payload.get("customerName"))
+        service_payload["customerPhone"] = normalize_text(order_payload.get("customerPhone"))
+        service_payload["reference"] = order_number
+        service_payload["linkedOnlineOrderId"] = order_record.id
+        service_payload["linkedOnlineOrderNumber"] = order_number
+        service_payload["linkedOnlineOrderStatus"] = normalize_text(order_payload.get("status")) or "new"
+        service_payload["linkedOnlineOrderUpdatedAt"] = normalize_text(order_payload.get("updatedAt")) or datetime.utcnow().isoformat()
+        if auto_note:
+            service_payload["notes"] = auto_note if not normalize_text(service_payload.get("notes")) else normalize_text(service_payload.get("notes"))
+        existing_service_items = service_line_items(module_key, service_payload)
+        if line_items and normalize_text(service_payload.get("status")).lower() != "cancelled" and (not existing_record or not existing_service_items):
+            service_payload[SERVICE_LINE_ITEMS_KEY] = line_items
+
+        if module_key == "laundry_tickets":
+            service_payload.setdefault("ticketDate", preferred_date_value or created_date.isoformat())
+            service_payload["serviceType"] = infer_laundry_service_type(order_payload, line_items or service_line_items(module_key, service_payload))
+            service_payload["deliveryMode"] = online_order_to_laundry_delivery_mode(order_payload.get("deliveryMode"))
+            service_payload["dueDate"] = preferred_date_value or normalize_text(service_payload.get("dueDate"))
+            service_payload.setdefault("itemSummary", normalize_text(order_payload.get("orderNotes")))
+            if normalize_text(order_payload.get("status")).lower() == "cancelled":
+                service_payload["status"] = "Cancelled"
+        elif module_key == "equipment_rental_bookings":
+            out_date = preferred_date or created_date
+            max_days = max((max(int(round(parse_amount(item.get("rentalDays") or 1))), 1) for item in line_items), default=1)
+            due_date = out_date + timedelta(days=max_days) if out_date else None
+            service_payload.setdefault("bookingDate", created_date.isoformat())
+            service_payload["outDate"] = out_date.isoformat() if out_date else normalize_text(service_payload.get("outDate"))
+            service_payload["dueDate"] = due_date.isoformat() if due_date else normalize_text(service_payload.get("dueDate"))
+            if normalize_text(order_payload.get("status")).lower() == "cancelled":
+                service_payload["status"] = "Cancelled"
+
+        hydrate_service_cost_payload(db, module_key, service_payload)
+        sync_service_line_item_rollup(module_key, service_payload)
+        apply_service_payment_rollup(module_key, service_payload)
+
+        if not existing_record:
+            existing_record = ModuleRecord(
+                id=service_payload["id"],
+                module_key=module_key,
+                created_at=datetime.utcnow(),
+            )
+            db.add(existing_record)
+        set_module_record_metadata(existing_record, definition, service_payload)
+        return existing_record
+
+    def sync_service_records_for_online_order(order_record: ModuleRecord, db_session=None) -> None:
+        db = db_session or g.db
+        order_payload = dict(order_record.payload or {})
+        linked_records: list[tuple[str, ModuleRecord]] = []
+        for module_key in ("laundry_tickets", "equipment_rental_bookings"):
+            linked_record = upsert_service_record_from_online_order(order_record, module_key, db_session=db)
+            link_key = linked_service_payload_key(module_key)
+            if linked_record and link_key:
+                order_payload[link_key] = linked_record.id
+                linked_records.append((module_key, linked_record))
+            elif link_key:
+                order_payload.pop(link_key, None)
+        set_module_record_metadata(order_record, MODULES["online_orders"], order_payload)
+        for module_key, linked_record in linked_records:
+            sync_linked_online_order_from_service_record(linked_record, module_key, db_session=db)
 
     def build_online_order_area_totals(items: list[dict[str, Any]], order_total: float = 0.0) -> dict[str, float]:
         totals: dict[str, float] = defaultdict(float)
@@ -5598,6 +5939,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for stale_record in stale_records:
                 if stale_record.reference not in kept_references:
                     db.delete(stale_record)
+            sync_linked_online_order_from_service_record(record, record.module_key, db_session=db)
             return
 
         if record.module_key == "equipment_rental_bookings":
@@ -5635,6 +5977,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for stale_record in stale_records:
                 if stale_record.reference not in kept_references:
                     db.delete(stale_record)
+            sync_linked_online_order_from_service_record(record, record.module_key, db_session=db)
             return
 
         if record.module_key == "security_deposit_records":
@@ -5668,7 +6011,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order_number = normalize_text(payload.get("orderNumber"))
         payment_status = normalize_text(payload.get("paymentStatus")).lower()
         paid_amount = parse_amount(payload.get("paidAmount"))
-        items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        items = online_order_sales_items(payload)
         order_total = parse_amount(payload.get("quotedTotal")) or compute_order_fixed_total(items)
         area_totals = build_online_order_area_totals(items, order_total=order_total)
         area_costs = build_online_order_area_costs(items)
@@ -6496,6 +6839,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         g.db.add(record)
         g.db.flush()
+        sync_service_records_for_online_order(record, db_session=g.db)
         sync_customer_crm_automation(g.db)
         order = serialize_online_order(record)
         audit(
@@ -7729,21 +8073,31 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         payload = dict(record.payload or {})
         order_before = serialize_online_order(record)
+        linked_service_managed = bool(
+            normalize_text(payload.get("linkedLaundryTicketId"))
+            or normalize_text(payload.get("linkedEquipmentBookingId"))
+            or online_order_items_for_service_module(payload, "laundry_tickets")
+            or online_order_items_for_service_module(payload, "equipment_rental_bookings")
+        )
         new_status = normalize_text(request.form.get("status")).lower() or order_before["status"]
-        payment_status = normalize_text(request.form.get("payment_status")).lower() or order_before["paymentStatus"]
+        payment_status = (
+            order_before["paymentStatus"]
+            if linked_service_managed
+            else (normalize_text(request.form.get("payment_status")).lower() or order_before["paymentStatus"])
+        )
         quoted_total_raw = normalize_text(request.form.get("quoted_total"))
-        paid_amount_raw = normalize_text(request.form.get("paid_amount"))
-        payment_date = normalize_text(request.form.get("payment_date"))
+        paid_amount_raw = "" if linked_service_managed else normalize_text(request.form.get("paid_amount"))
+        payment_date = order_before["paymentDate"] if linked_service_managed else normalize_text(request.form.get("payment_date"))
         staff_notes = normalize_text(request.form.get("staff_notes"))
         history_note = normalize_text(request.form.get("history_note"))
 
-        quoted_total = parse_amount(quoted_total_raw) if quoted_total_raw else order_before["totalAmount"]
-        if quoted_total <= 0:
+        quoted_total = order_before["totalAmount"] if linked_service_managed else (parse_amount(quoted_total_raw) if quoted_total_raw else order_before["totalAmount"])
+        if not linked_service_managed and quoted_total <= 0:
             quoted_total = order_before["fixedTotal"]
-        paid_amount = parse_amount(paid_amount_raw) if paid_amount_raw else order_before["paidAmount"]
-        if payment_status == "paid" and paid_amount <= 0:
+        paid_amount = order_before["paidAmount"] if linked_service_managed else (parse_amount(paid_amount_raw) if paid_amount_raw else order_before["paidAmount"])
+        if not linked_service_managed and payment_status == "paid" and paid_amount <= 0:
             paid_amount = quoted_total
-        if payment_status == "paid" and not payment_date:
+        if not linked_service_managed and payment_status == "paid" and not payment_date:
             payment_date = date.today().isoformat()
 
         payload["status"] = new_status
@@ -7770,6 +8124,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             append_order_history(payload, new_status, history_note)
 
         set_module_record_metadata(record, MODULES["online_orders"], payload)
+        sync_service_records_for_online_order(record)
         sync_online_order_sales(record)
         post_online_order_inventory_if_needed(record)
         sync_customer_crm_automation(g.db)

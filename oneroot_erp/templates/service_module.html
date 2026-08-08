@@ -198,7 +198,7 @@
                 </td>
                 <td>
                   {{ row.itemSummary }}
-                  <span class="table-secondary">{{ row.serviceCategory }} · {{ row.serviceType }}{% if row.pieces %} · {{ row.pieces }} pcs @ {{ row.unitRate|currency }}{% endif %}{% if row.lineItemCount > 1 %} · {{ row.lineItemCount }} lines{% endif %}{% if row.itemDetail %} · {{ row.itemDetail }}{% endif %}</span>
+                  <span class="table-secondary">{{ row.serviceCategory }} · {{ row.serviceType }}{% if row.pieces %} · {{ row.pieces }} pcs @ {{ row.unitRate|currency }}{% endif %}{% if row.lineItemCount > 1 %} · {{ row.lineItemCount }} lines{% endif %}{% if row.itemDetail %} · {{ row.itemDetail }}{% endif %}{% if row.linkedOnlineOrderNumber %} · Web {{ row.linkedOnlineOrderNumber }}{% endif %}</span>
                 </td>
                 <td>{{ row.ticketDate or '—' }}</td>
                 <td>
@@ -214,6 +214,9 @@
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
                     <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">Payment</a>
+                    {% if row.linkedOnlineOrderId %}
+                      <a class="table-link" href="{{ url_for('online_orders_desk', order_id=row.linkedOnlineOrderId) }}">Order</a>
+                    {% endif %}
                     <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
                       <input type="hidden" name="q" value="{{ search }}">
                       <input type="hidden" name="status" value="{{ status_filter }}">
@@ -253,6 +256,9 @@
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
                     <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">Payment</a>
+                    {% if row.linkedOnlineOrderId %}
+                      <a class="table-link" href="{{ url_for('online_orders_desk', order_id=row.linkedOnlineOrderId) }}">Order</a>
+                    {% endif %}
                     <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
                       <input type="hidden" name="q" value="{{ search }}">
                       <input type="hidden" name="status" value="{{ status_filter }}">
