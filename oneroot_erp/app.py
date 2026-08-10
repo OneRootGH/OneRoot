@@ -2988,6 +2988,20 @@ def build_target_progress_rows(records: list[ModuleRecord], month_value: str, *,
     return rows
 
 
+def mobile_money_transaction_is_completed(payload: dict[str, Any]) -> bool:
+    status_value = normalize_text(payload.get("status")).lower()
+    return status_value in {"completed", "complete", "successful", "success", "paid", "done"}
+
+
+def mobile_money_transaction_profit(payload: dict[str, Any]) -> float:
+    sales_amount = parse_amount(payload.get("salesAmount"))
+    cost_amount = parse_amount(payload.get("costAmount"))
+    profit_amount = parse_amount(payload.get("profitAmount"))
+    if abs(profit_amount) >= 0.01 or sales_amount <= 0:
+        return profit_amount
+    return round(sales_amount - cost_amount, 2)
+
+
 def build_module_overview(definition: ModuleDefinition, records: list[ModuleRecord]) -> dict[str, Any]:
     total_amount = round(sum(parse_amount(record.amount) for record in records), 2)
     this_month_key = date.today().strftime("%Y-%m")
@@ -3017,8 +3031,8 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
     elif definition.key == "mobile_money_transactions":
         principal_total = round(sum(parse_amount((record.payload or {}).get("transactionValue")) for record in records), 2)
         total_cost = round(sum(parse_amount((record.payload or {}).get("costAmount")) for record in records), 2)
-        total_profit = round(sum(parse_amount((record.payload or {}).get("profitAmount")) for record in records), 2)
-        completed_count = sum(1 for record in records if normalize_text((record.payload or {}).get("status")) == "Completed")
+        total_profit = round(sum(mobile_money_transaction_profit(record.payload or {}) for record in records), 2)
+        completed_count = sum(1 for record in records if mobile_money_transaction_is_completed(record.payload or {}))
         cards = [
             {"label": "MoMo Transactions", "value": f"{len(records)}", "note": "Customer transactions captured in this view"},
             {"label": "Handled Value", "value": format_currency(principal_total), "note": "Transaction face value processed"},
@@ -3373,6 +3387,167 @@ def mobile_money_status(payload: dict[str, Any]) -> str:
     if abs(variance) < 0.01:
         return "Balanced"
     return "Over Counted" if variance > 0 else "Short"
+
+
+def mobile_money_day_snapshot(db_session, target_date: date | None) -> dict[str, Any]:
+    if not target_date:
+        return {
+            "date": "",
+            "transactionCount": 0,
+            "completedTransactionCount": 0,
+            "handledValueTotal": 0.0,
+            "transactionFeeTotal": 0.0,
+            "transactionCostTotal": 0.0,
+            "transactionProfitTotal": 0.0,
+            "reconciliationCount": 0,
+            "reconciliationFeeTotal": 0.0,
+            "operatingExpenseTotal": 0.0,
+            "expectedClosingTotal": 0.0,
+            "closingCountedTotal": 0.0,
+            "varianceTotal": 0.0,
+            "balancedCount": 0,
+            "statusLabel": "No Reconciliation",
+            "recognizedSalesTotal": 0.0,
+            "recognizedCostTotal": 0.0,
+            "recognizedProfitTotal": 0.0,
+            "recognizedTransactionCount": 0,
+            "recognizedRecordCount": 0,
+            "recognizedSourceType": "mobile-money-transaction",
+            "recognizedSourceLabel": "Mobile Money Transaction",
+            "usesReconciliationFallback": False,
+            "hasData": False,
+            "latestUpdatedAtLabel": "",
+            "reference": "",
+            "summaryNote": "No mobile money activity has been captured yet.",
+        }
+
+    transaction_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "mobile_money_transactions",
+            ModuleRecord.record_date == target_date,
+        )
+        .order_by(desc(ModuleRecord.updated_at))
+    ).all()
+    reconciliation_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "mobile_money_reconciliations",
+            ModuleRecord.record_date == target_date,
+        )
+        .order_by(desc(ModuleRecord.updated_at))
+    ).all()
+
+    completed_transactions = [record for record in transaction_records if mobile_money_transaction_is_completed(record.payload or {})]
+    transaction_fee_total = round(
+        sum(parse_amount((record.payload or {}).get("salesAmount")) for record in completed_transactions),
+        2,
+    )
+    transaction_cost_total = round(
+        sum(parse_amount((record.payload or {}).get("costAmount")) for record in completed_transactions),
+        2,
+    )
+    transaction_profit_total = round(
+        sum(mobile_money_transaction_profit(record.payload or {}) for record in completed_transactions),
+        2,
+    )
+    handled_value_total = round(
+        sum(parse_amount((record.payload or {}).get("transactionValue")) for record in completed_transactions),
+        2,
+    )
+
+    reconciliation_fee_total = round(
+        sum(parse_amount((record.payload or {}).get("serviceFees")) for record in reconciliation_records),
+        2,
+    )
+    operating_expense_total = round(
+        sum(parse_amount((record.payload or {}).get("operatingExpense")) for record in reconciliation_records),
+        2,
+    )
+    expected_closing_total = round(
+        sum(mobile_money_expected_closing(record.payload or {}) for record in reconciliation_records),
+        2,
+    )
+    closing_counted_total = round(
+        sum(parse_amount((record.payload or {}).get("closingCashCounted")) for record in reconciliation_records),
+        2,
+    )
+    variance_total = round(sum(mobile_money_variance(record.payload or {}) for record in reconciliation_records), 2)
+    balanced_count = sum(1 for record in reconciliation_records if mobile_money_status(record.payload or {}) == "Balanced")
+
+    uses_reconciliation_fallback = transaction_fee_total <= 0 and reconciliation_fee_total > 0
+    recognized_sales_total = transaction_fee_total
+    recognized_cost_total = transaction_cost_total
+    recognized_profit_total = transaction_profit_total
+    recognized_transaction_count = len(completed_transactions)
+    recognized_record_count = len(completed_transactions)
+    recognized_source_type = "mobile-money-transaction"
+    recognized_source_label = "Mobile Money Transaction"
+
+    if uses_reconciliation_fallback:
+        recognized_sales_total = reconciliation_fee_total
+        recognized_cost_total = operating_expense_total
+        recognized_profit_total = round(reconciliation_fee_total - operating_expense_total, 2)
+        recognized_transaction_count = 1 if reconciliation_fee_total > 0 else 0
+        recognized_record_count = 1 if reconciliation_records else 0
+        recognized_source_type = "mobile-money-reconciliation"
+        recognized_source_label = "Mobile Money Reconciliation"
+
+    if not reconciliation_records:
+        status_label = "No Reconciliation"
+    else:
+        distinct_statuses = {mobile_money_status(record.payload or {}) for record in reconciliation_records}
+        status_label = distinct_statuses.pop() if len(distinct_statuses) == 1 else "Mixed"
+
+    latest_record = next((record for record in transaction_records if record.updated_at), None) or next(
+        (record for record in reconciliation_records if record.updated_at),
+        None,
+    )
+    latest_updated_at_label = (
+        latest_record.updated_at.strftime("%Y-%m-%d %H:%M") if latest_record and isinstance(latest_record.updated_at, datetime) else ""
+    )
+    reference = latest_record.reference if latest_record else ""
+
+    if uses_reconciliation_fallback:
+        summary_note = "Using reconciliation fees in the daily sales total because no completed mobile money transactions were synced for this day."
+    elif transaction_fee_total > 0 and reconciliation_records:
+        summary_note = "Completed mobile money transactions are in the daily sales total and checked against reconciliation."
+    elif transaction_fee_total > 0:
+        summary_note = "Completed mobile money transactions are reflected in the daily sales total."
+    elif reconciliation_records:
+        summary_note = "Reconciliation exists for this day, but no service fees were recorded yet."
+    else:
+        summary_note = "No mobile money activity has been captured yet."
+
+    return {
+        "date": target_date.isoformat(),
+        "transactionCount": len(transaction_records),
+        "completedTransactionCount": len(completed_transactions),
+        "handledValueTotal": handled_value_total,
+        "transactionFeeTotal": transaction_fee_total,
+        "transactionCostTotal": transaction_cost_total,
+        "transactionProfitTotal": transaction_profit_total,
+        "reconciliationCount": len(reconciliation_records),
+        "reconciliationFeeTotal": reconciliation_fee_total,
+        "operatingExpenseTotal": operating_expense_total,
+        "expectedClosingTotal": expected_closing_total,
+        "closingCountedTotal": closing_counted_total,
+        "varianceTotal": variance_total,
+        "balancedCount": balanced_count,
+        "statusLabel": status_label,
+        "recognizedSalesTotal": round(recognized_sales_total, 2),
+        "recognizedCostTotal": round(recognized_cost_total, 2),
+        "recognizedProfitTotal": round(recognized_profit_total, 2),
+        "recognizedTransactionCount": recognized_transaction_count,
+        "recognizedRecordCount": recognized_record_count,
+        "recognizedSourceType": recognized_source_type,
+        "recognizedSourceLabel": recognized_source_label,
+        "usesReconciliationFallback": uses_reconciliation_fallback,
+        "hasData": bool(transaction_records or reconciliation_records),
+        "latestUpdatedAtLabel": latest_updated_at_label,
+        "reference": reference,
+        "summaryNote": summary_note,
+    }
 
 
 def recurring_control_status(payload: dict[str, Any]) -> str:
@@ -4647,26 +4822,16 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
     source_map: dict[tuple[str, str], dict[str, Any]] = {}
     area_source_map: dict[tuple[str, str, str], dict[str, Any]] = {}
     detail_rows: list[dict[str, Any]] = []
+    mobile_money_snapshot = mobile_money_day_snapshot(db_session, sale_date)
+    mobile_money_in_scope = not selected_area or selected_area == "mobile-money"
 
-    sales_records = db_session.scalars(
-        select(ModuleRecord)
-        .where(
-            ModuleRecord.module_key == "sales",
-            ModuleRecord.record_date == sale_date,
-        )
-        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.amount))
-    ).all()
-
-    for record in sales_records:
-        payload = record.payload or {}
-        business_area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
-        if selected_area and business_area_id != selected_area:
-            continue
+    def ensure_area_entry(business_area_id: str) -> dict[str, Any]:
         if business_area_id not in area_map:
+            fallback_label = BUSINESS_AREA_LABELS.get(business_area_id, business_area_id or "Shared Operations")
             area_map[business_area_id] = {
                 "areaId": business_area_id,
-                "areaLabel": BUSINESS_AREA_LABELS.get(business_area_id, business_area_id or "Shared Operations"),
-                "areaShort": BUSINESS_AREA_SHORT.get(business_area_id, BUSINESS_AREA_LABELS.get(business_area_id, business_area_id or "Shared Operations")),
+                "areaLabel": fallback_label,
+                "areaShort": BUSINESS_AREA_SHORT.get(business_area_id, fallback_label),
                 "salesTotal": 0.0,
                 "costTotal": 0.0,
                 "profitTotal": 0.0,
@@ -4674,19 +4839,31 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
                 "recordCount": 0,
                 "_sourceTotals": defaultdict(float),
             }
+        return area_map[business_area_id]
 
-        source_type = normalize_text(payload.get("sourceType")).lower() or "manual-sale"
-        source_label = normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type)
-        amount = round(parse_amount(record.amount), 2)
-        cost_total = round(module_record_cost_amount(record), 2)
-        profit_total = round(module_record_profit_amount(record), 2)
-        transaction_count = max(int(parse_amount(payload.get("transactionCount"))), 1)
+    def append_sale_entry(
+        *,
+        entry_id: str,
+        title: str,
+        reference: str,
+        record_date_value: str,
+        updated_at_value: str,
+        business_area_id: str,
+        source_type: str,
+        source_label: str,
+        amount: float,
+        cost_total: float,
+        profit_total: float,
+        transaction_count: int,
+        notes: str,
+    ) -> None:
+        area_entry = ensure_area_entry(business_area_id)
+        safe_transaction_count = max(int(transaction_count), 0)
 
-        area_entry = area_map[business_area_id]
         area_entry["salesTotal"] = round(area_entry["salesTotal"] + amount, 2)
         area_entry["costTotal"] = round(area_entry["costTotal"] + cost_total, 2)
         area_entry["profitTotal"] = round(area_entry["profitTotal"] + profit_total, 2)
-        area_entry["transactionCount"] += transaction_count
+        area_entry["transactionCount"] += safe_transaction_count
         area_entry["recordCount"] += 1
         area_entry["_sourceTotals"][source_label] = round(area_entry["_sourceTotals"][source_label] + amount, 2)
 
@@ -4707,7 +4884,7 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         source_entry["salesTotal"] = round(source_entry["salesTotal"] + amount, 2)
         source_entry["costTotal"] = round(source_entry["costTotal"] + cost_total, 2)
         source_entry["profitTotal"] = round(source_entry["profitTotal"] + profit_total, 2)
-        source_entry["transactionCount"] += transaction_count
+        source_entry["transactionCount"] += safe_transaction_count
         source_entry["recordCount"] += 1
         source_entry["_areas"].add(area_entry["areaShort"])
 
@@ -4730,28 +4907,83 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         area_source_entry["salesTotal"] = round(area_source_entry["salesTotal"] + amount, 2)
         area_source_entry["costTotal"] = round(area_source_entry["costTotal"] + cost_total, 2)
         area_source_entry["profitTotal"] = round(area_source_entry["profitTotal"] + profit_total, 2)
-        area_source_entry["transactionCount"] += transaction_count
+        area_source_entry["transactionCount"] += safe_transaction_count
         area_source_entry["recordCount"] += 1
 
         detail_rows.append(
             {
-                "id": record.id,
-                "title": normalize_text(record.title) or source_label,
-                "reference": record.reference,
-                "recordDate": record.record_date.isoformat() if record.record_date else sale_date.isoformat(),
-                "updatedAt": record.updated_at.strftime("%Y-%m-%d %H:%M") if isinstance(record.updated_at, datetime) else "",
+                "id": entry_id,
+                "title": title or source_label,
+                "reference": reference,
+                "recordDate": record_date_value or sale_date.isoformat(),
+                "updatedAt": updated_at_value,
                 "areaId": business_area_id,
                 "areaLabel": area_entry["areaLabel"],
                 "areaShort": area_entry["areaShort"],
                 "sourceType": source_type,
                 "sourceLabel": source_label,
-                "transactionCount": transaction_count,
+                "transactionCount": safe_transaction_count,
                 "salesTotal": amount,
                 "costTotal": cost_total,
                 "profitTotal": profit_total,
                 "marginPercent": round((profit_total / amount) * 100, 2) if amount > 0 else 0.0,
-                "notes": normalize_text(payload.get("notes")),
+                "notes": notes,
             }
+        )
+
+    sales_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "sales",
+            ModuleRecord.record_date == sale_date,
+        )
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.amount))
+    ).all()
+
+    for record in sales_records:
+        payload = record.payload or {}
+        business_area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        if selected_area and business_area_id != selected_area:
+            continue
+
+        source_type = normalize_text(payload.get("sourceType")).lower() or "manual-sale"
+        source_label = normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type)
+        amount = round(parse_amount(record.amount), 2)
+        cost_total = round(module_record_cost_amount(record), 2)
+        profit_total = round(module_record_profit_amount(record), 2)
+        transaction_count = max(int(parse_amount(payload.get("transactionCount"))), 1)
+
+        append_sale_entry(
+            entry_id=record.id,
+            title=normalize_text(record.title) or source_label,
+            reference=record.reference,
+            record_date_value=record.record_date.isoformat() if record.record_date else sale_date.isoformat(),
+            updated_at_value=record.updated_at.strftime("%Y-%m-%d %H:%M") if isinstance(record.updated_at, datetime) else "",
+            business_area_id=business_area_id,
+            source_type=source_type,
+            source_label=source_label,
+            amount=amount,
+            cost_total=cost_total,
+            profit_total=profit_total,
+            transaction_count=transaction_count,
+            notes=normalize_text(payload.get("notes")),
+        )
+
+    if mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"] and mobile_money_snapshot["recognizedSalesTotal"] > 0:
+        append_sale_entry(
+            entry_id=f"mobile-money-reconciliation-{sale_date.isoformat()}",
+            title="Mobile Money Reconciliation",
+            reference=mobile_money_snapshot["reference"] or f"mobile-money-reconciliation|{sale_date.isoformat()}",
+            record_date_value=sale_date.isoformat(),
+            updated_at_value=mobile_money_snapshot["latestUpdatedAtLabel"],
+            business_area_id="mobile-money",
+            source_type=mobile_money_snapshot["recognizedSourceType"],
+            source_label=mobile_money_snapshot["recognizedSourceLabel"],
+            amount=mobile_money_snapshot["recognizedSalesTotal"],
+            cost_total=mobile_money_snapshot["recognizedCostTotal"],
+            profit_total=mobile_money_snapshot["recognizedProfitTotal"],
+            transaction_count=mobile_money_snapshot["recognizedTransactionCount"],
+            notes=mobile_money_snapshot["summaryNote"],
         )
 
     total_sales = round(sum(row["salesTotal"] for row in area_map.values()), 2)
@@ -4796,15 +5028,23 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
     area_source_rows.sort(key=lambda item: (item["salesTotal"], item["profitTotal"], item["areaLabel"], item["sourceLabel"]), reverse=True)
 
     top_area = next((row for row in area_rows if row["salesTotal"] > 0), None)
-    top_source = source_rows[0] if source_rows else None
-    mobile_money_area = next((row for row in area_rows if row["areaId"] == "mobile-money"), None)
-    mobile_money_source = next((row for row in source_rows if row["sourceType"] == "mobile-money-transaction"), None)
+    top_source = next((row for row in source_rows if row["salesTotal"] > 0), None) or (source_rows[0] if source_rows else None)
+    mobile_money_area = next((row for row in area_rows if row["areaId"] == "mobile-money"), None) if mobile_money_in_scope else None
+    mobile_money_source = (
+        next((row for row in source_rows if row["sourceType"] == mobile_money_snapshot["recognizedSourceType"]), None)
+        if mobile_money_in_scope
+        else None
+    )
     mobile_money_total = round(
-        mobile_money_source["salesTotal"] if mobile_money_source else (mobile_money_area["salesTotal"] if mobile_money_area else 0.0),
+        mobile_money_source["salesTotal"]
+        if mobile_money_source
+        else (mobile_money_area["salesTotal"] if mobile_money_area else 0.0),
         2,
     )
     mobile_money_profit = round(
-        mobile_money_source["profitTotal"] if mobile_money_source else (mobile_money_area["profitTotal"] if mobile_money_area else 0.0),
+        mobile_money_source["profitTotal"]
+        if mobile_money_source
+        else (mobile_money_area["profitTotal"] if mobile_money_area else 0.0),
         2,
     )
     mobile_money_transactions = (
@@ -4813,6 +5053,9 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         else (mobile_money_area["transactionCount"] if mobile_money_area else 0)
     )
     mobile_money_share = round((mobile_money_total / total_sales) * 100, 2) if total_sales > 0 else 0.0
+    mobile_money_scope_note = (
+        mobile_money_snapshot["summaryNote"] if mobile_money_in_scope else "Mobile money is outside the current business area filter."
+    )
 
     return {
         "area_rows": area_rows,
@@ -4834,6 +5077,18 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         "mobile_money_profit": mobile_money_profit,
         "mobile_money_transactions": mobile_money_transactions,
         "mobile_money_share": mobile_money_share,
+        "mobile_money_in_scope": mobile_money_in_scope,
+        "mobile_money_scope_note": mobile_money_scope_note,
+        "mobile_money_status_label": mobile_money_snapshot["statusLabel"] if mobile_money_in_scope else "Outside Filter",
+        "mobile_money_uses_fallback": mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"],
+        "mobile_money_reconciliation_total": mobile_money_snapshot["reconciliationFeeTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_reconciliation_count": mobile_money_snapshot["reconciliationCount"] if mobile_money_in_scope else 0,
+        "mobile_money_expected_closing": mobile_money_snapshot["expectedClosingTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_closing_counted": mobile_money_snapshot["closingCountedTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_variance": mobile_money_snapshot["varianceTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_balanced_count": mobile_money_snapshot["balancedCount"] if mobile_money_in_scope else 0,
+        "mobile_money_operating_expense": mobile_money_snapshot["operatingExpenseTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_handled_value": mobile_money_snapshot["handledValueTotal"] if mobile_money_in_scope else 0.0,
         "sales_area_chart": build_chart_rows(
             [
                 {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["salesTotal"]}
@@ -6375,8 +6630,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             provider = normalize_text(payload.get("provider")) or "MTN Mobile Money"
             service_type = normalize_text(payload.get("serviceType")) or "Mobile Money Service"
             customer = normalize_text(payload.get("customerName")) or "Walk-in Customer"
-            status = normalize_text(payload.get("status")) or "Completed"
-            sale_amount = parse_amount(payload.get("salesAmount")) if status == "Completed" else 0.0
+            is_completed = mobile_money_transaction_is_completed(payload)
+            sale_amount = parse_amount(payload.get("salesAmount")) if is_completed else 0.0
             upsert_generated_sale(
                 db,
                 reference=f"mobile-money-transaction|{record.id}",
@@ -6384,7 +6639,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 business_area_id="mobile-money",
                 amount=sale_amount,
                 cost_amount=parse_amount(payload.get("costAmount")) if sale_amount > 0 else 0.0,
-                profit_amount=parse_amount(payload.get("profitAmount")) if sale_amount > 0 else 0.0,
+                profit_amount=mobile_money_transaction_profit(payload) if sale_amount > 0 else 0.0,
                 source_type="mobile-money-transaction",
                 source_label="Mobile Money Transaction",
                 category=service_type,
@@ -6833,6 +7088,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     def build_pos_counter_summary(order_date: date, area_id: str = "") -> dict[str, Any]:
         selected_area = normalize_text(area_id)
+        mobile_money_in_scope = not selected_area or selected_area == "mobile-money"
+        mobile_money_snapshot = mobile_money_day_snapshot(g.db, order_date)
         all_orders = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == order_date).order_by(desc(PosOrder.updated_at))
         ).all()
@@ -6892,6 +7149,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             sales_query = sales_query.where(ModuleRecord.business_area_id == selected_area)
         sales_rows = g.db.scalars(sales_query).all()
         daily_sales_total = round(sum(parse_amount(record.amount) for record in sales_rows), 2)
+        if mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"] and mobile_money_snapshot["recognizedSalesTotal"] > 0:
+            daily_sales_total = round(daily_sales_total + mobile_money_snapshot["recognizedSalesTotal"], 2)
 
         reference = f"pos-closeout|{order_date.isoformat()}|{selected_area or 'all'}"
         closeout_record = g.db.scalar(
@@ -6913,6 +7172,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "profitAmount": round(total_amount - total_cost, 2),
             "dailySalesLedgerTotal": daily_sales_total,
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
+            "mobileMoneyInScope": mobile_money_in_scope,
+            "mobileMoneySalesTotal": mobile_money_snapshot["recognizedSalesTotal"] if mobile_money_in_scope else 0.0,
+            "mobileMoneyProfitTotal": mobile_money_snapshot["recognizedProfitTotal"] if mobile_money_in_scope else 0.0,
+            "mobileMoneyHandledValue": mobile_money_snapshot["handledValueTotal"] if mobile_money_in_scope else 0.0,
+            "mobileMoneyCompletedTransactions": mobile_money_snapshot["completedTransactionCount"] if mobile_money_in_scope else 0,
+            "mobileMoneyReconciliationTotal": mobile_money_snapshot["reconciliationFeeTotal"] if mobile_money_in_scope else 0.0,
+            "mobileMoneyReconciliationCount": mobile_money_snapshot["reconciliationCount"] if mobile_money_in_scope else 0,
+            "mobileMoneyVariance": mobile_money_snapshot["varianceTotal"] if mobile_money_in_scope else 0.0,
+            "mobileMoneyExpectedClosing": mobile_money_snapshot["expectedClosingTotal"] if mobile_money_in_scope else 0.0,
+            "mobileMoneyClosingCounted": mobile_money_snapshot["closingCountedTotal"] if mobile_money_in_scope else 0.0,
+            "mobileMoneyBalancedCount": mobile_money_snapshot["balancedCount"] if mobile_money_in_scope else 0,
+            "mobileMoneyStatusLabel": mobile_money_snapshot["statusLabel"] if mobile_money_in_scope else "Outside Filter",
+            "mobileMoneyUsesReconciliationFallback": mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"],
+            "mobileMoneySourceLabel": mobile_money_snapshot["recognizedSourceLabel"] if mobile_money_in_scope else "Mobile Money",
+            "mobileMoneySummaryNote": mobile_money_snapshot["summaryNote"] if mobile_money_in_scope else "Mobile money is outside the current area filter.",
             "orders": order_rows[:20],
             "businessAreaIds": sorted(business_areas),
             "lastCloseout": closeout_payload,

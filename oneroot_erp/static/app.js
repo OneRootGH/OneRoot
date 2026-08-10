@@ -21,6 +21,12 @@
   const ledgerTotalNode = document.getElementById("pos-ledger-total");
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
+  const momoSalesNode = document.getElementById("pos-momo-sales");
+  const momoProfitNode = document.getElementById("pos-momo-profit");
+  const momoReconciliationNode = document.getElementById("pos-momo-reconciliation");
+  const momoVarianceNode = document.getElementById("pos-momo-variance");
+  const momoStatusNode = document.getElementById("pos-momo-status");
+  const momoNoteNode = document.getElementById("pos-momo-note");
   const paymentLabelNode = document.getElementById("pos-payment-label");
   const summaryDateNode = document.getElementById("pos-summary-date");
   const summaryTotalNode = document.getElementById("pos-summary-total");
@@ -416,6 +422,26 @@
     }
     if (ledgerTotalNode) {
       ledgerTotalNode.textContent = formatCurrency(summary.dailySalesLedgerTotal);
+    }
+    if (momoSalesNode) {
+      momoSalesNode.textContent = formatCurrency(summary.mobileMoneySalesTotal);
+    }
+    if (momoProfitNode) {
+      momoProfitNode.textContent = formatCurrency(summary.mobileMoneyProfitTotal);
+    }
+    if (momoReconciliationNode) {
+      momoReconciliationNode.textContent = formatCurrency(summary.mobileMoneyReconciliationTotal);
+    }
+    if (momoVarianceNode) {
+      momoVarianceNode.textContent = formatCurrency(summary.mobileMoneyVariance);
+    }
+    if (momoStatusNode) {
+      momoStatusNode.textContent = summary.mobileMoneyInScope
+        ? `${summary.mobileMoneyStatusLabel || "No Reconciliation"}${summary.mobileMoneyReconciliationCount ? ` · ${summary.mobileMoneyReconciliationCount} closeout${summary.mobileMoneyReconciliationCount === 1 ? "" : "s"}` : ""}`
+        : "Outside Filter";
+    }
+    if (momoNoteNode) {
+      momoNoteNode.textContent = summary.mobileMoneySummaryNote || "";
     }
     if (areaLabelNode) {
       areaLabelNode.textContent = summary.areaLabel || "All POS Areas";

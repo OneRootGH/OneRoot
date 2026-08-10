@@ -68,11 +68,14 @@
       <span>Mobile Money</span>
       <strong>{{ mobile_money_total|currency }}</strong>
       <small>
-        Included in the daily sales total
-        {% if mobile_money_transactions %}
-          · {{ mobile_money_transactions }} completed transaction{% if mobile_money_transactions != 1 %}s{% endif %}
+        {% if not mobile_money_in_scope %}
+          Outside the current business area filter.
+        {% elif mobile_money_transactions %}
+          Included in the daily sales total · {{ mobile_money_transactions }} completed transaction{% if mobile_money_transactions != 1 %}s{% endif %}
+        {% elif mobile_money_uses_fallback %}
+          Included from reconciliation fees because completed transaction sales were not synced yet.
         {% else %}
-          · no completed transaction yet
+          {{ mobile_money_scope_note }}
         {% endif %}
       </small>
     </article>
@@ -83,7 +86,7 @@
     </article>
   </section>
 
-  <section class="card-grid three">
+  <section class="card-grid four">
     <article class="metric-card">
       <span>Top Source</span>
       <strong>{{ top_source.sourceLabel if top_source else 'No Sales' }}</strong>
@@ -95,9 +98,22 @@
       <small>{{ mobile_money_share }}% of the total day sales came from mobile money.</small>
     </article>
     <article class="metric-card">
-      <span>Daily Check</span>
-      <strong>All Captured</strong>
-      <small>POS, online orders, laundry, equipment rentals, apartments, and mobile money all reconcile from one daily ledger view.</small>
+      <span>MoMo Reconciliation</span>
+      <strong>{{ mobile_money_reconciliation_total|currency }}</strong>
+      <small>
+        {% if mobile_money_reconciliation_count %}
+          {{ mobile_money_reconciliation_count }} saved closeout{% if mobile_money_reconciliation_count != 1 %}s{% endif %} · handled {{ mobile_money_handled_value|currency }}
+        {% else %}
+          No reconciliation saved yet for this day.
+        {% endif %}
+      </small>
+    </article>
+    <article class="metric-card">
+      <span>MoMo Closing Check</span>
+      <strong>{{ mobile_money_status_label }}</strong>
+      <small>
+        Expected {{ mobile_money_expected_closing|currency }} · Counted {{ mobile_money_closing_counted|currency }} · Variance {{ mobile_money_variance|currency }}
+      </small>
     </article>
   </section>
 

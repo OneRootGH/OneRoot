@@ -19,7 +19,7 @@
 
     <section class="pos-counter-ribbon">
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Sales</span>
+        <span class="pos-counter-label">POS Sales</span>
         <strong id="pos-counter-total">{{ counter_summary.totalAmount|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
@@ -35,11 +35,11 @@
         <strong id="pos-area-label">{{ counter_summary.areaLabel }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Profit</span>
+        <span class="pos-counter-label">POS Profit</span>
         <strong id="pos-counter-profit">{{ counter_summary.profitAmount|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Daily</span>
+        <span class="pos-counter-label">All Daily Sales</span>
         <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill pos-counter-pill-wide">
@@ -55,6 +55,34 @@
         </strong>
       </article>
     </section>
+    <section class="pos-counter-ribbon pos-counter-ribbon-secondary">
+      <article class="pos-counter-pill pos-counter-pill-highlight">
+        <span class="pos-counter-label">MoMo Sales</span>
+        <strong id="pos-momo-sales">{{ counter_summary.mobileMoneySalesTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">MoMo Profit</span>
+        <strong id="pos-momo-profit">{{ counter_summary.mobileMoneyProfitTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Reconciliation</span>
+        <strong id="pos-momo-reconciliation">{{ counter_summary.mobileMoneyReconciliationTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Variance</span>
+        <strong id="pos-momo-variance">{{ counter_summary.mobileMoneyVariance|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill pos-counter-pill-wide">
+        <span class="pos-counter-label">MoMo Status</span>
+        <strong id="pos-momo-status">
+          {{ counter_summary.mobileMoneyStatusLabel }}
+          {% if counter_summary.mobileMoneyReconciliationCount %}
+            · {{ counter_summary.mobileMoneyReconciliationCount }} closeout{% if counter_summary.mobileMoneyReconciliationCount != 1 %}s{% endif %}
+          {% endif %}
+        </strong>
+      </article>
+    </section>
+    <p class="muted pos-counter-note" id="pos-momo-note">{{ counter_summary.mobileMoneySummaryNote }}</p>
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
       <section class="card pos-catalog-card">
