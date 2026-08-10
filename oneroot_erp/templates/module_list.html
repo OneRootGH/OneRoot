@@ -283,10 +283,6 @@
     </section>
   {% endif %}
 
-  {% if mobile_money_sop %}
-    {% include "_mobile_money_sop.html" %}
-  {% endif %}
-
   {% if definition.key in ['mobile_money_transactions', 'mobile_money_reconciliations'] and mobile_money_live_snapshot %}
     <section class="card">
       <div class="card-header compact">
@@ -298,30 +294,28 @@
       </div>
       <section class="card-grid four">
         <article class="metric-card">
-          <span>Physical Cash Available</span>
+          <span>Cash Left Now</span>
           <strong>{{ mobile_money_live_snapshot.physicalCashAvailable|currency }}</strong>
-          <small>Opening {{ mobile_money_live_snapshot.openingCash|currency }} · Top-Up {{ mobile_money_live_snapshot.cashTopUp|currency }}</small>
+          <small>Start {{ mobile_money_live_snapshot.openingCash|currency }} · Top-Up {{ mobile_money_live_snapshot.cashTopUp|currency }}</small>
         </article>
         <article class="metric-card">
-          <span>E-Cash Available</span>
+          <span>E-Cash Left Now</span>
           <strong>{{ mobile_money_live_snapshot.eCashAvailable|currency }}</strong>
-          <small>Opening {{ mobile_money_live_snapshot.openingECash|currency }} · Top-Up {{ mobile_money_live_snapshot.eCashTopUp|currency }}</small>
+          <small>Start {{ mobile_money_live_snapshot.openingECash|currency }} · Top-Up {{ mobile_money_live_snapshot.eCashTopUp|currency }}</small>
         </article>
         <article class="metric-card">
-          <span>Working Float Available</span>
+          <span>Working Float Left</span>
           <strong>{{ mobile_money_live_snapshot.workingFloatAvailable|currency }}</strong>
-          <small>Physical cash + e-cash available right now for MTN MoMo operations</small>
+          <small>Physical cash plus e-cash still available for mobile money today</small>
         </article>
         <article class="metric-card">
-          <span>Setup / Top-Up Source</span>
+          <span>Top-Up Source</span>
           <strong>{{ mobile_money_live_snapshot.cashTopUpSource or 'Not saved yet' }}</strong>
           <small>
             {% if mobile_money_live_snapshot.eCashTopUpSource %}
               E-Cash top-up from {{ mobile_money_live_snapshot.eCashTopUpSource }}
-            {% elif mobile_money_live_snapshot.startupSimCost %}
-              SIM setup cost {{ mobile_money_live_snapshot.startupSimCost|currency }} · Starting float {{ mobile_money_live_snapshot.startupFloatTotal|currency }}
             {% else %}
-              Save the source whenever you add extra cash to serve cash-out customers.
+              {{ mobile_money_live_snapshot.basisNote }}
             {% endif %}
           </small>
         </article>

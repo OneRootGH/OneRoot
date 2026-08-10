@@ -1,0 +1,340 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card module-hero compact-module-hero">
+    <div class="card-header compact-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }}</h3>
+        <p class="muted compact-copy">Run MTN MoMo like a daily counter: see start balances, cash left, e-cash left, and save the closeout from one place.</p>
+      </div>
+      <div class="toolbar compact-toolbar">
+        <a class="button subtle" href="{{ url_for('module_export', module_key=definition.key, q=search, provider=provider_filter, status=status_filter, category=category_filter, date_from=date_from, date_to=date_to) }}">Export CSV</a>
+        <a class="button subtle" href="{{ closeout_href }}">{{ closeout_label }}</a>
+        <a class="button primary" href="{{ url_for('module_form', module_key=definition.key, date=snapshot_date, provider=snapshot_provider) }}">New Transaction</a>
+      </div>
+    </div>
+
+    <form method="get" class="form-grid module-filter-grid compact-filter-grid mobile-money-filter-grid">
+      <label class="span-2">
+        <span>Search</span>
+        <input type="search" name="q" placeholder="Search customer, service, or reference" value="{{ search }}">
+      </label>
+      <label>
+        <span>Provider</span>
+        <select name="provider">
+          <option value="">All Providers</option>
+          {% for value, label in provider_options %}
+            <option value="{{ value }}" {% if provider_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>{{ category_filter_label }}</span>
+        <select name="category">
+          <option value="">All {{ category_filter_label }}</option>
+          {% for option in category_options %}
+            <option value="{{ option }}" {% if category_filter == option %}selected{% endif %}>{{ option }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Status</span>
+        <select name="status">
+          <option value="">All Statuses</option>
+          {% for value, label in status_options %}
+            <option value="{{ value }}" {% if status_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span>Date From</span>
+        <input type="date" name="date_from" value="{{ date_from }}">
+      </label>
+      <label>
+        <span>Date To</span>
+        <input type="date" name="date_to" value="{{ date_to }}">
+      </label>
+      <div class="form-actions span-2 compact-filter-actions">
+        <button class="button primary" type="submit">Apply</button>
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Reset</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card">
+    <div class="card-header compact">
+      <div>
+        <p class="eyebrow">Live Counter</p>
+        <h3>{{ snapshot_provider }} · {{ snapshot_date }}</h3>
+      </div>
+      <p class="muted list-summary">{{ mobile_money_live_snapshot.basisNote }}</p>
+    </div>
+
+    <div class="pos-counter-ribbon mobile-money-counter-ribbon">
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Start Cash</span>
+        <strong>{{ mobile_money_live_snapshot.openingCash|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Start E-Cash</span>
+        <strong>{{ mobile_money_live_snapshot.openingECash|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill pos-counter-pill-highlight">
+        <span class="pos-counter-label">Cash Left Now</span>
+        <strong>{{ mobile_money_live_snapshot.physicalCashAvailable|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill pos-counter-pill-highlight">
+        <span class="pos-counter-label">E-Cash Left Now</span>
+        <strong>{{ mobile_money_live_snapshot.eCashAvailable|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Fees Earned</span>
+        <strong>{{ transaction_summary.feeTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Profit</span>
+        <strong>{{ transaction_summary.profitTotal|currency }}</strong>
+      </article>
+    </div>
+
+    <div class="pos-counter-ribbon mobile-money-counter-ribbon">
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Cash In</span>
+        <strong>{{ transaction_summary.cashInValueTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Cash Out</span>
+        <strong>{{ transaction_summary.cashOutValueTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Cash Top-Up</span>
+        <strong>{{ mobile_money_live_snapshot.cashTopUp|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">E-Cash Top-Up</span>
+        <strong>{{ mobile_money_live_snapshot.eCashTopUp|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Working Float</span>
+        <strong>{{ mobile_money_live_snapshot.workingFloatAvailable|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Handled Value</span>
+        <strong>{{ transaction_summary.handledValueTotal|currency }}</strong>
+      </article>
+    </div>
+
+    <p class="pos-counter-note">
+      Top-ups today: physical {{ mobile_money_live_snapshot.cashTopUp|currency }}, e-cash {{ mobile_money_live_snapshot.eCashTopUp|currency }}.
+      Cash moved out {{ mobile_money_live_snapshot.cashRemoved|currency }} and e-cash moved out {{ mobile_money_live_snapshot.eCashRemoved|currency }}.
+      The counter above stays on {{ snapshot_date }}, while the transaction list below follows the filters you apply.
+    </p>
+  </section>
+
+  {% if module_quick_actions %}
+    <section class="card-grid two">
+      {% for action in module_quick_actions %}
+        <article class="metric-card module-action-card">
+          <span>{{ action.label }}</span>
+          <strong><a href="{{ action.href }}">{{ action.label }}</a></strong>
+          <small>{{ action.note }}</small>
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Transactions</span>
+      <strong>{{ transaction_summary.transactionCount }}</strong>
+      <small>Completed {{ transaction_summary.completedCount }} · Pending {{ transaction_summary.pendingCount }}</small>
+    </article>
+    <article class="metric-card">
+      <span>Average Fee</span>
+      <strong>{{ transaction_summary.averageFee|currency }}</strong>
+      <small>Top service: {{ transaction_summary.topServiceType }}</small>
+    </article>
+    <article class="metric-card">
+      <span>Net Cash Movement</span>
+      <strong>{{ transaction_summary.netCashMovementTotal|currency }}</strong>
+      <small>Cash in + fees less cash out</small>
+    </article>
+    <article class="metric-card">
+      <span>Closeout Days</span>
+      <strong>{{ reconciliation_summary.recordCount }}</strong>
+      <small>Status {{ reconciliation_summary.statusLabel }} · Balanced {{ reconciliation_summary.balancedCount }}</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Closeout</p>
+          <h3>Expected And Saved Leftover Balances</h3>
+        </div>
+        <a class="button subtle" href="{{ closeout_href }}">{{ closeout_label }}</a>
+      </div>
+      <section class="card-grid two">
+        <article class="metric-card">
+          <span>Expected Cash Left</span>
+          <strong>{{ today_closeout.cashExpected|currency }}</strong>
+          <small>What the counter should hold before you count cash at close</small>
+        </article>
+        <article class="metric-card">
+          <span>Expected E-Cash Left</span>
+          <strong>{{ today_closeout.eCashExpected|currency }}</strong>
+          <small>What the wallet should show before you save the day close</small>
+        </article>
+        <article class="metric-card {% if today_closeout.cashVariance is not none and today_closeout.cashVariance != 0 %}warning{% endif %}">
+          <span>Saved Cash Left</span>
+          <strong>{% if today_closeout.cashCounted is not none %}{{ today_closeout.cashCounted|currency }}{% else %}Not Saved{% endif %}</strong>
+          <small>{{ today_closeout.cashStatus }}{% if today_closeout.cashVariance is not none %} · Variance {{ today_closeout.cashVariance|currency }}{% endif %}</small>
+        </article>
+        <article class="metric-card {% if today_closeout.eCashVariance is not none and today_closeout.eCashVariance != 0 %}warning{% endif %}">
+          <span>Saved E-Cash Left</span>
+          <strong>{% if today_closeout.eCashCounted is not none %}{{ today_closeout.eCashCounted|currency }}{% else %}Not Saved{% endif %}</strong>
+          <small>{{ today_closeout.eCashStatus }}{% if today_closeout.eCashVariance is not none %} · Variance {{ today_closeout.eCashVariance|currency }}{% endif %}</small>
+        </article>
+      </section>
+      <p class="muted mobile-money-inline-note">
+        Fees captured {{ today_closeout.feesCaptured|currency }} · Physical cash moved out {{ today_closeout.cashMovedOut|currency }} · E-cash moved out {{ today_closeout.eCashMovedOut|currency }}
+      </p>
+    </article>
+
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Status Mix</p>
+          <h3>Counter Workflow</h3>
+        </div>
+      </div>
+      {% if status_chart %}
+        <div class="chart-stack">
+          {% for row in status_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No transaction status mix is available yet.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Service Fee Mix</p>
+          <h3>Which Mobile Money Services Are Earning</h3>
+        </div>
+      </div>
+      {% if service_mix_chart %}
+        <div class="chart-stack">
+          {% for row in service_mix_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No completed service fees are available yet.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Recent Closeouts</p>
+          <h3>Saved Counter Days</h3>
+        </div>
+      </div>
+      <ul class="mobile-money-recent-list">
+        {% for row in reconciliation_rows %}
+          <li>
+            <strong><a class="table-link" href="{{ url_for('module_form', module_key='mobile_money_reconciliations', record_id=row.id) }}">{{ row.date }} · {{ row.provider }}</a></strong>
+            <span>Cash left {{ row.closingCashCounted|currency }} · E-cash left {{ row.closingECashCounted|currency }}</span>
+            <span>Cash {{ row.cashStatus }}{% if row.cashVariance %} · {{ row.cashVariance|currency }}{% endif %} · E-cash {{ row.eCashStatus }}{% if row.eCashVariance %} · {{ row.eCashVariance|currency }}{% endif %}</span>
+          </li>
+        {% else %}
+          <li><span>No counter closeouts have been saved yet.</span></li>
+        {% endfor %}
+      </ul>
+    </article>
+  </section>
+
+  <article class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Transactions</p>
+        <h3>Mobile Money Sales Desk</h3>
+      </div>
+      <p class="muted list-summary">{{ transaction_rows|length }} transaction{% if transaction_rows|length != 1 %}s{% endif %} in view.</p>
+    </div>
+    <div class="table-wrap tall">
+      <table>
+        <thead>
+          <tr>
+            <th>Date</th>
+            <th>Customer</th>
+            <th>Service</th>
+            <th>Value</th>
+            <th>Fee</th>
+            <th>Profit</th>
+            <th>Status</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in transaction_rows %}
+            <tr>
+              <td>{{ row.date or '—' }}</td>
+              <td>
+                {{ row.customerName }}
+                <span class="table-secondary">{{ row.provider }}{% if row.customerPhone %} · {{ row.customerPhone }}{% endif %}{% if row.momoNumber %} · {{ row.momoNumber }}{% endif %}</span>
+              </td>
+              <td>
+                {{ row.serviceType }}
+                <span class="table-secondary">{{ row.floatImpact }}{% if row.reference %} · {{ row.reference }}{% endif %}</span>
+              </td>
+              <td>{{ row.transactionValue|currency }}</td>
+              <td>{{ row.feeAmount|currency }}</td>
+              <td>{{ row.profitAmount|currency }}</td>
+              <td>{{ row.status }}</td>
+              <td>
+                <div class="row-actions">
+                  <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                  <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this mobile money transaction?');">
+                    <input type="hidden" name="q" value="{{ search }}">
+                    <input type="hidden" name="provider" value="{{ provider_filter }}">
+                    <input type="hidden" name="status" value="{{ status_filter }}">
+                    <input type="hidden" name="category" value="{{ category_filter }}">
+                    <input type="hidden" name="date_from" value="{{ date_from }}">
+                    <input type="hidden" name="date_to" value="{{ date_to }}">
+                    <button class="text-button danger-text" type="submit">Delete</button>
+                  </form>
+                </div>
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8">No mobile money transactions match this view yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </article>
+{% endblock %}

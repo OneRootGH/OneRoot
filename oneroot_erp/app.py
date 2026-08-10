@@ -3357,6 +3357,65 @@ def mobile_money_reconciliation_breakdown(records: list[ModuleRecord | dict[str,
     }
 
 
+def build_mobile_money_transaction_rows(records: list[ModuleRecord]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        payload = dict(record.payload or {})
+        rows.append(
+            {
+                "id": record.id,
+                "date": record.record_date.isoformat() if record.record_date else "",
+                "provider": normalize_text(payload.get("provider")) or "MTN Mobile Money",
+                "serviceType": normalize_text(payload.get("serviceType")) or "Mobile Money Service",
+                "customerName": normalize_text(payload.get("customerName")) or record.title or "Walk-in Customer",
+                "customerPhone": normalize_phone(payload.get("customerPhone")),
+                "momoNumber": normalize_text(payload.get("momoNumber")),
+                "transactionValue": round(parse_amount(payload.get("transactionValue")), 2),
+                "feeAmount": round(parse_amount(payload.get("salesAmount")), 2),
+                "costAmount": round(parse_amount(payload.get("costAmount")), 2),
+                "profitAmount": round(mobile_money_transaction_profit(payload), 2) if mobile_money_transaction_is_completed(payload) else 0.0,
+                "floatImpact": mobile_money_resolved_float_impact(payload),
+                "reference": normalize_text(payload.get("reference")),
+                "status": normalize_text(payload.get("status")) or "Pending",
+                "notes": normalize_text(payload.get("notes")),
+                "isCompleted": mobile_money_transaction_is_completed(payload),
+            }
+        )
+    return rows
+
+
+def build_mobile_money_reconciliation_rows(records: list[ModuleRecord]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        payload = dict(record.payload or {})
+        rows.append(
+            {
+                "id": record.id,
+                "date": record.record_date.isoformat() if record.record_date else "",
+                "provider": normalize_text(payload.get("provider")) or "MTN Mobile Money",
+                "openingCash": round(parse_amount(payload.get("openingCash")), 2),
+                "openingECash": round(parse_amount(payload.get("openingECash")), 2),
+                "cashTopUp": round(parse_amount(payload.get("cashTopUp")), 2),
+                "eCashTopUp": round(parse_amount(payload.get("eCashTopUp")), 2),
+                "cashRemoved": round(parse_amount(payload.get("cashRemoved")), 2),
+                "eCashRemoved": round(parse_amount(payload.get("eCashRemoved")), 2),
+                "serviceFees": round(parse_amount(payload.get("serviceFees")), 2),
+                "cashInValue": round(parse_amount(payload.get("cashInValue")), 2),
+                "cashOutValue": round(parse_amount(payload.get("cashOutValue")), 2),
+                "closingCashCounted": round(parse_amount(payload.get("closingCashCounted")), 2),
+                "closingECashCounted": round(parse_amount(payload.get("closingECashCounted")), 2),
+                "expectedCash": mobile_money_expected_closing(payload),
+                "expectedECash": mobile_money_expected_ecash(payload),
+                "cashVariance": mobile_money_variance(payload),
+                "eCashVariance": mobile_money_ecash_variance(payload),
+                "cashStatus": mobile_money_status(payload),
+                "eCashStatus": mobile_money_ecash_status(payload),
+                "notes": normalize_text(payload.get("notes")),
+            }
+        )
+    return rows
+
+
 def mobile_money_transaction_day_rollup(
     db_session,
     target_date: date | None,
@@ -4105,90 +4164,6 @@ def mobile_money_live_balance_snapshot(db_session, target_date: date | None, pro
         "usesStartupDefaults": (not today_record and not carry_record and startup_float_total > 0),
         "basisNote": basis_note,
     }
-
-
-def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
-    startup_profile = dict(MOBILE_MONEY_STARTUP_PROFILES.get("MTN Mobile Money") or {})
-    startup_sim_cost = round(parse_amount(startup_profile.get("simPurchaseCost")), 2)
-    startup_opening_cash = round(parse_amount(startup_profile.get("openingCash")), 2)
-    startup_opening_ecash = round(parse_amount(startup_profile.get("openingECash")), 2)
-    startup_float_total = round(startup_opening_cash + startup_opening_ecash, 2)
-    focus_note = (
-        "You are on the Mobile Money Sales page. Record each customer transaction here as it happens."
-        if module_key == "mobile_money_transactions"
-        else "You are on the Mobile Money Reconciliation page. Close the day's float here after counting cash."
-    )
-    return {
-        "title": "MTN MoMo Daily Cashier Checklist",
-        "summary": "Use Mobile Money Sales during the day and Mobile Money Reconciliation once per provider at close of day so OneRoot always knows the real physical cash and e-cash available.",
-        "focus_note": focus_note,
-        "setup_cards": [
-            {
-                "label": "SIM Setup Cost",
-                "value": format_currency(startup_sim_cost),
-                "note": "Treat this as setup capital or asset cost, not as float available to pay customers.",
-            },
-            {
-                "label": "Starting Physical Cash",
-                "value": format_currency(startup_opening_cash),
-                "note": "Cash placed on hand to serve customer cash-out requests.",
-            },
-            {
-                "label": "Starting E-Cash",
-                "value": format_currency(startup_opening_ecash),
-                "note": "Wallet float deposited on the MTN MoMo line for daily transactions.",
-            },
-            {
-                "label": "Starting Working Float",
-                "value": format_currency(startup_float_total),
-                "note": "Usable float for the business before any top-up, removal, or customer transactions.",
-            },
-        ],
-        "day_steps": [
-            "Confirm the opening float before you start serving customers.",
-            "For every customer, save Date, Provider, Service Type, Transaction Value, Fee / Sales Amount, Float Impact, and Status.",
-            "Set Status to Completed only after the transaction succeeds.",
-            "Use Fee / Sales Amount for what OneRoot earned, not the full amount handled.",
-        ],
-        "closeout_steps": [
-            "At the end of the day, save one reconciliation row for MTN Mobile Money.",
-            "Enter Opening Cash Float, Opening E-Cash Float, any cash or e-cash top-up or removal, Total Cash-In Value, Total Cash-Out Value, Service Fees Earned, Operating Expense, and both closing balances counted.",
-            "Check the result immediately: Balanced means correct, Short means money is missing, and Over Counted means extra cash or e-cash was counted.",
-            "Open Daily Sales Summary for the date and confirm Mobile Money, Handled Value, Mobile Money Profit, and MoMo Closing Check.",
-        ],
-        "meaning_cards": [
-            {
-                "label": "Handled Value",
-                "value": "Full Customer Amount",
-                "note": "Use this for the total face value processed, for example GH¢500 cash-out.",
-            },
-            {
-                "label": "MoMo Sales",
-                "value": "OneRoot Fee",
-                "note": "Use this for what OneRoot earned on the service, not for the full amount handled.",
-            },
-            {
-                "label": "Profit",
-                "value": "Fee Minus Cost",
-                "note": "The app subtracts direct cost from the fee to show actual mobile money profit.",
-            },
-            {
-                "label": "Closing Check",
-                "value": "Expected Vs Counted",
-                "note": "This compares expected physical cash and expected e-cash with what was actually counted.",
-            },
-        ],
-        "golden_rules": [
-            "Mobile Money Sales is for customer-by-customer activity.",
-            "Mobile Money Reconciliation is for end-of-day float checking.",
-            "Only Completed transactions count into daily sales totals.",
-            "The GH₵3,000 SIM setup cost is not daily float. The working float starts from GH₵900 physical cash plus GH₵1,040 e-cash unless you update it in reconciliation.",
-            "If you add extra cash to serve customers, put the amount in Cash Top-Up and save where it came from in Cash Top-Up From.",
-            "If transaction rows were missed, reconciliation fees can temporarily feed daily sales, but best practice is to save both.",
-        ],
-    }
-
-
 def mobile_money_day_snapshot(db_session, target_date: date | None) -> dict[str, Any]:
     if not target_date:
         return {
@@ -10063,46 +10038,179 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         module_overview = build_module_overview(definition, records)
         module_quick_actions = []
-        mobile_money_sop = None
         mobile_money_reconciliation_summary = None
         mobile_money_live_snapshot = None
         automated_tenant_reminders: list[dict[str, Any]] = []
         automated_tenant_counts: dict[str, int] = {}
         if module_key == "mobile_money_transactions":
-            mobile_money_sop = mobile_money_sop_context(module_key)
+            provider_filter = normalize_text(request.args.get("provider"))
+            if provider_filter:
+                records = [
+                    record
+                    for record in records
+                    if normalize_text((record.payload or {}).get("provider")) == provider_filter
+                ]
+            module_overview = build_module_overview(definition, records)
             reconciliation_records = g.db.scalars(
                 select(ModuleRecord)
                 .where(ModuleRecord.module_key == "mobile_money_reconciliations")
                 .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
             ).all()
-            if date_from or date_to:
-                reconciliation_records = [
-                    record
-                    for record in reconciliation_records
-                    if (not date_from or (record.record_date and record.record_date >= date_from))
-                    and (not date_to or (record.record_date and record.record_date <= date_to))
-                ]
+            recent_reconciliation_records = [
+                record
+                for record in reconciliation_records
+                if not provider_filter or normalize_text((record.payload or {}).get("provider")) == provider_filter
+            ][:8]
+            reconciliation_records = [
+                record
+                for record in reconciliation_records
+                if (not provider_filter or normalize_text((record.payload or {}).get("provider")) == provider_filter)
+                and (not date_from or (record.record_date and record.record_date >= date_from))
+                and (not date_to or (record.record_date and record.record_date <= date_to))
+            ]
             mobile_money_reconciliation_summary = mobile_money_reconciliation_breakdown(reconciliation_records)
-            snapshot_date = date_to or date_from or max((record.record_date for record in records if record.record_date), default=date.today())
+            snapshot_date = date_to or date_from or date.today()
             provider_values = sorted(
                 {
                     normalize_text((record.payload or {}).get("provider"))
                     for record in records
                     if normalize_text((record.payload or {}).get("provider"))
                 }
+                | {
+                    normalize_text((record.payload or {}).get("provider"))
+                    for record in reconciliation_records
+                    if normalize_text((record.payload or {}).get("provider"))
+                }
             )
-            snapshot_provider = provider_values[0] if len(provider_values) == 1 else "MTN Mobile Money"
+            snapshot_provider = provider_filter or (provider_values[0] if len(provider_values) == 1 else "MTN Mobile Money")
             mobile_money_live_snapshot = mobile_money_live_balance_snapshot(g.db, snapshot_date, snapshot_provider)
             if user_has_access(g.current_user, "mobile_money_reconciliations"):
                 module_quick_actions.append(
                     {
-                        "label": "Open Mobile Money Reconciliation",
+                        "label": "Open Counter Closeout",
                         "href": url_for("module_list", module_key="mobile_money_reconciliations"),
-                        "note": "Close float and compare expected versus counted cash after recording transactions.",
+                        "note": "Review opening balances, cash left, e-cash left, and daily close status.",
                     }
                 )
+            if user_has_access(g.current_user, "sales_summary"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Daily Sales Summary",
+                        "href": url_for("sales_summary_page", date=snapshot_date.isoformat(), area="mobile-money"),
+                        "note": "See how mobile money feeds total daily sales and profit for the selected day.",
+                    }
+                )
+            if user_has_access(g.current_user, "sales"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Daily Sales",
+                        "href": url_for("module_list", module_key="sales", date_from=snapshot_date.isoformat(), date_to=snapshot_date.isoformat()),
+                        "note": "Review the sales ledger entries that are syncing from completed mobile money transactions.",
+                    }
+                )
+            transaction_summary = mobile_money_transaction_breakdown(records)
+            transaction_rows = build_mobile_money_transaction_rows(records)
+            reconciliation_rows = build_mobile_money_reconciliation_rows(recent_reconciliation_records)
+            status_chart = build_chart_rows(
+                [
+                    {"label": "Completed", "amount": transaction_summary["completedCount"]},
+                    {"label": "Pending", "amount": transaction_summary["pendingCount"]},
+                    {"label": "Reversed", "amount": transaction_summary["reversedCount"]},
+                    {"label": "Cancelled", "amount": transaction_summary["cancelledCount"]},
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="label",
+                positive_color="var(--accent)",
+            )
+            service_mix_chart = build_chart_rows(
+                [
+                    {"label": label, "amount": amount}
+                    for label, amount in sorted(
+                        transaction_summary["serviceFeeTotals"].items(),
+                        key=lambda item: item[1],
+                        reverse=True,
+                    )[:8]
+                ],
+                label_key="label",
+                value_key="amount",
+                short_key="label",
+            )
+            today_reconciliation_record = next(
+                (
+                    record
+                    for record in reconciliation_records
+                    if record.record_date == snapshot_date
+                    and normalize_text((record.payload or {}).get("provider")) == snapshot_provider
+                ),
+                None,
+            )
+            today_reconciliation_payload = dict(today_reconciliation_record.payload or {}) if today_reconciliation_record else {}
+            today_closeout = {
+                "hasRecord": bool(today_reconciliation_record),
+                "cashExpected": mobile_money_live_snapshot["physicalCashAvailable"],
+                "eCashExpected": mobile_money_live_snapshot["eCashAvailable"],
+                "cashCounted": round(parse_amount(today_reconciliation_payload.get("closingCashCounted")), 2)
+                if today_reconciliation_record
+                else None,
+                "eCashCounted": round(parse_amount(today_reconciliation_payload.get("closingECashCounted")), 2)
+                if today_reconciliation_record
+                else None,
+                "cashVariance": mobile_money_variance(today_reconciliation_payload) if today_reconciliation_record else None,
+                "eCashVariance": mobile_money_ecash_variance(today_reconciliation_payload) if today_reconciliation_record else None,
+                "cashStatus": mobile_money_status(today_reconciliation_payload) if today_reconciliation_record else "Not Closed",
+                "eCashStatus": mobile_money_ecash_status(today_reconciliation_payload) if today_reconciliation_record else "Not Closed",
+                "feesCaptured": round(parse_amount(today_reconciliation_payload.get("serviceFees")), 2)
+                if today_reconciliation_record
+                else mobile_money_live_snapshot["feeTotal"],
+                "cashMovedOut": round(parse_amount(today_reconciliation_payload.get("cashRemoved")), 2)
+                if today_reconciliation_record
+                else mobile_money_live_snapshot["cashRemoved"],
+                "eCashMovedOut": round(parse_amount(today_reconciliation_payload.get("eCashRemoved")), 2)
+                if today_reconciliation_record
+                else mobile_money_live_snapshot["eCashRemoved"],
+            }
+            closeout_href = (
+                url_for("module_form", module_key="mobile_money_reconciliations", record_id=today_reconciliation_record.id)
+                if today_reconciliation_record
+                else url_for(
+                    "module_form",
+                    module_key="mobile_money_reconciliations",
+                    date=snapshot_date.isoformat(),
+                    provider=snapshot_provider,
+                )
+            )
+            closeout_label = "Update Closeout" if today_reconciliation_record else "Open / Close Day"
+            provider_options = next((field.options for field in definition.fields if field.name == "provider"), [])
+            return render_template(
+                "mobile_money_counter.html",
+                page_title=definition.label,
+                definition=definition,
+                search=search,
+                provider_filter=provider_filter,
+                status_filter=status_filter,
+                category_filter=category_filter,
+                date_from=date_from.isoformat() if date_from else "",
+                date_to=date_to.isoformat() if date_to else "",
+                transaction_rows=transaction_rows,
+                transaction_summary=transaction_summary,
+                reconciliation_summary=mobile_money_reconciliation_summary,
+                reconciliation_rows=reconciliation_rows,
+                mobile_money_live_snapshot=mobile_money_live_snapshot,
+                today_closeout=today_closeout,
+                snapshot_date=snapshot_date.isoformat(),
+                snapshot_provider=snapshot_provider,
+                provider_options=provider_options,
+                status_options=module_status_options(definition, all_records),
+                category_options=module_category_options(definition, all_records),
+                category_filter_label=module_filter_category_label(definition),
+                module_quick_actions=module_quick_actions,
+                closeout_href=closeout_href,
+                closeout_label=closeout_label,
+                status_chart=status_chart,
+                service_mix_chart=service_mix_chart,
+            )
         if module_key == "mobile_money_reconciliations":
-            mobile_money_sop = mobile_money_sop_context(module_key)
             snapshot_date = date_to or date_from or max((record.record_date for record in records if record.record_date), default=date.today())
             snapshot_provider = category_filter or (
                 max(
@@ -10231,7 +10339,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
             automated_tenant_reminders=automated_tenant_reminders,
             automated_tenant_counts=automated_tenant_counts,
             growth_context=growth_context,
-            mobile_money_sop=mobile_money_sop,
             mobile_money_reconciliation_summary=mobile_money_reconciliation_summary,
             mobile_money_live_snapshot=mobile_money_live_snapshot,
         )
@@ -10295,6 +10402,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             date_from=date_from,
             date_to=date_to,
         )
+        if module_key == "mobile_money_transactions":
+            provider_filter = normalize_text(request.args.get("provider"))
+            if provider_filter:
+                records = [
+                    record
+                    for record in records
+                    if normalize_text((record.payload or {}).get("provider")) == provider_filter
+                ]
         headers, rows = build_module_export_rows(records, definition)
         return csv_download(
             f"oneroot-{module_key}-{date.today().isoformat()}.csv",
@@ -10321,6 +10436,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("module_list", module_key=module_key))
 
         record_payload = dict(record.payload if record else {})
+        if not record and module_key in {"mobile_money_transactions", "mobile_money_reconciliations"}:
+            query_date = parse_date(request.args.get("date"))
+            query_provider = normalize_text(request.args.get("provider"))
+            if query_date:
+                record_payload["date"] = query_date.isoformat()
+            if query_provider:
+                record_payload["provider"] = query_provider
         if request.method == "POST":
             payload = dict(record_payload)
             payload.setdefault("id", record.id if record else uuid4().hex)
@@ -10408,24 +10530,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
             record_payload.setdefault("provider", "MTN Mobile Money")
+            preview_snapshot = mobile_money_live_balance_snapshot(
+                g.db,
+                parse_date(record_payload.get("date")) or date.today(),
+                normalize_text(record_payload.get("provider")),
+            )
             setup_profile = dict(MOBILE_MONEY_STARTUP_PROFILES.get(normalize_text(record_payload.get("provider")) or "MTN Mobile Money") or {})
-            if not normalize_text(record_payload.get("openingCash")) and parse_amount(setup_profile.get("openingCash")) > 0:
-                record_payload["openingCash"] = parse_amount(setup_profile.get("openingCash"))
-            if not normalize_text(record_payload.get("openingECash")) and parse_amount(setup_profile.get("openingECash")) > 0:
-                record_payload["openingECash"] = parse_amount(setup_profile.get("openingECash"))
+            if not normalize_text(record_payload.get("openingCash")):
+                record_payload["openingCash"] = preview_snapshot["openingCash"]
+            if not normalize_text(record_payload.get("openingECash")):
+                record_payload["openingECash"] = preview_snapshot["openingECash"]
             if not normalize_text(record_payload.get("cashTopUpSource")) and normalize_text(setup_profile.get("cashTopUpSource")):
                 record_payload["cashTopUpSource"] = normalize_text(setup_profile.get("cashTopUpSource"))
             if not normalize_text(record_payload.get("eCashTopUpSource")) and normalize_text(setup_profile.get("eCashTopUpSource")):
                 record_payload["eCashTopUpSource"] = normalize_text(setup_profile.get("eCashTopUpSource"))
-            if not normalize_text(record_payload.get("notes")):
-                startup_sim_cost = parse_amount(setup_profile.get("simPurchaseCost"))
-                startup_cash = parse_amount(setup_profile.get("openingCash"))
-                startup_ecash = parse_amount(setup_profile.get("openingECash"))
-                if startup_sim_cost > 0 or startup_cash > 0 or startup_ecash > 0:
-                    record_payload["notes"] = (
-                        f"OneRoot startup setup: SIM / setup cost {format_currency(startup_sim_cost)}. "
-                        f"Opening physical cash {format_currency(startup_cash)} and opening e-cash {format_currency(startup_ecash)}."
-                    )
         elif module_key == "mobile_money_transactions":
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
@@ -10504,7 +10622,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 service_payment_summary=service_payment_summary(module_key, record_payload),
             )
         module_quick_actions = []
-        mobile_money_sop = mobile_money_sop_context(module_key) if module_key in {"mobile_money_transactions", "mobile_money_reconciliations"} else None
         mobile_money_day_helper = None
         mobile_money_live_snapshot = None
         if module_key == "mobile_money_reconciliations":
@@ -10536,7 +10653,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
             category_map=inventory_category_map(),
             dynamic_category_field="category" if module_has_field(definition, "category") else "",
             module_quick_actions=module_quick_actions,
-            mobile_money_sop=mobile_money_sop,
             mobile_money_day_helper=mobile_money_day_helper,
             mobile_money_live_snapshot=mobile_money_live_snapshot,
             today_iso=date.today().isoformat(),
@@ -10765,6 +10881,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "module_list",
                 module_key=module_key,
                 q=normalize_text(request.form.get("q")),
+                provider=normalize_text(request.form.get("provider")),
                 area=normalize_text(request.form.get("area")),
                 status=normalize_text(request.form.get("status")),
                 category=normalize_text(request.form.get("category")),

@@ -24,10 +24,6 @@
       </section>
     {% endif %}
 
-    {% if mobile_money_sop %}
-      {% include "_mobile_money_sop.html" %}
-    {% endif %}
-
     {% if definition.key == 'mobile_money_reconciliations' and mobile_money_day_helper and mobile_money_day_helper.hasData %}
       <section class="card-grid four module-inline-actions">
         <article class="metric-card">
@@ -56,26 +52,26 @@
     {% if definition.key in ['mobile_money_transactions', 'mobile_money_reconciliations'] and mobile_money_live_snapshot %}
       <section class="card-grid four module-inline-actions">
         <article class="metric-card">
-          <span>Physical Cash Available</span>
+          <span>Cash Left Now</span>
           <strong>{{ mobile_money_live_snapshot.physicalCashAvailable|currency }}</strong>
-          <small>Opening {{ mobile_money_live_snapshot.openingCash|currency }} · Top-Up {{ mobile_money_live_snapshot.cashTopUp|currency }}</small>
+          <small>Start {{ mobile_money_live_snapshot.openingCash|currency }} · Top-Up {{ mobile_money_live_snapshot.cashTopUp|currency }}</small>
         </article>
         <article class="metric-card">
-          <span>E-Cash Available</span>
+          <span>E-Cash Left Now</span>
           <strong>{{ mobile_money_live_snapshot.eCashAvailable|currency }}</strong>
-          <small>Opening {{ mobile_money_live_snapshot.openingECash|currency }} · Top-Up {{ mobile_money_live_snapshot.eCashTopUp|currency }}</small>
+          <small>Start {{ mobile_money_live_snapshot.openingECash|currency }} · Top-Up {{ mobile_money_live_snapshot.eCashTopUp|currency }}</small>
         </article>
         <article class="metric-card">
-          <span>Working Float Available</span>
+          <span>Working Float Left</span>
           <strong>{{ mobile_money_live_snapshot.workingFloatAvailable|currency }}</strong>
-          <small>Physical cash + e-cash available right now for MTN MoMo operations</small>
+          <small>Physical cash plus e-cash still available for mobile money today</small>
         </article>
         <article class="metric-card">
-          <span>Setup / Top-Up Source</span>
+          <span>Top-Up Source</span>
           <strong>{{ mobile_money_live_snapshot.cashTopUpSource or 'Not saved yet' }}</strong>
           <small>
-            {% if mobile_money_live_snapshot.startupSimCost %}
-              SIM setup cost {{ mobile_money_live_snapshot.startupSimCost|currency }} · Starting float {{ mobile_money_live_snapshot.startupFloatTotal|currency }}
+            {% if mobile_money_live_snapshot.eCashTopUpSource %}
+              E-Cash top-up from {{ mobile_money_live_snapshot.eCashTopUpSource }}
             {% else %}
               {{ mobile_money_live_snapshot.basisNote }}
             {% endif %}
@@ -212,6 +208,10 @@
             <small class="muted form-helper">Enter only the fee or commission OneRoot earns here, not the full transfer amount.</small>
           {% elif definition.key == 'mobile_money_transactions' and field.name == 'date' %}
             <small class="muted form-helper">Use the actual transaction date. Future dates are blocked.</small>
+          {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'openingCash' %}
+            <small class="muted form-helper">Enter the physical cash you are starting the day with before serving any customer.</small>
+          {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'openingECash' %}
+            <small class="muted form-helper">Enter the wallet e-cash available at the start of the day before any mobile money transaction.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'cashRemoved' %}
             <small class="muted form-helper">If you clear the drawer or hand cash over at close, record that amount here.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'cashTopUpSource' %}
@@ -219,7 +219,9 @@
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'eCashTopUpSource' %}
             <small class="muted form-helper">Record where the extra wallet float came from, such as another wallet or bank transfer.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'closingCashCounted' %}
-            <small class="muted form-helper">This is the cash left after cash removed, not the starting float.</small>
+            <small class="muted form-helper">Count the physical cash left at close after any cash moved out.</small>
+          {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'closingECashCounted' %}
+            <small class="muted form-helper">Enter the wallet balance left at close after the day's transactions and e-cash movements.</small>
           {% endif %}
         </label>
       {% endfor %}
