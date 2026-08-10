@@ -214,8 +214,8 @@
   }
 
   async function loadStorefront() {
-    setText(elements.catalogMeta, "Loading OneRoot catalog...");
-    setText(elements.vacancyMeta, "Loading current job vacancies...");
+    setText(elements.catalogMeta, "Loading items...");
+    setText(elements.vacancyMeta, "Loading vacancies...");
 
     try {
       const [catalogResponse, configResponse] = await Promise.all([
@@ -281,14 +281,14 @@
       console.error(error);
       setText(
         elements.catalogMeta,
-        "The catalog could not load right now. Refresh the page or check the server."
+        "Items could not load right now. Please refresh and try again."
       );
 
       if (elements.catalogGrid) {
         elements.catalogGrid.innerHTML = `
           <article class="catalog-card">
-            <strong>Catalog unavailable</strong>
-            <p>The OneRoot online ordering catalog could not be loaded.</p>
+            <strong>Items unavailable</strong>
+            <p>Items could not be loaded at the moment.</p>
           </article>
         `;
       }
@@ -297,7 +297,7 @@
         elements.vacancyGrid.innerHTML = `
           <article class="vacancy-card vacancy-card-empty">
             <strong>Vacancies unavailable</strong>
-            <p>Current job openings could not be loaded right now.</p>
+            <p>Vacancy information could not be loaded at the moment.</p>
           </article>
         `;
       }
@@ -480,15 +480,15 @@
       setText(
         elements.vacancyMeta,
         vacancies.length
-          ? `${vacancies.length} open role${vacancies.length === 1 ? "" : "s"} published by OneRoot right now.`
-          : "No vacancies are published right now, but this board updates as soon as roles open."
+          ? `${vacancies.length} open position${vacancies.length === 1 ? "" : "s"} available.`
+          : "There are no open vacancies at the moment."
       );
     }
 
     if (!vacancies.length) {
       elements.vacancyGrid.innerHTML = `
         <article class="vacancy-card vacancy-card-empty">
-          <strong>No open vacancies right now</strong>
+          <strong>No open vacancies at the moment</strong>
           <p>Check back soon for new opportunities across sales, service, operations, kitchen, delivery, and support.</p>
         </article>
       `;
@@ -626,7 +626,7 @@
       container.innerHTML = `
         <article class="service-quick-pick service-quick-pick-empty">
           <strong>No items available</strong>
-          <p>The OneRoot team has not published options for this service yet.</p>
+          <p>Please check back soon or contact OneRoot for help with this request.</p>
         </article>
       `;
       return;
@@ -738,7 +738,7 @@
       elements.equipmentItemPreview,
       getCatalogItemById(normalizeText(elements.equipmentItemSelect?.value)),
       "No equipment selected yet.",
-      "Choose an equipment item to preview the image and saved pricing before adding it to the request."
+      "Choose an equipment item to see the photo and price before adding it to your request."
     );
   }
 
@@ -748,7 +748,7 @@
       elements.laundryServicePreview,
       getCatalogItemById(normalizeText(elements.laundryServiceSelect?.value)),
       "No laundry service selected yet.",
-      "Choose a laundry service to preview the image and saved pricing before adding it to the request."
+      "Choose a laundry service to see the photo and price before adding it to your request."
     );
   }
 
@@ -1215,7 +1215,7 @@
       elements.catalogMeta,
       filteredItems.length === 0
         ? "No items match the current search."
-        : `${filteredItems.length} catalog item${filteredItems.length === 1 ? "" : "s"} ready for order.`
+        : `${filteredItems.length} item${filteredItems.length === 1 ? "" : "s"} available.`
     );
 
     if (elements.catalogResultsMeta) {
@@ -1238,7 +1238,7 @@
           ${
             filteredItems.length > visibleItems.length
               ? escapeHtml(
-                  `Showing ${visibleItems.length} of ${filteredItems.length} items. Search or choose an area to reach checkout faster.`
+                  `Showing ${visibleItems.length} of ${filteredItems.length} items. Use search or area filters to narrow the list.`
                 )
               : escapeHtml(`${filteredItems.length} item${filteredItems.length === 1 ? "" : "s"} shown.`)
           }
@@ -1249,8 +1249,8 @@
     if (filteredItems.length === 0) {
       elements.catalogGrid.innerHTML = `
         <article class="catalog-card">
-          <strong>No matching items</strong>
-          <p>Try another business area or search term.</p>
+          <strong>No items found</strong>
+          <p>Try another search term or choose a different area.</p>
         </article>
       `;
       return;
@@ -1263,9 +1263,9 @@
           <article class="catalog-card">
             <strong>More items available</strong>
             <p>${escapeHtml(
-              `${filteredItems.length - visibleItems.length} more catalog item${
+              `${filteredItems.length - visibleItems.length} more item${
                 filteredItems.length - visibleItems.length === 1 ? "" : "s"
-              } are hidden for speed.`
+              } in this section.`
             )}</p>
             <button class="button button-secondary" data-shop-action="show-more" type="button">
               Show More
