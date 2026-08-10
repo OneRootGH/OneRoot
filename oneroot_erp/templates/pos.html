@@ -10,6 +10,9 @@
       </div>
       <div class="toolbar pos-workbench-tools">
         <a class="button subtle" href="{{ url_for('inventory') }}">Inventory</a>
+        {% if 'sales_summary' in current_access_keys %}
+          <a class="button subtle" href="{{ url_for('sales_summary_page', date=today_iso, area=initial_area) }}">Summary</a>
+        {% endif %}
         <button class="button subtle" type="button" id="pos-closeout">Close</button>
       </div>
     </div>

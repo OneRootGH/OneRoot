@@ -2131,6 +2131,7 @@ SIDEBAR_LINK_LABELS = {
     "profits": ("Profit Center", "profits_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
+    "sales_summary": ("Daily Sales Summary", "sales_summary_page", None),
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
     "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
@@ -4346,6 +4347,215 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
         )
     rows.sort(key=lambda item: item["salesTotal"], reverse=True)
     return rows
+
+
+def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") -> dict[str, Any]:
+    selected_area = normalize_text(area_id)
+    scoped_areas = [area for area in BUSINESS_AREAS if not selected_area or area["id"] == selected_area]
+    area_map: dict[str, dict[str, Any]] = {
+        area["id"]: {
+            "areaId": area["id"],
+            "areaLabel": area["label"],
+            "areaShort": area["short"],
+            "salesTotal": 0.0,
+            "costTotal": 0.0,
+            "profitTotal": 0.0,
+            "transactionCount": 0,
+            "recordCount": 0,
+            "_sourceTotals": defaultdict(float),
+        }
+        for area in scoped_areas
+    }
+    source_map: dict[tuple[str, str], dict[str, Any]] = {}
+    area_source_map: dict[tuple[str, str, str], dict[str, Any]] = {}
+    detail_rows: list[dict[str, Any]] = []
+
+    sales_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "sales",
+            ModuleRecord.record_date == sale_date,
+        )
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.amount))
+    ).all()
+
+    for record in sales_records:
+        payload = record.payload or {}
+        business_area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        if selected_area and business_area_id != selected_area:
+            continue
+        if business_area_id not in area_map:
+            area_map[business_area_id] = {
+                "areaId": business_area_id,
+                "areaLabel": BUSINESS_AREA_LABELS.get(business_area_id, business_area_id or "Shared Operations"),
+                "areaShort": BUSINESS_AREA_SHORT.get(business_area_id, BUSINESS_AREA_LABELS.get(business_area_id, business_area_id or "Shared Operations")),
+                "salesTotal": 0.0,
+                "costTotal": 0.0,
+                "profitTotal": 0.0,
+                "transactionCount": 0,
+                "recordCount": 0,
+                "_sourceTotals": defaultdict(float),
+            }
+
+        source_type = normalize_text(payload.get("sourceType")).lower() or "manual-sale"
+        source_label = normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type)
+        amount = round(parse_amount(record.amount), 2)
+        cost_total = round(module_record_cost_amount(record), 2)
+        profit_total = round(module_record_profit_amount(record), 2)
+        transaction_count = max(int(parse_amount(payload.get("transactionCount"))), 1)
+
+        area_entry = area_map[business_area_id]
+        area_entry["salesTotal"] = round(area_entry["salesTotal"] + amount, 2)
+        area_entry["costTotal"] = round(area_entry["costTotal"] + cost_total, 2)
+        area_entry["profitTotal"] = round(area_entry["profitTotal"] + profit_total, 2)
+        area_entry["transactionCount"] += transaction_count
+        area_entry["recordCount"] += 1
+        area_entry["_sourceTotals"][source_label] = round(area_entry["_sourceTotals"][source_label] + amount, 2)
+
+        source_key = (source_type, source_label)
+        source_entry = source_map.setdefault(
+            source_key,
+            {
+                "sourceType": source_type,
+                "sourceLabel": source_label,
+                "salesTotal": 0.0,
+                "costTotal": 0.0,
+                "profitTotal": 0.0,
+                "transactionCount": 0,
+                "recordCount": 0,
+                "_areas": set(),
+            },
+        )
+        source_entry["salesTotal"] = round(source_entry["salesTotal"] + amount, 2)
+        source_entry["costTotal"] = round(source_entry["costTotal"] + cost_total, 2)
+        source_entry["profitTotal"] = round(source_entry["profitTotal"] + profit_total, 2)
+        source_entry["transactionCount"] += transaction_count
+        source_entry["recordCount"] += 1
+        source_entry["_areas"].add(area_entry["areaShort"])
+
+        area_source_key = (business_area_id, source_type, source_label)
+        area_source_entry = area_source_map.setdefault(
+            area_source_key,
+            {
+                "areaId": business_area_id,
+                "areaLabel": area_entry["areaLabel"],
+                "areaShort": area_entry["areaShort"],
+                "sourceType": source_type,
+                "sourceLabel": source_label,
+                "salesTotal": 0.0,
+                "costTotal": 0.0,
+                "profitTotal": 0.0,
+                "transactionCount": 0,
+                "recordCount": 0,
+            },
+        )
+        area_source_entry["salesTotal"] = round(area_source_entry["salesTotal"] + amount, 2)
+        area_source_entry["costTotal"] = round(area_source_entry["costTotal"] + cost_total, 2)
+        area_source_entry["profitTotal"] = round(area_source_entry["profitTotal"] + profit_total, 2)
+        area_source_entry["transactionCount"] += transaction_count
+        area_source_entry["recordCount"] += 1
+
+        detail_rows.append(
+            {
+                "id": record.id,
+                "title": normalize_text(record.title) or source_label,
+                "reference": record.reference,
+                "recordDate": record.record_date.isoformat() if record.record_date else sale_date.isoformat(),
+                "updatedAt": record.updated_at.strftime("%Y-%m-%d %H:%M") if isinstance(record.updated_at, datetime) else "",
+                "areaId": business_area_id,
+                "areaLabel": area_entry["areaLabel"],
+                "areaShort": area_entry["areaShort"],
+                "sourceType": source_type,
+                "sourceLabel": source_label,
+                "transactionCount": transaction_count,
+                "salesTotal": amount,
+                "costTotal": cost_total,
+                "profitTotal": profit_total,
+                "marginPercent": round((profit_total / amount) * 100, 2) if amount > 0 else 0.0,
+                "notes": normalize_text(payload.get("notes")),
+            }
+        )
+
+    total_sales = round(sum(row["salesTotal"] for row in area_map.values()), 2)
+    total_cost = round(sum(row["costTotal"] for row in area_map.values()), 2)
+    total_profit = round(sum(row["profitTotal"] for row in area_map.values()), 2)
+    transaction_total = sum(row["transactionCount"] for row in area_map.values())
+    record_total = sum(row["recordCount"] for row in area_map.values())
+
+    area_rows: list[dict[str, Any]] = []
+    for row in area_map.values():
+        source_totals = sorted(row.pop("_sourceTotals").items(), key=lambda item: (item[1], item[0]), reverse=True)
+        row["sharePercent"] = round((row["salesTotal"] / total_sales) * 100, 2) if total_sales > 0 else 0.0
+        row["averageSale"] = round(row["salesTotal"] / row["transactionCount"], 2) if row["transactionCount"] > 0 else 0.0
+        row["marginPercent"] = round((row["profitTotal"] / row["salesTotal"]) * 100, 2) if row["salesTotal"] > 0 else 0.0
+        row["sourceLines"] = [{"label": label, "amount": amount} for label, amount in source_totals]
+        row["sourceCount"] = len(source_totals)
+        row["topSourceLabel"] = source_totals[0][0] if source_totals else "No Sales"
+        row["topSourceAmount"] = source_totals[0][1] if source_totals else 0.0
+        row["sourceSummary"] = (
+            " · ".join(f"{label} {format_currency(amount)}" for label, amount in source_totals[:3])
+            if source_totals
+            else "No sales captured yet."
+        )
+        area_rows.append(row)
+    area_rows.sort(key=lambda item: (item["salesTotal"], item["profitTotal"], item["areaLabel"]), reverse=True)
+
+    source_rows: list[dict[str, Any]] = []
+    for row in source_map.values():
+        area_names = sorted(row.pop("_areas"))
+        row["sharePercent"] = round((row["salesTotal"] / total_sales) * 100, 2) if total_sales > 0 else 0.0
+        row["averageSale"] = round(row["salesTotal"] / row["transactionCount"], 2) if row["transactionCount"] > 0 else 0.0
+        row["marginPercent"] = round((row["profitTotal"] / row["salesTotal"]) * 100, 2) if row["salesTotal"] > 0 else 0.0
+        row["areaCount"] = len(area_names)
+        row["areasLabel"] = ", ".join(area_names) if area_names else "—"
+        source_rows.append(row)
+    source_rows.sort(key=lambda item: (item["salesTotal"], item["profitTotal"], item["sourceLabel"]), reverse=True)
+
+    area_source_rows = list(area_source_map.values())
+    for row in area_source_rows:
+        row["averageSale"] = round(row["salesTotal"] / row["transactionCount"], 2) if row["transactionCount"] > 0 else 0.0
+        row["marginPercent"] = round((row["profitTotal"] / row["salesTotal"]) * 100, 2) if row["salesTotal"] > 0 else 0.0
+    area_source_rows.sort(key=lambda item: (item["salesTotal"], item["profitTotal"], item["areaLabel"], item["sourceLabel"]), reverse=True)
+
+    top_area = next((row for row in area_rows if row["salesTotal"] > 0), None)
+    top_source = source_rows[0] if source_rows else None
+
+    return {
+        "area_rows": area_rows,
+        "source_rows": source_rows,
+        "area_source_rows": area_source_rows,
+        "detail_rows": detail_rows[:40],
+        "total_sales": total_sales,
+        "total_cost": total_cost,
+        "total_profit": total_profit,
+        "transaction_total": transaction_total,
+        "record_total": record_total,
+        "areas_with_sales": sum(1 for row in area_rows if row["salesTotal"] > 0),
+        "average_sale": round(total_sales / transaction_total, 2) if transaction_total > 0 else 0.0,
+        "top_area": top_area,
+        "top_source": top_source,
+        "sales_area_chart": build_chart_rows(
+            [
+                {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["salesTotal"]}
+                for row in area_rows
+                if row["salesTotal"] > 0
+            ],
+            label_key="label",
+            value_key="amount",
+            short_key="short",
+        ),
+        "sales_source_chart": build_chart_rows(
+            [
+                {"label": row["sourceLabel"], "short": row["sourceLabel"], "amount": row["salesTotal"]}
+                for row in source_rows
+                if row["salesTotal"] > 0
+            ],
+            label_key="label",
+            value_key="amount",
+            short_key="short",
+            positive_color="var(--accent)",
+        ),
+    }
 
 
 def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: str = "") -> list[dict[str, Any]]:
@@ -7360,6 +7570,51 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ),
         )
 
+    @app.route("/app/sales-summary")
+    @access_required("sales_summary")
+    def sales_summary_page():
+        sale_date = parse_date(request.args.get("date")) or date.today()
+        area_filter = normalize_text(request.args.get("area"))
+        summary_context = daily_sales_summary_context(g.db, sale_date, area_filter)
+        return render_template(
+            "sales_summary.html",
+            page_title="Daily Sales Summary",
+            sale_date=sale_date.isoformat(),
+            area_filter=area_filter,
+            business_area_options=BUSINESS_AREA_OPTIONS,
+            **summary_context,
+        )
+
+    @app.route("/app/sales-summary/export.csv")
+    @access_required("sales_summary")
+    def sales_summary_export():
+        sale_date = parse_date(request.args.get("date")) or date.today()
+        area_filter = normalize_text(request.args.get("area"))
+        summary_context = daily_sales_summary_context(g.db, sale_date, area_filter)
+        headers = [
+            "salesDate",
+            "areaId",
+            "areaLabel",
+            "salesTotal",
+            "costTotal",
+            "profitTotal",
+            "marginPercent",
+            "transactionCount",
+            "recordCount",
+            "averageSale",
+            "sharePercent",
+            "topSourceLabel",
+            "topSourceAmount",
+            "sourceSummary",
+        ]
+        rows = [{"salesDate": sale_date.isoformat(), **row} for row in summary_context["area_rows"]]
+        suffix = f"-{area_filter}" if area_filter else ""
+        return csv_download(
+            f"oneroot-daily-sales-summary-{sale_date.isoformat()}{suffix}.csv",
+            headers,
+            rows,
+        )
+
     @app.route("/app/profits/export.csv")
     @access_required("profits")
     def profits_export():
@@ -8399,6 +8654,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "note": "Capture MTN MoMo and SIM service fees before closing the daily reconciliation.",
                     }
                 )
+        if module_key == "sales" and user_has_access(g.current_user, "sales_summary"):
+            module_quick_actions.append(
+                {
+                    "label": "Open Daily Sales Summary",
+                    "href": url_for("sales_summary_page"),
+                    "note": "See one-day totals by business area so cashiers can account quickly.",
+                }
+            )
         if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
             growth_context = build_growth_automation_context(g.db, area_filter=area_filter)
             if user_has_access(g.current_user, "customer_crm"):

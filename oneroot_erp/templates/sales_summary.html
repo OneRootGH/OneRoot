@@ -1,0 +1,294 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Cashier Accountability</p>
+        <h3>Daily Sales Summary</h3>
+        <p class="muted">Use one day at a time to confirm how much each OneRoot business area sold. POS, online orders, laundry, equipment rentals, apartments, and mobile money payments are summarized from the Daily Sales ledger here.</p>
+      </div>
+      <a class="button subtle" href="{{ url_for('sales_summary_export', date=sale_date, area=area_filter) }}">Export Summary CSV</a>
+    </div>
+    <form class="form-grid">
+      <label>
+        <span>Sales Date</span>
+        <input type="date" name="date" value="{{ sale_date }}">
+      </label>
+      <label>
+        <span>Business Area</span>
+        <select name="area">
+          <option value="">All Business Areas</option>
+          {% for value, label in business_area_options %}
+            <option value="{{ value }}" {% if area_filter == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <div class="form-actions">
+        <button class="button primary" type="submit">Apply Summary Filter</button>
+        <a class="button subtle" href="{{ url_for('sales_summary_page') }}">Reset</a>
+      </div>
+    </form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Daily Sales</span>
+      <strong>{{ total_sales|currency }}</strong>
+      <small>Total ledger sales captured for {{ sale_date }}</small>
+    </article>
+    <article class="metric-card">
+      <span>Gross Profit</span>
+      <strong>{{ total_profit|currency }}</strong>
+      <small>Based on the cost already linked to those sales</small>
+    </article>
+    <article class="metric-card">
+      <span>Transactions</span>
+      <strong>{{ transaction_total }}</strong>
+      <small>Total transaction count rolled up from synced sources</small>
+    </article>
+    <article class="metric-card">
+      <span>Areas With Sales</span>
+      <strong>{{ areas_with_sales }}</strong>
+      <small>{{ record_total }} sales ledger entr{% if record_total == 1 %}y{% else %}ies{% endif %} in scope</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Average Sale</span>
+      <strong>{{ average_sale|currency }}</strong>
+      <small>Average value per transaction for this day</small>
+    </article>
+    <article class="metric-card">
+      <span>Cost</span>
+      <strong>{{ total_cost|currency }}</strong>
+      <small>Direct cost attached to the sales captured</small>
+    </article>
+    <article class="metric-card">
+      <span>Top Area</span>
+      <strong>{{ top_area.areaShort if top_area else 'No Sales' }}</strong>
+      <small>{% if top_area %}{{ top_area.salesTotal|currency }} · {{ top_area.sharePercent }}% of the day{% else %}No business area has sales in this scope yet{% endif %}</small>
+    </article>
+    <article class="metric-card">
+      <span>Top Source</span>
+      <strong>{{ top_source.sourceLabel if top_source else 'No Sales' }}</strong>
+      <small>{% if top_source %}{{ top_source.salesTotal|currency }} · {{ top_source.areaCount }} area{% if top_source.areaCount != 1 %}s{% endif %}{% else %}No sales source captured in this scope yet{% endif %}</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Daily Breakdown</p>
+          <h3>Sales By Business Area</h3>
+        </div>
+      </div>
+      {% if sales_area_chart %}
+        <div class="chart-stack">
+          {% for row in sales_area_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">No sales have been captured for this day yet.</p>
+      {% endif %}
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Daily Breakdown</p>
+          <h3>Sales By Source</h3>
+        </div>
+      </div>
+      {% if sales_source_chart %}
+        <div class="chart-stack">
+          {% for row in sales_source_chart %}
+            <div class="chart-row">
+              <div class="chart-row-header">
+                <strong>{{ row.chartLabel }}</strong>
+                <span>{{ row.chartValue|currency }}</span>
+              </div>
+              <div class="chart-track">
+                <span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span>
+              </div>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="muted">Sales source rows will appear as soon as the ledger has entries for this day.</p>
+      {% endif %}
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Area Scorecard</p>
+        <h3>Business Area Totals</h3>
+      </div>
+      <p class="muted list-summary">{{ area_rows|length }} area{% if area_rows|length != 1 %}s{% endif %} in scope.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Area</th>
+            <th>Sales</th>
+            <th>Cost</th>
+            <th>Profit</th>
+            <th>Transactions</th>
+            <th>Average Sale</th>
+            <th>Share</th>
+            <th>Sources</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in area_rows %}
+            <tr>
+              <td>{{ row.areaLabel }}</td>
+              <td>{{ row.salesTotal|currency }}</td>
+              <td>{{ row.costTotal|currency }}</td>
+              <td>{{ row.profitTotal|currency }}</td>
+              <td>{{ row.transactionCount }}</td>
+              <td>{{ row.averageSale|currency }}</td>
+              <td>{{ row.sharePercent }}%</td>
+              <td>
+                {% if row.sourceLines %}
+                  {{ row.sourceSummary }}
+                {% else %}
+                  <span class="muted">No sales captured</span>
+                {% endif %}
+              </td>
+            </tr>
+          {% else %}
+            <tr><td colspan="8">No business area sales have been captured for this day yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Source Mix</p>
+          <h3>Sales Source Totals</h3>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Source</th>
+              <th>Areas</th>
+              <th>Sales</th>
+              <th>Profit</th>
+              <th>Transactions</th>
+              <th>Share</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in source_rows %}
+              <tr>
+                <td>{{ row.sourceLabel }}</td>
+                <td>{{ row.areasLabel }}</td>
+                <td>{{ row.salesTotal|currency }}</td>
+                <td>{{ row.profitTotal|currency }}</td>
+                <td>{{ row.transactionCount }}</td>
+                <td>{{ row.sharePercent }}%</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="6">No sales source totals are available for this scope yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Area + Source</p>
+          <h3>Where Each Area's Sales Came From</h3>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Area</th>
+              <th>Source</th>
+              <th>Sales</th>
+              <th>Profit</th>
+              <th>Transactions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in area_source_rows %}
+              <tr>
+                <td>{{ row.areaShort }}</td>
+                <td>{{ row.sourceLabel }}</td>
+                <td>{{ row.salesTotal|currency }}</td>
+                <td>{{ row.profitTotal|currency }}</td>
+                <td>{{ row.transactionCount }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No area-by-source breakdown is available for this day yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Recent Entries</p>
+        <h3>Latest Daily Sales Rows</h3>
+      </div>
+      <p class="muted list-summary">Showing the latest {{ detail_rows|length }} synced or manual sales rows in this scope.</p>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Updated</th>
+            <th>Area</th>
+            <th>Source</th>
+            <th>Title</th>
+            <th>Amount</th>
+            <th>Profit</th>
+            <th>Notes</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in detail_rows %}
+            <tr>
+              <td>{{ row.updatedAt or row.recordDate }}</td>
+              <td>{{ row.areaShort }}</td>
+              <td>{{ row.sourceLabel }}</td>
+              <td>{{ row.title }}</td>
+              <td>{{ row.salesTotal|currency }}</td>
+              <td>{{ row.profitTotal|currency }}</td>
+              <td>{{ row.notes or '—' }}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="7">No detailed Daily Sales rows are available for this day yet.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+{% endblock %}
