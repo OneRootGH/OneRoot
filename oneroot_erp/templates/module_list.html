@@ -465,6 +465,18 @@
                 {% endif %}
                 {% if definition.key == 'sales' %}
                   <span class="table-secondary">Cost {{ (record.payload.get('costAmount', 0))|currency }} · Profit {{ (record.payload.get('profitAmount', record.amount - (record.payload.get('costAmount', 0) or 0)))|currency }}</span>
+                {% elif definition.key == 'mobile_money_transactions' %}
+                  <span class="table-secondary">
+                    {{ record.payload.get('serviceType', 'MoMo Service') }} ·
+                    Handled {{ (record.payload.get('transactionValue', 0))|currency }} ·
+                    {{ record.payload.get('floatImpact', 'No Cash Movement') }}
+                  </span>
+                {% elif definition.key == 'mobile_money_reconciliations' %}
+                  <span class="table-secondary">
+                    Opening {{ (record.payload.get('openingCash', 0))|currency }} ·
+                    Expected {{ mobile_money_expected_closing(record.payload or {})|currency }} ·
+                    Counted {{ (record.payload.get('closingCashCounted', 0))|currency }}
+                  </span>
                 {% elif definition.key == 'salary_records' %}
                   <span class="table-secondary">Net {{ (record.payload.get('netPay', 0))|currency }} · Paid {{ (record.payload.get('amountPaid', 0))|currency }} · Bal {{ (record.payload.get('balanceDue', 0))|currency }}</span>
                 {% elif definition.key == 'asset_records' %}

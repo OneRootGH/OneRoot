@@ -296,6 +296,7 @@
         const serviceTypeField = document.querySelector('select[name="serviceType"]');
         const transactionValueField = document.querySelector('input[name="transactionValue"]');
         const salesAmountField = document.querySelector('input[name="salesAmount"]');
+        const floatImpactField = document.querySelector('select[name="floatImpact"]');
         if (!form || !serviceTypeField || !transactionValueField || !salesAmountField) {
           return;
         }
@@ -304,15 +305,61 @@
           "Cash In",
           "Cash Out",
           "Send Money",
+          "Receive Money / Remittance",
           "Merchant Pay / Bill Pay",
+          "ECG / Utility Payment",
+          "School Fees / Institutional Payment",
           "Airtime / Data",
           "Wallet Top-Up",
+          "SIM Sale",
+          "SIM Replacement",
+          "SIM Sale / Replacement",
+          "SIM Registration / Update",
+          "PIN Reset / Account Support",
+          "Statement / Balance Check",
+          "Bank To Wallet",
+          "Wallet To Bank",
         ]);
+        const suggestedImpactMap = {
+          "Cash In": "Cash In",
+          "Send Money": "Cash In",
+          "Merchant Pay / Bill Pay": "Cash In",
+          "ECG / Utility Payment": "Cash In",
+          "School Fees / Institutional Payment": "Cash In",
+          "Airtime / Data": "Cash In",
+          "Wallet Top-Up": "Cash In",
+          "SIM Sale": "Cash In",
+          "SIM Replacement": "Cash In",
+          "SIM Sale / Replacement": "Cash In",
+          "SIM Registration / Update": "Cash In",
+          "PIN Reset / Account Support": "Cash In",
+          "Statement / Balance Check": "Cash In",
+          "Cash Out": "Cash Out",
+          "Receive Money / Remittance": "Cash Out",
+          "Bank To Wallet": "No Cash Movement",
+          "Wallet To Bank": "No Cash Movement",
+          "Other Service": "No Cash Movement",
+        };
+        let lastSuggestedImpact = "";
 
         function parseNumber(value) {
           const parsed = Number.parseFloat(value || "0");
           return Number.isFinite(parsed) ? parsed : 0;
         }
+
+        function updateSuggestedFloatImpact() {
+          if (!floatImpactField) {
+            return;
+          }
+          const suggestedImpact = suggestedImpactMap[serviceTypeField.value || ""] || "No Cash Movement";
+          if (!floatImpactField.value || floatImpactField.value === lastSuggestedImpact) {
+            floatImpactField.value = suggestedImpact;
+          }
+          lastSuggestedImpact = suggestedImpact;
+        }
+
+        serviceTypeField.addEventListener("change", updateSuggestedFloatImpact);
+        updateSuggestedFloatImpact();
 
         form.addEventListener("submit", function (event) {
           const transactionValue = parseNumber(transactionValueField.value);

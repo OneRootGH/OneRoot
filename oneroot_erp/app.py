@@ -3042,10 +3042,192 @@ MOBILE_MONEY_FEE_BASED_SERVICE_TYPES = {
     "Cash In",
     "Cash Out",
     "Send Money",
+    "Receive Money / Remittance",
     "Merchant Pay / Bill Pay",
+    "ECG / Utility Payment",
+    "School Fees / Institutional Payment",
     "Airtime / Data",
     "Wallet Top-Up",
+    "SIM Sale",
+    "SIM Replacement",
+    "SIM Sale / Replacement",
+    "SIM Registration / Update",
+    "PIN Reset / Account Support",
+    "Statement / Balance Check",
+    "Bank To Wallet",
+    "Wallet To Bank",
 }
+
+MOBILE_MONEY_DEFAULT_FLOAT_IMPACT = {
+    "Cash In": "Cash In",
+    "Send Money": "Cash In",
+    "Merchant Pay / Bill Pay": "Cash In",
+    "ECG / Utility Payment": "Cash In",
+    "School Fees / Institutional Payment": "Cash In",
+    "Airtime / Data": "Cash In",
+    "Wallet Top-Up": "Cash In",
+    "SIM Sale": "Cash In",
+    "SIM Replacement": "Cash In",
+    "SIM Sale / Replacement": "Cash In",
+    "SIM Registration / Update": "Cash In",
+    "PIN Reset / Account Support": "Cash In",
+    "Statement / Balance Check": "Cash In",
+    "Cash Out": "Cash Out",
+    "Receive Money / Remittance": "Cash Out",
+    "Bank To Wallet": "No Cash Movement",
+    "Wallet To Bank": "No Cash Movement",
+    "Other Service": "No Cash Movement",
+}
+
+
+def mobile_money_default_float_impact(service_type: Any) -> str:
+    return MOBILE_MONEY_DEFAULT_FLOAT_IMPACT.get(normalize_text(service_type), "No Cash Movement")
+
+
+def mobile_money_resolved_float_impact(payload: dict[str, Any]) -> str:
+    explicit_value = normalize_text(payload.get("floatImpact"))
+    if explicit_value in {"Cash In", "Cash Out", "No Cash Movement"}:
+        return explicit_value
+    return mobile_money_default_float_impact(payload.get("serviceType"))
+
+
+def mobile_money_transaction_breakdown(records: list[ModuleRecord | dict[str, Any]]) -> dict[str, Any]:
+    transaction_count = 0
+    completed_count = 0
+    pending_count = 0
+    reversed_count = 0
+    cancelled_count = 0
+    other_count = 0
+    handled_value_total = 0.0
+    fee_total = 0.0
+    cost_total = 0.0
+    profit_total = 0.0
+    cash_in_total = 0.0
+    cash_out_total = 0.0
+    no_cash_movement_total = 0.0
+    service_fee_totals: dict[str, float] = defaultdict(float)
+
+    for record in records:
+        payload = dict(record.payload or {}) if isinstance(record, ModuleRecord) else dict(record or {})
+        status_value = normalize_text(payload.get("status")).lower()
+        transaction_count += 1
+        if mobile_money_transaction_is_completed(payload):
+            completed_count += 1
+        elif status_value == "pending":
+            pending_count += 1
+        elif status_value == "reversed":
+            reversed_count += 1
+        elif status_value == "cancelled":
+            cancelled_count += 1
+        else:
+            other_count += 1
+
+        if not mobile_money_transaction_is_completed(payload):
+            continue
+
+        transaction_value = round(parse_amount(payload.get("transactionValue")), 2)
+        sales_amount = round(parse_amount(payload.get("salesAmount")), 2)
+        direct_cost = round(parse_amount(payload.get("costAmount")), 2)
+        profit_amount = round(mobile_money_transaction_profit(payload), 2)
+        float_impact = mobile_money_resolved_float_impact(payload)
+        service_type = normalize_text(payload.get("serviceType")) or "Other Service"
+
+        handled_value_total = round(handled_value_total + transaction_value, 2)
+        fee_total = round(fee_total + sales_amount, 2)
+        cost_total = round(cost_total + direct_cost, 2)
+        profit_total = round(profit_total + profit_amount, 2)
+        service_fee_totals[service_type] = round(service_fee_totals[service_type] + sales_amount, 2)
+
+        if float_impact == "Cash In":
+            cash_in_total = round(cash_in_total + transaction_value, 2)
+        elif float_impact == "Cash Out":
+            cash_out_total = round(cash_out_total + transaction_value, 2)
+        else:
+            no_cash_movement_total = round(no_cash_movement_total + transaction_value, 2)
+
+    net_cash_movement_total = round(cash_in_total + fee_total - cash_out_total, 2)
+    average_fee = round(fee_total / completed_count, 2) if completed_count > 0 else 0.0
+    top_service_type = max(service_fee_totals.items(), key=lambda item: item[1])[0] if service_fee_totals else "No Completed Transactions"
+
+    return {
+        "transactionCount": transaction_count,
+        "completedCount": completed_count,
+        "pendingCount": pending_count,
+        "reversedCount": reversed_count,
+        "cancelledCount": cancelled_count,
+        "otherCount": other_count,
+        "handledValueTotal": handled_value_total,
+        "feeTotal": fee_total,
+        "costTotal": cost_total,
+        "profitTotal": profit_total,
+        "cashInValueTotal": cash_in_total,
+        "cashOutValueTotal": cash_out_total,
+        "noCashMovementValueTotal": no_cash_movement_total,
+        "netCashMovementTotal": net_cash_movement_total,
+        "averageFee": average_fee,
+        "topServiceType": top_service_type,
+        "serviceFeeTotals": dict(service_fee_totals),
+        "hasData": bool(transaction_count),
+    }
+
+
+def mobile_money_reconciliation_breakdown(records: list[ModuleRecord | dict[str, Any]]) -> dict[str, Any]:
+    record_count = 0
+    opening_cash_total = 0.0
+    cash_top_up_total = 0.0
+    cash_removed_total = 0.0
+    cash_in_total = 0.0
+    cash_out_total = 0.0
+    service_fees_total = 0.0
+    operating_expense_total = 0.0
+    expected_closing_total = 0.0
+    closing_counted_total = 0.0
+    variance_total = 0.0
+    balanced_count = 0
+    statuses: set[str] = set()
+
+    for record in records:
+        payload = dict(record.payload or {}) if isinstance(record, ModuleRecord) else dict(record or {})
+        record_count += 1
+        opening_cash_total = round(opening_cash_total + parse_amount(payload.get("openingCash")), 2)
+        cash_top_up_total = round(cash_top_up_total + parse_amount(payload.get("cashTopUp")), 2)
+        cash_removed_total = round(cash_removed_total + parse_amount(payload.get("cashRemoved")), 2)
+        cash_in_total = round(cash_in_total + parse_amount(payload.get("cashInValue")), 2)
+        cash_out_total = round(cash_out_total + parse_amount(payload.get("cashOutValue")), 2)
+        service_fees_total = round(service_fees_total + parse_amount(payload.get("serviceFees")), 2)
+        operating_expense_total = round(operating_expense_total + parse_amount(payload.get("operatingExpense")), 2)
+        expected_closing_total = round(expected_closing_total + mobile_money_expected_closing(payload), 2)
+        closing_counted_total = round(closing_counted_total + parse_amount(payload.get("closingCashCounted")), 2)
+        variance = mobile_money_variance(payload)
+        variance_total = round(variance_total + variance, 2)
+        status_label = mobile_money_status(payload)
+        statuses.add(status_label)
+        if status_label == "Balanced":
+            balanced_count += 1
+
+    if not record_count:
+        status_summary = "No Reconciliation"
+    elif len(statuses) == 1:
+        status_summary = next(iter(statuses))
+    else:
+        status_summary = "Mixed"
+
+    return {
+        "recordCount": record_count,
+        "openingCashTotal": opening_cash_total,
+        "cashTopUpTotal": cash_top_up_total,
+        "cashRemovedTotal": cash_removed_total,
+        "cashInValueTotal": cash_in_total,
+        "cashOutValueTotal": cash_out_total,
+        "serviceFeesTotal": service_fees_total,
+        "operatingExpenseTotal": operating_expense_total,
+        "expectedClosingTotal": expected_closing_total,
+        "closingCountedTotal": closing_counted_total,
+        "varianceTotal": variance_total,
+        "balancedCount": balanced_count,
+        "statusLabel": status_summary,
+        "hasData": bool(record_count),
+    }
 
 
 def mobile_money_transaction_day_rollup(
@@ -3089,32 +3271,21 @@ def mobile_money_transaction_day_rollup(
             continue
         completed_records.append(payload)
 
-    handled_value_total = round(sum(parse_amount(item.get("transactionValue")) for item in completed_records), 2)
-    fee_total = round(sum(parse_amount(item.get("salesAmount")) for item in completed_records), 2)
-    cost_total = round(sum(parse_amount(item.get("costAmount")) for item in completed_records), 2)
-    profit_total = round(sum(mobile_money_transaction_profit(item) for item in completed_records), 2)
-    cash_in_total = 0.0
-    cash_out_total = 0.0
-    for item in completed_records:
-        handled_value = parse_amount(item.get("transactionValue"))
-        float_impact = normalize_text(item.get("floatImpact"))
-        service_type = normalize_text(item.get("serviceType"))
-        if float_impact == "Cash In" or service_type == "Cash In":
-            cash_in_total += handled_value
-        elif float_impact == "Cash Out" or service_type == "Cash Out":
-            cash_out_total += handled_value
+    transaction_summary = mobile_money_transaction_breakdown(completed_records)
 
     return {
         "date": target_date.isoformat(),
         "provider": clean_provider or "MTN Mobile Money",
-        "completedCount": len(completed_records),
-        "handledValueTotal": round(handled_value_total, 2),
-        "cashInValueTotal": round(cash_in_total, 2),
-        "cashOutValueTotal": round(cash_out_total, 2),
-        "feeTotal": round(fee_total, 2),
-        "costTotal": round(cost_total, 2),
-        "profitTotal": round(profit_total, 2),
-        "hasData": bool(completed_records),
+        "completedCount": transaction_summary["completedCount"],
+        "handledValueTotal": transaction_summary["handledValueTotal"],
+        "cashInValueTotal": transaction_summary["cashInValueTotal"],
+        "cashOutValueTotal": transaction_summary["cashOutValueTotal"],
+        "noCashMovementValueTotal": transaction_summary["noCashMovementValueTotal"],
+        "netCashMovementTotal": transaction_summary["netCashMovementTotal"],
+        "feeTotal": transaction_summary["feeTotal"],
+        "costTotal": transaction_summary["costTotal"],
+        "profitTotal": transaction_summary["profitTotal"],
+        "hasData": transaction_summary["hasData"],
     }
 
 
@@ -3173,25 +3344,108 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
             {"label": "Profit", "value": format_currency(total_profit), "note": "Realized gross profit in this view"},
         ]
     elif definition.key == "mobile_money_transactions":
-        principal_total = round(sum(parse_amount((record.payload or {}).get("transactionValue")) for record in records), 2)
-        total_cost = round(sum(parse_amount((record.payload or {}).get("costAmount")) for record in records), 2)
-        total_profit = round(sum(mobile_money_transaction_profit(record.payload or {}) for record in records), 2)
-        completed_count = sum(1 for record in records if mobile_money_transaction_is_completed(record.payload or {}))
+        mobile_money_summary = mobile_money_transaction_breakdown(records)
         cards = [
-            {"label": "MoMo Transactions", "value": f"{len(records)}", "note": "Customer transactions captured in this view"},
-            {"label": "Handled Value", "value": format_currency(principal_total), "note": "Transaction face value processed"},
-            {"label": "Fees Earned", "value": format_currency(total_amount), "note": f"Completed transactions: {completed_count}"},
-            {"label": "Profit", "value": format_currency(total_profit), "note": f"Direct service cost: {format_currency(total_cost)}"},
+            {
+                "label": "MoMo Transactions",
+                "value": f"{mobile_money_summary['transactionCount']}",
+                "note": (
+                    f"Completed {mobile_money_summary['completedCount']} · Pending {mobile_money_summary['pendingCount']} · "
+                    f"Reversed {mobile_money_summary['reversedCount']} · Cancelled {mobile_money_summary['cancelledCount']}"
+                ),
+            },
+            {
+                "label": "Handled Value",
+                "value": format_currency(mobile_money_summary["handledValueTotal"]),
+                "note": f"No-cash services: {format_currency(mobile_money_summary['noCashMovementValueTotal'])}",
+            },
+            {
+                "label": "Cash In Total",
+                "value": format_currency(mobile_money_summary["cashInValueTotal"]),
+                "note": "Customer cash collected into the till from completed MoMo services.",
+            },
+            {
+                "label": "Cash Out Total",
+                "value": format_currency(mobile_money_summary["cashOutValueTotal"]),
+                "note": "Cash paid out to customers from completed MoMo services.",
+            },
+            {
+                "label": "Fees Earned",
+                "value": format_currency(mobile_money_summary["feeTotal"]),
+                "note": (
+                    f"Average fee {format_currency(mobile_money_summary['averageFee'])} · "
+                    f"Top service {mobile_money_summary['topServiceType']}"
+                ),
+            },
+            {
+                "label": "Net Cash Movement",
+                "value": format_currency(mobile_money_summary["netCashMovementTotal"]),
+                "note": "Cash In + Fees Earned - Cash Out before float top-ups or cash removals.",
+            },
+            {
+                "label": "Direct Cost",
+                "value": format_currency(mobile_money_summary["costTotal"]),
+                "note": "Direct charges linked to the completed mobile money transactions in this view.",
+            },
+            {
+                "label": "Profit",
+                "value": format_currency(mobile_money_summary["profitTotal"]),
+                "note": "Fees earned minus direct cost for completed mobile money transactions.",
+            },
         ]
     elif definition.key == "mobile_money_reconciliations":
-        expected_total = round(sum(mobile_money_expected_closing(record.payload or {}) for record in records), 2)
-        fee_total = round(sum(parse_amount((record.payload or {}).get("serviceFees")) for record in records), 2)
-        balanced_count = sum(1 for record in records if mobile_money_status(record.payload or {}) == "Balanced")
+        reconciliation_summary = mobile_money_reconciliation_breakdown(records)
         cards = [
-            {"label": "Reconciliation Days", "value": f"{len(records)}", "note": "Saved daily float closeouts in this view"},
-            {"label": "Service Fees", "value": format_currency(fee_total), "note": "Fees recorded on reconciliation rows"},
-            {"label": "Expected Closing", "value": format_currency(expected_total), "note": "Computed expected closing cash across these rows"},
-            {"label": "Balanced Days", "value": f"{balanced_count}", "note": f"Variance total: {format_currency(total_amount)}"},
+            {
+                "label": "Reconciliation Days",
+                "value": f"{reconciliation_summary['recordCount']}",
+                "note": f"Current status: {reconciliation_summary['statusLabel']}",
+            },
+            {
+                "label": "Opening Float",
+                "value": format_currency(reconciliation_summary["openingCashTotal"]),
+                "note": "Opening cash available before any top-up or customer transaction.",
+            },
+            {
+                "label": "Cash Top-Up",
+                "value": format_currency(reconciliation_summary["cashTopUpTotal"]),
+                "note": "Additional cash added to float during the filtered reconciliation period.",
+            },
+            {
+                "label": "Cash Removed",
+                "value": format_currency(reconciliation_summary["cashRemovedTotal"]),
+                "note": "Cash taken out from float for banking, handover, or safekeeping.",
+            },
+            {
+                "label": "Cash In Total",
+                "value": format_currency(reconciliation_summary["cashInValueTotal"]),
+                "note": "Full customer value deposited into wallets according to reconciliation rows.",
+            },
+            {
+                "label": "Cash Out Total",
+                "value": format_currency(reconciliation_summary["cashOutValueTotal"]),
+                "note": "Full customer value paid out from the float according to reconciliation rows.",
+            },
+            {
+                "label": "Service Fees",
+                "value": format_currency(reconciliation_summary["serviceFeesTotal"]),
+                "note": f"Operating expense: {format_currency(reconciliation_summary['operatingExpenseTotal'])}",
+            },
+            {
+                "label": "Expected Closing",
+                "value": format_currency(reconciliation_summary["expectedClosingTotal"]),
+                "note": "Calculated closing cash based on opening float, movements, fees, and expenses.",
+            },
+            {
+                "label": "Counted Closing",
+                "value": format_currency(reconciliation_summary["closingCountedTotal"]),
+                "note": f"Balanced days: {reconciliation_summary['balancedCount']}",
+            },
+            {
+                "label": "Variance",
+                "value": format_currency(reconciliation_summary["varianceTotal"]),
+                "note": "Difference between expected closing and counted closing cash.",
+            },
         ]
     elif definition.key == "forecast_plans":
         total_target = round(sum(parse_amount((record.payload or {}).get("revenueTarget")) for record in records), 2)
@@ -3593,10 +3847,20 @@ def mobile_money_day_snapshot(db_session, target_date: date | None) -> dict[str,
             "transactionCount": 0,
             "completedTransactionCount": 0,
             "handledValueTotal": 0.0,
+            "cashInValueTotal": 0.0,
+            "cashOutValueTotal": 0.0,
+            "noCashMovementValueTotal": 0.0,
+            "netCashMovementTotal": 0.0,
             "transactionFeeTotal": 0.0,
             "transactionCostTotal": 0.0,
             "transactionProfitTotal": 0.0,
+            "pendingTransactionCount": 0,
+            "reversedTransactionCount": 0,
+            "cancelledTransactionCount": 0,
             "reconciliationCount": 0,
+            "openingCashTotal": 0.0,
+            "cashTopUpTotal": 0.0,
+            "cashRemovedTotal": 0.0,
             "reconciliationFeeTotal": 0.0,
             "operatingExpenseTotal": 0.0,
             "expectedClosingTotal": 0.0,
@@ -3635,66 +3899,31 @@ def mobile_money_day_snapshot(db_session, target_date: date | None) -> dict[str,
         .order_by(desc(ModuleRecord.updated_at))
     ).all()
 
-    completed_transactions = [record for record in transaction_records if mobile_money_transaction_is_completed(record.payload or {})]
-    transaction_fee_total = round(
-        sum(parse_amount((record.payload or {}).get("salesAmount")) for record in completed_transactions),
-        2,
-    )
-    transaction_cost_total = round(
-        sum(parse_amount((record.payload or {}).get("costAmount")) for record in completed_transactions),
-        2,
-    )
-    transaction_profit_total = round(
-        sum(mobile_money_transaction_profit(record.payload or {}) for record in completed_transactions),
-        2,
-    )
-    handled_value_total = round(
-        sum(parse_amount((record.payload or {}).get("transactionValue")) for record in completed_transactions),
-        2,
-    )
+    transaction_summary = mobile_money_transaction_breakdown(transaction_records)
+    reconciliation_summary = mobile_money_reconciliation_breakdown(reconciliation_records)
 
-    reconciliation_fee_total = round(
-        sum(parse_amount((record.payload or {}).get("serviceFees")) for record in reconciliation_records),
-        2,
-    )
-    operating_expense_total = round(
-        sum(parse_amount((record.payload or {}).get("operatingExpense")) for record in reconciliation_records),
-        2,
-    )
-    expected_closing_total = round(
-        sum(mobile_money_expected_closing(record.payload or {}) for record in reconciliation_records),
-        2,
-    )
-    closing_counted_total = round(
-        sum(parse_amount((record.payload or {}).get("closingCashCounted")) for record in reconciliation_records),
-        2,
-    )
-    variance_total = round(sum(mobile_money_variance(record.payload or {}) for record in reconciliation_records), 2)
-    balanced_count = sum(1 for record in reconciliation_records if mobile_money_status(record.payload or {}) == "Balanced")
-
-    uses_reconciliation_fallback = transaction_fee_total <= 0 and reconciliation_fee_total > 0
-    recognized_sales_total = transaction_fee_total
-    recognized_cost_total = transaction_cost_total
-    recognized_profit_total = transaction_profit_total
-    recognized_transaction_count = len(completed_transactions)
-    recognized_record_count = len(completed_transactions)
+    uses_reconciliation_fallback = transaction_summary["feeTotal"] <= 0 and reconciliation_summary["serviceFeesTotal"] > 0
+    recognized_sales_total = transaction_summary["feeTotal"]
+    recognized_cost_total = transaction_summary["costTotal"]
+    recognized_profit_total = transaction_summary["profitTotal"]
+    recognized_transaction_count = transaction_summary["completedCount"]
+    recognized_record_count = transaction_summary["completedCount"]
     recognized_source_type = "mobile-money-transaction"
     recognized_source_label = "Mobile Money Transaction"
 
     if uses_reconciliation_fallback:
-        recognized_sales_total = reconciliation_fee_total
-        recognized_cost_total = operating_expense_total
-        recognized_profit_total = round(reconciliation_fee_total - operating_expense_total, 2)
-        recognized_transaction_count = 1 if reconciliation_fee_total > 0 else 0
+        recognized_sales_total = reconciliation_summary["serviceFeesTotal"]
+        recognized_cost_total = reconciliation_summary["operatingExpenseTotal"]
+        recognized_profit_total = round(
+            reconciliation_summary["serviceFeesTotal"] - reconciliation_summary["operatingExpenseTotal"],
+            2,
+        )
+        recognized_transaction_count = 1 if reconciliation_summary["serviceFeesTotal"] > 0 else 0
         recognized_record_count = 1 if reconciliation_records else 0
         recognized_source_type = "mobile-money-reconciliation"
         recognized_source_label = "Mobile Money Reconciliation"
 
-    if not reconciliation_records:
-        status_label = "No Reconciliation"
-    else:
-        distinct_statuses = {mobile_money_status(record.payload or {}) for record in reconciliation_records}
-        status_label = distinct_statuses.pop() if len(distinct_statuses) == 1 else "Mixed"
+    status_label = reconciliation_summary["statusLabel"]
 
     latest_record = next((record for record in transaction_records if record.updated_at), None) or next(
         (record for record in reconciliation_records if record.updated_at),
@@ -3707,9 +3936,9 @@ def mobile_money_day_snapshot(db_session, target_date: date | None) -> dict[str,
 
     if uses_reconciliation_fallback:
         summary_note = "Using reconciliation fees in the daily sales total because no completed mobile money transactions were synced for this day."
-    elif transaction_fee_total > 0 and reconciliation_records:
+    elif transaction_summary["feeTotal"] > 0 and reconciliation_records:
         summary_note = "Completed mobile money transactions are in the daily sales total and checked against reconciliation."
-    elif transaction_fee_total > 0:
+    elif transaction_summary["feeTotal"] > 0:
         summary_note = "Completed mobile money transactions are reflected in the daily sales total."
     elif reconciliation_records:
         summary_note = "Reconciliation exists for this day, but no service fees were recorded yet."
@@ -3718,19 +3947,29 @@ def mobile_money_day_snapshot(db_session, target_date: date | None) -> dict[str,
 
     return {
         "date": target_date.isoformat(),
-        "transactionCount": len(transaction_records),
-        "completedTransactionCount": len(completed_transactions),
-        "handledValueTotal": handled_value_total,
-        "transactionFeeTotal": transaction_fee_total,
-        "transactionCostTotal": transaction_cost_total,
-        "transactionProfitTotal": transaction_profit_total,
-        "reconciliationCount": len(reconciliation_records),
-        "reconciliationFeeTotal": reconciliation_fee_total,
-        "operatingExpenseTotal": operating_expense_total,
-        "expectedClosingTotal": expected_closing_total,
-        "closingCountedTotal": closing_counted_total,
-        "varianceTotal": variance_total,
-        "balancedCount": balanced_count,
+        "transactionCount": transaction_summary["transactionCount"],
+        "completedTransactionCount": transaction_summary["completedCount"],
+        "pendingTransactionCount": transaction_summary["pendingCount"],
+        "reversedTransactionCount": transaction_summary["reversedCount"],
+        "cancelledTransactionCount": transaction_summary["cancelledCount"],
+        "handledValueTotal": transaction_summary["handledValueTotal"],
+        "cashInValueTotal": transaction_summary["cashInValueTotal"],
+        "cashOutValueTotal": transaction_summary["cashOutValueTotal"],
+        "noCashMovementValueTotal": transaction_summary["noCashMovementValueTotal"],
+        "netCashMovementTotal": transaction_summary["netCashMovementTotal"],
+        "transactionFeeTotal": transaction_summary["feeTotal"],
+        "transactionCostTotal": transaction_summary["costTotal"],
+        "transactionProfitTotal": transaction_summary["profitTotal"],
+        "reconciliationCount": reconciliation_summary["recordCount"],
+        "openingCashTotal": reconciliation_summary["openingCashTotal"],
+        "cashTopUpTotal": reconciliation_summary["cashTopUpTotal"],
+        "cashRemovedTotal": reconciliation_summary["cashRemovedTotal"],
+        "reconciliationFeeTotal": reconciliation_summary["serviceFeesTotal"],
+        "operatingExpenseTotal": reconciliation_summary["operatingExpenseTotal"],
+        "expectedClosingTotal": reconciliation_summary["expectedClosingTotal"],
+        "closingCountedTotal": reconciliation_summary["closingCountedTotal"],
+        "varianceTotal": reconciliation_summary["varianceTotal"],
+        "balancedCount": reconciliation_summary["balancedCount"],
         "statusLabel": status_label,
         "recognizedSalesTotal": round(recognized_sales_total, 2),
         "recognizedCostTotal": round(recognized_cost_total, 2),
@@ -5286,6 +5525,13 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         "mobile_money_balanced_count": mobile_money_snapshot["balancedCount"] if mobile_money_in_scope else 0,
         "mobile_money_operating_expense": mobile_money_snapshot["operatingExpenseTotal"] if mobile_money_in_scope else 0.0,
         "mobile_money_handled_value": mobile_money_snapshot["handledValueTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_cash_in_value": mobile_money_snapshot["cashInValueTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_cash_out_value": mobile_money_snapshot["cashOutValueTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_no_cash_value": mobile_money_snapshot["noCashMovementValueTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_net_cash_movement": mobile_money_snapshot["netCashMovementTotal"] if mobile_money_in_scope else 0.0,
+        "mobile_money_pending_transactions": mobile_money_snapshot["pendingTransactionCount"] if mobile_money_in_scope else 0,
+        "mobile_money_reversed_transactions": mobile_money_snapshot["reversedTransactionCount"] if mobile_money_in_scope else 0,
+        "mobile_money_cancelled_transactions": mobile_money_snapshot["cancelledTransactionCount"] if mobile_money_in_scope else 0,
         "sales_area_chart": build_chart_rows(
             [
                 {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["salesTotal"]}
@@ -9706,6 +9952,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["businessAreaId"] = "mobile-money"
             elif module_key == "mobile_money_transactions":
                 payload["businessAreaId"] = "mobile-money"
+                payload["floatImpact"] = normalize_text(payload.get("floatImpact")) or mobile_money_default_float_impact(payload.get("serviceType"))
                 payload["profitAmount"] = round(parse_amount(payload.get("salesAmount")) - parse_amount(payload.get("costAmount")), 2)
             elif module_key == "sales":
                 payload["sourceType"] = normalize_text(payload.get("sourceType")) or "manual-sale"
@@ -9747,7 +9994,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
             record_payload.setdefault("provider", "MTN Mobile Money")
-            record_payload.setdefault("floatImpact", "No Cash Movement")
+            record_payload.setdefault("floatImpact", mobile_money_default_float_impact(record_payload.get("serviceType")))
             record_payload.setdefault("status", "Completed")
             record_payload["profitAmount"] = round(parse_amount(record_payload.get("salesAmount")) - parse_amount(record_payload.get("costAmount")), 2)
         if module_key == "apartments":
@@ -11026,6 +11273,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "user_role_labels": USER_ROLE_LABELS,
             "staff_role_label": staff_role_label,
             "staff_role_labels": STAFF_WORK_ROLE_LABELS,
+            "mobile_money_expected_closing": mobile_money_expected_closing,
             "static_asset_version": current_static_asset_version(),
         }
 

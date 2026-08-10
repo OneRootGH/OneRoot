@@ -95,7 +95,22 @@
     <article class="metric-card">
       <span>Handled Value</span>
       <strong>{{ mobile_money_handled_value|currency }}</strong>
-      <small>Transaction face value processed.</small>
+      <small>No-cash movement services {{ mobile_money_no_cash_value|currency }}.</small>
+    </article>
+    <article class="metric-card">
+      <span>MoMo Cash In</span>
+      <strong>{{ mobile_money_cash_in_value|currency }}</strong>
+      <small>Customer cash collected into the float from completed transactions.</small>
+    </article>
+    <article class="metric-card">
+      <span>MoMo Cash Out</span>
+      <strong>{{ mobile_money_cash_out_value|currency }}</strong>
+      <small>Cash paid out to customers from completed transactions.</small>
+    </article>
+    <article class="metric-card">
+      <span>Net Cash Movement</span>
+      <strong>{{ mobile_money_net_cash_movement|currency }}</strong>
+      <small>Cash In + fees - Cash Out for completed mobile money transactions.</small>
     </article>
     <article class="metric-card">
       <span>Mobile Money Profit</span>
@@ -108,6 +123,11 @@
       <small>
         Expected {{ mobile_money_expected_closing|currency }} · Counted {{ mobile_money_closing_counted|currency }} · Variance {{ mobile_money_variance|currency }}
       </small>
+    </article>
+    <article class="metric-card">
+      <span>Pending / Issues</span>
+      <strong>{{ mobile_money_pending_transactions }} / {{ mobile_money_reversed_transactions }}</strong>
+      <small>Pending and reversed MoMo transactions · Cancelled {{ mobile_money_cancelled_transactions }}</small>
     </article>
   </section>
 
