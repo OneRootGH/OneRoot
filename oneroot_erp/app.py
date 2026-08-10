@@ -60,7 +60,9 @@ DATABASE_INIT_DELAY_SECONDS = 1
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
 SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
-POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "fresh-foods-drinks", "kitchen"}
+# Food Sales on the POS ribbon should reflect kitchen trading only:
+# online food orders, direct kitchen checkout, and manual OneRoot Kitchen sales.
+POS_FOOD_SALES_AREA_IDS = {"kitchen"}
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
 SERVICE_ITEM_FIELD_MAP = {
