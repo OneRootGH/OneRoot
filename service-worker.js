@@ -1,7 +1,9 @@
-const CACHE_NAME = "oneroot-platform-v67";
+const CACHE_NAME = "oneroot-platform-v68";
 const APP_SHELL_ASSETS = [
   "/",
   "/shop",
+  "/food",
+  "/kitchen",
   "/services",
   "/laundry",
   "/equipment",
@@ -15,7 +17,7 @@ const APP_SHELL_ASSETS = [
   "/icon.svg",
   "/assets/oneroot-icon-transparent.png",
   "/website/styles.css?v=20260808c",
-  "/website/app.js?v=20260808c",
+  "/website/app.js?v=20260810a",
   "/website/pwa.js?v=20260801c",
   "/static/app.css",
   "/static/oneroot-mark.svg"

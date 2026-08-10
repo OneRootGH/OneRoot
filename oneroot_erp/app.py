@@ -94,6 +94,247 @@ ICONIFY_API_BASE = "https://api.iconify.design"
 PUBLIC_JOB_VACANCY_STATUSES = {
     status for status, _label in JOB_VACANCY_STATUSES if status not in {"Draft", "Filled", "Closed"}
 }
+KITCHEN_MENU_SOURCE_ID = "oneroot-kitchen-menu"
+KITCHEN_MENU_PRODUCTS = [
+    {
+        "id": "kitchen-main-jollof-regular",
+        "name": "Jollof Rice - Regular Serve",
+        "category": "Main Meals",
+        "salesPrice": 10.0,
+        "notes": "Starting kitchen price for one regular serve.",
+    },
+    {
+        "id": "kitchen-main-jollof-large",
+        "name": "Jollof Rice - Large Serve",
+        "category": "Main Meals",
+        "salesPrice": 15.0,
+        "notes": "Larger portion. Add Takeaway Pack if it should be packed to go.",
+    },
+    {
+        "id": "kitchen-addon-takeaway-pack",
+        "name": "Takeaway Pack",
+        "category": "Packaging & Add-ons",
+        "salesPrice": 3.0,
+        "notes": "Use this add-on when the meal should be packed for takeaway.",
+    },
+    {
+        "id": "kitchen-main-plain-rice-stew",
+        "name": "Plain Rice With Stew",
+        "category": "Main Meals",
+        "salesPrice": 10.0,
+        "notes": "Starting kitchen price for one plate.",
+    },
+    {
+        "id": "kitchen-main-fried-rice",
+        "name": "Fried Rice",
+        "category": "Main Meals",
+        "salesPrice": 25.0,
+        "notes": "Starting kitchen price for one plate.",
+    },
+    {
+        "id": "kitchen-main-banku-soup",
+        "name": "Banku With Soup",
+        "category": "Main Meals",
+        "salesPrice": 5.0,
+        "notes": "Price is per ball. Increase quantity to match the number of balls needed.",
+    },
+    {
+        "id": "kitchen-main-banku-stew",
+        "name": "Banku With Stew",
+        "category": "Main Meals",
+        "salesPrice": 5.0,
+        "notes": "Price is per ball. Increase quantity to match the number of balls needed.",
+    },
+    {
+        "id": "kitchen-main-spaghetti-indomie",
+        "name": "Spaghetti / Indomie",
+        "category": "Main Meals",
+        "salesPrice": 20.0,
+        "notes": "Starting kitchen price for one plate.",
+    },
+    {
+        "id": "kitchen-protein-chicken-thigh-regular",
+        "name": "Fried Chicken - Thigh (Regular)",
+        "category": "Proteins & Extras",
+        "salesPrice": 10.0,
+        "notes": "Regular portion.",
+    },
+    {
+        "id": "kitchen-protein-chicken-thigh-large",
+        "name": "Fried Chicken - Thigh (Large)",
+        "category": "Proteins & Extras",
+        "salesPrice": 15.0,
+        "notes": "Large portion.",
+    },
+    {
+        "id": "kitchen-protein-chicken-drumstick-regular",
+        "name": "Fried Chicken - Drumstick (Regular)",
+        "category": "Proteins & Extras",
+        "salesPrice": 10.0,
+        "notes": "Regular portion.",
+    },
+    {
+        "id": "kitchen-protein-chicken-drumstick-large",
+        "name": "Fried Chicken - Drumstick (Large)",
+        "category": "Proteins & Extras",
+        "salesPrice": 15.0,
+        "notes": "Large portion.",
+    },
+    {
+        "id": "kitchen-protein-chicken-back-regular",
+        "name": "Fried Chicken - Back (Regular)",
+        "category": "Proteins & Extras",
+        "salesPrice": 7.0,
+        "notes": "Regular portion.",
+    },
+    {
+        "id": "kitchen-protein-chicken-back-large",
+        "name": "Fried Chicken - Back (Large)",
+        "category": "Proteins & Extras",
+        "salesPrice": 10.0,
+        "notes": "Large portion.",
+    },
+    {
+        "id": "kitchen-protein-fried-fish-small",
+        "name": "Fried Fish (Small)",
+        "category": "Proteins & Extras",
+        "salesPrice": 5.0,
+        "notes": "Starting size. Add quantity or leave a note if you need a larger piece.",
+    },
+    {
+        "id": "kitchen-protein-fried-fish-medium",
+        "name": "Fried Fish (Medium)",
+        "category": "Proteins & Extras",
+        "salesPrice": 10.0,
+        "notes": "Medium size. Staff can confirm larger pieces if needed.",
+    },
+    {
+        "id": "kitchen-protein-chicken-wings-soup",
+        "name": "Chicken Wings In Soup",
+        "category": "Proteins & Extras",
+        "salesPrice": 10.0,
+        "notes": "Per serving.",
+    },
+    {
+        "id": "kitchen-protein-cow-strips",
+        "name": "Cow Strips",
+        "category": "Proteins & Extras",
+        "salesPrice": 5.0,
+        "notes": "Starting kitchen price for one add-on portion.",
+    },
+    {
+        "id": "kitchen-protein-sausage",
+        "name": "Sausage",
+        "category": "Proteins & Extras",
+        "salesPrice": 3.0,
+        "notes": "Price is per piece.",
+    },
+    {
+        "id": "kitchen-protein-boiled-egg",
+        "name": "Boiled Egg",
+        "category": "Proteins & Extras",
+        "salesPrice": 3.0,
+        "notes": "Price is per egg.",
+    },
+    {
+        "id": "kitchen-side-fried-yam",
+        "name": "Fried Yam",
+        "category": "Sides",
+        "salesPrice": 5.0,
+        "notes": "Starting kitchen price for one side portion.",
+    },
+    {
+        "id": "kitchen-drink-voltic-water",
+        "name": "Voltic Water",
+        "category": "Drinks",
+        "salesPrice": 5.0,
+        "notes": "Bottle water.",
+    },
+    {
+        "id": "kitchen-drink-bel-aqua-water",
+        "name": "Bel-Aqua Water",
+        "category": "Drinks",
+        "salesPrice": 4.0,
+        "notes": "Bottle water.",
+    },
+    {
+        "id": "kitchen-drink-coca-cola",
+        "name": "Coca-Cola",
+        "category": "Drinks",
+        "salesPrice": 6.0,
+        "notes": "Cold drink.",
+    },
+    {
+        "id": "kitchen-drink-bel-cola",
+        "name": "Bel Cola",
+        "category": "Drinks",
+        "salesPrice": 4.0,
+        "notes": "Cold drink.",
+    },
+    {
+        "id": "kitchen-drink-bigoo-cola",
+        "name": "Bigoo Cola",
+        "category": "Drinks",
+        "salesPrice": 4.0,
+        "notes": "Cold drink.",
+    },
+    {
+        "id": "kitchen-drink-bigoo-apple",
+        "name": "Bigoo Apple",
+        "category": "Drinks",
+        "salesPrice": 4.0,
+        "notes": "Cold drink.",
+    },
+    {
+        "id": "kitchen-drink-bigoo-orange",
+        "name": "Bigoo Orange",
+        "category": "Drinks",
+        "salesPrice": 4.0,
+        "notes": "Cold drink.",
+    },
+    {
+        "id": "kitchen-drink-bigoo-cocktail",
+        "name": "Bigoo Cocktail",
+        "category": "Drinks",
+        "salesPrice": 4.0,
+        "notes": "Cold drink.",
+    },
+    {
+        "id": "kitchen-drink-bel-squeeze",
+        "name": "Bel Squeeze",
+        "category": "Drinks",
+        "salesPrice": 11.0,
+        "notes": "Fruit drink.",
+    },
+    {
+        "id": "kitchen-drink-bel-malt",
+        "name": "Bel Malt",
+        "category": "Drinks",
+        "salesPrice": 8.0,
+        "notes": "Malt drink.",
+    },
+    {
+        "id": "kitchen-drink-malta-guinness",
+        "name": "Malta Guinness",
+        "category": "Drinks",
+        "salesPrice": 15.0,
+        "notes": "Malt drink.",
+    },
+    {
+        "id": "kitchen-drink-kiki-cocktail",
+        "name": "Kiki Cocktail",
+        "category": "Drinks",
+        "salesPrice": 4.0,
+        "notes": "Cold drink.",
+    },
+    {
+        "id": "kitchen-drink-voltic-cool",
+        "name": "Voltic Cool",
+        "category": "Drinks",
+        "salesPrice": 0.5,
+        "notes": "Sachet water.",
+    },
+]
 
 
 def build_database_engine(database_url: str):
@@ -145,6 +386,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
             with session_factory() as bootstrap_session:
                 bootstrap_database(bootstrap_session, app_config)
                 migrate_planning_workspace(bootstrap_session)
+                sync_kitchen_menu_catalog(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 bootstrap_session.commit()
@@ -404,6 +646,11 @@ def mapped_online_product_image(name: str, category: str, area_id: str, item_typ
         )
     ):
         return iconify_svg_url("streamline-freehand-color:laundry-washing-machine", width=288, height=216)
+    if area_id == "kitchen" and any(
+        keyword in text_blob
+        for keyword in ("jollof", "rice", "banku", "stew", "soup", "spaghetti", "indomie", "yam", "meal", "takeaway")
+    ):
+        return iconify_svg_url("noto:pot-of-food", width=288, height=216)
 
     if any(keyword in text_blob for keyword in ("baby", "diaper", "wipes")):
         return iconify_svg_url("fxemoji:babybottle", width=288, height=216)
@@ -1341,6 +1588,37 @@ def backfill_pos_line_costs(db_session) -> None:
 def normalize_product_catalog(db_session) -> None:
     products = db_session.scalars(select(Product)).all()
     for product in products:
+        normalize_product_record(product)
+
+
+def sync_kitchen_menu_catalog(db_session) -> None:
+    for seed in KITCHEN_MENU_PRODUCTS:
+        product = db_session.get(Product, seed["id"])
+        is_new = product is None
+        if not product:
+            product = Product(id=seed["id"], created_at=datetime.utcnow())
+            db_session.add(product)
+
+        if product.user_created and not is_new:
+            normalize_product_record(product)
+            continue
+
+        product.source_catalog_id = KITCHEN_MENU_SOURCE_ID
+        product.name = normalize_text(seed["name"])
+        product.business_area_id = "kitchen"
+        product.category = normalize_text(seed["category"]) or "Kitchen"
+        product.source_category = "OneRoot Kitchen Menu"
+        product.item_type = "service"
+        product.track_inventory = False
+        product.quantity_on_hand = 0
+        product.quantity_known = False
+        product.min_stock_level = 0
+        product.sales_price = round(parse_amount(seed.get("salesPrice")), 2)
+        product.cost_price = round(parse_amount(seed.get("costPrice")), 2)
+        product.notes = normalize_text(seed.get("notes"))
+        product.active = True if is_new else bool(product.active)
+        product.user_created = False
+        product.updated_at = datetime.utcnow()
         normalize_product_record(product)
 
 
@@ -4519,6 +4797,22 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
 
     top_area = next((row for row in area_rows if row["salesTotal"] > 0), None)
     top_source = source_rows[0] if source_rows else None
+    mobile_money_area = next((row for row in area_rows if row["areaId"] == "mobile-money"), None)
+    mobile_money_source = next((row for row in source_rows if row["sourceType"] == "mobile-money-transaction"), None)
+    mobile_money_total = round(
+        mobile_money_source["salesTotal"] if mobile_money_source else (mobile_money_area["salesTotal"] if mobile_money_area else 0.0),
+        2,
+    )
+    mobile_money_profit = round(
+        mobile_money_source["profitTotal"] if mobile_money_source else (mobile_money_area["profitTotal"] if mobile_money_area else 0.0),
+        2,
+    )
+    mobile_money_transactions = (
+        mobile_money_source["transactionCount"]
+        if mobile_money_source
+        else (mobile_money_area["transactionCount"] if mobile_money_area else 0)
+    )
+    mobile_money_share = round((mobile_money_total / total_sales) * 100, 2) if total_sales > 0 else 0.0
 
     return {
         "area_rows": area_rows,
@@ -4534,6 +4828,12 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         "average_sale": round(total_sales / transaction_total, 2) if transaction_total > 0 else 0.0,
         "top_area": top_area,
         "top_source": top_source,
+        "mobile_money_area": mobile_money_area,
+        "mobile_money_source": mobile_money_source,
+        "mobile_money_total": mobile_money_total,
+        "mobile_money_profit": mobile_money_profit,
+        "mobile_money_transactions": mobile_money_transactions,
+        "mobile_money_share": mobile_money_share,
         "sales_area_chart": build_chart_rows(
             [
                 {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["salesTotal"]}
@@ -5523,6 +5823,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(Product.active.is_(True))
             .order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
         ).all()
+        kitchen_catalog_exists = any(normalize_text(product.business_area_id) == "kitchen" for product in products)
         for product in products:
             if not is_orderable_area(product.business_area_id):
                 continue
@@ -5548,6 +5849,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         for item in load_service_offers():
             business_area_id = normalize_text(item.get("businessAreaId"))
             if not is_orderable_area(business_area_id):
+                continue
+            if kitchen_catalog_exists and business_area_id == "kitchen":
                 continue
             items.append(
                 {
@@ -6872,6 +7175,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/shop.html")
     def shop_page():
         return public_page("shop.html")
+
+    @app.route("/food")
+    @app.route("/food.html")
+    @app.route("/kitchen")
+    @app.route("/kitchen.html")
+    def food_page():
+        return public_page("food.html")
 
     @app.route("/services")
     @app.route("/services.html")

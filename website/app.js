@@ -328,6 +328,10 @@
           `<option value="${escapeHtml(area.id)}">${escapeHtml(area.label)}</option>`
       )
     ].join("");
+
+    if (state.filters.area) {
+      elements.catalogAreaFilter.value = state.filters.area;
+    }
   }
 
   function populatePaymentMethods() {
@@ -2453,8 +2457,12 @@
 
   function applyInitialFiltersFromLocation() {
     const params = new URLSearchParams(window.location.search);
-    state.filters.search = normalizeText(params.get("q"));
-    state.filters.area = normalizeText(params.get("area"));
-    state.filters.sort = normalizeText(params.get("sort")) || "featured";
+    const dataset = document.body?.dataset || {};
+    const defaultSearch = normalizeText(dataset.catalogDefaultSearch);
+    const defaultArea = normalizeText(dataset.catalogDefaultArea);
+    const defaultSort = normalizeText(dataset.catalogDefaultSort) || "featured";
+    state.filters.search = normalizeText(params.get("q")) || defaultSearch;
+    state.filters.area = normalizeText(params.get("area")) || defaultArea;
+    state.filters.sort = normalizeText(params.get("sort")) || defaultSort;
   }
 })();

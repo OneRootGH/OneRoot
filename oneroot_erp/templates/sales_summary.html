@@ -65,14 +65,39 @@
       <small>Direct cost attached to the sales captured</small>
     </article>
     <article class="metric-card">
+      <span>Mobile Money</span>
+      <strong>{{ mobile_money_total|currency }}</strong>
+      <small>
+        Included in the daily sales total
+        {% if mobile_money_transactions %}
+          · {{ mobile_money_transactions }} completed transaction{% if mobile_money_transactions != 1 %}s{% endif %}
+        {% else %}
+          · no completed transaction yet
+        {% endif %}
+      </small>
+    </article>
+    <article class="metric-card">
       <span>Top Area</span>
       <strong>{{ top_area.areaShort if top_area else 'No Sales' }}</strong>
       <small>{% if top_area %}{{ top_area.salesTotal|currency }} · {{ top_area.sharePercent }}% of the day{% else %}No business area has sales in this scope yet{% endif %}</small>
     </article>
+  </section>
+
+  <section class="card-grid three">
     <article class="metric-card">
       <span>Top Source</span>
       <strong>{{ top_source.sourceLabel if top_source else 'No Sales' }}</strong>
       <small>{% if top_source %}{{ top_source.salesTotal|currency }} · {{ top_source.areaCount }} area{% if top_source.areaCount != 1 %}s{% endif %}{% else %}No sales source captured in this scope yet{% endif %}</small>
+    </article>
+    <article class="metric-card">
+      <span>Mobile Money Profit</span>
+      <strong>{{ mobile_money_profit|currency }}</strong>
+      <small>{{ mobile_money_share }}% of the total day sales came from mobile money.</small>
+    </article>
+    <article class="metric-card">
+      <span>Daily Check</span>
+      <strong>All Captured</strong>
+      <small>POS, online orders, laundry, equipment rentals, apartments, and mobile money all reconcile from one daily ledger view.</small>
     </article>
   </section>
 

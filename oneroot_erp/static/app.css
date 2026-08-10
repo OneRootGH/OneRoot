@@ -551,6 +551,7 @@ a { color: inherit; text-decoration: none; }
   gap: 1rem;
   margin-bottom: 1rem;
 }
+.card-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 .card-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .card-grid.four { grid-template-columns: repeat(4, minmax(0, 1fr)); }
 .split-grid {
@@ -1743,6 +1744,7 @@ thead th {
   .split-grid,
   .split-grid.wide-right,
   .pos-layout,
+  .card-grid.three,
   .card-grid.four,
   .card-grid.two,
   .attendance-desk-layout,

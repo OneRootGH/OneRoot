@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Shop groceries, frozen foods, drinks, water, kitchen supplies, and household essentials from OneRoot Essentials."
+      content="Order OneRoot Kitchen meals, proteins, sides, takeaway packs, and cold drinks online."
     />
     <meta name="theme-color" content="#143a2b" />
-    <title>Shop Essentials | OneRoot Essentials</title>
+    <title>OneRoot Kitchen | OneRoot Essentials</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -19,21 +19,21 @@
     />
     <link rel="stylesheet" href="/website/styles.css?v=20260808c" />
   </head>
-  <body>
+  <body data-catalog-default-area="kitchen" data-catalog-default-sort="name">
     <div class="shop-shell">
       <header class="site-header">
         <a class="brand" href="/">
           <img src="/assets/oneroot-icon-transparent.png" alt="OneRoot Essentials mark" />
           <span>
             <strong>OneRoot Essentials</strong>
-            <small>Shop Daily Essentials</small>
+            <small>OneRoot Kitchen</small>
           </span>
         </a>
 
         <nav class="site-nav" aria-label="Primary">
           <a href="/">Home</a>
-          <a class="is-current" href="/shop">Shop</a>
-          <a href="/food">Food</a>
+          <a href="/shop">Shop</a>
+          <a class="is-current" href="/food">Food</a>
           <a href="/laundry">Laundry</a>
           <a href="/equipment">Equipment</a>
           <a href="/track-order">Track Order</a>
@@ -56,12 +56,11 @@
       <main class="page-main">
         <section class="page-hero">
           <div>
-            <p class="eyebrow">Shop</p>
-            <h1>Shop everyday essentials from OneRoot.</h1>
+            <p class="eyebrow">OneRoot Kitchen</p>
+            <h1>Good food, cold drinks, and convenient service.</h1>
             <p class="section-note">
-              Browse groceries, frozen foods, drinks, water, kitchen supplies,
-              and household essentials. Add what you need to cart and send one
-              clear order for staff confirmation.
+              Order hot meals, proteins, sides, takeaway packs, and drinks from
+              OneRoot Kitchen in one easy order flow.
             </p>
           </div>
           <div class="hero-tags" id="heroContactLine"></div>
@@ -70,32 +69,31 @@
         <section class="shop-section" id="shop">
           <div class="section-heading">
             <div>
-              <p class="eyebrow">Order Workspace</p>
-              <h2>Build your order in one guided flow</h2>
+              <p class="eyebrow">Kitchen Menu</p>
+              <h2>Build your food order in one guided flow</h2>
             </div>
-            <p id="catalogMeta" class="section-note">Loading OneRoot catalog...</p>
+            <p id="catalogMeta" class="section-note">Loading OneRoot Kitchen menu...</p>
           </div>
 
           <div class="shop-layout">
             <aside class="order-guide-panel">
               <article class="order-guide-card">
                 <p class="eyebrow">Quick Start</p>
-                <h3>Choose an area, add items, and send one clear order.</h3>
-                <p>Use filters when you want to shop one business area first.</p>
+                <h3>Main meals, proteins, sides, and cold drinks in one place.</h3>
+                <p>Use quantity for portions, drinks, or the number of banku balls needed.</p>
                 <div id="catalogQuickFilters" class="filter-chip-row"></div>
               </article>
 
               <article class="order-guide-card order-guide-card-muted">
-                <p class="eyebrow">Also Need A Service?</p>
+                <p class="eyebrow">Kitchen Notes</p>
                 <ul class="order-guide-list">
-                  <li>Use Laundry for normal and express washing, drying, ironing, and folding requests.</li>
-                  <li>Use Equipment for bookings that need rental days, quantity, and site details.</li>
-                  <li>Shop stays focused on goods and simple order lines for faster checkout.</li>
+                  <li>Add Takeaway Pack when meals should be packed to go.</li>
+                  <li>Use order notes for spice level, bigger portions, or special serving requests.</li>
+                  <li>Staff will confirm timing, pickup, delivery, and any price that needs clarification.</li>
                 </ul>
                 <div class="inline-button-row">
-                  <a class="button button-secondary" href="/food">Food</a>
-                  <a class="button button-secondary" href="/laundry">Laundry</a>
-                  <a class="button button-secondary" href="/equipment">Equipment</a>
+                  <a class="button button-secondary" href="/shop">General Shop</a>
+                  <a class="button button-secondary" href="/track-order">Track Order</a>
                 </div>
               </article>
             </aside>
@@ -107,7 +105,7 @@
                   <input
                     id="catalogSearchInput"
                     type="search"
-                    placeholder="Search item, category, or business area"
+                    placeholder="Search meal, drink, side, or protein"
                   />
                 </label>
                 <label>
@@ -117,10 +115,10 @@
                 <label>
                   <span>Sort</span>
                   <select id="catalogSortFilter">
+                    <option value="name">Name</option>
                     <option value="featured">Featured</option>
                     <option value="price-asc">Price: Low to High</option>
                     <option value="price-desc">Price: High to Low</option>
-                    <option value="name">Name</option>
                   </select>
                 </label>
                 <button id="clearCatalogFiltersBtn" class="button button-secondary" type="button">
@@ -137,14 +135,14 @@
               <div class="cart-panel-head">
                 <div>
                   <p class="eyebrow">Review & Send</p>
-                  <h3>Your Order</h3>
+                  <h3>Your Food Order</h3>
                 </div>
                 <button id="closeCartBtn" class="icon-button" type="button" aria-label="Close cart">
                   ×
                 </button>
               </div>
 
-              <p class="cart-panel-copy">Review the basket once, then leave your contact, delivery, and payment details below.</p>
+              <p class="cart-panel-copy">Review the food order once, then leave your contact, delivery, and payment details below.</p>
 
               <div class="order-snapshot-grid">
                 <article>
@@ -169,7 +167,7 @@
                   <strong id="cartSubtotalValue">GH¢0.00</strong>
                 </div>
                 <p class="cart-summary-note">
-                  Items with price confirmation stay in the order and are finalized by staff.
+                  Quote items stay in the order and are finalized by staff during confirmation.
                 </p>
               </div>
 
@@ -242,30 +240,30 @@
                     <span class="step-number">3</span>
                     <div>
                       <strong>Payment & Notes</strong>
-                      <p>Add the last details for quote items, special requests, or family orders.</p>
+                      <p>Choose a payment method and tell the kitchen anything that helps them serve you faster.</p>
                     </div>
                   </div>
 
                   <div class="checkout-fields">
                     <label>
-                      <span>Payment Method</span>
+                      <span>Preferred Payment Method</span>
                       <select id="paymentMethodInput" name="paymentMethod"></select>
                     </label>
 
                     <label class="wide-field">
-                      <span>Notes</span>
+                      <span>Order Notes</span>
                       <textarea
                         id="orderNotesInput"
-                        name="notes"
+                        name="orderNotes"
                         rows="4"
-                        placeholder="Tell OneRoot any quantity detail, meal preference, delivery direction, or follow-up note."
+                        placeholder="Examples: extra pepper, add takeaway packs, bigger fish piece, call before delivery"
                       ></textarea>
                     </label>
                   </div>
                 </section>
 
                 <button id="submitOrderBtn" class="button button-primary button-wide" type="submit">
-                  Send Order For Confirmation
+                  Send Food Order
                 </button>
               </form>
 
@@ -289,11 +287,10 @@
           <p id="footerContactLine">Loading contact details...</p>
         </div>
         <div class="footer-links">
+          <a href="/shop">Shop</a>
           <a href="/food">Food</a>
           <a href="/laundry">Laundry</a>
           <a href="/equipment">Equipment</a>
-          <a href="/track-order">Track Order</a>
-          <a href="/contact">Contact</a>
         </div>
       </footer>
     </div>
