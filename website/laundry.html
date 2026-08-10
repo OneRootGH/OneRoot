@@ -17,7 +17,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="/website/styles.css?v=20260808c" />
+    <link rel="stylesheet" href="/website/styles.css?v=20260810e" />
   </head>
   <body>
     <div class="shop-shell">
@@ -33,9 +33,9 @@
         <nav class="site-nav" aria-label="Primary">
           <a href="/">Home</a>
           <a href="/shop">Shop</a>
-          <a href="/food">Food</a>
-          <a class="is-current" href="/laundry">Laundry</a>
-          <a href="/equipment">Equipment</a>
+          <a href="/food#shop">Food</a>
+          <a class="is-current" href="/laundry#book">Laundry</a>
+          <a href="/equipment#book">Equipment</a>
           <a href="/track-order">Track Order</a>
           <details class="site-nav-menu">
             <summary class="site-nav-summary">More</summary>
@@ -58,11 +58,15 @@
               pickup or delivery, and add multiple laundry lines for one
               customer before the OneRoot team confirms the service.
             </p>
+            <div class="hero-actions page-hero-actions">
+              <a class="button button-primary" href="#book">Choose Laundry Service</a>
+              <a class="button button-secondary" href="/track-order">Track Request</a>
+            </div>
           </div>
           <div class="hero-tags" id="heroContactLine"></div>
         </section>
 
-        <section class="service-form-layout">
+        <section class="service-form-layout" id="book">
           <section class="tracking-card service-form-card">
             <div class="section-heading">
               <div>
@@ -82,6 +86,14 @@
                   <button id="laundryAddItemBtn" class="button button-secondary" type="button">
                     Add Laundry Line
                   </button>
+                </div>
+
+                <div class="service-quick-picks">
+                  <div class="service-quick-picks-head">
+                    <span class="count-pill">Tap To Select</span>
+                    <p>See the saved laundry services first, then set item count and add the line.</p>
+                  </div>
+                  <div id="laundryQuickPickGrid" class="service-quick-pick-grid"></div>
                 </div>
 
                 <div class="checkout-fields">
@@ -172,7 +184,7 @@
             <article class="order-guide-card order-guide-card-muted">
               <p class="eyebrow">Need Another Service?</p>
               <div class="inline-button-row">
-                <a class="button button-secondary" href="/equipment">Equipment</a>
+                <a class="button button-secondary" href="/equipment#book">Equipment</a>
                 <a class="button button-secondary" href="/track-order">Track Request</a>
               </div>
             </article>
@@ -187,14 +199,14 @@
         </div>
         <div class="footer-links">
           <a href="/shop">Shop</a>
-          <a href="/food">Food</a>
-          <a href="/equipment">Equipment</a>
+          <a href="/food#shop">Food</a>
+          <a href="/equipment#book">Equipment</a>
           <a href="/track-order">Track Order</a>
         </div>
       </footer>
     </div>
 
-    <script src="/website/app.js?v=20260810a"></script>
+    <script src="/website/app.js?v=20260810b"></script>
     <script src="/website/pwa.js?v=20260801c"></script>
   </body>
 </html>

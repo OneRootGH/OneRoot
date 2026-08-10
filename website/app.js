@@ -32,6 +32,7 @@
     resetVisibleCatalogCount();
     state.isCartOpen = !isCompactViewport();
     syncCartPanelLayout();
+    maybeSnapToActiveAnchor();
 
     if (elements.checkoutForm) {
       restoreCustomerDraftIntoForm();
@@ -106,6 +107,7 @@
       "trackingResult",
       "equipmentBookingForm",
       "equipmentItemSelect",
+      "equipmentQuickPickGrid",
       "equipmentItemPreview",
       "equipmentAddItemBtn",
       "equipmentSelectedItems",
@@ -125,6 +127,7 @@
       "equipmentMessage",
       "laundryBookingForm",
       "laundryServiceSelect",
+      "laundryQuickPickGrid",
       "laundryServicePreview",
       "laundryAddItemBtn",
       "laundrySelectedItems",
@@ -257,6 +260,7 @@
       populateServicePaymentMethods();
       restoreServiceCustomerDraftIntoForms();
       syncCartPanelLayout();
+      maybeSnapToActiveAnchor();
 
       if (elements.vacancyGrid) {
         try {
@@ -311,6 +315,7 @@
       state.config = await response.json();
       renderContactLines();
       renderContactPage();
+      maybeSnapToActiveAnchor();
     } catch (error) {
       console.error(error);
     }
@@ -585,6 +590,7 @@
         (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
       )
     ].join("");
+    renderEquipmentQuickPicks();
     renderEquipmentItemPreview();
     renderEquipmentSelections();
   }
@@ -606,8 +612,69 @@
         (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
       )
     ].join("");
+    renderLaundryQuickPicks();
     renderLaundryItemPreview();
     renderLaundrySelections();
+  }
+
+  function renderServiceQuickPicks(container, items, selectedId, serviceType) {
+    if (!container) {
+      return;
+    }
+
+    if (!items.length) {
+      container.innerHTML = `
+        <article class="service-quick-pick service-quick-pick-empty">
+          <strong>No items available</strong>
+          <p>The OneRoot team has not published options for this service yet.</p>
+        </article>
+      `;
+      return;
+    }
+
+    container.innerHTML = items
+      .map((item) => {
+        const isActive = normalizeText(item.id) === normalizeText(selectedId);
+        const salesPrice = Number(item.salesPrice || 0);
+        return `
+          <button
+            class="service-quick-pick ${isActive ? "is-active" : ""}"
+            data-service-pick="${escapeHtml(serviceType)}"
+            data-item-id="${escapeHtml(item.id)}"
+            type="button"
+          >
+            <img
+              class="service-quick-pick-thumb"
+              src="${escapeHtml(resolveCatalogImageSrc(item))}"
+              alt="${escapeHtml(item.name)}"
+            >
+            <span class="service-quick-pick-copy">
+              <strong>${escapeHtml(item.name)}</strong>
+              <small>${escapeHtml(item.category || "Service Item")}</small>
+              <span>${escapeHtml(salesPrice > 0 ? formatCurrency(salesPrice) : "Quote")}</span>
+            </span>
+          </button>
+        `;
+      })
+      .join("");
+  }
+
+  function renderEquipmentQuickPicks() {
+    renderServiceQuickPicks(
+      elements.equipmentQuickPickGrid,
+      getEquipmentCatalogItems(),
+      normalizeText(elements.equipmentItemSelect?.value),
+      "equipment"
+    );
+  }
+
+  function renderLaundryQuickPicks() {
+    renderServiceQuickPicks(
+      elements.laundryQuickPickGrid,
+      getLaundryCatalogItems(),
+      normalizeText(elements.laundryServiceSelect?.value),
+      "laundry"
+    );
   }
 
   function getWhatsappDisplayNumbers() {
@@ -666,6 +733,7 @@
   }
 
   function renderEquipmentItemPreview() {
+    renderEquipmentQuickPicks();
     renderServiceItemPreview(
       elements.equipmentItemPreview,
       getCatalogItemById(normalizeText(elements.equipmentItemSelect?.value)),
@@ -675,6 +743,7 @@
   }
 
   function renderLaundryItemPreview() {
+    renderLaundryQuickPicks();
     renderServiceItemPreview(
       elements.laundryServicePreview,
       getCatalogItemById(normalizeText(elements.laundryServiceSelect?.value)),
@@ -1375,6 +1444,27 @@
           (selection) => selection.selectionId !== selectionId
         );
         renderLaundrySelections();
+      }
+
+      return;
+    }
+
+    const servicePickButton = event.target.closest("button[data-service-pick]");
+
+    if (servicePickButton) {
+      const itemId = normalizeText(servicePickButton.dataset.itemId);
+      const serviceType = normalizeText(servicePickButton.dataset.servicePick);
+
+      if (serviceType === "equipment" && elements.equipmentItemSelect) {
+        elements.equipmentItemSelect.value = itemId;
+        renderEquipmentItemPreview();
+        elements.equipmentQuantityInput?.focus();
+      }
+
+      if (serviceType === "laundry" && elements.laundryServiceSelect) {
+        elements.laundryServiceSelect.value = itemId;
+        renderLaundryItemPreview();
+        elements.laundryItemCountInput?.focus();
       }
 
       return;
@@ -2219,6 +2309,22 @@
     setInputValue(elements.catalogAreaFilter, "");
     setInputValue(elements.catalogSortFilter, "featured");
     renderCatalog();
+  }
+
+  function maybeSnapToActiveAnchor() {
+    const hash = normalizeText(window.location.hash).replace(/^#/, "");
+    if (!hash || !isCompactViewport()) {
+      return;
+    }
+
+    const target = document.getElementById(hash);
+    if (!target) {
+      return;
+    }
+
+    window.setTimeout(() => {
+      target.scrollIntoView({ block: "start", behavior: "auto" });
+    }, 90);
   }
 
   function getCartMetrics() {
