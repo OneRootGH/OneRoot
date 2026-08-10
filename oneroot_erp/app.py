@@ -79,6 +79,15 @@ SERVICE_LEGACY_PAYMENT_FIELDS = {
 }
 POS_CASH_PAYMENT_METHODS = {"cash", "cash on delivery"}
 INVENTORY_EXPIRY_SOON_DAYS = 30
+MOBILE_MONEY_STARTUP_PROFILES = {
+    "MTN Mobile Money": {
+        "simPurchaseCost": 3000.0,
+        "openingCash": 900.0,
+        "openingECash": 1040.0,
+        "cashTopUpSource": "Opening startup float",
+        "eCashTopUpSource": "Opening startup float",
+    }
+}
 LOCAL_TIMEZONE = ZoneInfo("Africa/Accra")
 PRODUCT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
 PRODUCT_IMAGE_ALLOWED_MIME_TYPES = {
@@ -3959,25 +3968,36 @@ def mobile_money_ecash_status(payload: dict[str, Any]) -> str:
 
 def mobile_money_live_balance_snapshot(db_session, target_date: date | None, provider: str = "") -> dict[str, Any]:
     clean_provider = normalize_text(provider) or "MTN Mobile Money"
+    startup_profile = dict(MOBILE_MONEY_STARTUP_PROFILES.get(clean_provider) or {})
+    startup_sim_cost = round(parse_amount(startup_profile.get("simPurchaseCost")), 2)
+    startup_opening_cash = round(parse_amount(startup_profile.get("openingCash")), 2)
+    startup_opening_ecash = round(parse_amount(startup_profile.get("openingECash")), 2)
+    startup_float_total = round(startup_opening_cash + startup_opening_ecash, 2)
+    startup_capital_total = round(startup_sim_cost + startup_float_total, 2)
     if not target_date:
         return {
             "date": "",
             "provider": clean_provider,
-            "openingCash": 0.0,
-            "openingECash": 0.0,
+            "openingCash": startup_opening_cash,
+            "openingECash": startup_opening_ecash,
             "physicalCashAvailable": 0.0,
             "eCashAvailable": 0.0,
+            "workingFloatAvailable": 0.0,
             "cashInValueTotal": 0.0,
             "cashOutValueTotal": 0.0,
             "feeTotal": 0.0,
             "cashTopUp": 0.0,
-            "cashTopUpSource": "",
+            "cashTopUpSource": normalize_text(startup_profile.get("cashTopUpSource")),
             "cashRemoved": 0.0,
             "eCashTopUp": 0.0,
-            "eCashTopUpSource": "",
+            "eCashTopUpSource": normalize_text(startup_profile.get("eCashTopUpSource")),
             "eCashRemoved": 0.0,
             "operatingExpense": 0.0,
             "hasBase": False,
+            "startupSimCost": startup_sim_cost,
+            "startupFloatTotal": startup_float_total,
+            "startupCapitalTotal": startup_capital_total,
+            "usesStartupDefaults": startup_float_total > 0,
             "basisNote": "No date selected yet.",
         }
 
@@ -4023,16 +4043,22 @@ def mobile_money_live_balance_snapshot(db_session, target_date: date | None, pro
         operating_expense = 0.0
         basis_note = "Using the last saved closing balances as today's opening base. Save today's reconciliation row to lock in the opening float."
     else:
-        opening_cash = 0.0
-        opening_ecash = 0.0
+        opening_cash = startup_opening_cash
+        opening_ecash = startup_opening_ecash
         cash_top_up = 0.0
-        cash_top_up_source = ""
+        cash_top_up_source = normalize_text(startup_profile.get("cashTopUpSource"))
         cash_removed = 0.0
         ecash_top_up = 0.0
-        ecash_top_up_source = ""
+        ecash_top_up_source = normalize_text(startup_profile.get("eCashTopUpSource"))
         ecash_removed = 0.0
         operating_expense = 0.0
-        basis_note = "Save today's reconciliation row first so the app knows the opening cash and opening e-cash."
+        if startup_float_total > 0:
+            basis_note = (
+                f"Using OneRoot startup float for {clean_provider}: {format_currency(startup_opening_cash)} physical cash + "
+                f"{format_currency(startup_opening_ecash)} e-cash. Save today's reconciliation row to lock this opening float."
+            )
+        else:
+            basis_note = "Save today's reconciliation row first so the app knows the opening cash and opening e-cash."
 
     physical_cash_available = round(
         opening_cash
@@ -4052,6 +4078,7 @@ def mobile_money_live_balance_snapshot(db_session, target_date: date | None, pro
         - ecash_removed,
         2,
     )
+    working_float_available = round(physical_cash_available + ecash_available, 2)
 
     return {
         "date": target_date.isoformat(),
@@ -4060,6 +4087,7 @@ def mobile_money_live_balance_snapshot(db_session, target_date: date | None, pro
         "openingECash": opening_ecash,
         "physicalCashAvailable": physical_cash_available,
         "eCashAvailable": ecash_available,
+        "workingFloatAvailable": working_float_available,
         "cashInValueTotal": transaction_rollup["cashInValueTotal"],
         "cashOutValueTotal": transaction_rollup["cashOutValueTotal"],
         "feeTotal": transaction_rollup["feeTotal"],
@@ -4071,11 +4099,20 @@ def mobile_money_live_balance_snapshot(db_session, target_date: date | None, pro
         "eCashRemoved": ecash_removed,
         "operatingExpense": operating_expense,
         "hasBase": bool(today_record or carry_record),
+        "startupSimCost": startup_sim_cost,
+        "startupFloatTotal": startup_float_total,
+        "startupCapitalTotal": startup_capital_total,
+        "usesStartupDefaults": (not today_record and not carry_record and startup_float_total > 0),
         "basisNote": basis_note,
     }
 
 
 def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
+    startup_profile = dict(MOBILE_MONEY_STARTUP_PROFILES.get("MTN Mobile Money") or {})
+    startup_sim_cost = round(parse_amount(startup_profile.get("simPurchaseCost")), 2)
+    startup_opening_cash = round(parse_amount(startup_profile.get("openingCash")), 2)
+    startup_opening_ecash = round(parse_amount(startup_profile.get("openingECash")), 2)
+    startup_float_total = round(startup_opening_cash + startup_opening_ecash, 2)
     focus_note = (
         "You are on the Mobile Money Sales page. Record each customer transaction here as it happens."
         if module_key == "mobile_money_transactions"
@@ -4083,8 +4120,30 @@ def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
     )
     return {
         "title": "MTN MoMo Daily Cashier Checklist",
-        "summary": "Use Mobile Money Sales during the day and Mobile Money Reconciliation once per provider at close of day.",
+        "summary": "Use Mobile Money Sales during the day and Mobile Money Reconciliation once per provider at close of day so OneRoot always knows the real physical cash and e-cash available.",
         "focus_note": focus_note,
+        "setup_cards": [
+            {
+                "label": "SIM Setup Cost",
+                "value": format_currency(startup_sim_cost),
+                "note": "Treat this as setup capital or asset cost, not as float available to pay customers.",
+            },
+            {
+                "label": "Starting Physical Cash",
+                "value": format_currency(startup_opening_cash),
+                "note": "Cash placed on hand to serve customer cash-out requests.",
+            },
+            {
+                "label": "Starting E-Cash",
+                "value": format_currency(startup_opening_ecash),
+                "note": "Wallet float deposited on the MTN MoMo line for daily transactions.",
+            },
+            {
+                "label": "Starting Working Float",
+                "value": format_currency(startup_float_total),
+                "note": "Usable float for the business before any top-up, removal, or customer transactions.",
+            },
+        ],
         "day_steps": [
             "Confirm the opening float before you start serving customers.",
             "For every customer, save Date, Provider, Service Type, Transaction Value, Fee / Sales Amount, Float Impact, and Status.",
@@ -4123,6 +4182,8 @@ def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
             "Mobile Money Sales is for customer-by-customer activity.",
             "Mobile Money Reconciliation is for end-of-day float checking.",
             "Only Completed transactions count into daily sales totals.",
+            "The GH₵3,000 SIM setup cost is not daily float. The working float starts from GH₵900 physical cash plus GH₵1,040 e-cash unless you update it in reconciliation.",
+            "If you add extra cash to serve customers, put the amount in Cash Top-Up and save where it came from in Cash Top-Up From.",
             "If transaction rows were missed, reconciliation fees can temporarily feed daily sales, but best practice is to save both.",
         ],
     }
@@ -10347,6 +10408,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
             record_payload.setdefault("provider", "MTN Mobile Money")
+            setup_profile = dict(MOBILE_MONEY_STARTUP_PROFILES.get(normalize_text(record_payload.get("provider")) or "MTN Mobile Money") or {})
+            if not normalize_text(record_payload.get("openingCash")) and parse_amount(setup_profile.get("openingCash")) > 0:
+                record_payload["openingCash"] = parse_amount(setup_profile.get("openingCash"))
+            if not normalize_text(record_payload.get("openingECash")) and parse_amount(setup_profile.get("openingECash")) > 0:
+                record_payload["openingECash"] = parse_amount(setup_profile.get("openingECash"))
+            if not normalize_text(record_payload.get("cashTopUpSource")) and normalize_text(setup_profile.get("cashTopUpSource")):
+                record_payload["cashTopUpSource"] = normalize_text(setup_profile.get("cashTopUpSource"))
+            if not normalize_text(record_payload.get("eCashTopUpSource")) and normalize_text(setup_profile.get("eCashTopUpSource")):
+                record_payload["eCashTopUpSource"] = normalize_text(setup_profile.get("eCashTopUpSource"))
+            if not normalize_text(record_payload.get("notes")):
+                startup_sim_cost = parse_amount(setup_profile.get("simPurchaseCost"))
+                startup_cash = parse_amount(setup_profile.get("openingCash"))
+                startup_ecash = parse_amount(setup_profile.get("openingECash"))
+                if startup_sim_cost > 0 or startup_cash > 0 or startup_ecash > 0:
+                    record_payload["notes"] = (
+                        f"OneRoot startup setup: SIM / setup cost {format_currency(startup_sim_cost)}. "
+                        f"Opening physical cash {format_currency(startup_cash)} and opening e-cash {format_currency(startup_ecash)}."
+                    )
         elif module_key == "mobile_money_transactions":
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())

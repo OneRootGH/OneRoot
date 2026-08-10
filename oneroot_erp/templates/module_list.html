@@ -308,16 +308,18 @@
           <small>Opening {{ mobile_money_live_snapshot.openingECash|currency }} · Top-Up {{ mobile_money_live_snapshot.eCashTopUp|currency }}</small>
         </article>
         <article class="metric-card">
-          <span>Cash In / Cash Out</span>
-          <strong>{{ mobile_money_live_snapshot.cashInValueTotal|currency }} / {{ mobile_money_live_snapshot.cashOutValueTotal|currency }}</strong>
-          <small>Completed transactions already affecting the live balances</small>
+          <span>Working Float Available</span>
+          <strong>{{ mobile_money_live_snapshot.workingFloatAvailable|currency }}</strong>
+          <small>Physical cash + e-cash available right now for MTN MoMo operations</small>
         </article>
         <article class="metric-card">
-          <span>Cash Top-Up From</span>
+          <span>Setup / Top-Up Source</span>
           <strong>{{ mobile_money_live_snapshot.cashTopUpSource or 'Not saved yet' }}</strong>
           <small>
             {% if mobile_money_live_snapshot.eCashTopUpSource %}
               E-Cash top-up from {{ mobile_money_live_snapshot.eCashTopUpSource }}
+            {% elif mobile_money_live_snapshot.startupSimCost %}
+              SIM setup cost {{ mobile_money_live_snapshot.startupSimCost|currency }} · Starting float {{ mobile_money_live_snapshot.startupFloatTotal|currency }}
             {% else %}
               Save the source whenever you add extra cash to serve cash-out customers.
             {% endif %}

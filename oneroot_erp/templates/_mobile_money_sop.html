@@ -38,6 +38,18 @@
     </article>
   </section>
 
+  {% if mobile_money_sop.setup_cards %}
+    <section class="card-grid four">
+      {% for card in mobile_money_sop.setup_cards %}
+        <article class="metric-card">
+          <span>{{ card.label }}</span>
+          <strong>{{ card.value }}</strong>
+          <small>{{ card.note }}</small>
+        </article>
+      {% endfor %}
+    </section>
+  {% endif %}
+
   <section class="card-grid four">
     {% for card in mobile_money_sop.meaning_cards %}
       <article class="metric-card">
