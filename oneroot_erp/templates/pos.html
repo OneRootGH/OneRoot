@@ -179,6 +179,24 @@
           <a class="button subtle is-disabled" href="#" id="pos-last-receipt" target="_blank" rel="noopener">Receipt</a>
         </section>
 
+        <section class="mini-card pos-cash-closeout-card">
+          <div class="pos-cash-closeout-grid">
+            <label>
+              <span>Opening Cash</span>
+              <input type="number" step="0.01" min="0" id="pos-opening-cash" value="{{ counter_summary.openingCash }}">
+            </label>
+            <label>
+              <span>Counted Close</span>
+              <input type="number" step="0.01" min="0" id="pos-closing-cash" value="{{ counter_summary.closingCashCounted }}">
+            </label>
+          </div>
+          <div class="pos-ticket-inline pos-ticket-inline-tight">
+            <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
+            <span>Expected <strong id="pos-expected-cash">{{ counter_summary.expectedClosingCash|currency }}</strong></span>
+            <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
+          </div>
+        </section>
+
         <details class="muted-box pos-customer-box pos-customer-box-compact">
           <summary>Customer</summary>
           <div class="form-grid single">
@@ -188,7 +206,7 @@
           </div>
           <p class="muted pos-closeout-note" id="pos-closeout-meta">
             {% if counter_summary.lastCloseout %}
-              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}.
+              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}. Open {{ counter_summary.openingCash|currency }} · Close {{ counter_summary.closingCashCounted|currency }}.
             {% else %}
               No closeout has been saved for this counter day yet.
             {% endif %}

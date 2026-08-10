@@ -77,6 +77,8 @@ SERVICE_LEGACY_PAYMENT_FIELDS = {
     "laundry_tickets": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
     "equipment_rental_bookings": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
 }
+POS_CASH_PAYMENT_METHODS = {"cash", "cash on delivery"}
+INVENTORY_EXPIRY_SOON_DAYS = 30
 LOCAL_TIMEZONE = ZoneInfo("Africa/Accra")
 PRODUCT_IMAGE_MAX_BYTES = 2 * 1024 * 1024
 PRODUCT_IMAGE_ALLOWED_MIME_TYPES = {
@@ -369,6 +371,8 @@ def ensure_schema_columns(engine) -> None:
         product_columns = {column["name"] for column in inspector.get_columns("products")}
     if "products" in table_names and "image_url" not in product_columns:
         statements.append("ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT ''")
+    if "products" in table_names and "expiry_date" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN expiry_date DATE")
     user_columns = set()
     if "app_users" in table_names:
         user_columns = {column["name"] for column in inspector.get_columns("app_users")}
@@ -520,6 +524,78 @@ def format_product_stock_badge(item_or_payload: Product | dict[str, Any]) -> str
     return f"Stock {quantity_display}"
 
 
+def product_expiry_date_value(item_or_payload: Product | dict[str, Any]) -> date | None:
+    if isinstance(item_or_payload, Product):
+        raw_value = item_or_payload.expiry_date
+    else:
+        raw_value = item_or_payload.get("expiryDate", item_or_payload.get("expiry_date"))
+    if isinstance(raw_value, date):
+        return raw_value
+    return parse_date(raw_value)
+
+
+def product_expiry_status(item_or_payload: Product | dict[str, Any], today_value: date | None = None) -> dict[str, Any]:
+    today_key = today_value or date.today()
+    expiry_value = product_expiry_date_value(item_or_payload)
+    if not expiry_value:
+        return {
+            "expiryDate": None,
+            "label": "No Expiry",
+            "tone": "muted",
+            "daysLeft": None,
+            "isExpired": False,
+            "isExpiringSoon": False,
+            "discardNow": False,
+        }
+
+    days_left = (expiry_value - today_key).days
+    if days_left < 0:
+        return {
+            "expiryDate": expiry_value,
+            "label": "Expired - Discard",
+            "tone": "danger",
+            "daysLeft": days_left,
+            "isExpired": True,
+            "isExpiringSoon": False,
+            "discardNow": True,
+        }
+    if days_left <= INVENTORY_EXPIRY_SOON_DAYS:
+        return {
+            "expiryDate": expiry_value,
+            "label": "Expiring Soon",
+            "tone": "warning",
+            "daysLeft": days_left,
+            "isExpired": False,
+            "isExpiringSoon": True,
+            "discardNow": False,
+        }
+    return {
+        "expiryDate": expiry_value,
+        "label": "Fresh",
+        "tone": "ok",
+        "daysLeft": days_left,
+        "isExpired": False,
+        "isExpiringSoon": False,
+        "discardNow": False,
+    }
+
+
+def product_matches_expiry_filter(item_or_payload: Product | dict[str, Any], expiry_filter: str, today_value: date | None = None) -> bool:
+    clean_filter = normalize_text(expiry_filter).lower()
+    if not clean_filter:
+        return True
+    expiry_meta = product_expiry_status(item_or_payload, today_value)
+    if clean_filter == "expired":
+        return expiry_meta["isExpired"]
+    if clean_filter == "expiring-soon":
+        return expiry_meta["isExpiringSoon"]
+    if clean_filter == "fresh":
+        return bool(expiry_meta["expiryDate"]) and not expiry_meta["isExpired"] and not expiry_meta["isExpiringSoon"]
+    if clean_filter == "no-expiry":
+        return expiry_meta["expiryDate"] is None
+    return True
+
+
 def normalize_product_record(product: Product) -> bool:
     changed = False
     item_type = normalized_product_item_type(product.item_type, product.track_inventory)
@@ -545,6 +621,25 @@ def normalize_product_record(product: Product) -> bool:
         product.sku = sku_value
         changed = True
     return changed
+
+
+def pos_cash_sales_total(payment_mix: dict[str, Any]) -> float:
+    return round(
+        sum(
+            parse_amount(amount)
+            for label, amount in (payment_mix or {}).items()
+            if normalize_text(label).lower() in POS_CASH_PAYMENT_METHODS
+        ),
+        2,
+    )
+
+
+def pos_expected_closing_cash(opening_cash: Any, cash_sales_total: Any) -> float:
+    return round(parse_amount(opening_cash) + parse_amount(cash_sales_total), 2)
+
+
+def pos_cash_variance(opening_cash: Any, closing_cash_counted: Any, cash_sales_total: Any) -> float:
+    return round(parse_amount(closing_cash_counted) - pos_expected_closing_cash(opening_cash, cash_sales_total), 2)
 
 
 def normalize_product_image_value(value: Any) -> str:
@@ -5908,6 +6003,8 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
         "minStockLevel",
         "salesPrice",
         "costPrice",
+        "expiryDate",
+        "expiryStatus",
         "imageUrl",
         "trackInventory",
         "active",
@@ -5928,6 +6025,8 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
             "minStockLevel": item.min_stock_level,
             "salesPrice": item.sales_price,
             "costPrice": item.cost_price,
+            "expiryDate": item.expiry_date.isoformat() if item.expiry_date else "",
+            "expiryStatus": product_expiry_status(item)["label"],
             "imageUrl": item.image_url,
             "trackInventory": product_tracks_inventory(item),
             "active": item.active,
@@ -7435,6 +7534,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "minStockLevel": product.min_stock_level,
                     "salesPrice": product.sales_price,
                     "costPrice": product.cost_price,
+                    "expiryDate": product.expiry_date.isoformat() if product.expiry_date else "",
                     "imageUrl": product.image_url,
                     "active": product.active,
                     "notes": product.notes,
@@ -7613,6 +7713,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         )
         closeout_payload = serialize_module_record(closeout_record) if closeout_record else None
+        cash_sales_total = pos_cash_sales_total(payment_mix)
+        opening_cash = parse_amount(closeout_payload.get("openingCash")) if closeout_payload else 0.0
+        closing_cash_counted = parse_amount(closeout_payload.get("closingCashCounted")) if closeout_payload else 0.0
+        expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_sales_total)
+        cash_variance = pos_cash_variance(opening_cash, closing_cash_counted, cash_sales_total)
+        if closeout_payload is not None:
+            closeout_payload["cashSalesTotal"] = cash_sales_total
+            closeout_payload["openingCash"] = opening_cash
+            closeout_payload["closingCashCounted"] = closing_cash_counted
+            closeout_payload["expectedClosingCash"] = expected_closing_cash
+            closeout_payload["cashVariance"] = cash_variance
 
         return {
             "orderDate": order_date.isoformat(),
@@ -7625,6 +7736,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "profitAmount": round(total_amount - total_cost, 2),
             "dailySalesLedgerTotal": daily_sales_total,
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
+            "cashSalesTotal": cash_sales_total,
+            "openingCash": opening_cash,
+            "closingCashCounted": closing_cash_counted,
+            "expectedClosingCash": expected_closing_cash,
+            "cashVariance": cash_variance,
             "foodSalesTotal": round(
                 sum(amount for area_key, amount in daily_sales_by_area.items() if area_key in POS_FOOD_SALES_AREA_IDS),
                 2,
@@ -7679,6 +7795,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 continue
 
             existing_payload = dict(record.payload or {})
+            opening_cash = parse_amount(existing_payload.get("openingCash"))
+            closing_cash_counted = parse_amount(existing_payload.get("closingCashCounted"))
+            cash_sales_total = pos_cash_sales_total(summary["paymentMix"])
+            expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_sales_total)
             closeout_payload = {
                 "id": record.id,
                 "orderDate": summary["orderDate"],
@@ -7693,6 +7813,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "itemCount": summary["itemCount"],
                 "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
                 "paymentMix": summary["paymentMix"],
+                "cashSalesTotal": cash_sales_total,
+                "openingCash": opening_cash,
+                "closingCashCounted": closing_cash_counted,
+                "expectedClosingCash": expected_closing_cash,
+                "cashVariance": pos_cash_variance(opening_cash, closing_cash_counted, cash_sales_total),
                 "orderNumbers": [order["orderNumber"] for order in summary["orders"]],
                 "closedAt": existing_payload.get("closedAt") or datetime.utcnow().isoformat(),
                 "closedBy": existing_payload.get("closedBy") or actor_name,
@@ -9685,10 +9810,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
         module_overview = build_module_overview(definition, records)
         module_quick_actions = []
         mobile_money_sop = None
+        mobile_money_reconciliation_summary = None
         automated_tenant_reminders: list[dict[str, Any]] = []
         automated_tenant_counts: dict[str, int] = {}
         if module_key == "mobile_money_transactions":
             mobile_money_sop = mobile_money_sop_context(module_key)
+            reconciliation_records = g.db.scalars(
+                select(ModuleRecord)
+                .where(ModuleRecord.module_key == "mobile_money_reconciliations")
+                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+            ).all()
+            if date_from or date_to:
+                reconciliation_records = [
+                    record
+                    for record in reconciliation_records
+                    if (not date_from or (record.record_date and record.record_date >= date_from))
+                    and (not date_to or (record.record_date and record.record_date <= date_to))
+                ]
+            mobile_money_reconciliation_summary = mobile_money_reconciliation_breakdown(reconciliation_records)
             if user_has_access(g.current_user, "mobile_money_reconciliations"):
                 module_quick_actions.append(
                     {
@@ -9816,6 +9955,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             automated_tenant_counts=automated_tenant_counts,
             growth_context=growth_context,
             mobile_money_sop=mobile_money_sop,
+            mobile_money_reconciliation_summary=mobile_money_reconciliation_summary,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")
@@ -10682,6 +10822,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 product.min_stock_level = int(parse_amount(request.form.get("min_stock_level")))
                 product.sales_price = parse_amount(request.form.get("sales_price"))
                 product.cost_price = parse_amount(request.form.get("cost_price"))
+                product.expiry_date = parse_date(request.form.get("expiry_date"))
                 product.active = request.form.get("active") == "on"
                 product.notes = normalize_text(request.form.get("notes"))
                 product.user_created = True
@@ -10709,6 +10850,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         q=normalize_text(request.args.get("q")),
                         area=normalize_text(request.args.get("area")),
                         category=normalize_text(request.args.get("category")),
+                        expiry=normalize_text(request.args.get("expiry")),
                     )
                 )
             except ValueError as error:
@@ -10728,6 +10870,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         q = normalize_text(request.args.get("q"))
         area_filter = normalize_text(request.args.get("area"))
         category_filter = normalize_text(request.args.get("category"))
+        expiry_filter = normalize_text(request.args.get("expiry")).lower()
         query = select(Product)
         if area_filter:
             query = query.where(Product.business_area_id == area_filter)
@@ -10746,6 +10889,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         products = g.db.scalars(query.order_by(Product.active.desc(), Product.business_area_id.asc(), Product.name.asc()).limit(300)).all()
         for item in products:
             normalize_product_record(item)
+        if expiry_filter:
+            products = [item for item in products if product_matches_expiry_filter(item, expiry_filter)]
+        expired_count = sum(1 for item in products if item.active and product_expiry_status(item)["isExpired"])
+        expiring_soon_count = sum(1 for item in products if item.active and product_expiry_status(item)["isExpiringSoon"])
         low_stock_count = sum(
             1
             for item in products
@@ -10754,6 +10901,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         active_count = sum(1 for item in products if item.active)
         service_count = sum(1 for item in products if normalized_product_item_type(item.item_type, item.track_inventory) == "service")
         stock_value = round(sum(item.quantity_on_hand * item.cost_price for item in products if product_tracks_inventory(item)), 2)
+        discard_value = round(
+            sum(
+                item.quantity_on_hand * item.cost_price
+                for item in products
+                if product_tracks_inventory(item) and product_expiry_status(item)["isExpired"]
+            ),
+            2,
+        )
         return render_template(
             "inventory.html",
             page_title="Inventory",
@@ -10765,13 +10920,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
             search=q,
             area_filter=area_filter,
             category_filter=category_filter,
+            expiry_filter=expiry_filter,
             low_stock_count=low_stock_count,
             active_count=active_count,
             service_count=service_count,
             stock_value=stock_value,
+            expired_count=expired_count,
+            expiring_soon_count=expiring_soon_count,
+            discard_value=discard_value,
             product_image_src=product_image_src,
             product_tracks_inventory=product_tracks_inventory,
             format_product_stock_badge=format_product_stock_badge,
+            product_expiry_status=product_expiry_status,
         )
 
     @app.route("/app/inventory/barcode", methods=["GET", "POST"])
@@ -10867,6 +11027,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 q=normalize_text(request.form.get("q")),
                 area=normalize_text(request.form.get("area")),
                 category=normalize_text(request.form.get("category")),
+                expiry=normalize_text(request.form.get("expiry")),
             )
         )
 
@@ -10876,6 +11037,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         q = normalize_text(request.args.get("q"))
         area_filter = normalize_text(request.args.get("area"))
         category_filter = normalize_text(request.args.get("category"))
+        expiry_filter = normalize_text(request.args.get("expiry")).lower()
         query = select(Product)
         if area_filter:
             query = query.where(Product.business_area_id == area_filter)
@@ -10892,6 +11054,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
             )
         products = g.db.scalars(query.order_by(Product.active.desc(), Product.business_area_id.asc(), Product.name.asc())).all()
+        if expiry_filter:
+            products = [item for item in products if product_matches_expiry_filter(item, expiry_filter)]
         headers, rows = build_inventory_export_rows(products)
         return csv_download(
             f"oneroot-inventory-{date.today().isoformat()}.csv",
@@ -11199,6 +11363,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         summary = build_pos_counter_summary(order_date, area_id)
         if summary["orderCount"] <= 0:
             return jsonify({"ok": False, "error": "No POS orders are available for this date and area."}), 400
+        opening_cash_raw = parse_amount(payload.get("openingCash"))
+        closing_cash_counted_raw = parse_amount(payload.get("closingCashCounted"))
+        if opening_cash_raw < 0 or closing_cash_counted_raw < 0:
+            return jsonify({"ok": False, "error": "Opening cash and counted close cash cannot be below zero."}), 400
 
         reference = f"pos-closeout|{summary['orderDate']}|{area_id or 'all'}"
         record = g.db.scalar(
@@ -11208,6 +11376,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         )
         is_existing = record is not None
+        existing_payload = dict(record.payload or {}) if record else {}
+        cash_sales_total = pos_cash_sales_total(summary["paymentMix"])
+        expected_closing_cash = pos_expected_closing_cash(opening_cash_raw, cash_sales_total)
         closeout_payload = {
             "id": record.id if record else uuid4().hex,
             "orderDate": summary["orderDate"],
@@ -11216,14 +11387,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "reference": reference,
             "status": "closed",
             "totalAmount": summary["totalAmount"],
+            "costAmount": summary["costAmount"],
+            "profitAmount": summary["profitAmount"],
             "orderCount": summary["orderCount"],
             "itemCount": summary["itemCount"],
             "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
             "paymentMix": summary["paymentMix"],
+            "cashSalesTotal": cash_sales_total,
+            "openingCash": opening_cash_raw,
+            "closingCashCounted": closing_cash_counted_raw,
+            "expectedClosingCash": expected_closing_cash,
+            "cashVariance": pos_cash_variance(opening_cash_raw, closing_cash_counted_raw, cash_sales_total),
             "orderNumbers": [order["orderNumber"] for order in summary["orders"]],
             "closedAt": datetime.utcnow().isoformat(),
             "closedBy": g.current_user.full_name or g.current_user.username,
-            "notes": normalize_text(payload.get("notes")) or f"Counter closeout for {summary['areaLabel']} on {summary['orderDate']}.",
+            "notes": normalize_text(payload.get("notes"))
+            or normalize_text(existing_payload.get("notes"))
+            or f"Counter closeout for {summary['areaLabel']} on {summary['orderDate']}.",
         }
         if not record:
             record = ModuleRecord(

@@ -287,6 +287,41 @@
     {% include "_mobile_money_sop.html" %}
   {% endif %}
 
+  {% if definition.key == 'mobile_money_transactions' and mobile_money_reconciliation_summary %}
+    <section class="card-grid four">
+      <article class="metric-card">
+        <span>Opening Float</span>
+        <strong>{{ mobile_money_reconciliation_summary.openingCashTotal|currency }}</strong>
+        <small>Cash available at the start of reconciled days in this view</small>
+      </article>
+      <article class="metric-card">
+        <span>Cash Top-Up</span>
+        <strong>{{ mobile_money_reconciliation_summary.cashTopUpTotal|currency }}</strong>
+        <small>Extra float added during the same filtered period</small>
+      </article>
+      <article class="metric-card">
+        <span>Cash Removed</span>
+        <strong>{{ mobile_money_reconciliation_summary.cashRemovedTotal|currency }}</strong>
+        <small>Cash taken out for banking, handover, or safekeeping</small>
+      </article>
+      <article class="metric-card">
+        <span>Expected Closing</span>
+        <strong>{{ mobile_money_reconciliation_summary.expectedClosingTotal|currency }}</strong>
+        <small>Closing float expected from reconciled days in this view</small>
+      </article>
+      <article class="metric-card">
+        <span>Counted Closing</span>
+        <strong>{{ mobile_money_reconciliation_summary.closingCountedTotal|currency }}</strong>
+        <small>Actual cash counted when the mobile money desk closed</small>
+      </article>
+      <article class="metric-card {% if mobile_money_reconciliation_summary.varianceTotal != 0 %}warning{% endif %}">
+        <span>Variance</span>
+        <strong>{{ mobile_money_reconciliation_summary.varianceTotal|currency }}</strong>
+        <small>Status {{ mobile_money_reconciliation_summary.statusLabel }} · Balanced days {{ mobile_money_reconciliation_summary.balancedCount }}</small>
+      </article>
+    </section>
+  {% endif %}
+
   {% if definition.key == 'workforce_attendance' and attendance_widget %}
     <section class="card attendance-desk-card">
       <div class="card-header">

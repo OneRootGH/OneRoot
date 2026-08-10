@@ -16,6 +16,16 @@
       <strong>{{ low_stock_count }}</strong>
       <small>Filtered items at or below minimum</small>
     </article>
+    <article class="metric-card warning">
+      <span>Expired / Discard</span>
+      <strong>{{ expired_count }}</strong>
+      <small>{{ discard_value|currency }} cost value should be removed</small>
+    </article>
+    <article class="metric-card">
+      <span>Expiring Soon</span>
+      <strong>{{ expiring_soon_count }}</strong>
+      <small>Within {{ 30 }} days of expiry</small>
+    </article>
     <article class="metric-card">
       <span>Tracked Stock Value</span>
       <strong>{{ stock_value|currency }}</strong>
@@ -49,10 +59,17 @@
                 </optgroup>
               {% endfor %}
             </select>
+            <select name="expiry">
+              <option value="">All Expiry</option>
+              <option value="expired" {% if expiry_filter == 'expired' %}selected{% endif %}>Expired - Discard</option>
+              <option value="expiring-soon" {% if expiry_filter == 'expiring-soon' %}selected{% endif %}>Expiring Soon</option>
+              <option value="fresh" {% if expiry_filter == 'fresh' %}selected{% endif %}>Fresh</option>
+              <option value="no-expiry" {% if expiry_filter == 'no-expiry' %}selected{% endif %}>No Expiry</option>
+            </select>
             <button class="button subtle" type="submit">Search</button>
           </form>
           <a class="button subtle" href="{{ url_for('inventory_barcode') }}">Barcode Update</a>
-          <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter) }}">Export CSV</a>
+          <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter, expiry=expiry_filter) }}">Export CSV</a>
         </div>
       </div>
       <div class="table-wrap tall">
@@ -64,12 +81,14 @@
               <th>SKU</th>
               <th>Type</th>
               <th>Stock</th>
+              <th>Expiry</th>
               <th>Price</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {% for item in products %}
+              {% set expiry = product_expiry_status(item) %}
               <tr>
                 <td>
                   <div class="inventory-item-summary">
@@ -86,24 +105,31 @@
                 <td>{{ format_product_stock_badge(item) }}</td>
                 <td>
                   <div class="inventory-price-stack">
+                    <strong>{{ item.expiry_date.isoformat() if item.expiry_date else '—' }}</strong>
+                    <span class="status-chip {% if expiry.tone == 'danger' %}is-danger{% elif expiry.tone == 'warning' %}is-warning{% elif expiry.tone == 'ok' %}is-highlight{% endif %}">{{ expiry.label }}</span>
+                  </div>
+                </td>
+                <td>
+                  <div class="inventory-price-stack">
                     <strong>{{ item.sales_price|currency }}</strong>
                     <span>Cost {{ item.cost_price|currency }}</span>
                   </div>
                 </td>
                 <td>
                   <div class="row-actions">
-                    <a class="table-link" href="{{ url_for('inventory', edit=item.id, q=search) }}">Edit</a>
+                    <a class="table-link" href="{{ url_for('inventory', edit=item.id, q=search, area=area_filter, category=category_filter, expiry=expiry_filter) }}">Edit</a>
                     <form method="post" action="{{ url_for('inventory_delete', product_id=item.id) }}" onsubmit="return confirm('Delete this inventory item?');">
                       <input type="hidden" name="q" value="{{ search }}">
                       <input type="hidden" name="area" value="{{ area_filter }}">
                       <input type="hidden" name="category" value="{{ category_filter }}">
+                      <input type="hidden" name="expiry" value="{{ expiry_filter }}">
                       <button class="text-button danger-text" type="submit">Delete</button>
                     </form>
                   </div>
                 </td>
               </tr>
             {% else %}
-              <tr><td colspan="7">No inventory items found.</td></tr>
+              <tr><td colspan="8">No inventory items found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -152,6 +178,7 @@
         <label><span>Min Stock Level</span><input type="number" step="1" name="min_stock_level" value="{{ editing_product.min_stock_level if editing_product else 5 }}"></label>
         <label><span>Sales Price</span><input type="number" step="0.01" name="sales_price" value="{{ editing_product.sales_price if editing_product else 0 }}"></label>
         <label><span>Cost Price</span><input type="number" step="0.01" name="cost_price" value="{{ editing_product.cost_price if editing_product else 0 }}"></label>
+        <label><span>Expiry Date</span><input type="date" name="expiry_date" value="{{ editing_product.expiry_date.isoformat() if editing_product and editing_product.expiry_date else '' }}"></label>
         <label><span>Image URL</span><input type="url" name="image_url" value="{{ editing_product.image_url if editing_product and ((editing_product.image_url or '').startswith('http://') or (editing_product.image_url or '').startswith('https://')) else '' }}" placeholder="https://..."></label>
         <label><span>Upload Image</span><input type="file" name="image_file" accept="image/*"></label>
         {% if editing_product and editing_product.image_url %}
@@ -162,7 +189,7 @@
         <div class="form-actions">
           <button class="button primary" type="submit">Save Item</button>
           {% if editing_product %}
-            <a class="button subtle" href="{{ url_for('inventory', q=search, area=area_filter, category=category_filter) }}">Cancel</a>
+            <a class="button subtle" href="{{ url_for('inventory', q=search, area=area_filter, category=category_filter, expiry=expiry_filter) }}">Cancel</a>
           {% endif %}
         </div>
       </form>

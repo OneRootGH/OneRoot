@@ -593,6 +593,7 @@ def bootstrap_database(session: Session, config: AppConfig) -> None:
                 min_stock_level=int(item.get("minStockLevel") or 0),
                 sales_price=_parse_amount(item.get("salesPrice")),
                 cost_price=_parse_amount(item.get("costPrice")),
+                expiry_date=_parse_date(item.get("expiryDate")),
                 image_url=_normalize_text(item.get("imageUrl")),
                 active=bool(item.get("active", True)),
                 user_created=bool(item.get("userCreated", False)),

@@ -1458,6 +1458,29 @@ textarea { resize: vertical; }
 .pos-ticket-inline strong {
   color: var(--ink);
 }
+.pos-ticket-inline-tight {
+  margin-bottom: 0;
+}
+.pos-cash-closeout-card {
+  margin-bottom: 0.65rem;
+  display: grid;
+  gap: 0.55rem;
+}
+.pos-cash-closeout-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+.pos-cash-closeout-grid label {
+  display: grid;
+  gap: 0.22rem;
+}
+.pos-cash-closeout-grid span {
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
 .pos-customer-box {
   margin-bottom: 0.65rem;
 }
@@ -1657,6 +1680,16 @@ textarea { resize: vertical; }
   background: #dcebdd;
   border-color: #b9d2bf;
 }
+.status-chip.is-warning {
+  background: #fff3de;
+  color: #9a5f08;
+  border-color: #f3d4a1;
+}
+.status-chip.is-danger {
+  background: #fde7e4;
+  color: #a13e31;
+  border-color: #efc2ba;
+}
 
 .service-form-stack {
   display: grid;
@@ -1834,6 +1867,9 @@ thead th {
   }
   .pos-inline-tools {
     justify-content: flex-start;
+  }
+  .pos-cash-closeout-grid {
+    grid-template-columns: 1fr;
   }
   .pos-results-list-tall {
     grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));

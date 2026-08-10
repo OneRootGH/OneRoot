@@ -32,6 +32,11 @@
   const summaryTotalNode = document.getElementById("pos-summary-total");
   const closeoutMetaNode = document.getElementById("pos-closeout-meta");
   const closeoutButton = document.getElementById("pos-closeout");
+  const openingCashInput = document.getElementById("pos-opening-cash");
+  const closingCashInput = document.getElementById("pos-closing-cash");
+  const cashSalesNode = document.getElementById("pos-cash-sales");
+  const expectedCashNode = document.getElementById("pos-expected-cash");
+  const cashVarianceNode = document.getElementById("pos-cash-variance");
   const orderDateInput = document.getElementById("pos-order-date");
   const areaFilterInput = document.getElementById("pos-area-filter");
   const paymentMethodInput = document.getElementById("pos-payment-method");
@@ -54,7 +59,8 @@
     searchTimer: null,
     latestResults: [],
     activeSearchRequest: 0,
-    resultPage: 0
+    resultPage: 0,
+    currentSummary: null
   };
   const RESULTS_PER_PAGE = 8;
 
@@ -73,6 +79,22 @@
       currency: "GHS",
       minimumFractionDigits: 2
     }).format(Number(value || 0)).replace("GHS", "GH₵");
+  }
+
+  function parseMoneyInput(input) {
+    const value = Number.parseFloat(String(input?.value || "0").trim());
+    return Number.isFinite(value) ? value : 0;
+  }
+
+  function syncMoneyInput(input, value) {
+    if (!input) {
+      return;
+    }
+    if (document.activeElement === input && input.dataset.dirty === "true") {
+      return;
+    }
+    input.value = Number(value || 0).toFixed(2);
+    input.dataset.dirty = "false";
   }
 
   function setStatus(message, type = "info") {
@@ -415,6 +437,7 @@
     if (!summary) {
       return;
     }
+    state.currentSummary = summary;
     if (counterTotalNode) {
       counterTotalNode.textContent = formatCurrency(summary.totalAmount);
     }
@@ -456,9 +479,15 @@
     if (summaryTotalNode) {
       summaryTotalNode.textContent = formatCurrency(summary.totalAmount);
     }
+    if (cashSalesNode) {
+      cashSalesNode.textContent = formatCurrency(summary.cashSalesTotal);
+    }
+    syncMoneyInput(openingCashInput, summary.openingCash);
+    syncMoneyInput(closingCashInput, summary.closingCashCounted);
+    renderCloseoutPreview(summary);
     if (closeoutMetaNode) {
       closeoutMetaNode.textContent = summary.lastCloseout
-        ? `Last closeout saved ${String(summary.lastCloseout.closedAt || "").slice(0, 16).replace("T", " ")} by ${summary.lastCloseout.closedBy || "staff"}.`
+        ? `Last closeout saved ${String(summary.lastCloseout.closedAt || "").slice(0, 16).replace("T", " ")} by ${summary.lastCloseout.closedBy || "staff"}. Open ${formatCurrency(summary.openingCash)} · Close ${formatCurrency(summary.closingCashCounted)} · Variance ${formatCurrency(summary.cashVariance)}.`
         : "No closeout has been saved for this counter day yet.";
     }
     if (closeoutButton) {
@@ -466,6 +495,24 @@
     }
     renderPaymentMix(summary.paymentMix);
     renderHistory(summary.orders || []);
+  }
+
+  function renderCloseoutPreview(summary = state.currentSummary) {
+    if (!summary) {
+      return;
+    }
+    const openingCash = parseMoneyInput(openingCashInput);
+    const countedClose = parseMoneyInput(closingCashInput);
+    const cashSales = Number(summary.cashSalesTotal || 0);
+    const expectedClose = openingCash + cashSales;
+    const variance = countedClose - expectedClose;
+    if (expectedCashNode) {
+      expectedCashNode.textContent = formatCurrency(expectedClose);
+    }
+    if (cashVarianceNode) {
+      cashVarianceNode.textContent = formatCurrency(variance);
+      cashVarianceNode.classList.toggle("danger-text", Math.abs(variance) > 0.009);
+    }
   }
 
   async function refreshSummary() {
@@ -619,6 +666,13 @@
     setStatus("Cart cleared.");
   });
 
+  [openingCashInput, closingCashInput].forEach((input) => {
+    input?.addEventListener("input", () => {
+      input.dataset.dirty = "true";
+      renderCloseoutPreview();
+    });
+  });
+
   closeoutButton?.addEventListener("click", async () => {
     closeoutButton.disabled = true;
     setStatus("Saving counter closeout...");
@@ -631,7 +685,9 @@
       },
       body: JSON.stringify({
         orderDate: getOrderDate(),
-        areaId: getSelectedArea()
+        areaId: getSelectedArea(),
+        openingCash: parseMoneyInput(openingCashInput),
+        closingCashCounted: parseMoneyInput(closingCashInput)
       })
     });
     const result = await response.json();
@@ -641,7 +697,7 @@
       return;
     }
     renderSummary(result.summary);
-    setStatus(`Counter closeout saved for ${result.closeout.areaLabel} at ${formatCurrency(result.closeout.totalAmount)}.`);
+    setStatus(`Counter closeout saved for ${result.closeout.areaLabel} at ${formatCurrency(result.closeout.totalAmount)}. Variance ${formatCurrency(result.closeout.cashVariance)}.`);
   });
 
   historyBody?.addEventListener("click", async (event) => {
