@@ -27,16 +27,16 @@
         <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Cart</span>
-        <strong data-pos-total>GH₵0.00</strong>
+        <span class="pos-counter-label">Food Sales</span>
+        <strong id="pos-food-sales">{{ counter_summary.foodSalesTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Items</span>
-        <strong id="pos-cart-item-count">0</strong>
+        <span class="pos-counter-label">Laundry Sales</span>
+        <strong id="pos-laundry-sales">{{ counter_summary.laundrySalesTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Area</span>
-        <strong id="pos-area-label">{{ counter_summary.areaLabel }}</strong>
+        <span class="pos-counter-label">Equipment Sales</span>
+        <strong id="pos-equipment-sales">{{ counter_summary.equipmentSalesTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill pos-counter-pill-highlight">
         <span class="pos-counter-label">MoMo Sales</span>
@@ -57,7 +57,9 @@
       </article>
     </section>
     <p class="muted pos-counter-note" id="pos-counter-note">
-      Mix:
+      Area:
+      <span id="pos-area-label">{{ counter_summary.areaLabel }}</span>
+      · Mix:
       <span id="pos-payment-mix">
         {% if counter_summary.paymentMix %}
           {% for label, amount in counter_summary.paymentMix.items() %}

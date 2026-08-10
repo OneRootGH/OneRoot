@@ -14,11 +14,13 @@
   const paymentButtonNodes = Array.from(document.querySelectorAll("[data-payment-method]"));
   const cartContainer = document.getElementById("pos-cart-lines");
   const totalNodes = document.querySelectorAll("[data-pos-total]");
-  const cartItemCountNode = document.getElementById("pos-cart-item-count");
   const cartItemCountDuplicateNode = document.getElementById("pos-cart-item-count-duplicate");
   const counterTotalNode = document.getElementById("pos-counter-total");
   const counterProfitNode = document.getElementById("pos-counter-profit");
   const ledgerTotalNode = document.getElementById("pos-ledger-total");
+  const foodSalesNode = document.getElementById("pos-food-sales");
+  const laundrySalesNode = document.getElementById("pos-laundry-sales");
+  const equipmentSalesNode = document.getElementById("pos-equipment-sales");
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
   const momoSalesNode = document.getElementById("pos-momo-sales");
@@ -146,9 +148,6 @@
     totalNodes.forEach((node) => {
       node.textContent = formatCurrency(total);
     });
-    if (cartItemCountNode) {
-      cartItemCountNode.textContent = String(itemCount);
-    }
     if (cartItemCountDuplicateNode) {
       cartItemCountDuplicateNode.textContent = String(itemCount);
     }
@@ -424,6 +423,15 @@
     }
     if (ledgerTotalNode) {
       ledgerTotalNode.textContent = formatCurrency(summary.dailySalesLedgerTotal);
+    }
+    if (foodSalesNode) {
+      foodSalesNode.textContent = formatCurrency(summary.foodSalesTotal);
+    }
+    if (laundrySalesNode) {
+      laundrySalesNode.textContent = formatCurrency(summary.laundrySalesTotal);
+    }
+    if (equipmentSalesNode) {
+      equipmentSalesNode.textContent = formatCurrency(summary.equipmentSalesTotal);
     }
     if (momoSalesNode) {
       momoSalesNode.textContent = formatCurrency(summary.mobileMoneySalesTotal);

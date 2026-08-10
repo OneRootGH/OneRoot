@@ -43,6 +43,7 @@ from .registry import (
     PAYMENT_METHODS,
     ROLE_ACCESS_KEYS,
     ROLE_DESCRIPTIONS,
+    STAFF_ROLE_DESCRIPTIONS,
     STAFF_WORK_ROLE_LABELS,
     STAFF_WORK_ROLES,
     SUITE_NAMES,
@@ -59,6 +60,9 @@ DATABASE_INIT_DELAY_SECONDS = 1
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
 SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
+POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "fresh-foods-drinks", "kitchen"}
+POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
+POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
 SERVICE_ITEM_FIELD_MAP = {
     "laundry_tickets": "laundryItem",
     "equipment_rental_bookings": "equipmentItem",
@@ -2288,14 +2292,31 @@ def normalize_role_key(value: Any) -> str:
     role_aliases = {
         "owner": "owner",
         "admin": "admin",
+        "platform admin": "admin",
         "finance": "finance",
+        "finance & controls": "finance",
         "operations": "operations",
+        "operations manager": "operations",
         "apartment-manager": "apartment-manager",
         "apartment manager": "apartment-manager",
         "sales-stock-operator": "sales-stock-operator",
         "sales & stock operator": "sales-stock-operator",
         "sales and stock operator": "sales-stock-operator",
+        "sales & stock": "sales-stock-operator",
         "cashier": "cashier",
+        "pos cashier": "cashier",
+        "mobile-money-agent": "mobile-money-agent",
+        "mobile money agent": "mobile-money-agent",
+        "laundry-desk": "laundry-desk",
+        "laundry desk": "laundry-desk",
+        "equipment-desk": "equipment-desk",
+        "equipment desk": "equipment-desk",
+        "delivery-dispatch": "delivery-dispatch",
+        "delivery & dispatch": "delivery-dispatch",
+        "marketing-crm": "marketing-crm",
+        "crm & marketing": "marketing-crm",
+        "hr-payroll": "hr-payroll",
+        "hr & payroll": "hr-payroll",
         "viewer": "viewer",
     }
     return role_aliases.get(raw, "viewer")
@@ -2311,10 +2332,16 @@ def default_staff_role_for_access_role(value: Any) -> str:
         "owner": "Manager",
         "admin": "Manager",
         "finance": "Finance Officer",
-        "operations": "Manager",
+        "operations": "Operations Manager",
         "apartment-manager": "Apartment Manager",
         "sales-stock-operator": "Stock Officer",
-        "cashier": "Cashier",
+        "cashier": "POS Cashier",
+        "mobile-money-agent": "Mobile Money Agent",
+        "laundry-desk": "Laundry Desk Officer",
+        "equipment-desk": "Equipment Rental Officer",
+        "delivery-dispatch": "Dispatch Coordinator",
+        "marketing-crm": "CRM & Marketing Officer",
+        "hr-payroll": "HR & Payroll Officer",
         "viewer": "Support Staff",
     }
     return role_map.get(role_key, "Support Staff")
@@ -2325,6 +2352,13 @@ def normalize_staff_role(value: Any, *, fallback_role: Any = "viewer") -> str:
     if raw in STAFF_WORK_ROLE_LABELS:
         return raw
     normalized = raw.lower()
+    legacy_aliases = {
+        "cashier": "POS Cashier",
+        "laundry attendant": "Laundry Desk Officer",
+        "equipment officer": "Equipment Rental Officer",
+    }
+    if normalized in legacy_aliases:
+        return legacy_aliases[normalized]
     for option_value, option_label in STAFF_WORK_ROLES:
         if normalized in {option_value.lower(), option_label.lower()}:
             return option_value
@@ -7302,6 +7336,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 }
             )
 
+        all_sales_rows = g.db.scalars(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "sales",
+                ModuleRecord.record_date == order_date,
+            )
+        ).all()
+        daily_sales_by_area: dict[str, float] = defaultdict(float)
+        for record in all_sales_rows:
+            daily_sales_by_area[record.business_area_id or "shared-operations"] += parse_amount(record.amount)
+
         sales_query = select(ModuleRecord).where(
             ModuleRecord.module_key == "sales",
             ModuleRecord.record_date == order_date,
@@ -7333,6 +7377,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "profitAmount": round(total_amount - total_cost, 2),
             "dailySalesLedgerTotal": daily_sales_total,
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
+            "foodSalesTotal": round(
+                sum(amount for area_key, amount in daily_sales_by_area.items() if area_key in POS_FOOD_SALES_AREA_IDS),
+                2,
+            ),
+            "laundrySalesTotal": round(
+                sum(amount for area_key, amount in daily_sales_by_area.items() if area_key in POS_LAUNDRY_SALES_AREA_IDS),
+                2,
+            ),
+            "equipmentSalesTotal": round(
+                sum(amount for area_key, amount in daily_sales_by_area.items() if area_key in POS_EQUIPMENT_SALES_AREA_IDS),
+                2,
+            ),
             "mobileMoneyInScope": mobile_money_in_scope,
             "mobileMoneySalesTotal": mobile_money_snapshot["recognizedSalesTotal"] if mobile_money_in_scope else 0.0,
             "mobileMoneyProfitTotal": mobile_money_snapshot["recognizedProfitTotal"] if mobile_money_in_scope else 0.0,
@@ -8828,6 +8884,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             role_options=USER_ROLE_OPTIONS,
             role_descriptions=ROLE_DESCRIPTIONS,
             staff_role_options=STAFF_WORK_ROLES,
+            staff_role_descriptions=STAFF_ROLE_DESCRIPTIONS,
         )
 
     @app.route("/app/users/<user_id>/delete", methods=["POST"])

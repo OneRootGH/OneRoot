@@ -122,6 +122,7 @@
               <option value="{{ value }}" {% if form_user.get('role') == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
+          <small class="muted">Choose the menu access this person needs across POS, services, finance, mobile money, apartments, and reporting.</small>
         </label>
         <label>
           <span>Staff Role</span>
@@ -130,6 +131,7 @@
               <option value="{{ value }}" {% if form_user.get('staff_role') == value %}selected{% endif %}>{{ label }}</option>
             {% endfor %}
           </select>
+          <small class="muted">Use the actual day-to-day desk or work assignment for the staff member.</small>
         </label>
         <label>
           <span>Phone</span>
@@ -243,7 +245,7 @@
         {% for value, label in staff_role_options %}
           <li>
             <strong>{{ label }}</strong>
-            <span>Use this to reflect the staff member's actual day-to-day work assignment.</span>
+            <span>{{ staff_role_descriptions.get(value, 'Use this to reflect the staff member’s actual day-to-day work assignment.') }}</span>
           </li>
         {% endfor %}
       </ul>
