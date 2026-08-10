@@ -93,20 +93,14 @@
       <small>{% if top_source %}{{ top_source.salesTotal|currency }} · {{ top_source.areaCount }} area{% if top_source.areaCount != 1 %}s{% endif %}{% else %}No sales source captured in this scope yet{% endif %}</small>
     </article>
     <article class="metric-card">
+      <span>Handled Value</span>
+      <strong>{{ mobile_money_handled_value|currency }}</strong>
+      <small>Transaction face value processed.</small>
+    </article>
+    <article class="metric-card">
       <span>Mobile Money Profit</span>
       <strong>{{ mobile_money_profit|currency }}</strong>
       <small>{{ mobile_money_share }}% of the total day sales came from mobile money.</small>
-    </article>
-    <article class="metric-card">
-      <span>MoMo Reconciliation</span>
-      <strong>{{ mobile_money_reconciliation_total|currency }}</strong>
-      <small>
-        {% if mobile_money_reconciliation_count %}
-          {{ mobile_money_reconciliation_count }} saved closeout{% if mobile_money_reconciliation_count != 1 %}s{% endif %} · handled {{ mobile_money_handled_value|currency }}
-        {% else %}
-          No reconciliation saved yet for this day.
-        {% endif %}
-      </small>
     </article>
     <article class="metric-card">
       <span>MoMo Closing Check</span>

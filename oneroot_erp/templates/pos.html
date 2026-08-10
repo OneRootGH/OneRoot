@@ -23,6 +23,10 @@
         <strong id="pos-counter-total">{{ counter_summary.totalAmount|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
+        <span class="pos-counter-label">All Daily Sales</span>
+        <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
         <span class="pos-counter-label">Cart</span>
         <strong data-pos-total>GH₵0.00</strong>
       </article>
@@ -34,45 +38,15 @@
         <span class="pos-counter-label">Area</span>
         <strong id="pos-area-label">{{ counter_summary.areaLabel }}</strong>
       </article>
-      <article class="pos-counter-pill">
-        <span class="pos-counter-label">POS Profit</span>
-        <strong id="pos-counter-profit">{{ counter_summary.profitAmount|currency }}</strong>
-      </article>
-      <article class="pos-counter-pill">
-        <span class="pos-counter-label">All Daily Sales</span>
-        <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
-      </article>
-      <article class="pos-counter-pill pos-counter-pill-wide">
-        <span class="pos-counter-label">Payment Mix</span>
-        <strong id="pos-payment-mix">
-          {% if counter_summary.paymentMix %}
-            {% for label, amount in counter_summary.paymentMix.items() %}
-              {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
-            {% endfor %}
-          {% else %}
-            No payment mix recorded yet.
-          {% endif %}
-        </strong>
-      </article>
-    </section>
-    <section class="pos-counter-ribbon pos-counter-ribbon-secondary">
       <article class="pos-counter-pill pos-counter-pill-highlight">
         <span class="pos-counter-label">MoMo Sales</span>
         <strong id="pos-momo-sales">{{ counter_summary.mobileMoneySalesTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">MoMo Profit</span>
-        <strong id="pos-momo-profit">{{ counter_summary.mobileMoneyProfitTotal|currency }}</strong>
+        <span class="pos-counter-label">Handled Value</span>
+        <strong id="pos-momo-handled">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Reconciliation</span>
-        <strong id="pos-momo-reconciliation">{{ counter_summary.mobileMoneyReconciliationTotal|currency }}</strong>
-      </article>
-      <article class="pos-counter-pill">
-        <span class="pos-counter-label">Variance</span>
-        <strong id="pos-momo-variance">{{ counter_summary.mobileMoneyVariance|currency }}</strong>
-      </article>
-      <article class="pos-counter-pill pos-counter-pill-wide">
         <span class="pos-counter-label">MoMo Status</span>
         <strong id="pos-momo-status">
           {{ counter_summary.mobileMoneyStatusLabel }}
@@ -82,7 +56,19 @@
         </strong>
       </article>
     </section>
-    <p class="muted pos-counter-note" id="pos-momo-note">{{ counter_summary.mobileMoneySummaryNote }}</p>
+    <p class="muted pos-counter-note" id="pos-counter-note">
+      Mix:
+      <span id="pos-payment-mix">
+        {% if counter_summary.paymentMix %}
+          {% for label, amount in counter_summary.paymentMix.items() %}
+            {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
+          {% endfor %}
+        {% else %}
+          No payment mix recorded yet.
+        {% endif %}
+      </span>
+      · <span id="pos-momo-note">{{ counter_summary.mobileMoneySummaryNote }}</span>
+    </p>
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
       <section class="card pos-catalog-card">

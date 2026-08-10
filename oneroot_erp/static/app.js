@@ -22,9 +22,7 @@
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
   const momoSalesNode = document.getElementById("pos-momo-sales");
-  const momoProfitNode = document.getElementById("pos-momo-profit");
-  const momoReconciliationNode = document.getElementById("pos-momo-reconciliation");
-  const momoVarianceNode = document.getElementById("pos-momo-variance");
+  const momoHandledNode = document.getElementById("pos-momo-handled");
   const momoStatusNode = document.getElementById("pos-momo-status");
   const momoNoteNode = document.getElementById("pos-momo-note");
   const paymentLabelNode = document.getElementById("pos-payment-label");
@@ -370,14 +368,18 @@
     }
   }
 
+  function paymentMixText(paymentMix) {
+    const entries = Object.entries(paymentMix || {});
+    return entries.length
+      ? entries.map(([label, amount]) => `${label} ${formatCurrency(amount)}`).join(" · ")
+      : "No payment mix recorded yet.";
+  }
+
   function renderPaymentMix(paymentMix) {
     if (!paymentMixNode) {
       return;
     }
-    const entries = Object.entries(paymentMix || {});
-    paymentMixNode.textContent = entries.length
-      ? entries.map(([label, amount]) => `${label} ${formatCurrency(amount)}`).join(" · ")
-      : "No payment mix recorded yet.";
+    paymentMixNode.textContent = paymentMixText(paymentMix);
   }
 
   function buildHistoryRowMarkup(order) {
@@ -426,14 +428,8 @@
     if (momoSalesNode) {
       momoSalesNode.textContent = formatCurrency(summary.mobileMoneySalesTotal);
     }
-    if (momoProfitNode) {
-      momoProfitNode.textContent = formatCurrency(summary.mobileMoneyProfitTotal);
-    }
-    if (momoReconciliationNode) {
-      momoReconciliationNode.textContent = formatCurrency(summary.mobileMoneyReconciliationTotal);
-    }
-    if (momoVarianceNode) {
-      momoVarianceNode.textContent = formatCurrency(summary.mobileMoneyVariance);
+    if (momoHandledNode) {
+      momoHandledNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
     }
     if (momoStatusNode) {
       momoStatusNode.textContent = summary.mobileMoneyInScope
