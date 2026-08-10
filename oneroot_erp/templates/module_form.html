@@ -53,6 +53,31 @@
       </section>
     {% endif %}
 
+    {% if definition.key in ['mobile_money_transactions', 'mobile_money_reconciliations'] and mobile_money_live_snapshot %}
+      <section class="card-grid four module-inline-actions">
+        <article class="metric-card">
+          <span>Physical Cash Available</span>
+          <strong>{{ mobile_money_live_snapshot.physicalCashAvailable|currency }}</strong>
+          <small>Opening {{ mobile_money_live_snapshot.openingCash|currency }} · Top-Up {{ mobile_money_live_snapshot.cashTopUp|currency }}</small>
+        </article>
+        <article class="metric-card">
+          <span>E-Cash Available</span>
+          <strong>{{ mobile_money_live_snapshot.eCashAvailable|currency }}</strong>
+          <small>Opening {{ mobile_money_live_snapshot.openingECash|currency }} · Top-Up {{ mobile_money_live_snapshot.eCashTopUp|currency }}</small>
+        </article>
+        <article class="metric-card">
+          <span>Cash In / Cash Out</span>
+          <strong>{{ mobile_money_live_snapshot.cashInValueTotal|currency }} / {{ mobile_money_live_snapshot.cashOutValueTotal|currency }}</strong>
+          <small>Completed transactions already included in the live float</small>
+        </article>
+        <article class="metric-card">
+          <span>Cash Top-Up From</span>
+          <strong>{{ mobile_money_live_snapshot.cashTopUpSource or 'Not saved yet' }}</strong>
+          <small>{{ mobile_money_live_snapshot.basisNote }}</small>
+        </article>
+      </section>
+    {% endif %}
+
     <form method="post" class="form-grid module-form-grid" id="generic-module-form">
       {% for field in definition.fields %}
         <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
@@ -183,6 +208,10 @@
             <small class="muted form-helper">Use the actual transaction date. Future dates are blocked.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'cashRemoved' %}
             <small class="muted form-helper">If you clear the drawer or hand cash over at close, record that amount here.</small>
+          {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'cashTopUpSource' %}
+            <small class="muted form-helper">Example: cashbook, bank withdrawal, owner top-up, or another safe cash source used to serve cash-out customers.</small>
+          {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'eCashTopUpSource' %}
+            <small class="muted form-helper">Record where the extra wallet float came from, such as another wallet or bank transfer.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'closingCashCounted' %}
             <small class="muted form-helper">This is the cash left after cash removed, not the starting float.</small>
           {% endif %}

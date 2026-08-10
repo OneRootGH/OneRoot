@@ -287,6 +287,46 @@
     {% include "_mobile_money_sop.html" %}
   {% endif %}
 
+  {% if definition.key in ['mobile_money_transactions', 'mobile_money_reconciliations'] and mobile_money_live_snapshot %}
+    <section class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Live Float Snapshot</p>
+          <h3>{{ mobile_money_live_snapshot.provider }} on {{ mobile_money_live_snapshot.date or 'Today' }}</h3>
+        </div>
+        <p class="muted list-summary">{{ mobile_money_live_snapshot.basisNote }}</p>
+      </div>
+      <section class="card-grid four">
+        <article class="metric-card">
+          <span>Physical Cash Available</span>
+          <strong>{{ mobile_money_live_snapshot.physicalCashAvailable|currency }}</strong>
+          <small>Opening {{ mobile_money_live_snapshot.openingCash|currency }} · Top-Up {{ mobile_money_live_snapshot.cashTopUp|currency }}</small>
+        </article>
+        <article class="metric-card">
+          <span>E-Cash Available</span>
+          <strong>{{ mobile_money_live_snapshot.eCashAvailable|currency }}</strong>
+          <small>Opening {{ mobile_money_live_snapshot.openingECash|currency }} · Top-Up {{ mobile_money_live_snapshot.eCashTopUp|currency }}</small>
+        </article>
+        <article class="metric-card">
+          <span>Cash In / Cash Out</span>
+          <strong>{{ mobile_money_live_snapshot.cashInValueTotal|currency }} / {{ mobile_money_live_snapshot.cashOutValueTotal|currency }}</strong>
+          <small>Completed transactions already affecting the live balances</small>
+        </article>
+        <article class="metric-card">
+          <span>Cash Top-Up From</span>
+          <strong>{{ mobile_money_live_snapshot.cashTopUpSource or 'Not saved yet' }}</strong>
+          <small>
+            {% if mobile_money_live_snapshot.eCashTopUpSource %}
+              E-Cash top-up from {{ mobile_money_live_snapshot.eCashTopUpSource }}
+            {% else %}
+              Save the source whenever you add extra cash to serve cash-out customers.
+            {% endif %}
+          </small>
+        </article>
+      </section>
+    </section>
+  {% endif %}
+
   {% if definition.key == 'mobile_money_transactions' and mobile_money_reconciliation_summary %}
     <section class="card-grid four">
       <article class="metric-card">
@@ -511,6 +551,9 @@
                     Opening {{ (record.payload.get('openingCash', 0))|currency }} ·
                     Expected {{ mobile_money_expected_closing(record.payload or {})|currency }} ·
                     Counted {{ (record.payload.get('closingCashCounted', 0))|currency }}
+                    {% if record.payload.get('cashTopUpSource') %}
+                      · Top-Up From {{ record.payload.get('cashTopUpSource') }}
+                    {% endif %}
                   </span>
                 {% elif definition.key == 'salary_records' %}
                   <span class="table-secondary">Net {{ (record.payload.get('netPay', 0))|currency }} · Paid {{ (record.payload.get('amountPaid', 0))|currency }} · Bal {{ (record.payload.get('balanceDue', 0))|currency }}</span>

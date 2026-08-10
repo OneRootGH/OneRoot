@@ -3269,8 +3269,11 @@ def mobile_money_transaction_breakdown(records: list[ModuleRecord | dict[str, An
 def mobile_money_reconciliation_breakdown(records: list[ModuleRecord | dict[str, Any]]) -> dict[str, Any]:
     record_count = 0
     opening_cash_total = 0.0
+    opening_ecash_total = 0.0
     cash_top_up_total = 0.0
+    ecash_top_up_total = 0.0
     cash_removed_total = 0.0
+    ecash_removed_total = 0.0
     cash_in_total = 0.0
     cash_out_total = 0.0
     service_fees_total = 0.0
@@ -3278,27 +3281,40 @@ def mobile_money_reconciliation_breakdown(records: list[ModuleRecord | dict[str,
     expected_closing_total = 0.0
     closing_counted_total = 0.0
     variance_total = 0.0
+    expected_ecash_total = 0.0
+    closing_ecash_counted_total = 0.0
+    ecash_variance_total = 0.0
     balanced_count = 0
+    ecash_balanced_count = 0
     statuses: set[str] = set()
 
     for record in records:
         payload = dict(record.payload or {}) if isinstance(record, ModuleRecord) else dict(record or {})
         record_count += 1
         opening_cash_total = round(opening_cash_total + parse_amount(payload.get("openingCash")), 2)
+        opening_ecash_total = round(opening_ecash_total + parse_amount(payload.get("openingECash")), 2)
         cash_top_up_total = round(cash_top_up_total + parse_amount(payload.get("cashTopUp")), 2)
+        ecash_top_up_total = round(ecash_top_up_total + parse_amount(payload.get("eCashTopUp")), 2)
         cash_removed_total = round(cash_removed_total + parse_amount(payload.get("cashRemoved")), 2)
+        ecash_removed_total = round(ecash_removed_total + parse_amount(payload.get("eCashRemoved")), 2)
         cash_in_total = round(cash_in_total + parse_amount(payload.get("cashInValue")), 2)
         cash_out_total = round(cash_out_total + parse_amount(payload.get("cashOutValue")), 2)
         service_fees_total = round(service_fees_total + parse_amount(payload.get("serviceFees")), 2)
         operating_expense_total = round(operating_expense_total + parse_amount(payload.get("operatingExpense")), 2)
         expected_closing_total = round(expected_closing_total + mobile_money_expected_closing(payload), 2)
         closing_counted_total = round(closing_counted_total + parse_amount(payload.get("closingCashCounted")), 2)
+        expected_ecash_total = round(expected_ecash_total + mobile_money_expected_ecash(payload), 2)
+        closing_ecash_counted_total = round(closing_ecash_counted_total + parse_amount(payload.get("closingECashCounted")), 2)
         variance = mobile_money_variance(payload)
+        ecash_variance = mobile_money_ecash_variance(payload)
         variance_total = round(variance_total + variance, 2)
+        ecash_variance_total = round(ecash_variance_total + ecash_variance, 2)
         status_label = mobile_money_status(payload)
         statuses.add(status_label)
         if status_label == "Balanced":
             balanced_count += 1
+        if mobile_money_ecash_status(payload) == "Balanced":
+            ecash_balanced_count += 1
 
     if not record_count:
         status_summary = "No Reconciliation"
@@ -3310,8 +3326,11 @@ def mobile_money_reconciliation_breakdown(records: list[ModuleRecord | dict[str,
     return {
         "recordCount": record_count,
         "openingCashTotal": opening_cash_total,
+        "openingECashTotal": opening_ecash_total,
         "cashTopUpTotal": cash_top_up_total,
+        "eCashTopUpTotal": ecash_top_up_total,
         "cashRemovedTotal": cash_removed_total,
+        "eCashRemovedTotal": ecash_removed_total,
         "cashInValueTotal": cash_in_total,
         "cashOutValueTotal": cash_out_total,
         "serviceFeesTotal": service_fees_total,
@@ -3319,7 +3338,11 @@ def mobile_money_reconciliation_breakdown(records: list[ModuleRecord | dict[str,
         "expectedClosingTotal": expected_closing_total,
         "closingCountedTotal": closing_counted_total,
         "varianceTotal": variance_total,
+        "expectedECashTotal": expected_ecash_total,
+        "closingECashCountedTotal": closing_ecash_counted_total,
+        "eCashVarianceTotal": ecash_variance_total,
         "balancedCount": balanced_count,
+        "eCashBalancedCount": ecash_balanced_count,
         "statusLabel": status_summary,
         "hasData": bool(record_count),
     }
@@ -3507,9 +3530,24 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
                 "note": "Additional cash added to float during the filtered reconciliation period.",
             },
             {
+                "label": "Opening E-Cash",
+                "value": format_currency(reconciliation_summary["openingECashTotal"]),
+                "note": "Wallet float available before serving customers.",
+            },
+            {
+                "label": "E-Cash Top-Up",
+                "value": format_currency(reconciliation_summary["eCashTopUpTotal"]),
+                "note": "Extra wallet float added during the filtered reconciliation period.",
+            },
+            {
                 "label": "Cash Removed",
                 "value": format_currency(reconciliation_summary["cashRemovedTotal"]),
                 "note": "Cash taken out from float for banking, handover, or safekeeping.",
+            },
+            {
+                "label": "E-Cash Removed",
+                "value": format_currency(reconciliation_summary["eCashRemovedTotal"]),
+                "note": "Wallet float moved out to bank or another wallet source.",
             },
             {
                 "label": "Cash In Total",
@@ -3540,6 +3578,21 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
                 "label": "Variance",
                 "value": format_currency(reconciliation_summary["varianceTotal"]),
                 "note": "Difference between expected closing and counted closing cash.",
+            },
+            {
+                "label": "Expected E-Cash",
+                "value": format_currency(reconciliation_summary["expectedECashTotal"]),
+                "note": "Calculated wallet balance based on opening e-cash and today's movements.",
+            },
+            {
+                "label": "Counted E-Cash",
+                "value": format_currency(reconciliation_summary["closingECashCountedTotal"]),
+                "note": f"Balanced wallet days: {reconciliation_summary['eCashBalancedCount']}",
+            },
+            {
+                "label": "E-Cash Variance",
+                "value": format_currency(reconciliation_summary["eCashVarianceTotal"]),
+                "note": "Difference between expected e-cash and counted e-cash.",
             },
         ]
     elif definition.key == "forecast_plans":
@@ -3871,8 +3924,23 @@ def mobile_money_expected_closing(payload: dict[str, Any]) -> float:
     return round(expected, 2)
 
 
+def mobile_money_expected_ecash(payload: dict[str, Any]) -> float:
+    expected = (
+        parse_amount(payload.get("openingECash"))
+        + parse_amount(payload.get("eCashTopUp"))
+        + parse_amount(payload.get("cashOutValue"))
+        - parse_amount(payload.get("cashInValue"))
+        - parse_amount(payload.get("eCashRemoved"))
+    )
+    return round(expected, 2)
+
+
 def mobile_money_variance(payload: dict[str, Any]) -> float:
     return round(parse_amount(payload.get("closingCashCounted")) - mobile_money_expected_closing(payload), 2)
+
+
+def mobile_money_ecash_variance(payload: dict[str, Any]) -> float:
+    return round(parse_amount(payload.get("closingECashCounted")) - mobile_money_expected_ecash(payload), 2)
 
 
 def mobile_money_status(payload: dict[str, Any]) -> str:
@@ -3880,6 +3948,131 @@ def mobile_money_status(payload: dict[str, Any]) -> str:
     if abs(variance) < 0.01:
         return "Balanced"
     return "Over Counted" if variance > 0 else "Short"
+
+
+def mobile_money_ecash_status(payload: dict[str, Any]) -> str:
+    variance = mobile_money_ecash_variance(payload)
+    if abs(variance) < 0.01:
+        return "Balanced"
+    return "Over Counted" if variance > 0 else "Short"
+
+
+def mobile_money_live_balance_snapshot(db_session, target_date: date | None, provider: str = "") -> dict[str, Any]:
+    clean_provider = normalize_text(provider) or "MTN Mobile Money"
+    if not target_date:
+        return {
+            "date": "",
+            "provider": clean_provider,
+            "openingCash": 0.0,
+            "openingECash": 0.0,
+            "physicalCashAvailable": 0.0,
+            "eCashAvailable": 0.0,
+            "cashInValueTotal": 0.0,
+            "cashOutValueTotal": 0.0,
+            "feeTotal": 0.0,
+            "cashTopUp": 0.0,
+            "cashTopUpSource": "",
+            "cashRemoved": 0.0,
+            "eCashTopUp": 0.0,
+            "eCashTopUpSource": "",
+            "eCashRemoved": 0.0,
+            "operatingExpense": 0.0,
+            "hasBase": False,
+            "basisNote": "No date selected yet.",
+        }
+
+    transaction_rollup = mobile_money_transaction_day_rollup(db_session, target_date, clean_provider)
+    reconciliation_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "mobile_money_reconciliations",
+            ModuleRecord.record_date <= target_date,
+        )
+        .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+    ).all()
+    provider_records = [
+        record
+        for record in reconciliation_records
+        if normalize_text((record.payload or {}).get("provider")) == clean_provider
+    ]
+    today_record = next((record for record in provider_records if record.record_date == target_date), None)
+    carry_record = today_record or next((record for record in provider_records if record.record_date and record.record_date < target_date), None)
+    carry_payload = dict(carry_record.payload or {}) if carry_record else {}
+    today_payload = dict(today_record.payload or {}) if today_record else {}
+
+    if today_record:
+        opening_cash = parse_amount(today_payload.get("openingCash"))
+        opening_ecash = parse_amount(today_payload.get("openingECash"))
+        cash_top_up = parse_amount(today_payload.get("cashTopUp"))
+        cash_top_up_source = normalize_text(today_payload.get("cashTopUpSource"))
+        cash_removed = parse_amount(today_payload.get("cashRemoved"))
+        ecash_top_up = parse_amount(today_payload.get("eCashTopUp"))
+        ecash_top_up_source = normalize_text(today_payload.get("eCashTopUpSource"))
+        ecash_removed = parse_amount(today_payload.get("eCashRemoved"))
+        operating_expense = parse_amount(today_payload.get("operatingExpense"))
+        basis_note = "Using today's saved opening cash and e-cash plus completed mobile money transactions."
+    elif carry_record:
+        opening_cash = parse_amount(carry_payload.get("closingCashCounted")) or mobile_money_expected_closing(carry_payload)
+        opening_ecash = parse_amount(carry_payload.get("closingECashCounted")) or mobile_money_expected_ecash(carry_payload)
+        cash_top_up = 0.0
+        cash_top_up_source = ""
+        cash_removed = 0.0
+        ecash_top_up = 0.0
+        ecash_top_up_source = ""
+        ecash_removed = 0.0
+        operating_expense = 0.0
+        basis_note = "Using the last saved closing balances as today's opening base. Save today's reconciliation row to lock in the opening float."
+    else:
+        opening_cash = 0.0
+        opening_ecash = 0.0
+        cash_top_up = 0.0
+        cash_top_up_source = ""
+        cash_removed = 0.0
+        ecash_top_up = 0.0
+        ecash_top_up_source = ""
+        ecash_removed = 0.0
+        operating_expense = 0.0
+        basis_note = "Save today's reconciliation row first so the app knows the opening cash and opening e-cash."
+
+    physical_cash_available = round(
+        opening_cash
+        + cash_top_up
+        + transaction_rollup["cashInValueTotal"]
+        + transaction_rollup["feeTotal"]
+        - transaction_rollup["cashOutValueTotal"]
+        - cash_removed
+        - operating_expense,
+        2,
+    )
+    ecash_available = round(
+        opening_ecash
+        + ecash_top_up
+        + transaction_rollup["cashOutValueTotal"]
+        - transaction_rollup["cashInValueTotal"]
+        - ecash_removed,
+        2,
+    )
+
+    return {
+        "date": target_date.isoformat(),
+        "provider": clean_provider,
+        "openingCash": opening_cash,
+        "openingECash": opening_ecash,
+        "physicalCashAvailable": physical_cash_available,
+        "eCashAvailable": ecash_available,
+        "cashInValueTotal": transaction_rollup["cashInValueTotal"],
+        "cashOutValueTotal": transaction_rollup["cashOutValueTotal"],
+        "feeTotal": transaction_rollup["feeTotal"],
+        "cashTopUp": cash_top_up,
+        "cashTopUpSource": cash_top_up_source,
+        "cashRemoved": cash_removed,
+        "eCashTopUp": ecash_top_up,
+        "eCashTopUpSource": ecash_top_up_source,
+        "eCashRemoved": ecash_removed,
+        "operatingExpense": operating_expense,
+        "hasBase": bool(today_record or carry_record),
+        "basisNote": basis_note,
+    }
 
 
 def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
@@ -3900,8 +4093,8 @@ def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
         ],
         "closeout_steps": [
             "At the end of the day, save one reconciliation row for MTN Mobile Money.",
-            "Enter Opening Cash Float, Cash Top-Up Added, Cash Removed, Total Cash-In Value, Total Cash-Out Value, Service Fees Earned, Operating Expense, and Closing Cash Counted.",
-            "Check the result immediately: Balanced means correct, Short means money is missing, and Over Counted means extra cash was counted.",
+            "Enter Opening Cash Float, Opening E-Cash Float, any cash or e-cash top-up or removal, Total Cash-In Value, Total Cash-Out Value, Service Fees Earned, Operating Expense, and both closing balances counted.",
+            "Check the result immediately: Balanced means correct, Short means money is missing, and Over Counted means extra cash or e-cash was counted.",
             "Open Daily Sales Summary for the date and confirm Mobile Money, Handled Value, Mobile Money Profit, and MoMo Closing Check.",
         ],
         "meaning_cards": [
@@ -3923,7 +4116,7 @@ def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
             {
                 "label": "Closing Check",
                 "value": "Expected Vs Counted",
-                "note": "This compares expected float with counted cash and shows whether the day is balanced, short, or over counted.",
+                "note": "This compares expected physical cash and expected e-cash with what was actually counted.",
             },
         ],
         "golden_rules": [
@@ -9811,6 +10004,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         module_quick_actions = []
         mobile_money_sop = None
         mobile_money_reconciliation_summary = None
+        mobile_money_live_snapshot = None
         automated_tenant_reminders: list[dict[str, Any]] = []
         automated_tenant_counts: dict[str, int] = {}
         if module_key == "mobile_money_transactions":
@@ -9828,6 +10022,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     and (not date_to or (record.record_date and record.record_date <= date_to))
                 ]
             mobile_money_reconciliation_summary = mobile_money_reconciliation_breakdown(reconciliation_records)
+            snapshot_date = date_to or date_from or max((record.record_date for record in records if record.record_date), default=date.today())
+            provider_values = sorted(
+                {
+                    normalize_text((record.payload or {}).get("provider"))
+                    for record in records
+                    if normalize_text((record.payload or {}).get("provider"))
+                }
+            )
+            snapshot_provider = provider_values[0] if len(provider_values) == 1 else "MTN Mobile Money"
+            mobile_money_live_snapshot = mobile_money_live_balance_snapshot(g.db, snapshot_date, snapshot_provider)
             if user_has_access(g.current_user, "mobile_money_reconciliations"):
                 module_quick_actions.append(
                     {
@@ -9838,6 +10042,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
         if module_key == "mobile_money_reconciliations":
             mobile_money_sop = mobile_money_sop_context(module_key)
+            snapshot_date = date_to or date_from or max((record.record_date for record in records if record.record_date), default=date.today())
+            snapshot_provider = category_filter or (
+                max(
+                    (
+                        normalize_text((record.payload or {}).get("provider"))
+                        for record in records
+                        if normalize_text((record.payload or {}).get("provider"))
+                    ),
+                    default="MTN Mobile Money",
+                )
+            )
+            mobile_money_live_snapshot = mobile_money_live_balance_snapshot(g.db, snapshot_date, snapshot_provider)
             if user_has_access(g.current_user, "mobile_money_transactions"):
                 module_quick_actions.append(
                     {
@@ -9956,6 +10172,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             growth_context=growth_context,
             mobile_money_sop=mobile_money_sop,
             mobile_money_reconciliation_summary=mobile_money_reconciliation_summary,
+            mobile_money_live_snapshot=mobile_money_live_snapshot,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")
@@ -10210,10 +10427,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
         module_quick_actions = []
         mobile_money_sop = mobile_money_sop_context(module_key) if module_key in {"mobile_money_transactions", "mobile_money_reconciliations"} else None
         mobile_money_day_helper = None
+        mobile_money_live_snapshot = None
         if module_key == "mobile_money_reconciliations":
             mobile_money_day_helper = mobile_money_transaction_day_rollup(
                 g.db,
                 parse_date(record_payload.get("date")),
+                normalize_text(record_payload.get("provider")),
+            )
+        if module_key in {"mobile_money_transactions", "mobile_money_reconciliations"}:
+            mobile_money_live_snapshot = mobile_money_live_balance_snapshot(
+                g.db,
+                parse_date(record_payload.get("date")) or date.today(),
                 normalize_text(record_payload.get("provider")),
             )
         if module_key == "salary_records" and record:
@@ -10235,6 +10459,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             module_quick_actions=module_quick_actions,
             mobile_money_sop=mobile_money_sop,
             mobile_money_day_helper=mobile_money_day_helper,
+            mobile_money_live_snapshot=mobile_money_live_snapshot,
             today_iso=date.today().isoformat(),
         )
 
