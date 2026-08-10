@@ -1056,7 +1056,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("customerPhone", "Customer Phone", "text"),
             FieldDefinition("momoNumber", "MoMo / SIM Number", "text"),
             FieldDefinition("transactionValue", "Transaction Value", "number"),
-            FieldDefinition("salesAmount", "Fee / Sales Amount", "number", True),
+            FieldDefinition("salesAmount", "Fee Earned / Commission", "number", True),
             FieldDefinition("costAmount", "Direct Cost", "number"),
             FieldDefinition("floatImpact", "Float Impact", "select", False, MOBILE_MONEY_FLOAT_IMPACTS),
             FieldDefinition("reference", "Reference", "text"),

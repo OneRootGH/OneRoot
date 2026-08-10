@@ -827,6 +827,12 @@ textarea { resize: vertical; }
   margin-top: 1rem;
   background: #f8f4eb;
 }
+.form-helper {
+  display: block;
+  margin-top: 0.38rem;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
 .muted-box pre {
   white-space: pre-wrap;
   word-break: break-word;

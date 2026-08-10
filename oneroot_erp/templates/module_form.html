@@ -28,6 +28,31 @@
       {% include "_mobile_money_sop.html" %}
     {% endif %}
 
+    {% if definition.key == 'mobile_money_reconciliations' and mobile_money_day_helper and mobile_money_day_helper.hasData %}
+      <section class="card-grid four module-inline-actions">
+        <article class="metric-card">
+          <span>Completed Txns</span>
+          <strong>{{ mobile_money_day_helper.completedCount }}</strong>
+          <small>{{ mobile_money_day_helper.provider }} on {{ mobile_money_day_helper.date }}</small>
+        </article>
+        <article class="metric-card">
+          <span>Handled Value</span>
+          <strong>{{ mobile_money_day_helper.handledValueTotal|currency }}</strong>
+          <small>Full customer value processed</small>
+        </article>
+        <article class="metric-card">
+          <span>Cash In / Out</span>
+          <strong>{{ mobile_money_day_helper.cashInValueTotal|currency }} / {{ mobile_money_day_helper.cashOutValueTotal|currency }}</strong>
+          <small>Use these to close the float correctly</small>
+        </article>
+        <article class="metric-card">
+          <span>Fee Earned</span>
+          <strong>{{ mobile_money_day_helper.feeTotal|currency }}</strong>
+          <small>Completed transaction fees already saved for this day</small>
+        </article>
+      </section>
+    {% endif %}
+
     <form method="post" class="form-grid module-form-grid" id="generic-module-form">
       {% for field in definition.fields %}
         <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
@@ -150,6 +175,17 @@
               {% if field.required %}required{% endif %}
             >
           {% endif %}
+          {% if definition.key == 'mobile_money_transactions' and field.name == 'transactionValue' %}
+            <small class="muted form-helper">Enter the full customer amount handled for this transaction.</small>
+          {% elif definition.key == 'mobile_money_transactions' and field.name == 'salesAmount' %}
+            <small class="muted form-helper">Enter only the fee or commission OneRoot earns here, not the full transfer amount.</small>
+          {% elif definition.key == 'mobile_money_transactions' and field.name == 'date' %}
+            <small class="muted form-helper">Use the actual transaction date. Future dates are blocked.</small>
+          {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'cashRemoved' %}
+            <small class="muted form-helper">If you clear the drawer or hand cash over at close, record that amount here.</small>
+          {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'closingCashCounted' %}
+            <small class="muted form-helper">This is the cash left after cash removed, not the starting float.</small>
+          {% endif %}
         </label>
       {% endfor %}
       <div class="form-actions span-2">
@@ -227,6 +263,67 @@
         costField.addEventListener("input", updateProfit);
         costField.addEventListener("change", updateProfit);
         updateProfit();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key in ['mobile_money_transactions', 'mobile_money_reconciliations'] %}
+    <script>
+      (function () {
+        const form = document.getElementById("generic-module-form");
+        const dateField = document.querySelector('input[name="date"]');
+        const todayIso = "{{ today_iso }}";
+        if (dateField) {
+          dateField.setAttribute("max", todayIso);
+        }
+        if (!form) {
+          return;
+        }
+
+        form.addEventListener("submit", function (event) {
+          if (dateField && dateField.value && dateField.value > todayIso) {
+            event.preventDefault();
+            window.alert("Mobile money date cannot be in the future.");
+            dateField.focus();
+          }
+        });
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'mobile_money_transactions' %}
+    <script>
+      (function () {
+        const form = document.getElementById("generic-module-form");
+        const serviceTypeField = document.querySelector('select[name="serviceType"]');
+        const transactionValueField = document.querySelector('input[name="transactionValue"]');
+        const salesAmountField = document.querySelector('input[name="salesAmount"]');
+        if (!form || !serviceTypeField || !transactionValueField || !salesAmountField) {
+          return;
+        }
+
+        const feeBasedTypes = new Set([
+          "Cash In",
+          "Cash Out",
+          "Send Money",
+          "Merchant Pay / Bill Pay",
+          "Airtime / Data",
+          "Wallet Top-Up",
+        ]);
+
+        function parseNumber(value) {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        }
+
+        form.addEventListener("submit", function (event) {
+          const transactionValue = parseNumber(transactionValueField.value);
+          const feeAmount = parseNumber(salesAmountField.value);
+          const serviceType = serviceTypeField.value || "";
+          if (feeBasedTypes.has(serviceType) && transactionValue > 0 && feeAmount >= transactionValue) {
+            event.preventDefault();
+            window.alert("Fee earned must be lower than the full transaction value. Put the customer amount in Transaction Value and only OneRoot's charge in Fee Earned / Commission.");
+            salesAmountField.focus();
+          }
+        });
       })();
     </script>
   {% endif %}

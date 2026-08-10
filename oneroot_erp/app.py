@@ -3002,6 +3002,114 @@ def mobile_money_transaction_profit(payload: dict[str, Any]) -> float:
     return round(sales_amount - cost_amount, 2)
 
 
+MOBILE_MONEY_FEE_BASED_SERVICE_TYPES = {
+    "Cash In",
+    "Cash Out",
+    "Send Money",
+    "Merchant Pay / Bill Pay",
+    "Airtime / Data",
+    "Wallet Top-Up",
+}
+
+
+def mobile_money_transaction_day_rollup(
+    db_session,
+    target_date: date | None,
+    provider: str = "",
+    exclude_record_id: str = "",
+) -> dict[str, Any]:
+    if not target_date:
+        return {
+            "date": "",
+            "provider": normalize_text(provider) or "MTN Mobile Money",
+            "completedCount": 0,
+            "handledValueTotal": 0.0,
+            "cashInValueTotal": 0.0,
+            "cashOutValueTotal": 0.0,
+            "feeTotal": 0.0,
+            "costTotal": 0.0,
+            "profitTotal": 0.0,
+            "hasData": False,
+        }
+
+    candidate_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "mobile_money_transactions",
+            ModuleRecord.record_date == target_date,
+        )
+        .order_by(desc(ModuleRecord.updated_at))
+    ).all()
+
+    clean_provider = normalize_text(provider)
+    completed_records = []
+    for record in candidate_records:
+        if exclude_record_id and record.id == exclude_record_id:
+            continue
+        payload = dict(record.payload or {})
+        if clean_provider and normalize_text(payload.get("provider")) != clean_provider:
+            continue
+        if not mobile_money_transaction_is_completed(payload):
+            continue
+        completed_records.append(payload)
+
+    handled_value_total = round(sum(parse_amount(item.get("transactionValue")) for item in completed_records), 2)
+    fee_total = round(sum(parse_amount(item.get("salesAmount")) for item in completed_records), 2)
+    cost_total = round(sum(parse_amount(item.get("costAmount")) for item in completed_records), 2)
+    profit_total = round(sum(mobile_money_transaction_profit(item) for item in completed_records), 2)
+    cash_in_total = 0.0
+    cash_out_total = 0.0
+    for item in completed_records:
+        handled_value = parse_amount(item.get("transactionValue"))
+        float_impact = normalize_text(item.get("floatImpact"))
+        service_type = normalize_text(item.get("serviceType"))
+        if float_impact == "Cash In" or service_type == "Cash In":
+            cash_in_total += handled_value
+        elif float_impact == "Cash Out" or service_type == "Cash Out":
+            cash_out_total += handled_value
+
+    return {
+        "date": target_date.isoformat(),
+        "provider": clean_provider or "MTN Mobile Money",
+        "completedCount": len(completed_records),
+        "handledValueTotal": round(handled_value_total, 2),
+        "cashInValueTotal": round(cash_in_total, 2),
+        "cashOutValueTotal": round(cash_out_total, 2),
+        "feeTotal": round(fee_total, 2),
+        "costTotal": round(cost_total, 2),
+        "profitTotal": round(profit_total, 2),
+        "hasData": bool(completed_records),
+    }
+
+
+def mobile_money_form_errors(module_key: str, payload: dict[str, Any]) -> list[str]:
+    errors: list[str] = []
+    target_date = parse_date(payload.get("date"))
+    if target_date and target_date > date.today():
+        errors.append("Mobile money date cannot be in the future.")
+
+    if module_key != "mobile_money_transactions":
+        return errors
+
+    service_type = normalize_text(payload.get("serviceType"))
+    transaction_value = parse_amount(payload.get("transactionValue"))
+    fee_amount = parse_amount(payload.get("salesAmount"))
+
+    if fee_amount < 0:
+        errors.append("Fee earned cannot be below zero.")
+
+    if (
+        service_type in MOBILE_MONEY_FEE_BASED_SERVICE_TYPES
+        and transaction_value > 0
+        and fee_amount >= transaction_value
+    ):
+        errors.append(
+            "Fee earned must be lower than the full transaction value. Put the customer amount in Transaction Value and only OneRoot's charge in Fee Earned / Commission."
+        )
+
+    return errors
+
+
 def build_module_overview(definition: ModuleDefinition, records: list[ModuleRecord]) -> dict[str, Any]:
     total_amount = round(sum(parse_amount(record.amount) for record in records), 2)
     this_month_key = date.today().strftime("%Y-%m")
@@ -9489,8 +9597,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if record and record.module_key != module_key:
             return redirect(url_for("module_list", module_key=module_key))
 
+        record_payload = dict(record.payload if record else {})
         if request.method == "POST":
-            payload = dict(record.payload if record else {})
+            payload = dict(record_payload)
             payload.setdefault("id", record.id if record else uuid4().hex)
             payload.setdefault("createdAt", record.created_at.isoformat() if record else datetime.utcnow().isoformat())
             for field in definition.fields:
@@ -9543,19 +9652,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["sourceType"] = normalize_text(payload.get("sourceType")) or "manual-sale"
                 payload["profitAmount"] = round(parse_amount(payload.get("amount")) - parse_amount(payload.get("costAmount")), 2)
             payload["updatedAt"] = datetime.utcnow().isoformat()
-            if not record:
-                record = ModuleRecord(id=payload["id"], module_key=module_key, created_at=datetime.utcnow())
-                g.db.add(record)
-            set_module_record_metadata(record, definition, payload)
-            sync_generated_sales_for_module_record(record)
-            if module_key in {"customer_crm", "apartments", "laundry_tickets", "equipment_rental_bookings", "delivery_dispatch"}:
-                sync_customer_crm_automation(g.db)
-            audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
-            g.db.commit()
-            flash(f"{definition.label} saved.", "success")
-            return redirect(url_for("module_list", module_key=module_key))
+            form_errors = mobile_money_form_errors(module_key, payload)
+            if form_errors:
+                record_payload = payload
+                for message in form_errors:
+                    flash(message, "error")
+            else:
+                if not record:
+                    record = ModuleRecord(id=payload["id"], module_key=module_key, created_at=datetime.utcnow())
+                    g.db.add(record)
+                set_module_record_metadata(record, definition, payload)
+                sync_generated_sales_for_module_record(record)
+                if module_key in {"customer_crm", "apartments", "laundry_tickets", "equipment_rental_bookings", "delivery_dispatch"}:
+                    sync_customer_crm_automation(g.db)
+                audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
+                g.db.commit()
+                flash(f"{definition.label} saved.", "success")
+                return redirect(url_for("module_list", module_key=module_key))
 
-        record_payload = dict(record.payload if record else {})
         if module_key == "salary_records":
             salary_rollup(record_payload)
         elif module_key == "asset_records":
@@ -9649,6 +9763,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         module_quick_actions = []
         mobile_money_sop = mobile_money_sop_context(module_key) if module_key in {"mobile_money_transactions", "mobile_money_reconciliations"} else None
+        mobile_money_day_helper = None
+        if module_key == "mobile_money_reconciliations":
+            mobile_money_day_helper = mobile_money_transaction_day_rollup(
+                g.db,
+                parse_date(record_payload.get("date")),
+                normalize_text(record_payload.get("provider")),
+            )
         if module_key == "salary_records" and record:
             module_quick_actions.append(
                 {
@@ -9667,6 +9788,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             dynamic_category_field="category" if module_has_field(definition, "category") else "",
             module_quick_actions=module_quick_actions,
             mobile_money_sop=mobile_money_sop,
+            mobile_money_day_helper=mobile_money_day_helper,
+            today_iso=date.today().isoformat(),
         )
 
     @app.route("/app/services/<module_key>/<record_id>/payment", methods=["GET", "POST"])
