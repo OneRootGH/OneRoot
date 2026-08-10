@@ -24,6 +24,10 @@
       </section>
     {% endif %}
 
+    {% if mobile_money_sop %}
+      {% include "_mobile_money_sop.html" %}
+    {% endif %}
+
     <form method="post" class="form-grid module-form-grid" id="generic-module-form">
       {% for field in definition.fields %}
         <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">

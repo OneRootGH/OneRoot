@@ -283,6 +283,10 @@
     </section>
   {% endif %}
 
+  {% if mobile_money_sop %}
+    {% include "_mobile_money_sop.html" %}
+  {% endif %}
+
   {% if definition.key == 'workforce_attendance' and attendance_widget %}
     <section class="card attendance-desk-card">
       <div class="card-header">

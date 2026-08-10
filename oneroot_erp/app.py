@@ -3389,6 +3389,59 @@ def mobile_money_status(payload: dict[str, Any]) -> str:
     return "Over Counted" if variance > 0 else "Short"
 
 
+def mobile_money_sop_context(module_key: str) -> dict[str, Any]:
+    focus_note = (
+        "You are on the Mobile Money Sales page. Record each customer transaction here as it happens."
+        if module_key == "mobile_money_transactions"
+        else "You are on the Mobile Money Reconciliation page. Close the day's float here after counting cash."
+    )
+    return {
+        "title": "MTN MoMo Daily Cashier Checklist",
+        "summary": "Use Mobile Money Sales during the day and Mobile Money Reconciliation once per provider at close of day.",
+        "focus_note": focus_note,
+        "day_steps": [
+            "Confirm the opening float before you start serving customers.",
+            "For every customer, save Date, Provider, Service Type, Transaction Value, Fee / Sales Amount, Float Impact, and Status.",
+            "Set Status to Completed only after the transaction succeeds.",
+            "Use Fee / Sales Amount for what OneRoot earned, not the full amount handled.",
+        ],
+        "closeout_steps": [
+            "At the end of the day, save one reconciliation row for MTN Mobile Money.",
+            "Enter Opening Cash Float, Cash Top-Up Added, Cash Removed, Total Cash-In Value, Total Cash-Out Value, Service Fees Earned, Operating Expense, and Closing Cash Counted.",
+            "Check the result immediately: Balanced means correct, Short means money is missing, and Over Counted means extra cash was counted.",
+            "Open Daily Sales Summary for the date and confirm Mobile Money, Handled Value, Mobile Money Profit, and MoMo Closing Check.",
+        ],
+        "meaning_cards": [
+            {
+                "label": "Handled Value",
+                "value": "Full Customer Amount",
+                "note": "Use this for the total face value processed, for example GH¢500 cash-out.",
+            },
+            {
+                "label": "MoMo Sales",
+                "value": "OneRoot Fee",
+                "note": "Use this for what OneRoot earned on the service, not for the full amount handled.",
+            },
+            {
+                "label": "Profit",
+                "value": "Fee Minus Cost",
+                "note": "The app subtracts direct cost from the fee to show actual mobile money profit.",
+            },
+            {
+                "label": "Closing Check",
+                "value": "Expected Vs Counted",
+                "note": "This compares expected float with counted cash and shows whether the day is balanced, short, or over counted.",
+            },
+        ],
+        "golden_rules": [
+            "Mobile Money Sales is for customer-by-customer activity.",
+            "Mobile Money Reconciliation is for end-of-day float checking.",
+            "Only Completed transactions count into daily sales totals.",
+            "If transaction rows were missed, reconciliation fees can temporarily feed daily sales, but best practice is to save both.",
+        ],
+    }
+
+
 def mobile_money_day_snapshot(db_session, target_date: date | None) -> dict[str, Any]:
     if not target_date:
         return {
@@ -9218,9 +9271,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         module_overview = build_module_overview(definition, records)
         module_quick_actions = []
+        mobile_money_sop = None
         automated_tenant_reminders: list[dict[str, Any]] = []
         automated_tenant_counts: dict[str, int] = {}
         if module_key == "mobile_money_transactions":
+            mobile_money_sop = mobile_money_sop_context(module_key)
             if user_has_access(g.current_user, "mobile_money_reconciliations"):
                 module_quick_actions.append(
                     {
@@ -9230,6 +9285,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     }
                 )
         if module_key == "mobile_money_reconciliations":
+            mobile_money_sop = mobile_money_sop_context(module_key)
             if user_has_access(g.current_user, "mobile_money_transactions"):
                 module_quick_actions.append(
                     {
@@ -9346,6 +9402,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             automated_tenant_reminders=automated_tenant_reminders,
             automated_tenant_counts=automated_tenant_counts,
             growth_context=growth_context,
+            mobile_money_sop=mobile_money_sop,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")
@@ -9591,6 +9648,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 service_payment_summary=service_payment_summary(module_key, record_payload),
             )
         module_quick_actions = []
+        mobile_money_sop = mobile_money_sop_context(module_key) if module_key in {"mobile_money_transactions", "mobile_money_reconciliations"} else None
         if module_key == "salary_records" and record:
             module_quick_actions.append(
                 {
@@ -9608,6 +9666,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             category_map=inventory_category_map(),
             dynamic_category_field="category" if module_has_field(definition, "category") else "",
             module_quick_actions=module_quick_actions,
+            mobile_money_sop=mobile_money_sop,
         )
 
     @app.route("/app/services/<module_key>/<record_id>/payment", methods=["GET", "POST"])
