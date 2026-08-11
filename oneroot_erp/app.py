@@ -8338,14 +8338,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     @app.before_request
     def open_session():
-        g.db = app.config["SESSION_LOCAL"]()
         g.current_user = None
         needs_database = database_required_for_path(request.path or "/")
         if needs_database and not ensure_database_ready():
-            g.db.close()
-            app.config["SESSION_LOCAL"].remove()
             g.db = None
             return database_unavailable_response()
+        g.db = app.config["SESSION_LOCAL"]()
 
         user_id = session.get("user_id")
         pending_login_user = normalize_text(session.get("pending_login_user")).lower()
