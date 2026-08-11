@@ -501,6 +501,25 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
     return changed
 
 
+def find_inventory_product(db_session, lookup_value: Any) -> Product | None:
+    clean_lookup = normalize_text(lookup_value)
+    if not clean_lookup:
+        return None
+    direct_match = db_session.get(Product, clean_lookup)
+    if direct_match:
+        return direct_match
+    for condition in (
+        Product.source_catalog_id.ilike(clean_lookup),
+        Product.sku.ilike(clean_lookup),
+        Product.barcode.ilike(clean_lookup),
+        Product.name.ilike(clean_lookup),
+    ):
+        match = db_session.scalar(select(Product).where(condition))
+        if match:
+            return match
+    return None
+
+
 def sku_code_token(value: Any) -> str:
     cleaned = "".join(character if str(character).isalnum() else " " for character in normalize_text(value).upper())
     return " ".join(cleaned.split())
@@ -11354,7 +11373,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if reclassify_legacy_inventory_products(g.db):
             g.db.commit()
         editing_id = normalize_text(request.args.get("edit"))
-        editing_product = g.db.get(Product, editing_id) if editing_id else None
+        editing_product = find_inventory_product(g.db, editing_id) if editing_id else None
         all_products = g.db.scalars(select(Product).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())).all()
         for product in all_products:
             normalize_product_record(product)
@@ -11374,7 +11393,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         if request.method == "POST":
             product_id = normalize_text(request.form.get("id")) or uuid4().hex
-            product = g.db.get(Product, product_id)
+            product = find_inventory_product(g.db, product_id)
             is_new = product is None
             if not product:
                 product = Product(id=product_id, created_at=datetime.utcnow())
@@ -11383,6 +11402,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 existing_image_url = normalize_text(product.image_url)
                 existing_sku = normalize_text(product.sku)
                 product.updated_at = datetime.utcnow()
+                product.source_catalog_id = normalize_text(product.source_catalog_id) or product.id
                 product.sku = existing_sku or normalize_text(request.form.get("sku"))
                 product.barcode = normalize_text(request.form.get("barcode"))
                 product.name = normalize_text(request.form.get("name"))
@@ -11582,7 +11602,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/inventory/<product_id>/delete", methods=["POST"])
     @access_required("inventory")
     def inventory_delete(product_id: str):
-        product = g.db.get(Product, product_id)
+        product = find_inventory_product(g.db, product_id)
         if not product:
             flash("That inventory item could not be found.", "error")
             return redirect(url_for("inventory"))
