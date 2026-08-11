@@ -11,7 +11,7 @@ BUSINESS_AREAS = [
     {"id": "rentals-apartments", "label": "OneRoot Rentals & Apartments", "short": "Apartments"},
     {"id": "fresh-foods-drinks", "label": "OneRoot Fresh Foods & Drinks", "short": "Fresh Foods & Drinks"},
     {"id": "kitchen", "label": "OneRoot Kitchen", "short": "Kitchen"},
-    {"id": "shared-operations", "label": "OneRoot Shared Operations", "short": "Shared Operations"},
+    {"id": "shared-operations", "label": "OneRoot Internal / Shared Operations", "short": "Internal"},
 ]
 BUSINESS_AREA_OPTIONS = [(item["id"], item["label"]) for item in BUSINESS_AREAS]
 BUSINESS_AREA_LABELS = {item["id"]: item["label"] for item in BUSINESS_AREAS}
@@ -878,6 +878,10 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("rentCycleAmount", "Rent Cycle Amount", "number"),
             FieldDefinition("rentDue", "Rent Due", "number"),
             FieldDefinition("rentPaid", "Rent Paid", "number"),
+            FieldDefinition("bedRentDue", "Bed Rent Due", "number"),
+            FieldDefinition("bedRentPaid", "Bed Rent Paid", "number"),
+            FieldDefinition("mattressRentDue", "Mattress Rent Due", "number"),
+            FieldDefinition("mattressRentPaid", "Mattress Rent Paid", "number"),
             FieldDefinition("rentPaymentDate", "Rent Payment Date", "date"),
             FieldDefinition("rentPaymentMethod", "Rent Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
             FieldDefinition("rentPaymentReference", "Rent Payment Reference", "text"),

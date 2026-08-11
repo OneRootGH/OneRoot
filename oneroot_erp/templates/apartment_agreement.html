@@ -44,7 +44,7 @@
     <article class="mini-card">
       <span>Rent Plan</span>
       <strong>{{ source.get('rentCycleAmount')|currency }}</strong>
-      <small>Paid {{ source.get('rentPaid')|currency }} via {{ source.get('rentPaymentMethod') or 'Not saved' }}</small>
+      <small>Paid {{ profile.rentPaid|currency }} via {{ source.get('rentPaymentMethod') or 'Not saved' }}</small>
     </article>
   </section>
 
@@ -68,10 +68,16 @@
     <h3>3. Rent And Payment</h3>
     <p>
       The agreed rent for the current cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>,
-      with <strong>{{ source.get('rentPaid')|currency }}</strong> recorded as paid.
+      with <strong>{{ profile.rentPaid|currency }}</strong> recorded as paid.
       Payment method: <strong>{{ source.get('rentPaymentMethod') or '_______________________________' }}</strong>.
       Payment reference: <strong>{{ source.get('rentPaymentReference') or '_______________________________' }}</strong>.
       Received by: <strong>{{ source.get('rentReceivedBy') or '_______________________________' }}</strong>.
+      {% if profile.additionalRentItems %}
+        Additional rent items on record:
+        {% for item in profile.additionalRentItems %}
+          <strong>{{ item.label }}</strong> {{ item.due|currency }}{% if not loop.last %}, {% else %}.{% endif %}
+        {% endfor %}
+      {% endif %}
     </p>
 
     <h3>4. Monthly Bills And Service Charges</h3>

@@ -17,7 +17,7 @@
     <article class="mini-card">
       <span>Statement Totals</span>
       <strong>Rent {{ totals.rentPaid|currency }}</strong>
-      <small>Bills {{ totals.billsPaid|currency }}</small>
+      <small>Bills {{ totals.billsPaid|currency }}{% if profile.additionalRentItems %} · Includes bed / mattress rent{% endif %}</small>
     </article>
     <article class="mini-card">
       <span>Current Balance</span>
@@ -73,6 +73,18 @@
       </tfoot>
     </table>
   </div>
+
+  {% if profile.additionalRentItems %}
+    <section class="document-note">
+      <strong>Rent Breakdown</strong>
+      <p>
+        The rent figures in this statement include the suite rent and these additional tenant charges:
+        {% for item in profile.additionalRentItems %}
+          {{ item.label }} (due {{ item.due|currency }}, paid {{ item.paid|currency }}){% if not loop.last %}; {% else %}.{% endif %}
+        {% endfor %}
+      </p>
+    </section>
+  {% endif %}
 
   <section class="card-grid two document-detail-grid">
     <article class="mini-card">

@@ -12,7 +12,7 @@
     <article class="mini-card">
       <span>Receipt Total</span>
       <strong>{{ receipt_total|currency }}</strong>
-      <small>Rent {{ profile.rentPaid|currency }} · Bills {{ profile.billsPaid|currency }}</small>
+      <small>{{ profile.rentSummaryLabel }} {{ profile.rentPaid|currency }} · Bills {{ profile.billsPaid|currency }}</small>
     </article>
     <article class="mini-card">
       <span>Rent Payment</span>
@@ -35,8 +35,14 @@
         </tr>
       </thead>
       <tbody>
-        <tr><td>Rent Due</td><td>{{ profile.rentDue|currency }}</td></tr>
-        <tr><td>Rent Paid</td><td>{{ profile.rentPaid|currency }}</td></tr>
+        <tr><td>Suite Rent Due</td><td>{{ profile.suiteRentDue|currency }}</td></tr>
+        <tr><td>Suite Rent Paid</td><td>{{ profile.suiteRentPaid|currency }}</td></tr>
+        {% for item in profile.additionalRentItems %}
+          <tr><td>{{ item.label }} Due</td><td>{{ item.due|currency }}</td></tr>
+          <tr><td>{{ item.label }} Paid</td><td>{{ item.paid|currency }}</td></tr>
+        {% endfor %}
+        <tr><td>Total Rent Due</td><td>{{ profile.rentDue|currency }}</td></tr>
+        <tr><td>Total Rent Paid</td><td>{{ profile.rentPaid|currency }}</td></tr>
         {% for item in bill_items if item.amount > 0 %}
           <tr><td>{{ item.label }}</td><td>{{ item.amount|currency }}</td></tr>
         {% endfor %}

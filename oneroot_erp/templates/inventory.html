@@ -148,7 +148,7 @@
           <img class="product-thumb product-thumb-large" src="{{ product_image_src(editing_product or {}) }}" alt="{{ editing_product.name if editing_product else 'New inventory item' }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
           <div class="inventory-editor-copy">
             <strong>{{ editing_product.name if editing_product else 'Item photo ready' }}</strong>
-            <span>Upload an image file or paste an image URL. If you skip this, OneRoot will show a branded item picture automatically.</span>
+            <span>Upload an image file or paste an image URL. The saved picture appears in POS, the website, laundry, and equipment rentals. If you skip this, OneRoot shows a branded fallback image automatically.</span>
           </div>
         </div>
         <label><span>Name</span><input type="text" name="name" value="{{ editing_product.name if editing_product else '' }}" required></label>

@@ -406,6 +406,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 bootstrap_database(bootstrap_session, app_config)
                 migrate_planning_workspace(bootstrap_session)
                 sync_kitchen_menu_catalog(bootstrap_session)
+                reclassify_legacy_inventory_products(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 bootstrap_session.commit()
@@ -439,6 +440,65 @@ def inventory_category_map(products: list[Product] | None = None) -> dict[str, l
         for area_id, values in category_map.items()
         if values
     }
+
+
+LEGACY_SHARED_OPERATION_STOCK_NAMES = {
+    "bine hand wash multipurpose",
+    "topco big multipurpose soap",
+    "topco jumbo multipurpose soap",
+    "viva plus multipurpose soap",
+}
+LEGACY_SHARED_OPERATION_STOCK_SOURCE_CATEGORIES = {"household items"}
+LEGACY_SHARED_OPERATION_SERVICE_NAMES = {"tip", "gift card"}
+
+
+def reclassify_legacy_inventory_products(db_session) -> bool:
+    changed = False
+    shared_operation_products = db_session.scalars(
+        select(Product).where(Product.business_area_id == "shared-operations")
+    ).all()
+    for product in shared_operation_products:
+        name_key = normalize_text(product.name).lower()
+        source_category_key = normalize_text(product.source_category).lower()
+        category_key = normalize_text(product.category).lower()
+        product_changed = False
+
+        if name_key in LEGACY_SHARED_OPERATION_STOCK_NAMES or (
+            source_category_key in LEGACY_SHARED_OPERATION_STOCK_SOURCE_CATEGORIES
+            and category_key == "service charges"
+        ):
+            if normalize_text(product.business_area_id) != "cold-store-groceries":
+                product.business_area_id = "cold-store-groceries"
+                product_changed = True
+            if normalize_text(product.category) != "Household & Cleaning":
+                product.category = "Household & Cleaning"
+                product_changed = True
+            if normalize_text(product.source_category) != "Household & Cleaning":
+                product.source_category = "Household & Cleaning"
+                product_changed = True
+            if normalize_text(product.item_type) != "stock":
+                product.item_type = "stock"
+                product_changed = True
+        elif name_key in LEGACY_SHARED_OPERATION_SERVICE_NAMES:
+            expected_category = "Gift Cards" if name_key == "gift card" else "Service Charges"
+            if normalize_text(product.category) != expected_category:
+                product.category = expected_category
+                product_changed = True
+            if normalize_text(product.item_type) != "service":
+                product.item_type = "service"
+                product_changed = True
+
+        if product_changed:
+            product.updated_at = datetime.utcnow()
+            product.sku = generate_auto_product_sku(
+                product_id=product.id,
+                name=product.name,
+                business_area_id=product.business_area_id,
+                category=product.category,
+            )
+            normalize_product_record(product)
+            changed = True
+    return changed
 
 
 def sku_code_token(value: Any) -> str:
@@ -3880,6 +3940,10 @@ APARTMENT_FORM_SECTIONS = [
             "rentCycleAmount",
             "rentDue",
             "rentPaid",
+            "bedRentDue",
+            "bedRentPaid",
+            "mattressRentDue",
+            "mattressRentPaid",
             "rentPaymentDate",
             "rentPaymentMethod",
             "rentPaymentReference",
@@ -4459,6 +4523,8 @@ def amount_for_module_record(definition: ModuleDefinition, payload: dict[str, An
         total_budget = parse_amount(payload.get("totalBudget"))
         revenue_target = parse_amount(payload.get("revenueTarget"))
         return total_budget if total_budget > 0 else revenue_target
+    if definition.key == "apartments":
+        return round(apartment_total_rent_paid(payload) + parse_amount(payload.get("billAmountPaid")), 2)
     if definition.key == "salary_records":
         salary_rollup(payload)
         gross_pay = parse_amount(payload.get("grossPay"))
@@ -4630,6 +4696,61 @@ def apartment_custom_charge_rows(payload: dict[str, Any]) -> list[dict[str, Any]
     return rows
 
 
+def apartment_additional_rent_rows(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    rows = []
+    for label, due_key, paid_key in (
+        ("Bed Rent", "bedRentDue", "bedRentPaid"),
+        ("Mattress Rent", "mattressRentDue", "mattressRentPaid"),
+    ):
+        due_amount = parse_amount(payload.get(due_key))
+        paid_amount = parse_amount(payload.get(paid_key))
+        if due_amount <= 0 and paid_amount <= 0:
+            continue
+        rows.append(
+            {
+                "label": label,
+                "due": round(due_amount, 2),
+                "paid": round(paid_amount, 2),
+                "balance": round(max(due_amount - paid_amount, 0), 2),
+            }
+        )
+    return rows
+
+
+def apartment_additional_rent_due(payload: dict[str, Any]) -> float:
+    return round(sum(item["due"] for item in apartment_additional_rent_rows(payload)), 2)
+
+
+def apartment_additional_rent_paid(payload: dict[str, Any]) -> float:
+    return round(sum(item["paid"] for item in apartment_additional_rent_rows(payload)), 2)
+
+
+def apartment_total_rent_due(payload: dict[str, Any]) -> float:
+    return round(parse_amount(payload.get("rentDue")) + apartment_additional_rent_due(payload), 2)
+
+
+def apartment_total_rent_paid(payload: dict[str, Any]) -> float:
+    return round(parse_amount(payload.get("rentPaid")) + apartment_additional_rent_paid(payload), 2)
+
+
+def apartment_rent_summary_label(payload: dict[str, Any]) -> str:
+    extra_rows = apartment_additional_rent_rows(payload)
+    if not extra_rows:
+        return "Rent"
+    extras = " + ".join(item["label"].replace(" Rent", "") for item in extra_rows)
+    return f"Rent + {extras}"
+
+
+def apartment_additional_rent_note(payload: dict[str, Any]) -> str:
+    rows = apartment_additional_rent_rows(payload)
+    if not rows:
+        return ""
+    return " Additional rent items currently on record: " + "; ".join(
+        f'{item["label"]} {format_agreement_currency(item["due"] if item["due"] > 0 else item["paid"])}'
+        for item in rows
+    ) + "."
+
+
 def apartment_bills_due(payload: dict[str, Any]) -> float:
     total = (
         parse_amount(payload.get("waterBill"))
@@ -4643,7 +4764,7 @@ def apartment_bills_due(payload: dict[str, Any]) -> float:
 
 def apartment_total_due_before_payments(payload: dict[str, Any]) -> float:
     return round(
-        parse_amount(payload.get("rentDue"))
+        apartment_total_rent_due(payload)
         + apartment_bills_due(payload)
         + parse_amount(payload.get("arrearsBroughtForward"))
         + parse_amount(payload.get("lateFee")),
@@ -4654,7 +4775,7 @@ def apartment_total_due_before_payments(payload: dict[str, Any]) -> float:
 def apartment_balance_after_payments(payload: dict[str, Any]) -> float:
     return round(
         apartment_total_due_before_payments(payload)
-        - parse_amount(payload.get("rentPaid"))
+        - apartment_total_rent_paid(payload)
         - parse_amount(payload.get("billAmountPaid"))
         - parse_amount(payload.get("creditBroughtForward")),
         2,
@@ -4664,10 +4785,10 @@ def apartment_balance_after_payments(payload: dict[str, Any]) -> float:
 def apartment_rent_balance(payload: dict[str, Any]) -> float:
     return round(
         max(
-            parse_amount(payload.get("rentDue"))
+            apartment_total_rent_due(payload)
             + parse_amount(payload.get("arrearsBroughtForward"))
             + parse_amount(payload.get("lateFee"))
-            - parse_amount(payload.get("rentPaid"))
+            - apartment_total_rent_paid(payload)
             - parse_amount(payload.get("creditBroughtForward")),
             0,
         ),
@@ -4732,6 +4853,7 @@ def apartment_alert_summary(payload: dict[str, Any]) -> dict[str, Any]:
 def apartment_profile(record: ModuleRecord) -> dict[str, Any]:
     payload = dict(record.payload or {})
     custom_charges = apartment_custom_charge_rows(payload)
+    additional_rent_items = apartment_additional_rent_rows(payload)
     alert = apartment_alert_summary(payload)
     occupancy = normalize_text(payload.get("occupancyStatus")) or record.status or "Unknown"
     coverage_start = normalize_text(payload.get("rentCoverageStartDate"))
@@ -4763,8 +4885,18 @@ def apartment_profile(record: ModuleRecord) -> dict[str, Any]:
         "leaseEndDate": normalize_text(payload.get("leaseEndDate")),
         "rentCycleLabel": apartment_cycle_label(payload),
         "rentCycleAmount": parse_amount(payload.get("rentCycleAmount")),
-        "rentDue": parse_amount(payload.get("rentDue")),
-        "rentPaid": parse_amount(payload.get("rentPaid")),
+        "suiteRentDue": parse_amount(payload.get("rentDue")),
+        "suiteRentPaid": parse_amount(payload.get("rentPaid")),
+        "bedRentDue": parse_amount(payload.get("bedRentDue")),
+        "bedRentPaid": parse_amount(payload.get("bedRentPaid")),
+        "mattressRentDue": parse_amount(payload.get("mattressRentDue")),
+        "mattressRentPaid": parse_amount(payload.get("mattressRentPaid")),
+        "additionalRentItems": additional_rent_items,
+        "additionalRentDue": apartment_additional_rent_due(payload),
+        "additionalRentPaid": apartment_additional_rent_paid(payload),
+        "rentSummaryLabel": apartment_rent_summary_label(payload),
+        "rentDue": apartment_total_rent_due(payload),
+        "rentPaid": apartment_total_rent_paid(payload),
         "rentBalance": apartment_rent_balance(payload),
         "rentPaymentDate": normalize_text(payload.get("rentPaymentDate")),
         "rentPaymentMethod": normalize_text(payload.get("rentPaymentMethod")),
@@ -4803,17 +4935,7 @@ def apartment_profile(record: ModuleRecord) -> dict[str, Any]:
         "alertRank": alert["rank"],
         "alertDate": alert["date"].isoformat() if isinstance(alert["date"], date) else "",
         "notes": normalize_text(payload.get("notes")),
-        "agreementReady": bool(
-            tenant
-            and occupancy in APARTMENT_ACTIVE_STATUSES
-            and (
-                parse_amount(payload.get("rentPaid")) > 0
-                or normalize_text(payload.get("rentPaymentDate"))
-                or normalize_text(payload.get("rentPaymentMethod"))
-                or normalize_text(payload.get("rentPaymentReference"))
-                or normalize_text(payload.get("rentReceivedBy"))
-            )
-        ),
+        "agreementReady": bool(tenant and occupancy in APARTMENT_ACTIVE_STATUSES and apartment_payment_confirmed(payload)),
         "updatedAt": record.updated_at,
         "record": record,
     }
@@ -4872,7 +4994,7 @@ def apartment_due_entries(profile: dict[str, Any]) -> list[dict[str, Any]]:
     if parse_amount(profile.get("rentBalance")) > 0:
         entries.append(
             {
-                "label": "Rent",
+                "label": normalize_text(profile.get("rentSummaryLabel")) or "Rent",
                 "amount": round(parse_amount(profile.get("rentBalance")), 2),
                 "dueDate": parse_date(profile.get("nextRentDueDate")),
                 "dueLabel": normalize_text(profile.get("nextRentDueDate")),
@@ -5048,7 +5170,7 @@ def apartment_tenant_identity(payload: dict[str, Any]) -> str:
 
 def apartment_payment_confirmed(payload: dict[str, Any]) -> bool:
     return (
-        parse_amount(payload.get("rentPaid")) > 0
+        apartment_total_rent_paid(payload) > 0
         or bool(normalize_text(payload.get("rentPaymentDate")))
         or bool(normalize_text(payload.get("rentPaymentMethod")))
         or bool(normalize_text(payload.get("rentPaymentReference")))
@@ -5133,8 +5255,8 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
         payload = apartment_record_payload(record)
         opening_arrears = parse_amount(payload.get("arrearsBroughtForward")) if index == 0 else running_balance
         late_fee = parse_amount(payload.get("lateFee"))
-        rent_due = parse_amount(payload.get("rentDue"))
-        rent_paid = parse_amount(payload.get("rentPaid"))
+        rent_due = apartment_total_rent_due(payload)
+        rent_paid = apartment_total_rent_paid(payload)
         bills_due = apartment_bills_due(payload)
         bills_paid = parse_amount(payload.get("billAmountPaid"))
         credit_applied = parse_amount(payload.get("creditBroughtForward"))
@@ -5147,6 +5269,7 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
                 "record": record,
                 "month": record.month or parse_month(payload.get("month")),
                 "occupancyStatus": normalize_text(payload.get("occupancyStatus")) or "Unknown",
+                "rentSummaryLabel": apartment_rent_summary_label(payload),
                 "rentDue": rent_due,
                 "rentPaid": rent_paid,
                 "billsDue": bills_due,
@@ -5192,7 +5315,14 @@ def apartment_document_source_payload(reference_record: ModuleRecord, suite_reco
         or pick_latest_amount(source_payloads, "rentDue")
         or pick_latest_amount(source_payloads, "rentPaid")
     )
-    rent_due = parse_amount((payment_payload or {}).get("rentDue")) or rent_cycle_amount or pick_latest_amount(source_payloads, "rentDue")
+    suite_rent_due = parse_amount((payment_payload or {}).get("rentDue")) or rent_cycle_amount or pick_latest_amount(source_payloads, "rentDue")
+    suite_rent_paid = parse_amount((payment_payload or {}).get("rentPaid")) or pick_latest_amount(source_payloads, "rentPaid")
+    bed_rent_due = parse_amount((payment_payload or {}).get("bedRentDue")) or pick_latest_amount(source_payloads, "bedRentDue")
+    bed_rent_paid = parse_amount((payment_payload or {}).get("bedRentPaid")) or pick_latest_amount(source_payloads, "bedRentPaid")
+    mattress_rent_due = parse_amount((payment_payload or {}).get("mattressRentDue")) or pick_latest_amount(source_payloads, "mattressRentDue")
+    mattress_rent_paid = parse_amount((payment_payload or {}).get("mattressRentPaid")) or pick_latest_amount(source_payloads, "mattressRentPaid")
+    total_rent_due = round(suite_rent_due + bed_rent_due + mattress_rent_due, 2)
+    total_rent_paid = round(suite_rent_paid + bed_rent_paid + mattress_rent_paid, 2)
 
     return {
         **current_payload,
@@ -5212,8 +5342,24 @@ def apartment_document_source_payload(reference_record: ModuleRecord, suite_reco
         "rentCycleType": rent_cycle_type,
         "rentCycleMonths": rent_cycle_months,
         "rentCycleAmount": rent_cycle_amount,
-        "rentDue": rent_due,
-        "rentPaid": parse_amount((payment_payload or {}).get("rentPaid")) or pick_latest_amount(source_payloads, "rentPaid"),
+        "suiteRentDue": suite_rent_due,
+        "suiteRentPaid": suite_rent_paid,
+        "bedRentDue": bed_rent_due,
+        "bedRentPaid": bed_rent_paid,
+        "mattressRentDue": mattress_rent_due,
+        "mattressRentPaid": mattress_rent_paid,
+        "additionalRentDue": round(bed_rent_due + mattress_rent_due, 2),
+        "additionalRentPaid": round(bed_rent_paid + mattress_rent_paid, 2),
+        "rentSummaryLabel": apartment_rent_summary_label(
+            {
+                "bedRentDue": bed_rent_due,
+                "bedRentPaid": bed_rent_paid,
+                "mattressRentDue": mattress_rent_due,
+                "mattressRentPaid": mattress_rent_paid,
+            }
+        ),
+        "rentDue": total_rent_due,
+        "rentPaid": total_rent_paid,
         "rentCoverageStartDate": pick_latest_date(payment_sources, "rentCoverageStartDate"),
         "rentCoverageEndDate": pick_latest_date(payment_sources, "rentCoverageEndDate"),
         "nextRentDueDate": pick_latest_date(source_payloads, "nextRentDueDate"),
@@ -5302,8 +5448,8 @@ def apartment_agreement_placeholders(payload: dict[str, Any], app_config: AppCon
     cycle_months = apartment_cycle_months(payload)
     advance_rent_due = (
         parse_amount(payload.get("rentCycleAmount"))
-        or parse_amount(payload.get("rentDue"))
-        or parse_amount(payload.get("rentPaid"))
+        or apartment_total_rent_due(payload)
+        or apartment_total_rent_paid(payload)
     )
     amount_received = parse_amount(payload.get("rentPaid")) or advance_rent_due
     monthly_rent = round(advance_rent_due / cycle_months, 2) if cycle_months > 0 and advance_rent_due > 0 else advance_rent_due
@@ -5316,17 +5462,19 @@ def apartment_agreement_placeholders(payload: dict[str, Any], app_config: AppCon
     lease_term_label = agreement_interval_label(cycle_months)
     agreement_status_date = format_display_date(payment_date or date.today().isoformat(), long_month=True)
     payment_channel = f"MTN Mobile Money to {app_config.whatsapp_number}"
+    rent_plan_summary = (
+        f"{format_agreement_currency(monthly_rent)} per month, payable {agreement_advance_label(cycle_months)}."
+        if monthly_rent > 0
+        else TENANCY_PLACEHOLDER_LINE
+    )
+    rent_plan_summary = f"{rent_plan_summary}{apartment_additional_rent_note(payload)}"
 
     return {
         "[[SUITE_NAME]]": normalize_text(payload.get("suite")) or "Apartment Suite",
         "[[PROPERTY_LOCATION]]": TENANCY_PROPERTY_LOCATION,
         "[[LEASE_TERM_LABEL]]": f"{lease_term_label} from the agreed commencement date to the matching expiry date.",
         "[[LEASE_TERM_TEXT]]": lease_term_label,
-        "[[RENT_PLAN_SUMMARY]]": (
-            f"{format_agreement_currency(monthly_rent)} per month, payable {agreement_advance_label(cycle_months)}."
-            if monthly_rent > 0
-            else TENANCY_PLACEHOLDER_LINE
-        ),
+        "[[RENT_PLAN_SUMMARY]]": rent_plan_summary,
         "[[ADVANCE_RENT_DUE]]": format_agreement_currency(advance_rent_due) if advance_rent_due > 0 else TENANCY_PLACEHOLDER_LINE,
         "[[AMOUNT_RECEIVED]]": format_agreement_currency(amount_received) if amount_received > 0 else TENANCY_PLACEHOLDER_LINE,
         "[[MONTHLY_SERVICE_TOTAL]]": format_agreement_currency(service_total),
@@ -6060,7 +6208,7 @@ def category_performance_rows(db_session, month_value: str, area_id: str = "") -
             add_category_row(
                 area_id_value=apartment_area,
                 category_label="Rent",
-                sales_amount=payload.get("rentPaid"),
+                sales_amount=apartment_total_rent_paid(payload),
                 transaction_count=1,
                 source_label="Apartment Rent",
             )
@@ -7426,7 +7574,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 reference=f"apartment-rent-payment|{record.id}",
                 sale_date=get_apartment_rent_payment_date(payload),
                 business_area_id="rentals-apartments",
-                amount=parse_amount(payload.get("rentPaid")),
+                amount=apartment_total_rent_paid(payload),
                 source_type="apartment-rent-payment",
                 source_label="Apartment Rent Payment",
                 note=f"[Apartment Sync] Rent payment for {tenant} in {suite}.",
@@ -10594,7 +10742,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     {
                         "label": "Open Inventory",
                         "href": url_for("inventory", area=service_area),
-                        "note": "Check related stock, supplies, and referenced equipment.",
+                        "note": "Open the item to edit stock, price, and the picture used on the service desk and website.",
                     }
                 )
             return render_template(
@@ -11203,6 +11351,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/inventory", methods=["GET", "POST"])
     @access_required("inventory")
     def inventory():
+        if reclassify_legacy_inventory_products(g.db):
+            g.db.commit()
         editing_id = normalize_text(request.args.get("edit"))
         editing_product = g.db.get(Product, editing_id) if editing_id else None
         all_products = g.db.scalars(select(Product).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())).all()

@@ -94,7 +94,7 @@
             <small>{{ apartment_summary.occupancyStatus }}</small>
           </article>
           <article class="mini-card">
-            <span>Rent Balance</span>
+            <span>{{ apartment_summary.rentSummaryLabel }}</span>
             <strong>{{ apartment_summary.rentBalance|currency }}</strong>
             <small>Due {{ apartment_summary.rentDue|currency }} · Paid {{ apartment_summary.rentPaid|currency }}</small>
           </article>
@@ -114,6 +114,16 @@
             <small>Advance or excess payment held</small>
           </article>
         </section>
+
+        <div class="dashboard-subsection">
+          <p class="eyebrow">Rent Breakdown</p>
+          <ul class="stack-list compact">
+            <li><strong>Suite Rent</strong><span>Due {{ apartment_summary.suiteRentDue|currency }} · Paid {{ apartment_summary.suiteRentPaid|currency }}</span></li>
+            {% for item in apartment_summary.additionalRentItems %}
+              <li><strong>{{ item.label }}</strong><span>Due {{ item.due|currency }} · Paid {{ item.paid|currency }}</span></li>
+            {% endfor %}
+          </ul>
+        </div>
 
         <div class="dashboard-subsection">
           <p class="eyebrow">Coverage & Due Dates</p>
@@ -166,7 +176,7 @@
           </li>
           <li>
             <strong>Rent controls</strong>
-            <span>Lease dates, rent cycle, due amount, payment date, coverage period, arrears, late fee, and advance balance.</span>
+            <span>Lease dates, rent cycle, suite rent, bed rent, mattress rent, payment date, coverage period, arrears, late fee, and advance balance.</span>
           </li>
           <li>
             <strong>Monthly bills</strong>
