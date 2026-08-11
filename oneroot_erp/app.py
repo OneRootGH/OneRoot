@@ -387,6 +387,12 @@ def ensure_schema_columns(engine) -> None:
         user_columns = {column["name"] for column in inspector.get_columns("app_users")}
     if "app_users" in table_names and "staff_role" not in user_columns:
         statements.append("ALTER TABLE app_users ADD COLUMN staff_role VARCHAR(100) DEFAULT ''")
+    if "audit_logs" in table_names and engine.dialect.name == "postgresql":
+        audit_columns = {column["name"]: column for column in inspector.get_columns("audit_logs")}
+        record_id_column = audit_columns.get("record_id")
+        record_id_length = getattr(record_id_column.get("type"), "length", None) if record_id_column else None
+        if record_id_column and record_id_length and record_id_length < 255:
+            statements.append("ALTER TABLE audit_logs ALTER COLUMN record_id TYPE VARCHAR(255)")
     if not statements:
         return
     with engine.begin() as connection:

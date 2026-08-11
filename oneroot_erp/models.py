@@ -146,7 +146,7 @@ class AuditLog(Base):
     action: Mapped[str] = mapped_column(String(50), default="", index=True)
     title: Mapped[str] = mapped_column(String(255), default="")
     detail: Mapped[str] = mapped_column(Text, default="")
-    record_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    record_id: Mapped[str] = mapped_column(String(255), default="", index=True)
     actor_id: Mapped[str] = mapped_column(String(64), default="", index=True)
     actor_name: Mapped[str] = mapped_column(String(200), default="")
     actor_role: Mapped[str] = mapped_column(String(100), default="")
