@@ -19,6 +19,11 @@ BUSINESS_AREA_SHORT = {item["id"]: item["short"] for item in BUSINESS_AREAS}
 INVENTORY_CATEGORY_LIBRARY = {
     "water-equipment": [
         "Water Supply",
+        "Equipment Rental",
+        "Construction Support",
+        "Hand Tools",
+        "Powered Tools",
+        "Concrete & Masonry",
         "Equipment & Construction Consumables",
     ],
     "cold-store-groceries": [

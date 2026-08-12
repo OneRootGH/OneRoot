@@ -11790,14 +11790,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
             except ValueError as error:
                 g.db.rollback()
-                if is_new:
-                    g.db.expunge(product)
                 editing_product = product
                 flash(str(error), "error")
             except Exception:
                 g.db.rollback()
-                if is_new:
-                    g.db.expunge(product)
                 editing_product = product
                 app.logger.exception("Inventory save failed for %s", product_id)
                 flash("That item could not be saved. Please check the item type, category, and image fields.", "error")

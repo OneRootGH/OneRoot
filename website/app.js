@@ -12,6 +12,10 @@
     customerDraft: loadStoredCustomerDraft(),
     equipmentSelections: [],
     laundrySelections: [],
+    serviceFilters: {
+      equipmentCategory: "",
+      laundryCategory: ""
+    },
     filters: {
       search: "",
       area: "",
@@ -107,6 +111,7 @@
       "trackingResult",
       "equipmentBookingForm",
       "equipmentItemSelect",
+      "equipmentCategoryFilterRow",
       "equipmentQuickPickGrid",
       "equipmentItemPreview",
       "equipmentAddItemBtn",
@@ -127,6 +132,7 @@
       "equipmentMessage",
       "laundryBookingForm",
       "laundryServiceSelect",
+      "laundryCategoryFilterRow",
       "laundryQuickPickGrid",
       "laundryServicePreview",
       "laundryAddItemBtn",
@@ -567,24 +573,253 @@
   }
 
   function getEquipmentCatalogItems() {
-    return state.catalog
-      .filter((item) => {
-        const areaId = normalizeText(item.businessAreaId);
-        const itemType = normalizeText(item.itemType).toLowerCase();
-        const category = normalizeText(item.category).toLowerCase();
-        return (
-          areaId === "water-equipment" &&
-          itemType === "service" &&
-          (category.includes("equipment rental") || normalizeText(item.id).startsWith("equipment-rental"))
-        );
-      })
-      .sort((left, right) => left.name.localeCompare(right.name));
+    const activeCategory = normalizeText(state.serviceFilters.equipmentCategory);
+    return getEquipmentCatalogBaseItems().filter((item) => {
+      if (!activeCategory) {
+        return true;
+      }
+      return getServiceCategoryLabel(item.category, "equipment") === activeCategory;
+    });
   }
 
   function getLaundryCatalogItems() {
-    return state.catalog
-      .filter((item) => normalizeText(item.businessAreaId) === "laundry-services")
-      .sort((left, right) => left.name.localeCompare(right.name));
+    const activeCategory = normalizeText(state.serviceFilters.laundryCategory);
+    return getLaundryCatalogBaseItems().filter((item) => {
+      if (!activeCategory) {
+        return true;
+      }
+      return getServiceCategoryLabel(item.category, "laundry") === activeCategory;
+    });
+  }
+
+  function getServiceCategoryLabel(category, serviceType) {
+    const cleanCategory = normalizeText(category);
+    if (!cleanCategory) {
+      return serviceType === "laundry" ? "General Laundry" : "General Equipment";
+    }
+    if (serviceType === "laundry") {
+      return cleanCategory.replace(/^Laundry\s*-\s*/i, "") || "General Laundry";
+    }
+    return cleanCategory;
+  }
+
+  function getEquipmentItemFingerprint(item) {
+    const textBlob = [
+      normalizeText(item.id),
+      normalizeText(item.name),
+      normalizeText(item.category),
+      normalizeText(item.sourceCategory)
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (textBlob.includes("wheelbarrow")) {
+      return "wheelbarrow";
+    }
+    if (textBlob.includes("vibrator")) {
+      return "concrete-vibrator";
+    }
+    if (textBlob.includes("cutting machine") || textBlob.includes("cutter")) {
+      return "cutting-machine";
+    }
+    if (textBlob.includes("head pan") || textBlob.includes("headpan")) {
+      return "head-pan";
+    }
+    if (textBlob.includes("shovel")) {
+      return "shovel";
+    }
+    if (textBlob.includes("impact drill") || textBlob.includes("drill")) {
+      return "impact-drill";
+    }
+    return normalizeText(item.id) || normalizeText(item.name);
+  }
+
+  function isEquipmentCatalogItem(item) {
+    const areaId = normalizeText(item.businessAreaId);
+    if (areaId !== "water-equipment") {
+      return false;
+    }
+
+    const textBlob = [
+      normalizeText(item.id),
+      normalizeText(item.name),
+      normalizeText(item.category),
+      normalizeText(item.sourceCategory),
+      normalizeText(item.itemType)
+    ]
+      .join(" ")
+      .toLowerCase();
+
+    if (
+      textBlob.includes("water delivery") ||
+      textBlob.includes("water supply") ||
+      normalizeText(item.id) === "water-delivery-request"
+    ) {
+      return false;
+    }
+
+    return [
+      "equipment rental",
+      "construction support",
+      "hand tools",
+      "powered tools",
+      "concrete & masonry",
+      "wheelbarrow",
+      "drill",
+      "shovel",
+      "head pan",
+      "headpan",
+      "vibrator",
+      "cutting machine",
+      "cutter",
+      "impact drill"
+    ].some((keyword) => textBlob.includes(keyword));
+  }
+
+  function compareCatalogItems(left, right) {
+    const leftCategory = getServiceCategoryLabel(left.category, normalizeText(left.businessAreaId) === "laundry-services" ? "laundry" : "equipment");
+    const rightCategory = getServiceCategoryLabel(right.category, normalizeText(right.businessAreaId) === "laundry-services" ? "laundry" : "equipment");
+    return (
+      leftCategory.localeCompare(rightCategory) ||
+      left.name.localeCompare(right.name)
+    );
+  }
+
+  function getEquipmentCatalogBaseItems() {
+    const matchingItems = state.catalog.filter(isEquipmentCatalogItem);
+    const preferredItems = [];
+    const inventoryFingerprints = new Set(
+      matchingItems
+        .filter((item) => normalizeText(item.source) === "inventory")
+        .map((item) => getEquipmentItemFingerprint(item))
+    );
+
+    matchingItems
+      .sort((left, right) => {
+        const sourceDelta =
+          Number(normalizeText(right.source) === "inventory") -
+          Number(normalizeText(left.source) === "inventory");
+        return sourceDelta || compareCatalogItems(left, right);
+      })
+      .forEach((item) => {
+        const source = normalizeText(item.source);
+        const fingerprint = getEquipmentItemFingerprint(item);
+        if (source !== "inventory" && inventoryFingerprints.has(fingerprint)) {
+          return;
+        }
+        preferredItems.push(item);
+      });
+
+    return preferredItems.sort(compareCatalogItems);
+  }
+
+  function getLaundryCatalogBaseItems() {
+    const laundryItems = state.catalog.filter(
+      (item) => normalizeText(item.businessAreaId) === "laundry-services"
+    );
+    const inventoryItems = laundryItems.filter(
+      (item) => normalizeText(item.source) === "inventory"
+    );
+    const baseItems = inventoryItems.length ? inventoryItems : laundryItems;
+    return [...baseItems].sort(compareCatalogItems);
+  }
+
+  function getServiceCategoryOptions(items, serviceType) {
+    return [...new Set(items.map((item) => getServiceCategoryLabel(item.category, serviceType)).filter(Boolean))].sort(
+      (left, right) => left.localeCompare(right)
+    );
+  }
+
+  function syncServiceSelection(selectElement, items) {
+    if (!selectElement) {
+      return;
+    }
+    const selectedId = normalizeText(selectElement.value);
+    if (selectedId && !items.some((item) => normalizeText(item.id) === selectedId)) {
+      selectElement.value = "";
+    }
+  }
+
+  function buildServiceSelectMarkup(items, serviceType, placeholder) {
+    const groups = new Map();
+    items.forEach((item) => {
+      const categoryLabel = getServiceCategoryLabel(item.category, serviceType);
+      if (!groups.has(categoryLabel)) {
+        groups.set(categoryLabel, []);
+      }
+      groups.get(categoryLabel).push(item);
+    });
+
+    const optionGroups = Array.from(groups.entries())
+      .sort((left, right) => left[0].localeCompare(right[0]))
+      .map(
+        ([categoryLabel, groupItems]) => `
+          <optgroup label="${escapeHtml(categoryLabel)}">
+            ${groupItems
+              .map(
+                (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
+              )
+              .join("")}
+          </optgroup>
+        `
+      );
+
+    return [`<option value="">${escapeHtml(placeholder)}</option>`, ...optionGroups].join("");
+  }
+
+  function renderServiceCategoryFilters(container, serviceType, options, activeCategory) {
+    if (!container) {
+      return;
+    }
+
+    if (!options.length) {
+      container.innerHTML = "";
+      return;
+    }
+
+    const allLabel = serviceType === "laundry" ? "All Laundry Categories" : "All Equipment Categories";
+    container.innerHTML = [
+      `
+        <button
+          class="service-filter-chip ${activeCategory === "" ? "is-active" : ""}"
+          data-service-category=""
+          data-service-type="${escapeHtml(serviceType)}"
+          type="button"
+        >
+          ${escapeHtml(allLabel)}
+        </button>
+      `,
+      ...options.map(
+        (category) => `
+          <button
+            class="service-filter-chip ${activeCategory === category ? "is-active" : ""}"
+            data-service-category="${escapeHtml(category)}"
+            data-service-type="${escapeHtml(serviceType)}"
+            type="button"
+          >
+            ${escapeHtml(category)}
+          </button>
+        `
+      )
+    ].join("");
+  }
+
+  function renderEquipmentCategoryFilters() {
+    renderServiceCategoryFilters(
+      elements.equipmentCategoryFilterRow,
+      "equipment",
+      getServiceCategoryOptions(getEquipmentCatalogBaseItems(), "equipment"),
+      normalizeText(state.serviceFilters.equipmentCategory)
+    );
+  }
+
+  function renderLaundryCategoryFilters() {
+    renderServiceCategoryFilters(
+      elements.laundryCategoryFilterRow,
+      "laundry",
+      getServiceCategoryOptions(getLaundryCatalogBaseItems(), "laundry"),
+      normalizeText(state.serviceFilters.laundryCategory)
+    );
   }
 
   function populateEquipmentOptions() {
@@ -592,18 +827,22 @@
       return;
     }
 
+    renderEquipmentCategoryFilters();
     const items = getEquipmentCatalogItems();
+    syncServiceSelection(elements.equipmentItemSelect, items);
     if (!items.length) {
       elements.equipmentItemSelect.innerHTML = `<option value="">No equipment options available right now</option>`;
+      renderEquipmentQuickPicks();
+      renderEquipmentItemPreview();
+      renderEquipmentSelections();
       return;
     }
 
-    elements.equipmentItemSelect.innerHTML = [
-      `<option value="">Select equipment item</option>`,
-      ...items.map(
-        (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
-      )
-    ].join("");
+    elements.equipmentItemSelect.innerHTML = buildServiceSelectMarkup(
+      items,
+      "equipment",
+      "Select equipment item"
+    );
     renderEquipmentQuickPicks();
     renderEquipmentItemPreview();
     renderEquipmentSelections();
@@ -614,18 +853,22 @@
       return;
     }
 
+    renderLaundryCategoryFilters();
     const items = getLaundryCatalogItems();
+    syncServiceSelection(elements.laundryServiceSelect, items);
     if (!items.length) {
       elements.laundryServiceSelect.innerHTML = `<option value="">No laundry options available right now</option>`;
+      renderLaundryQuickPicks();
+      renderLaundryItemPreview();
+      renderLaundrySelections();
       return;
     }
 
-    elements.laundryServiceSelect.innerHTML = [
-      `<option value="">Select laundry service</option>`,
-      ...items.map(
-        (item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.name)}</option>`
-      )
-    ].join("");
+    elements.laundryServiceSelect.innerHTML = buildServiceSelectMarkup(
+      items,
+      "laundry",
+      "Select laundry service"
+    );
     renderLaundryQuickPicks();
     renderLaundryItemPreview();
     renderLaundrySelections();
@@ -664,7 +907,7 @@
             >
             <span class="service-quick-pick-copy">
               <strong>${escapeHtml(item.name)}</strong>
-              <small>${escapeHtml(item.category || "Service Item")}</small>
+              <small>${escapeHtml(getServiceCategoryLabel(item.category, serviceType) || "Service Item")}</small>
               <span>${escapeHtml(salesPrice > 0 ? formatCurrency(salesPrice) : "Quote")}</span>
             </span>
           </button>
@@ -1458,6 +1701,25 @@
           (selection) => selection.selectionId !== selectionId
         );
         renderLaundrySelections();
+      }
+
+      return;
+    }
+
+    const serviceCategoryButton = event.target.closest("button[data-service-category]");
+
+    if (serviceCategoryButton) {
+      const serviceType = normalizeText(serviceCategoryButton.dataset.serviceType);
+      const category = normalizeText(serviceCategoryButton.dataset.serviceCategory);
+
+      if (serviceType === "equipment") {
+        state.serviceFilters.equipmentCategory = category;
+        populateEquipmentOptions();
+      }
+
+      if (serviceType === "laundry") {
+        state.serviceFilters.laundryCategory = category;
+        populateLaundryOptions();
       }
 
       return;
