@@ -110,6 +110,7 @@ PRODUCT_IMAGE_AREA_COLORS = {
 }
 ICONIFY_API_BASE = "https://api.iconify.design"
 EQUIPMENT_SERVICE_CATEGORY_LABELS = {
+    "rent",
     "equipment rental",
     "water delivery",
     "hand tools",
@@ -117,8 +118,20 @@ EQUIPMENT_SERVICE_CATEGORY_LABELS = {
     "concrete & masonry",
     "construction support",
 }
-EQUIPMENT_SERVICE_KEYWORDS = (
+EQUIPMENT_RENT_LEGACY_CATEGORY_LABELS = {
+    "rent",
     "equipment rental",
+    "hand tools",
+    "powered tools",
+    "concrete & masonry",
+    "construction support",
+}
+EQUIPMENT_SERVICE_KEYWORDS = (
+    "rent",
+    "equipment rental",
+    "hammer",
+    "pick axe",
+    "pickaxe",
     "wheelbarrow",
     "drill",
     "shovel",
@@ -862,7 +875,7 @@ def matches_equipment_service_item(
     if clean_category == "equipment & construction consumables":
         return False
     if clean_item_id == "water-delivery-request":
-        return True
+        return False
     return (
         clean_item_id.startswith("equipment-rental")
         or (clean_item_type == "service" and clean_category == "water delivery")
@@ -891,6 +904,44 @@ def product_matches_equipment_service(product_or_item: Product | dict[str, Any])
     )
 
 
+def normalized_equipment_service_category(value: Any) -> str:
+    category_text = normalize_text(value)
+    category_key = category_text.lower()
+    if category_key == "water delivery":
+        return "Water Delivery"
+    if category_key in EQUIPMENT_RENT_LEGACY_CATEGORY_LABELS:
+        return "Rent"
+    return category_text or "Rent"
+
+
+def normalize_equipment_inventory_category(product: Product) -> bool:
+    if normalize_text(product.business_area_id) != "water-equipment":
+        return False
+    category_key = normalize_text(product.category).lower()
+    name_key = normalize_text(product.name).lower()
+    source_category_key = normalize_text(product.source_category).lower()
+    item_type = normalized_product_item_type(product.item_type, product.track_inventory)
+    if category_key == "water supply":
+        return False
+    if "water delivery" in name_key or "water delivery" in source_category_key or category_key == "water delivery":
+        normalized_category = normalized_equipment_service_category("Water Delivery")
+        if normalize_text(product.category) != normalized_category:
+            product.category = normalized_category
+            return True
+        return False
+    if (
+        category_key in EQUIPMENT_RENT_LEGACY_CATEGORY_LABELS
+        or normalize_text(product.id).startswith("equipment-rental-")
+        or item_type == "service"
+        or any(keyword in name_key for keyword in EQUIPMENT_SERVICE_KEYWORDS)
+    ):
+        normalized_category = normalized_equipment_service_category(product.category)
+        if normalize_text(product.category) != normalized_category:
+            product.category = normalized_category
+            return True
+    return False
+
+
 LEGACY_SHARED_OPERATION_STOCK_NAMES = {
     "bine hand wash multipurpose",
     "topco big multipurpose soap",
@@ -903,6 +954,21 @@ LEGACY_SHARED_OPERATION_SERVICE_NAMES = {"tip", "gift card"}
 
 def reclassify_legacy_inventory_products(db_session) -> bool:
     changed = False
+    equipment_products = db_session.scalars(
+        select(Product).where(Product.business_area_id == "water-equipment")
+    ).all()
+    for product in equipment_products:
+        if normalize_equipment_inventory_category(product):
+            product.updated_at = datetime.utcnow()
+            product.sku = generate_auto_product_sku(
+                product_id=product.id,
+                name=product.name,
+                business_area_id=product.business_area_id,
+                category=product.category,
+            )
+            normalize_product_record(product)
+            changed = True
+
     shared_operation_products = db_session.scalars(
         select(Product).where(Product.business_area_id == "shared-operations")
     ).all()
@@ -1010,7 +1076,7 @@ def sync_equipment_service_catalog(db_session, app_config: AppConfig) -> None:
         product.source_catalog_id = seed_id
         product.name = normalize_text(seed.get("name"))
         product.business_area_id = "water-equipment"
-        product.category = normalize_text(seed.get("category")) or "Equipment Rental"
+        product.category = normalize_text(seed.get("category")) or ("Water Delivery" if seed_id == "water-delivery-request" else "Rent")
         product.source_category = normalize_text(seed.get("sourceCategory")) or "Website Service"
         product.item_type = "service"
         product.track_inventory = False
@@ -1213,6 +1279,8 @@ def product_matches_expiry_filter(item_or_payload: Product | dict[str, Any], exp
 
 def normalize_product_record(product: Product) -> bool:
     changed = False
+    if normalize_equipment_inventory_category(product):
+        changed = True
     item_type = normalized_product_item_type(product.item_type, product.track_inventory)
     should_track_inventory = item_type != "service"
     image_url = normalize_text(product.image_url)
@@ -2418,6 +2486,8 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
         if line_cost <= 0 and cost_price > 0:
             line_cost = round(cost_price * quantity * (days if module_key == "equipment_rental_bookings" else 1), 2)
         category_value = normalize_text(raw_item.get("category"))
+        if module_key == "equipment_rental_bookings":
+            category_value = normalized_equipment_service_category(category_value)
         image_url = normalize_text(raw_item.get("imageUrl")) or product_image_src(
             {
                 "name": item_name,
@@ -2553,7 +2623,7 @@ def sync_service_line_item_rollup(module_key: str, payload: dict[str, Any]) -> N
             if len(items) == 1
             else f"{items[0]['name']} (+{len(items) - 1} more)"
         )
-        payload["equipmentCategory"] = categories[0] if len(set(categories)) == 1 and categories else "Mixed Equipment"
+        payload["equipmentCategory"] = normalized_equipment_service_category(categories[0] if categories else "Rent")
 
 
 def service_reference_products(db_session, module_key: str) -> list[Product]:
@@ -2780,7 +2850,7 @@ def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str,
     elif module_key == "equipment_rental_bookings":
         payload["rentalFee"] = round(parse_amount(match.sales_price) * multiplier, 2)
         if normalize_text(match.category):
-            payload["equipmentCategory"] = normalize_text(match.category)
+            payload["equipmentCategory"] = normalized_equipment_service_category(match.category)
     sync_service_line_item_rollup(module_key, payload)
 
 
@@ -3498,7 +3568,7 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
                 "record": record,
                 "id": record.id,
                 "equipmentItem": service_line_items_brief("equipment_rental_bookings", payload) if line_items else (normalize_text(payload.get("equipmentItem")) or record.title or "Equipment Rental"),
-                "equipmentCategory": normalize_text(payload.get("equipmentCategory")) or "Construction Support",
+                "equipmentCategory": normalize_text(payload.get("equipmentCategory")) or "Rent",
                 "customerName": normalize_text(payload.get("customerName")) or "Customer",
                 "customerPhone": normalize_phone(payload.get("customerPhone")),
                 "bookingDate": parse_date(payload.get("bookingDate")),
@@ -7834,6 +7904,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if cost_price <= 0:
                     cost_price = round(parse_amount(match.cost_price), 2)
             category = normalize_text(match.category) if match and normalize_text(match.category) else normalize_text(raw_item.get("category"))
+            if module_key == "equipment_rental_bookings":
+                category = normalized_equipment_service_category(category)
             line_total = round(parse_amount(raw_item.get("lineTotal")), 2)
             if line_total <= 0 and unit_price > 0:
                 line_total = round(unit_price * quantity * (rental_days if module_key == "equipment_rental_bookings" else 1), 2)

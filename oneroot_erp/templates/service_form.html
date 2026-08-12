@@ -68,54 +68,58 @@
           <p class="muted section-note">{{ section.description }}</p>
           <div class="form-grid">
             {% for field in section.fields %}
-              <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
-                <span>{{ field.label }}</span>
-                {% if field.field_type == 'textarea' %}
-                  <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
-                {% elif field.field_type == 'select' %}
-                  <select
-                    name="{{ field.name }}"
-                    {% if field.name == 'serviceCategory' %}id="service-category"{% elif field.name == 'equipmentCategory' %}id="equipment-category"{% endif %}
-                    {% if field.required %}required{% endif %}
-                  >
-                    <option value="">Select {{ field.label }}</option>
-                    {% for value, label in field.options %}
-                      <option value="{{ value }}" {% if payload.get(field.name, '') == value %}selected{% endif %}>{{ label }}</option>
-                    {% endfor %}
-                  </select>
-                {% elif definition.key == 'laundry_tickets' and field.name == 'laundryItem' %}
-                  <input
-                    type="text"
-                    name="{{ field.name }}"
-                    id="laundry-item"
-                    value="{{ payload.get(field.name, '') }}"
-                    list="service-reference-options"
-                    placeholder="Choose or type laundry item"
-                    {% if field.required %}required{% endif %}
-                  >
-                {% elif definition.key == 'equipment_rental_bookings' and field.name == 'equipmentItem' %}
-                  <input
-                    type="text"
-                    name="{{ field.name }}"
-                    id="equipment-item"
-                    value="{{ payload.get(field.name, '') }}"
-                    list="service-reference-options"
-                    placeholder="Choose or type equipment item"
-                    {% if field.required %}required{% endif %}
-                  >
-                {% else %}
-                  <input
-                    type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
-                    {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
-                    name="{{ field.name }}"
-                    {% if field.name == 'pieces' %}id="laundry-pieces"{% elif field.name == 'amountDue' %}id="laundry-amount-due"{% elif field.name == 'costAmount' %}id="service-cost-amount"{% elif field.name == 'rentalDays' %}id="equipment-rental-days"{% elif field.name == 'rentalFee' %}id="equipment-rental-fee"{% elif field.name == 'outDate' %}id="equipment-out-date"{% elif field.name == 'dueDate' %}id="equipment-due-date"{% endif %}
-                    step="{{ field.step if field.field_type == 'number' else '' }}"
-                    value="{{ payload.get(field.name, '') }}"
-                    placeholder="{{ field.placeholder or field.label }}"
-                    {% if field.required %}required{% endif %}
-                  >
-                {% endif %}
-              </label>
+              {% if definition.key == 'equipment_rental_bookings' and field.name == 'equipmentCategory' %}
+                <input type="hidden" name="{{ field.name }}" value="{{ payload.get(field.name, 'Rent') or 'Rent' }}">
+              {% else %}
+                <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
+                  <span>{{ field.label }}</span>
+                  {% if field.field_type == 'textarea' %}
+                    <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
+                  {% elif field.field_type == 'select' %}
+                    <select
+                      name="{{ field.name }}"
+                      {% if field.name == 'serviceCategory' %}id="service-category"{% elif field.name == 'equipmentCategory' %}id="equipment-category"{% endif %}
+                      {% if field.required %}required{% endif %}
+                    >
+                      <option value="">Select {{ field.label }}</option>
+                      {% for value, label in field.options %}
+                        <option value="{{ value }}" {% if payload.get(field.name, '') == value %}selected{% endif %}>{{ label }}</option>
+                      {% endfor %}
+                    </select>
+                  {% elif definition.key == 'laundry_tickets' and field.name == 'laundryItem' %}
+                    <input
+                      type="text"
+                      name="{{ field.name }}"
+                      id="laundry-item"
+                      value="{{ payload.get(field.name, '') }}"
+                      list="service-reference-options"
+                      placeholder="Choose or type laundry item"
+                      {% if field.required %}required{% endif %}
+                    >
+                  {% elif definition.key == 'equipment_rental_bookings' and field.name == 'equipmentItem' %}
+                    <input
+                      type="text"
+                      name="{{ field.name }}"
+                      id="equipment-item"
+                      value="{{ payload.get(field.name, '') }}"
+                      list="service-reference-options"
+                      placeholder="Choose or type equipment item"
+                      {% if field.required %}required{% endif %}
+                    >
+                  {% else %}
+                    <input
+                      type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
+                      {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
+                      name="{{ field.name }}"
+                      {% if field.name == 'pieces' %}id="laundry-pieces"{% elif field.name == 'amountDue' %}id="laundry-amount-due"{% elif field.name == 'costAmount' %}id="service-cost-amount"{% elif field.name == 'rentalDays' %}id="equipment-rental-days"{% elif field.name == 'rentalFee' %}id="equipment-rental-fee"{% elif field.name == 'outDate' %}id="equipment-out-date"{% elif field.name == 'dueDate' %}id="equipment-due-date"{% endif %}
+                      step="{{ field.step if field.field_type == 'number' else '' }}"
+                      value="{{ payload.get(field.name, '') }}"
+                      placeholder="{{ field.placeholder or field.label }}"
+                      {% if field.required %}required{% endif %}
+                    >
+                  {% endif %}
+                </label>
+              {% endif %}
             {% endfor %}
           </div>
           {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] and loop.index == 2 %}
@@ -447,7 +451,7 @@
               fields.rentalFee.value = formatAmount(totalRentalFee);
             }
             if (fields.category) {
-              ensureSelectValue(fields.category, categories.length === 1 ? categories[0] : "Mixed Equipment");
+              ensureSelectValue(fields.category, categories[0] || "Rent");
             }
           }
           fields.costAmount.value = formatAmount(totalCost);

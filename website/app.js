@@ -600,6 +600,17 @@
     if (serviceType === "laundry") {
       return cleanCategory.replace(/^Laundry\s*-\s*/i, "") || "General Laundry";
     }
+    if (
+      [
+        "equipment rental",
+        "construction support",
+        "hand tools",
+        "powered tools",
+        "concrete & masonry"
+      ].includes(cleanCategory.toLowerCase())
+    ) {
+      return "Rent";
+    }
     return cleanCategory;
   }
 
@@ -658,8 +669,8 @@
       return false;
     }
 
-    if (normalizeText(item.id) === "water-delivery-request") {
-      return true;
+    if (normalizeText(item.id) === "water-delivery-request" || category === "water delivery") {
+      return false;
     }
 
     if (itemType === "service") {
@@ -670,7 +681,6 @@
       [
         "rent",
         "equipment rental",
-        "water delivery",
         "construction support",
         "hand tools",
         "powered tools",
@@ -684,7 +694,6 @@
     return [
       "equipment rental",
       "rent",
-      "water delivery",
       "construction support",
       "hand tools",
       "powered tools",
@@ -1129,7 +1138,7 @@
                     selection.durationDays === 1 ? "" : "s"
                   }`
                 )}</p>
-                <p>${escapeHtml(selection.category || "Equipment Rental")}</p>
+                <p>${escapeHtml(selection.category || "Rent")}</p>
               </div>
             </div>
             <div class="service-selected-item-side">

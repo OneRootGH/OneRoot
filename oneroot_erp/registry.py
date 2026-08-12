@@ -19,11 +19,8 @@ BUSINESS_AREA_SHORT = {item["id"]: item["short"] for item in BUSINESS_AREAS}
 INVENTORY_CATEGORY_LIBRARY = {
     "water-equipment": [
         "Water Supply",
-        "Equipment Rental",
-        "Construction Support",
-        "Hand Tools",
-        "Powered Tools",
-        "Concrete & Masonry",
+        "Water Delivery",
+        "Rent",
         "Equipment & Construction Consumables",
     ],
     "cold-store-groceries": [
@@ -427,12 +424,7 @@ LAUNDRY_ITEM_CATEGORY_OPTIONS = [
 LAUNDRY_STATUSES = ["Received", "In Progress", "Ready", "Delivered", "Cancelled"]
 LAUNDRY_DELIVERY_MODES = ["Walk-in", "Pickup", "Delivery", "Pickup / Delivery"]
 EQUIPMENT_RENTAL_CATEGORY_OPTIONS = [
-    ("Equipment Rental", "Equipment Rental"),
-    ("Water Delivery", "Water Delivery"),
-    ("Hand Tools", "Hand Tools"),
-    ("Powered Tools", "Powered Tools"),
-    ("Concrete & Masonry", "Concrete & Masonry"),
-    ("Construction Support", "Construction Support"),
+    ("Rent", "Rent"),
 ]
 EQUIPMENT_RENTAL_STATUSES = ["Booked", "Out", "Returned", "Cancelled"]
 EQUIPMENT_CONDITIONS = ["Good", "Fair", "Damaged"]
