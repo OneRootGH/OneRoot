@@ -129,6 +129,9 @@
       "equipmentNeedOperatorInput",
       "equipmentNotesInput",
       "equipmentPaymentMethodInput",
+      "equipmentFormNote",
+      "equipmentQuickPickHint",
+      "equipmentSubmitBtn",
       "equipmentMessage",
       "laundryBookingForm",
       "laundryServiceSelect",
@@ -602,6 +605,17 @@
     }
     if (
       [
+        "buy",
+        "equipment & construction consumables",
+        "construction consumables",
+        "equipment sales",
+        "sales"
+      ].includes(cleanCategory.toLowerCase())
+    ) {
+      return "Buy";
+    }
+    if (
+      [
         "equipment rental",
         "construction support",
         "hand tools",
@@ -612,6 +626,114 @@
       return "Rent";
     }
     return cleanCategory;
+  }
+
+  function getEquipmentOrderMode(item) {
+    return getServiceCategoryLabel(item?.category, "equipment") === "Buy" ? "buy" : "rent";
+  }
+
+  function getEquipmentSelectionMultiplier(selection) {
+    return selection?.mode === "buy"
+      ? 1
+      : Math.max(Number(selection?.durationDays || 1), 1);
+  }
+
+  function computeEquipmentSelectionLineTotal(selection) {
+    return Number(
+      (
+        Number(selection?.unitPrice || 0) *
+        Math.max(Number(selection?.quantity || 1), 1) *
+        getEquipmentSelectionMultiplier(selection)
+      ).toFixed(2)
+    );
+  }
+
+  function describeEquipmentSelection(selection) {
+    const quantity = Math.max(Number(selection?.quantity || 1), 1);
+    if (selection?.mode === "buy") {
+      return `${quantity} item${quantity === 1 ? "" : "s"} to buy`;
+    }
+    const days = Math.max(Number(selection?.durationDays || 1), 1);
+    return `${quantity} item${quantity === 1 ? "" : "s"} for ${days} day${days === 1 ? "" : "s"}`;
+  }
+
+  function getCurrentEquipmentMode() {
+    const selectedItem = getCatalogItemById(normalizeText(elements.equipmentItemSelect?.value));
+    if (selectedItem) {
+      return getEquipmentOrderMode(selectedItem);
+    }
+
+    const activeCategory = normalizeText(state.serviceFilters.equipmentCategory);
+    if (activeCategory === "Buy") {
+      return "buy";
+    }
+    if (activeCategory === "Rent") {
+      return "rent";
+    }
+
+    const selectionModes = [...new Set(state.equipmentSelections.map((selection) => selection.mode).filter(Boolean))];
+    return selectionModes.length === 1 ? selectionModes[0] : "";
+  }
+
+  function refreshEquipmentFormMode() {
+    const mode = getCurrentEquipmentMode();
+    const quantityField = elements.equipmentQuantityInput?.closest("label");
+    const quantityLabel = quantityField?.querySelector("span");
+    const durationField = elements.equipmentDurationInput?.closest("label");
+    const selectionModes = [...new Set(state.equipmentSelections.map((selection) => selection.mode).filter(Boolean))];
+    const effectiveMode =
+      selectionModes.length > 1
+        ? "mixed"
+        : selectionModes[0] || mode;
+
+    if (quantityLabel) {
+      quantityLabel.textContent =
+        mode === "buy"
+          ? "Quantity To Buy"
+          : mode === "rent"
+            ? "Quantity Needed"
+            : "Quantity";
+    }
+
+    if (durationField) {
+      durationField.classList.toggle("hidden", mode === "buy");
+    }
+
+    if (elements.equipmentFormNote) {
+      elements.equipmentFormNote.textContent =
+        mode === "buy"
+          ? "Choose the items you want to buy, set quantity, and send one order for everything you need."
+          : mode === "rent"
+            ? "Choose the equipment you need, set quantity and rental days, and include all required items in one request."
+            : "Choose equipment to rent or items to buy, set quantity, and send one combined request.";
+    }
+
+    if (elements.equipmentQuickPickHint) {
+      elements.equipmentQuickPickHint.textContent =
+        mode === "buy"
+          ? "Choose the item first, then set the quantity you want to buy."
+          : mode === "rent"
+            ? "Choose the equipment first, then set the quantity and rental days."
+            : "Choose the item first, then set quantity. Rental items will also ask for days.";
+    }
+
+    if (elements.equipmentAddItemBtn) {
+      elements.equipmentAddItemBtn.textContent =
+        mode === "buy"
+          ? "Add Buy Item"
+          : mode === "rent"
+            ? "Add Rental Item"
+            : "Add Equipment Item";
+    }
+
+    if (elements.equipmentSubmitBtn) {
+      elements.equipmentSubmitBtn.textContent =
+        effectiveMode === "buy"
+          ? "Send Equipment Order"
+          : effectiveMode === "rent"
+            ? "Send Equipment Request"
+            : "Send Equipment Order / Request";
+    }
   }
 
   function getEquipmentItemFingerprint(item) {
@@ -665,10 +787,6 @@
       return false;
     }
 
-    if (category === "equipment & construction consumables") {
-      return false;
-    }
-
     if (normalizeText(item.id) === "water-delivery-request" || category === "water delivery") {
       return false;
     }
@@ -685,7 +803,10 @@
         "hand tools",
         "powered tools",
         "concrete & masonry",
-        "equipment & construction consumables"
+        "equipment & construction consumables",
+        "buy",
+        "equipment sales",
+        "construction consumables"
       ].includes(category)
     ) {
       return true;
@@ -1029,13 +1150,20 @@
   }
 
   function renderEquipmentItemPreview() {
+    const selectedItem = getCatalogItemById(normalizeText(elements.equipmentItemSelect?.value));
     renderEquipmentQuickPicks();
     renderServiceItemPreview(
       elements.equipmentItemPreview,
-      getCatalogItemById(normalizeText(elements.equipmentItemSelect?.value)),
+      selectedItem
+        ? {
+            ...selectedItem,
+            category: getServiceCategoryLabel(selectedItem.category, "equipment")
+          }
+        : null,
       "No equipment selected yet.",
       "Choose an equipment item to see the photo and price before adding it to your request."
     );
+    refreshEquipmentFormMode();
   }
 
   function renderLaundryItemPreview() {
@@ -1057,7 +1185,10 @@
     }
 
     const quantity = Math.max(Number(elements.equipmentQuantityInput?.value || 1), 1);
-    const durationDays = Math.max(Number(elements.equipmentDurationInput?.value || 1), 1);
+    const mode = getEquipmentOrderMode(catalogItem);
+    const durationDays = mode === "buy"
+      ? 1
+      : Math.max(Number(elements.equipmentDurationInput?.value || 1), 1);
     const unitPrice = Number(catalogItem.salesPrice || 0);
 
     return {
@@ -1068,9 +1199,15 @@
         category: catalogItem.category || "",
         imageUrl: resolveCatalogImageSrc(catalogItem),
         quantity,
+        mode,
         durationDays,
         unitPrice,
-        lineTotal: Number((unitPrice * quantity * durationDays).toFixed(2))
+        lineTotal: computeEquipmentSelectionLineTotal({
+          quantity,
+          durationDays,
+          unitPrice,
+          mode
+        })
       }
     };
   }
@@ -1083,18 +1220,30 @@
       return false;
     }
 
+    const existingModes = [...new Set(state.equipmentSelections.map((entry) => entry.mode).filter(Boolean))];
+    if (existingModes.length && !existingModes.includes(selection.mode)) {
+      renderServiceMessage(
+        elements.equipmentMessage,
+        "error",
+        selection.mode === "buy"
+          ? "Buy items should be sent in their own order. Remove the rental items first or send a separate order."
+          : "Rental items should be sent in their own request. Remove the buy items first or send a separate order."
+      );
+      return false;
+    }
+
     const existingSelection = state.equipmentSelections.find(
-      (entry) => entry.id === selection.id && Number(entry.durationDays || 1) === Number(selection.durationDays || 1)
+      (entry) =>
+        entry.id === selection.id &&
+        entry.mode === selection.mode &&
+        (
+          selection.mode === "buy" ||
+          Number(entry.durationDays || 1) === Number(selection.durationDays || 1)
+        )
     );
     if (existingSelection) {
       existingSelection.quantity = Number(existingSelection.quantity || 0) + Number(selection.quantity || 0);
-      existingSelection.lineTotal = Number(
-        (
-          Number(existingSelection.unitPrice || 0) *
-          Number(existingSelection.quantity || 0) *
-          Number(existingSelection.durationDays || 1)
-        ).toFixed(2)
-      );
+      existingSelection.lineTotal = computeEquipmentSelectionLineTotal(existingSelection);
     } else {
       state.equipmentSelections.push(selection);
     }
@@ -1119,9 +1268,10 @@
       elements.equipmentSelectedItems.innerHTML = `
         <article class="service-selected-empty">
           <strong>No equipment items added yet</strong>
-          <p>Select an item, set quantity and rental days, then add it to this request.</p>
+          <p>Select an item, set quantity, and add it here. Rental items will also include days.</p>
         </article>
       `;
+      refreshEquipmentFormMode();
       return;
     }
 
@@ -1133,12 +1283,8 @@
               <img class="service-selected-thumb" src="${escapeHtml(resolveCatalogImageSrc(selection))}" alt="${escapeHtml(selection.name)}">
               <div>
                 <strong>${escapeHtml(selection.name)}</strong>
-                <p>${escapeHtml(
-                  `${selection.quantity} item${selection.quantity === 1 ? "" : "s"} for ${selection.durationDays} day${
-                    selection.durationDays === 1 ? "" : "s"
-                  }`
-                )}</p>
-                <p>${escapeHtml(selection.category || "Rent")}</p>
+                <p>${escapeHtml(describeEquipmentSelection(selection))}</p>
+                <p>${escapeHtml(getServiceCategoryLabel(selection.category, "equipment") || "Rent")}</p>
               </div>
             </div>
             <div class="service-selected-item-side">
@@ -1156,6 +1302,7 @@
         `
       )
       .join("");
+    refreshEquipmentFormMode();
   }
 
   function buildLaundrySelectionFromInputs() {
@@ -1987,6 +2134,10 @@
     }
 
     const selections = [...state.equipmentSelections];
+    const buySelections = selections.filter((selection) => selection.mode === "buy");
+    const rentSelections = selections.filter((selection) => selection.mode !== "buy");
+    const hasBuySelections = buySelections.length > 0;
+    const hasRentSelections = rentSelections.length > 0;
     const preferredDate = normalizeText(elements.equipmentStartDateInput?.value);
     const preferredTime = normalizeText(elements.equipmentPreferredTimeInput?.value);
     const deliveryMode = normalizeText(elements.equipmentDeliveryModeInput?.value) || "Call To Confirm";
@@ -1997,16 +2148,28 @@
     const customerEmail = normalizeText(elements.equipmentCustomerEmail?.value);
     const paymentMethod = normalizeText(elements.equipmentPaymentMethodInput?.value) || "Call To Confirm";
 
+    const orderTitle = hasBuySelections && hasRentSelections
+      ? "Equipment order and rental request"
+      : hasBuySelections
+        ? "Equipment purchase order"
+        : "Equipment rental booking request";
     const orderNotes = [
-      "Equipment rental booking request",
-      `Equipment items: ${selections
-        .map(
-          (selection) =>
-            `${selection.name} x${selection.quantity} for ${selection.durationDays} day${
-              selection.durationDays === 1 ? "" : "s"
-            }`
-        )
-        .join("; ")}`,
+      orderTitle,
+      rentSelections.length
+        ? `Rental items: ${rentSelections
+            .map(
+              (selection) =>
+                `${selection.name} x${selection.quantity} for ${selection.durationDays} day${
+                  selection.durationDays === 1 ? "" : "s"
+                }`
+            )
+            .join("; ")}`
+        : "",
+      buySelections.length
+        ? `Buy items: ${buySelections
+            .map((selection) => `${selection.name} x${selection.quantity}`)
+            .join("; ")}`
+        : "",
       preferredDate ? `Preferred start date: ${preferredDate}` : "",
       preferredTime ? `Preferred time: ${preferredTime}` : "",
       deliveryMode ? `Delivery mode: ${deliveryMode}` : "",
@@ -2017,7 +2180,11 @@
       .filter(Boolean)
       .join("\n");
 
-    renderServiceMessage(elements.equipmentMessage, "success", "Sending equipment booking...");
+    renderServiceMessage(
+      elements.equipmentMessage,
+      "success",
+      hasBuySelections && !hasRentSelections ? "Sending equipment order..." : "Sending equipment request..."
+    );
 
     try {
       const result = await submitPublicOrder({
@@ -2034,10 +2201,14 @@
           id: selection.id,
           quantity: selection.quantity,
           unitPrice: selection.unitPrice,
-          pricingMultiplier: selection.durationDays,
-          requestedDays: selection.durationDays,
-          notes: `${selection.name} x${selection.quantity} for ${selection.durationDays} day${
-            selection.durationDays === 1 ? "" : "s"
+          pricingMultiplier: selection.mode === "buy" ? 1 : selection.durationDays,
+          requestedDays: selection.mode === "buy" ? 0 : selection.durationDays,
+          notes: `${
+            selection.mode === "buy"
+              ? `${selection.name} x${selection.quantity} to buy`
+              : `${selection.name} x${selection.quantity} for ${selection.durationDays} day${
+                  selection.durationDays === 1 ? "" : "s"
+                }`
           }\n${orderNotes}`
         }))
       });
@@ -2045,7 +2216,13 @@
       renderServiceMessage(
         elements.equipmentMessage,
         "success",
-        `Equipment booking received. Your order number is <strong>${escapeHtml(
+        `${
+          hasBuySelections && hasRentSelections
+            ? "Equipment order and rental request received."
+            : hasBuySelections
+              ? "Equipment order received."
+              : "Equipment booking received."
+        } Your order number is <strong>${escapeHtml(
           result.orderNumber
         )}</strong>. ${escapeHtml(buildOrderAmountLine(result))}. Track it later with the same phone number.`
       );

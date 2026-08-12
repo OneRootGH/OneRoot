@@ -21,6 +21,7 @@ INVENTORY_CATEGORY_LIBRARY = {
         "Water Supply",
         "Water Delivery",
         "Rent",
+        "Buy",
         "Equipment & Construction Consumables",
     ],
     "cold-store-groceries": [

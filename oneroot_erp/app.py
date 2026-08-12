@@ -118,6 +118,13 @@ EQUIPMENT_SERVICE_CATEGORY_LABELS = {
     "concrete & masonry",
     "construction support",
 }
+EQUIPMENT_BUY_CATEGORY_LABELS = {
+    "buy",
+    "equipment & construction consumables",
+    "construction consumables",
+    "equipment sales",
+    "sales",
+}
 EQUIPMENT_RENT_LEGACY_CATEGORY_LABELS = {
     "rent",
     "equipment rental",
@@ -872,7 +879,7 @@ def matches_equipment_service_item(
         return False
     if "water supply" in text_blob or clean_category == "water supply":
         return False
-    if clean_category == "equipment & construction consumables":
+    if clean_category in EQUIPMENT_BUY_CATEGORY_LABELS:
         return False
     if clean_item_id == "water-delivery-request":
         return False

@@ -5,10 +5,10 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta
       name="description"
-      content="Book OneRoot equipment rentals with item, quantity, start date, rental duration, and site details."
+      content="Rent equipment or buy site support items from OneRoot Essentials with simple customer ordering."
     />
     <meta name="theme-color" content="#143a2b" />
-    <title>Equipment Rentals | OneRoot Essentials</title>
+    <title>Equipment | OneRoot Essentials</title>
     <link rel="manifest" href="/manifest.webmanifest" />
     <link rel="icon" href="/icon.svg" type="image/svg+xml" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -26,7 +26,7 @@
           <img src="/assets/oneroot-icon-transparent.png" alt="OneRoot Essentials mark" />
           <span>
             <strong>OneRoot Essentials</strong>
-            <small>Equipment Rentals</small>
+            <small>Equipment</small>
           </span>
         </a>
 
@@ -51,13 +51,13 @@
       <main class="page-main">
         <section class="page-hero">
           <div>
-            <p class="eyebrow">Equipment Rentals</p>
-            <h1>Reliable equipment support for site work and short-term jobs.</h1>
+            <p class="eyebrow">Equipment</p>
+            <h1>Rent equipment or buy site support items without the back and forth.</h1>
             <p class="section-note">
               Reserve wheelbarrows, concrete vibrators, cutting machines, head
-              pans, shovels, impact drills, and related support equipment.
-              Share quantity, rental days, and location, and add several items
-              to one request so the team can prepare the right equipment for you.
+              pans, shovels, impact drills, and related support equipment, or
+              buy items like nails and other site consumables. Add everything
+              needed for one customer before sending.
             </p>
             <div class="hero-actions page-hero-actions">
               <a class="button button-primary" href="#book">Choose Equipment</a>
@@ -71,10 +71,10 @@
           <section class="tracking-card service-form-card">
             <div class="section-heading">
               <div>
-                <p class="eyebrow">Equipment Booking</p>
-                <h2>Send rental request</h2>
+                <p class="eyebrow">Equipment Desk</p>
+                <h2>Send rent or buy request</h2>
               </div>
-              <p class="section-note">Choose the equipment you need, set quantity and rental days, and include all required items in one request.</p>
+              <p id="equipmentFormNote" class="section-note">Choose the equipment you need, set quantity and rental days, and include all required items in one request.</p>
             </div>
 
             <form id="equipmentBookingForm" class="checkout-form" novalidate>
@@ -92,7 +92,7 @@
                 <div class="service-quick-picks">
                   <div class="service-quick-picks-head">
                     <span class="count-pill">Tap To Select</span>
-                    <p>Choose an item first, then set the quantity and rental days.</p>
+                    <p id="equipmentQuickPickHint">Choose an item first, then set the quantity and rental days.</p>
                   </div>
                   <div id="equipmentCategoryFilterRow" class="service-filter-chip-row"></div>
                   <div id="equipmentQuickPickGrid" class="service-quick-pick-grid"></div>
@@ -170,7 +170,7 @@
                 </label>
               </div>
 
-              <button class="button button-primary button-wide" type="submit">
+              <button id="equipmentSubmitBtn" class="button button-primary button-wide" type="submit">
                 Send Equipment Request
               </button>
             </form>
@@ -183,9 +183,9 @@
               <p class="eyebrow">Booking Notes</p>
               <h3>Tell us what you need and when you need it.</h3>
               <ul class="order-guide-list">
-                <li>Select the exact item, quantity, and number of rental days.</li>
+                <li>Choose the exact item and quantity. Rental items also need the number of days.</li>
                 <li>Add the site location and whether delivery or pickup is preferred.</li>
-                <li>OneRoot confirms price, availability, and next steps after submission.</li>
+                <li>OneRoot confirms availability, totals, and next steps after submission.</li>
               </ul>
             </article>
             <article class="order-guide-card order-guide-card-muted">
