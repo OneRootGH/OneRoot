@@ -108,6 +108,25 @@ PRODUCT_IMAGE_AREA_COLORS = {
     "shared-operations": "#50606f",
 }
 ICONIFY_API_BASE = "https://api.iconify.design"
+EQUIPMENT_SERVICE_CATEGORY_LABELS = {
+    "equipment rental",
+    "hand tools",
+    "powered tools",
+    "concrete & masonry",
+    "construction support",
+}
+EQUIPMENT_SERVICE_KEYWORDS = (
+    "equipment rental",
+    "wheelbarrow",
+    "drill",
+    "shovel",
+    "head pan",
+    "headpan",
+    "vibrator",
+    "cutting machine",
+    "cutter",
+    "impact drill",
+)
 PUBLIC_JOB_VACANCY_STATUSES = {
     status for status, _label in JOB_VACANCY_STATUSES if status not in {"Draft", "Filled", "Closed"}
 }
@@ -734,6 +753,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 bootstrap_database(bootstrap_session, app_config)
                 migrate_planning_workspace(bootstrap_session)
                 sync_kitchen_menu_catalog(bootstrap_session)
+                sync_equipment_service_catalog(bootstrap_session, app_config)
                 reclassify_legacy_inventory_products(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
@@ -769,6 +789,102 @@ def inventory_category_map(products: list[Product] | None = None) -> dict[str, l
         for area_id, values in category_map.items()
         if values
     }
+
+
+def load_service_offers_catalog(root_dir: str) -> list[dict[str, Any]]:
+    service_path = Path(root_dir) / "website" / "service_offers.json"
+    if not service_path.exists():
+        return []
+    try:
+        payload = json.loads(service_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return []
+    return payload if isinstance(payload, list) else []
+
+
+def equipment_service_fingerprint(
+    *,
+    item_id: Any = "",
+    name: Any = "",
+    category: Any = "",
+    source_category: Any = "",
+) -> str:
+    text_blob = " ".join(
+        normalize_text(value).lower()
+        for value in (item_id, name, category, source_category)
+        if normalize_text(value)
+    )
+    if not text_blob:
+        return ""
+    if "water delivery" in text_blob:
+        return "water-delivery-request"
+    if "wheelbarrow" in text_blob:
+        return "wheelbarrow"
+    if "vibrator" in text_blob:
+        return "concrete-vibrator"
+    if "cutting machine" in text_blob or "cutter" in text_blob:
+        return "cutting-machine"
+    if "head pan" in text_blob or "headpan" in text_blob:
+        return "head-pan"
+    if "shovel" in text_blob:
+        return "shovel"
+    if "impact drill" in text_blob or "drill" in text_blob:
+        return "impact-drill"
+    return normalize_text(item_id) or normalize_text(name).lower()
+
+
+def matches_equipment_service_item(
+    *,
+    area_id: Any = "",
+    item_id: Any = "",
+    name: Any = "",
+    category: Any = "",
+    item_type: Any = "",
+    source_category: Any = "",
+) -> bool:
+    clean_area_id = normalize_text(area_id)
+    if clean_area_id != "water-equipment":
+        return False
+    clean_item_id = normalize_text(item_id).lower()
+    clean_category = normalize_text(category).lower()
+    text_blob = " ".join(
+        normalize_text(value).lower()
+        for value in (item_id, name, category)
+        if normalize_text(value)
+    )
+    if not text_blob:
+        return False
+    if (
+        "water delivery" in text_blob
+        or "water supply" in text_blob
+        or clean_item_id == "water-delivery-request"
+    ):
+        return False
+    return (
+        clean_item_id.startswith("equipment-rental")
+        or clean_category in EQUIPMENT_SERVICE_CATEGORY_LABELS
+        or any(keyword in text_blob for keyword in EQUIPMENT_SERVICE_KEYWORDS)
+    )
+
+
+def product_matches_equipment_service(product_or_item: Product | dict[str, Any]) -> bool:
+    if isinstance(product_or_item, Product):
+        return matches_equipment_service_item(
+            area_id=product_or_item.business_area_id,
+            item_id=product_or_item.id,
+            name=product_or_item.name,
+            category=product_or_item.category,
+            item_type=product_or_item.item_type,
+            source_category=product_or_item.source_category,
+        )
+    return matches_equipment_service_item(
+        area_id=product_or_item.get("businessAreaId") or product_or_item.get("business_area_id"),
+        item_id=product_or_item.get("id") or product_or_item.get("productId"),
+        name=product_or_item.get("name"),
+        category=product_or_item.get("category"),
+        item_type=product_or_item.get("itemType") or product_or_item.get("item_type"),
+        source_category=product_or_item.get("sourceCategory") or product_or_item.get("source_category"),
+    )
 
 
 LEGACY_SHARED_OPERATION_STOCK_NAMES = {
@@ -828,6 +944,84 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
             normalize_product_record(product)
             changed = True
     return changed
+
+
+def sync_equipment_service_catalog(db_session, app_config: AppConfig) -> None:
+    db_session.flush()
+    service_offers = [
+        item
+        for item in load_service_offers_catalog(app_config.root_dir)
+        if normalize_text(item.get("businessAreaId")) == "water-equipment"
+        and normalize_text(item.get("itemType") or "service") == "service"
+    ]
+    if not service_offers:
+        return
+
+    existing_products = db_session.scalars(
+        select(Product).where(Product.business_area_id == "water-equipment")
+    ).all()
+    products_by_id = {product.id: product for product in existing_products}
+    existing_fingerprints = {
+        equipment_service_fingerprint(
+            item_id=product.id,
+            name=product.name,
+            category=product.category,
+            source_category=product.source_category,
+        ): product
+        for product in existing_products
+        if normalize_text(product.item_type) == "service" or not product_tracks_inventory(product)
+    }
+
+    for seed in service_offers:
+        seed_id = normalize_text(seed.get("id"))
+        if not seed_id:
+            continue
+        fingerprint = equipment_service_fingerprint(
+            item_id=seed.get("id"),
+            name=seed.get("name"),
+            category=seed.get("category"),
+            source_category=seed.get("sourceCategory"),
+        )
+        product = (
+            products_by_id.get(seed_id)
+            or db_session.get(Product, seed_id)
+            or db_session.scalar(select(Product).where(Product.source_catalog_id == seed_id))
+        )
+        is_new = product is None
+
+        if not product and fingerprint and fingerprint in existing_fingerprints:
+            continue
+
+        if not product:
+            product = Product(id=seed_id, created_at=datetime.utcnow())
+            db_session.add(product)
+            products_by_id[seed_id] = product
+        else:
+            products_by_id[seed_id] = product
+
+        if product.user_created and not is_new:
+            normalize_product_record(product)
+            continue
+
+        product.source_catalog_id = seed_id
+        product.name = normalize_text(seed.get("name"))
+        product.business_area_id = "water-equipment"
+        product.category = normalize_text(seed.get("category")) or "Equipment Rental"
+        product.source_category = normalize_text(seed.get("sourceCategory")) or "Website Service"
+        product.item_type = "service"
+        product.track_inventory = False
+        product.quantity_on_hand = 0
+        product.quantity_known = False
+        product.min_stock_level = 0
+        product.sales_price = round(parse_amount(seed.get("salesPrice")), 2)
+        product.cost_price = round(parse_amount(seed.get("costPrice")), 2)
+        product.notes = normalize_text(seed.get("notes"))
+        product.active = True if is_new else bool(product.active)
+        product.user_created = False
+        product.updated_at = datetime.utcnow()
+        normalize_product_record(product)
+        if fingerprint:
+            existing_fingerprints[fingerprint] = product
 
 
 def find_inventory_product(db_session, lookup_value: Any) -> Product | None:
@@ -2362,11 +2556,47 @@ def service_reference_products(db_session, module_key: str) -> list[Product]:
     service_area = SERVICE_MODULE_AREA_IDS.get(module_key, "")
     if not service_area:
         return []
-    return db_session.scalars(
+    products = db_session.scalars(
         select(Product)
         .where(Product.business_area_id == service_area, Product.active.is_(True))
-        .order_by(Product.name.asc())
+        .order_by(Product.category.asc(), Product.name.asc())
     ).all()
+    if module_key != "equipment_rental_bookings":
+        return products
+
+    deduped_products: dict[str, Product] = {}
+    for product in products:
+        if not product_matches_equipment_service(product):
+            continue
+        fingerprint = equipment_service_fingerprint(
+            item_id=product.id,
+            name=product.name,
+            category=product.category,
+            source_category=product.source_category,
+        )
+        if not fingerprint:
+            fingerprint = product.id
+        existing = deduped_products.get(fingerprint)
+        if not existing:
+            deduped_products[fingerprint] = product
+            continue
+        existing_priority = (
+            int(bool(existing.user_created)),
+            int(bool(existing.track_inventory)),
+            int(parse_amount(existing.sales_price) > 0),
+        )
+        product_priority = (
+            int(bool(product.user_created)),
+            int(bool(product.track_inventory)),
+            int(parse_amount(product.sales_price) > 0),
+        )
+        if product_priority > existing_priority:
+            deduped_products[fingerprint] = product
+
+    return sorted(
+        deduped_products.values(),
+        key=lambda item: (normalize_text(item.category), normalize_text(item.name)),
+    )
 
 
 def match_service_reference_product(products: list[Product], item_name: str) -> Product | None:
@@ -7310,16 +7540,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ),
         }
 
-    def load_service_offers() -> list[dict[str, Any]]:
-        service_path = Path(app_config.root_dir) / "website" / "service_offers.json"
-        if not service_path.exists():
-            return []
-        try:
-            payload = json.loads(service_path.read_text(encoding="utf-8"))
-        except json.JSONDecodeError:
-            return []
-        return payload if isinstance(payload, list) else []
-
     def build_public_config() -> dict[str, Any]:
         return {
             "domain": app_config.public_domain,
@@ -7340,6 +7560,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     def build_public_catalog() -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
+        seen_catalog_ids: set[str] = set()
+        seen_source_catalog_ids: set[str] = set()
         products = g.db.scalars(
             select(Product)
             .where(Product.active.is_(True))
@@ -7352,11 +7574,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             items.append(
                 {
                     "id": product.id,
+                    "sourceCatalogId": product.source_catalog_id,
                     "sku": product.sku,
                     "name": product.name,
                     "businessAreaId": product.business_area_id,
                     "businessAreaLabel": BUSINESS_AREA_SHORT.get(product.business_area_id, product.business_area_id),
                     "category": product.category,
+                    "sourceCategory": product.source_category,
                     "salesPrice": product.sales_price,
                     "costPrice": product.cost_price,
                     "quantityOnHand": product.quantity_on_hand,
@@ -7368,20 +7592,28 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "source": "inventory",
                 }
             )
-        for item in load_service_offers():
+            seen_catalog_ids.add(normalize_text(product.id))
+            if normalize_text(product.source_catalog_id):
+                seen_source_catalog_ids.add(normalize_text(product.source_catalog_id))
+        for item in load_service_offers_catalog(app_config.root_dir):
             business_area_id = normalize_text(item.get("businessAreaId"))
             if not is_orderable_area(business_area_id):
                 continue
             if kitchen_catalog_exists and business_area_id == "kitchen":
                 continue
+            item_id = normalize_text(item.get("id"))
+            if item_id and (item_id in seen_catalog_ids or item_id in seen_source_catalog_ids):
+                continue
             items.append(
                 {
-                    "id": normalize_text(item.get("id")) or uuid4().hex,
+                    "id": item_id or uuid4().hex,
+                    "sourceCatalogId": item_id,
                     "sku": normalize_text(item.get("sku")),
                     "name": normalize_text(item.get("name")),
                     "businessAreaId": business_area_id,
                     "businessAreaLabel": BUSINESS_AREA_SHORT.get(business_area_id, business_area_id),
                     "category": normalize_text(item.get("category")) or "Services",
+                    "sourceCategory": normalize_text(item.get("sourceCategory")),
                     "salesPrice": parse_amount(item.get("salesPrice")),
                     "costPrice": parse_amount(item.get("costPrice")),
                     "quantityOnHand": parse_amount(item.get("quantityOnHand")),
@@ -7471,32 +7703,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return ""
 
     def online_order_item_matches_equipment_service(item: dict[str, Any]) -> bool:
-        if normalize_text(item.get("businessAreaId")) != "water-equipment":
-            return False
-        category = normalize_text(item.get("category")).lower()
-        item_id = normalize_text(item.get("productId") or item.get("id")).lower()
-        name = normalize_text(item.get("name")).lower()
-        item_type = normalize_text(item.get("itemType")).lower()
-        equipment_keywords = (
-            "equipment rental",
-            "wheelbarrow",
-            "drill",
-            "shovel",
-            "head pan",
-            "headpan",
-            "vibrator",
-            "cutting machine",
-            "cutter",
-            "impact drill",
-        )
-        return (
-            item_id.startswith("equipment-rental")
-            or "equipment rental" in category
-            or (
-                item_type == "service"
-                and any(keyword in f"{name} {category}" for keyword in equipment_keywords)
-            )
-        )
+        return product_matches_equipment_service(item)
 
     def online_order_items_for_service_module(payload: dict[str, Any], module_key: str) -> list[dict[str, Any]]:
         items = payload.get("items") if isinstance(payload.get("items"), list) else []

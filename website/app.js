@@ -643,9 +643,7 @@
     const textBlob = [
       normalizeText(item.id),
       normalizeText(item.name),
-      normalizeText(item.category),
-      normalizeText(item.sourceCategory),
-      normalizeText(item.itemType)
+      normalizeText(item.category)
     ]
       .join(" ")
       .toLowerCase();

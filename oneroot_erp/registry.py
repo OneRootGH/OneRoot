@@ -427,6 +427,7 @@ LAUNDRY_ITEM_CATEGORY_OPTIONS = [
 LAUNDRY_STATUSES = ["Received", "In Progress", "Ready", "Delivered", "Cancelled"]
 LAUNDRY_DELIVERY_MODES = ["Walk-in", "Pickup", "Delivery", "Pickup / Delivery"]
 EQUIPMENT_RENTAL_CATEGORY_OPTIONS = [
+    ("Equipment Rental", "Equipment Rental"),
     ("Water Delivery", "Water Delivery"),
     ("Hand Tools", "Hand Tools"),
     ("Powered Tools", "Powered Tools"),
