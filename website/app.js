@@ -640,6 +640,8 @@
       return false;
     }
 
+    const category = normalizeText(item.category).toLowerCase();
+    const itemType = normalizeText(item.itemType).toLowerCase();
     const textBlob = [
       normalizeText(item.id),
       normalizeText(item.name),
@@ -648,16 +650,21 @@
       .join(" ")
       .toLowerCase();
 
-    if (
-      textBlob.includes("water delivery") ||
-      textBlob.includes("water supply") ||
-      normalizeText(item.id) === "water-delivery-request"
-    ) {
+    if (textBlob.includes("water supply") || category === "water supply") {
       return false;
+    }
+
+    if (category === "equipment & construction consumables") {
+      return false;
+    }
+
+    if (normalizeText(item.id) === "water-delivery-request") {
+      return true;
     }
 
     return [
       "equipment rental",
+      "water delivery",
       "construction support",
       "hand tools",
       "powered tools",
@@ -671,7 +678,7 @@
       "cutting machine",
       "cutter",
       "impact drill"
-    ].some((keyword) => textBlob.includes(keyword));
+    ].some((keyword) => textBlob.includes(keyword)) || (itemType === "service" && category === "water delivery");
   }
 
   function compareCatalogItems(left, right) {

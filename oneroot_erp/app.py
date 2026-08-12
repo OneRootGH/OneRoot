@@ -32,6 +32,7 @@ from .registry import (
     BUSINESS_AREA_OPTIONS,
     BUSINESS_AREA_SHORT,
     BUSINESS_AREAS,
+    EQUIPMENT_RENTAL_CATEGORY_OPTIONS,
     INVENTORY_CATEGORY_LIBRARY,
     JOB_VACANCY_STATUSES,
     MENU_GROUPS,
@@ -110,6 +111,7 @@ PRODUCT_IMAGE_AREA_COLORS = {
 ICONIFY_API_BASE = "https://api.iconify.design"
 EQUIPMENT_SERVICE_CATEGORY_LABELS = {
     "equipment rental",
+    "water delivery",
     "hand tools",
     "powered tools",
     "concrete & masonry",
@@ -847,6 +849,7 @@ def matches_equipment_service_item(
         return False
     clean_item_id = normalize_text(item_id).lower()
     clean_category = normalize_text(category).lower()
+    clean_item_type = normalize_text(item_type).lower()
     text_blob = " ".join(
         normalize_text(value).lower()
         for value in (item_id, name, category)
@@ -854,14 +857,15 @@ def matches_equipment_service_item(
     )
     if not text_blob:
         return False
-    if (
-        "water delivery" in text_blob
-        or "water supply" in text_blob
-        or clean_item_id == "water-delivery-request"
-    ):
+    if "water supply" in text_blob or clean_category == "water supply":
         return False
+    if clean_category == "equipment & construction consumables":
+        return False
+    if clean_item_id == "water-delivery-request":
+        return True
     return (
         clean_item_id.startswith("equipment-rental")
+        or (clean_item_type == "service" and clean_category == "water delivery")
         or clean_category in EQUIPMENT_SERVICE_CATEGORY_LABELS
         or any(keyword in text_blob for keyword in EQUIPMENT_SERVICE_KEYWORDS)
     )
