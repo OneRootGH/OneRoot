@@ -354,6 +354,328 @@ KITCHEN_MENU_PRODUCTS = [
 ]
 
 
+def default_job_vacancy_apply_text(app_config: AppConfig) -> str:
+    return (
+        "Apply through the OneRoot vacancies page or send your CV and a short application message "
+        f"by WhatsApp to {app_config.whatsapp_number} or {app_config.support_phone}. "
+        f"You can also email {app_config.support_email}."
+    )
+
+
+def build_default_job_vacancies(app_config: AppConfig) -> list[dict[str, Any]]:
+    common_vacancy = {
+        "vacancyStatus": "Open",
+        "employmentType": "Full-Time",
+        "openings": 1,
+        "salaryRange": "",
+        "contactPerson": "OneRoot Essentials Recruitment",
+        "applicationPhone": app_config.whatsapp_number,
+        "applicationEmail": app_config.support_email,
+        "applicationLink": "",
+        "howToApply": default_job_vacancy_apply_text(app_config),
+    }
+    return [
+        {
+            **common_vacancy,
+            "reference": "vacancy-business-manager-operations-lead",
+            "displayOrder": 1,
+            "businessAreaId": "shared-operations",
+            "jobTitle": "Business Manager & Operations Lead",
+            "staffRole": "Business Manager & Operations Lead",
+            "location": "On-site at OneRoot Essentials",
+            "workingHours": "Full-time with oversight across business hours, including peak and weekend support when needed.",
+            "summary": "Lead OneRoot Essentials and supervise day-to-day operations across sales, services, staff, stock, customer experience, and business growth.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Supervise all business areas and daily operations.",
+                    "Review sales, service performance, cash control, and stock movement.",
+                    "Lead staff, assign priorities, and resolve escalated customer or team issues.",
+                    "Enforce operating controls, reporting discipline, and service standards.",
+                    "Drive growth, efficiency, and profitability across the business.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "Strong leadership and business supervision experience.",
+                    "Good financial awareness and decision-making ability.",
+                    "Confidence managing staff and fast-moving operations.",
+                    "Ability to use business systems, reports, and daily controls well.",
+                ]
+            ),
+        },
+        {
+            **common_vacancy,
+            "reference": "vacancy-finance-hr-payroll-officer",
+            "displayOrder": 2,
+            "businessAreaId": "shared-operations",
+            "jobTitle": "Finance, HR & Payroll Officer",
+            "staffRole": "Finance, HR & Payroll Officer",
+            "location": "On-site at OneRoot Essentials",
+            "workingHours": "Full-time, mostly office-based with regular reporting and payroll support deadlines.",
+            "summary": "Manage expense records, payroll support, attendance-linked administration, reconciliations, and core staff documentation.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Maintain expense records, petty cash, cashbook, and bankbook entries.",
+                    "Support payroll preparation using attendance and salary records.",
+                    "Manage staff files, onboarding support, leave tracking, and vacancy administration.",
+                    "Review financial entries from business areas and prepare summaries for management.",
+                    "Help enforce documentation standards, internal controls, and timely reporting.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "Background in accounting, finance, administration, or HR support.",
+                    "Strong attention to detail and recordkeeping discipline.",
+                    "High level of confidentiality, honesty, and accountability.",
+                    "Confidence using spreadsheets or business systems accurately.",
+                ]
+            ),
+        },
+        {
+            **common_vacancy,
+            "reference": "vacancy-front-desk-service-desk-officer",
+            "displayOrder": 3,
+            "businessAreaId": "shared-operations",
+            "jobTitle": "Front Desk / Service Desk Officer",
+            "staffRole": "Front Desk / Service Desk Officer",
+            "location": "On-site at OneRoot Essentials",
+            "workingHours": "Full-time or shift-based, including busy counter periods and weekends where scheduled.",
+            "summary": "Serve as the main customer-facing desk officer for counter sales, laundry intake, equipment rental requests, receipts, and payment capture.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Handle walk-in POS checkout and issue receipts accurately.",
+                    "Receive laundry jobs and equipment rental bookings from customers.",
+                    "Calculate charges, capture payments, and update service status correctly.",
+                    "Support pickup, return, and customer follow-up from the front desk.",
+                    "Keep the service desk tidy, fast, and customer-friendly at all times.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "Good customer service and communication skills.",
+                    "Honesty, confidence handling cash and digital payments, and good numeracy.",
+                    "Ability to work quickly and accurately in a busy service environment.",
+                    "Comfort using POS or service-entry systems is an advantage.",
+                ]
+            ),
+        },
+        {
+            **common_vacancy,
+            "reference": "vacancy-stock-dispatch-officer",
+            "displayOrder": 4,
+            "businessAreaId": "shared-operations",
+            "jobTitle": "Stock & Dispatch Officer",
+            "staffRole": "Stock & Dispatch Officer",
+            "location": "On-site at OneRoot Essentials",
+            "workingHours": "Full-time with support during stock counts, order peaks, and dispatch windows.",
+            "summary": "Keep stock accurate and coordinate order preparation and handover for delivery and pickup.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Update stock quantities and keep product records accurate.",
+                    "Receive items, track stock movement, and monitor expiry or damaged stock.",
+                    "Prepare customer orders for dispatch and coordinate handover timing.",
+                    "Support barcode-based stock updates and inventory control.",
+                    "Flag low stock, stock errors, and fulfillment issues early.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "Inventory or store support experience is an advantage.",
+                    "Strong attention to detail and counting accuracy.",
+                    "Ability to organize stock well and work with delivery preparation.",
+                    "Willingness to support physical stock handling where needed.",
+                ]
+            ),
+        },
+        {
+            **common_vacancy,
+            "reference": "vacancy-crm-marketing-support-officer",
+            "displayOrder": 5,
+            "businessAreaId": "shared-operations",
+            "jobTitle": "CRM, Marketing & Support Officer",
+            "staffRole": "CRM, Marketing & Support Officer",
+            "location": "On-site at OneRoot Essentials",
+            "workingHours": "Full-time with campaign follow-up and customer support across business hours.",
+            "summary": "Grow repeat sales through customer follow-up, WhatsApp promotions, campaign support, and shared operational assistance.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Maintain customer records and follow up on leads or inactive customers.",
+                    "Support promotions, WhatsApp campaigns, and customer reactivation efforts.",
+                    "Track campaign response and help improve repeat business.",
+                    "Assist with customer complaint follow-up and service communication.",
+                    "Provide general support for shared operational tasks when needed.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "Strong communication and follow-up discipline.",
+                    "Basic marketing, sales support, or customer engagement experience.",
+                    "Creativity, consistency, and willingness to support different teams.",
+                    "Comfort using WhatsApp, spreadsheets, or business systems for outreach.",
+                ]
+            ),
+        },
+        {
+            **common_vacancy,
+            "reference": "vacancy-mobile-money-agent",
+            "displayOrder": 6,
+            "businessAreaId": "mobile-money",
+            "jobTitle": "Mobile Money Agent",
+            "staffRole": "Mobile Money Agent",
+            "location": "On-site at OneRoot Essentials",
+            "workingHours": "Full-time or shift-based during mobile money service hours.",
+            "summary": "Run MTN Mobile Money services and manage e-cash, physical cash, float movement, and daily reconciliation carefully.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Handle cash-in, cash-out, transfers, top-ups, and other mobile money services.",
+                    "Record each transaction correctly and track fees or commissions earned.",
+                    "Manage opening and closing cash, e-cash, and float movement accurately.",
+                    "Complete daily reconciliation and report any variance immediately.",
+                    "Serve customers quickly while keeping strong fraud and cash controls.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "High level of trustworthiness and cash-handling discipline.",
+                    "Good numeracy, speed, and accuracy under pressure.",
+                    "Prior mobile money experience is an advantage.",
+                    "Ability to keep transaction records clean and fully accountable.",
+                ]
+            ),
+        },
+        {
+            **common_vacancy,
+            "reference": "vacancy-kitchen-staff",
+            "displayOrder": 7,
+            "businessAreaId": "kitchen",
+            "jobTitle": "Kitchen Staff",
+            "staffRole": "Kitchen Staff",
+            "location": "On-site at OneRoot Essentials",
+            "workingHours": "Shift-based, especially around meal rush periods and customer peak hours.",
+            "summary": "Prepare, portion, and package food for OneRoot Kitchen while maintaining hygiene and fast order fulfillment.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Prepare meals to standard and support quick food order fulfillment.",
+                    "Portion and package food correctly for walk-in and online customers.",
+                    "Maintain cleanliness, hygiene, and ingredient handling standards.",
+                    "Support kitchen workflow during peak periods and reduce waste.",
+                    "Keep the kitchen ready for smooth service throughout the day.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "Food preparation experience is preferred.",
+                    "Cleanliness, speed, and strong teamwork.",
+                    "Ability to work well during busy meal periods.",
+                    "Willingness to follow kitchen standards and portion control.",
+                ]
+            ),
+        },
+        {
+            **common_vacancy,
+            "reference": "vacancy-delivery-rider",
+            "displayOrder": 8,
+            "businessAreaId": "shared-operations",
+            "jobTitle": "Delivery Rider",
+            "staffRole": "Delivery Rider",
+            "location": "Field-based from OneRoot Essentials",
+            "workingHours": "Shift-based and demand-based, including peak delivery periods.",
+            "summary": "Deliver customer orders safely, quickly, and professionally while representing OneRoot Essentials well in the field.",
+            "keyResponsibilities": "\n".join(
+                [
+                    "Pick up assigned deliveries and confirm order details before leaving.",
+                    "Deliver to customers safely and on time.",
+                    "Collect or confirm payment where required and record proof of handover.",
+                    "Communicate delivery delays or customer issues promptly.",
+                    "Represent the OneRoot brand well during every delivery trip.",
+                ]
+            ),
+            "requirements": "\n".join(
+                [
+                    "Reliable riding ability and good route knowledge.",
+                    "Punctuality, responsibility, and strong customer manners.",
+                    "Ability to handle orders with care and follow delivery instructions.",
+                    "Comfort working during busy or changing delivery schedules.",
+                ]
+            ),
+        },
+    ]
+
+
+def ensure_default_job_vacancies(db_session, app_config: AppConfig) -> None:
+    definition = MODULES.get("job_vacancies")
+    if not definition:
+        return
+
+    existing_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "job_vacancies")
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+    ).all()
+    records_by_reference = {
+        normalize_text(record.reference): record
+        for record in existing_records
+        if normalize_text(record.reference)
+    }
+    today_iso = date.today().isoformat()
+    excluded_titles = {
+        "apartment manager",
+        "apartment & tenant relations officer",
+    }
+
+    for existing_record in existing_records:
+        payload = dict(existing_record.payload or {})
+        title_key = normalize_text(payload.get("jobTitle") or existing_record.title).lower()
+        role_key = normalize_text(payload.get("staffRole")).lower()
+        if title_key not in excluded_titles and role_key not in excluded_titles:
+            continue
+        if normalize_text(payload.get("vacancyStatus")) == "Closed":
+            continue
+        payload["vacancyStatus"] = "Closed"
+        apply_module_record_metadata(existing_record, definition, payload)
+
+    for seed in build_default_job_vacancies(app_config):
+        reference = normalize_text(seed.get("reference"))
+        if not reference:
+            continue
+        record = records_by_reference.get(reference)
+        payload = dict(record.payload or {}) if record else {}
+        payload_changed = False
+        created_at = record.created_at if record else datetime.utcnow()
+        payload_defaults = {
+            "id": record.id if record else uuid4().hex,
+            "createdAt": normalize_text(payload.get("createdAt")) or created_at.isoformat(),
+            "postedDate": today_iso,
+            **seed,
+        }
+        for key, value in payload_defaults.items():
+            if key == "id":
+                if not normalize_text(payload.get("id")):
+                    payload["id"] = value
+                    payload_changed = True
+                continue
+            current_value = payload.get(key)
+            if isinstance(value, (int, float)):
+                if current_value in (None, ""):
+                    payload[key] = value
+                    payload_changed = True
+                continue
+            if not normalize_text(current_value):
+                payload[key] = value
+                payload_changed = True
+        payload["updatedAt"] = normalize_text(payload.get("updatedAt")) or datetime.utcnow().isoformat()
+        if not record:
+            record = ModuleRecord(
+                id=payload["id"],
+                module_key="job_vacancies",
+                created_at=created_at,
+            )
+            db_session.add(record)
+            payload_changed = True
+        if payload_changed:
+            apply_module_record_metadata(record, definition, payload)
+
+
 def build_database_engine(database_url: str):
     engine_options: dict[str, Any] = {"future": True}
     if database_url.startswith("postgresql+psycopg://"):
@@ -415,6 +737,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 reclassify_legacy_inventory_products(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
+                ensure_default_job_vacancies(bootstrap_session, app_config)
                 bootstrap_session.commit()
             session_factory.remove()
             return
@@ -7102,8 +7425,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "employmentType": normalize_text(payload.get("employmentType")),
             "vacancyStatus": status,
             "openings": openings,
+            "displayOrder": int(parse_amount(payload.get("displayOrder"))) if normalize_text(payload.get("displayOrder")) else 999,
             "location": normalize_text(payload.get("location")) or "Accra",
             "postedDate": normalize_text(payload.get("postedDate")) or (record.record_date.isoformat() if record.record_date else ""),
+            "workingHours": normalize_text(payload.get("workingHours")),
             "closingDate": normalize_text(payload.get("closingDate")),
             "salaryRange": normalize_text(payload.get("salaryRange")),
             "contactPerson": normalize_text(payload.get("contactPerson")),
@@ -7111,6 +7436,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "applicationEmail": normalize_text(payload.get("applicationEmail")) or app_config.support_email,
             "applicationLink": normalize_text(payload.get("applicationLink")),
             "summary": normalize_text(payload.get("summary")),
+            "keyResponsibilities": normalize_text(payload.get("keyResponsibilities")),
             "requirements": normalize_text(payload.get("requirements")),
             "howToApply": normalize_text(payload.get("howToApply")),
             "notes": normalize_text(payload.get("notes")),
@@ -7123,7 +7449,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
         vacancies = [serialize_public_vacancy(record) for record in records]
-        return [vacancy for vacancy in vacancies if vacancy]
+        return sorted(
+            [vacancy for vacancy in vacancies if vacancy],
+            key=lambda vacancy: (
+                int(vacancy.get("displayOrder", 999) or 999),
+                normalize_text(vacancy.get("jobTitle")),
+            ),
+        )
 
     def build_catalog_lookup() -> dict[str, dict[str, Any]]:
         return {item["id"]: item for item in build_public_catalog()}
@@ -10722,6 +11054,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("floatImpact", mobile_money_default_float_impact(record_payload.get("serviceType")))
             record_payload.setdefault("status", "Completed")
             record_payload["profitAmount"] = round(parse_amount(record_payload.get("salesAmount")) - parse_amount(record_payload.get("costAmount")), 2)
+        elif module_key == "job_vacancies":
+            record_payload.setdefault("postedDate", date.today().isoformat())
+            record_payload.setdefault("vacancyStatus", "Open")
+            record_payload.setdefault("employmentType", "Full-Time")
+            record_payload.setdefault("contactPerson", "OneRoot Essentials Recruitment")
+            record_payload.setdefault("applicationPhone", app_config.whatsapp_number)
+            record_payload.setdefault("applicationEmail", app_config.support_email)
+            record_payload.setdefault("howToApply", default_job_vacancy_apply_text(app_config))
         if module_key == "apartments":
             record_payload.setdefault("businessAreaId", "rentals-apartments")
             field_map = {field.name: field for field in definition.fields}

@@ -561,6 +561,15 @@
                   <span class="table-secondary">{{ record.payload.get('entryType', 'Entry') }} · {{ record.payload.get('audienceRole', 'All Staff') }}</span>
                 {% elif definition.key == 'workforce_attendance' %}
                   <span class="table-secondary">{{ record.payload.get('shiftType', 'Shift') }} · OT {{ record.payload.get('overtimeHours', 0) }} hrs · Late {{ record.payload.get('lateMinutes', 0) }} min</span>
+                {% elif definition.key == 'job_vacancies' %}
+                  <span class="table-secondary">
+                    {{ record.payload.get('staffRole', 'Vacancy') }} ·
+                    {{ record.payload.get('employmentType', 'Flexible') }} ·
+                    {{ record.payload.get('location', 'Accra') }}
+                    {% if record.payload.get('closingDate') %}
+                      · Apply by {{ record.payload.get('closingDate') }}
+                    {% endif %}
+                  </span>
                 {% elif definition.key == 'customer_crm' %}
                   <span class="table-secondary">{{ record.payload.get('customerSegment', 'Customer') }} · {{ record.payload.get('leadSource', 'Walk-in') }} · Orders {{ record.payload.get('paidOrderCount', record.payload.get('orderCount', 0)) }}{% if record.payload.get('followUpDate') %} · Follow Up {{ record.payload.get('followUpDate') }}{% endif %}</span>
                 {% elif definition.key == 'promotions' %}

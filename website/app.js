@@ -523,10 +523,24 @@
                 )}
               </section>
               <section class="vacancy-detail-section">
+                <strong>Key Duties</strong>
+                ${renderVacancyList(
+                  vacancy.keyResponsibilities,
+                  "Support the team, serve customers well, and handle assigned daily responsibilities with care and accountability."
+                )}
+              </section>
+              <section class="vacancy-detail-section">
                 <strong>Requirements</strong>
                 ${renderVacancyList(
                   vacancy.requirements,
                   "Relevant experience, reliability, communication skills, and willingness to serve customers well."
+                )}
+              </section>
+              <section class="vacancy-detail-section">
+                <strong>Working Hours</strong>
+                ${renderVacancyParagraph(
+                  vacancy.workingHours,
+                  "Working hours will be shared during the hiring process based on the needs of the role."
                 )}
               </section>
               <section class="vacancy-detail-section">
@@ -1113,16 +1127,16 @@
       return directLink;
     }
 
-    const email = normalizeText(vacancy.applicationEmail || state.config?.supportEmail);
-    if (email) {
-      const subject = encodeURIComponent(`Application - ${vacancy.jobTitle || "OneRoot Vacancy"}`);
-      return `mailto:${email}?subject=${subject}`;
-    }
-
     const whatsappNumber = normalizeWhatsappNumber(vacancy.applicationPhone || state.config?.whatsappNumber);
     if (whatsappNumber) {
       const message = encodeURIComponent(`Hello OneRoot, I want to apply for ${vacancy.jobTitle || "this vacancy"}.`);
       return `https://wa.me/${whatsappNumber}?text=${message}`;
+    }
+
+    const email = normalizeText(vacancy.applicationEmail || state.config?.supportEmail);
+    if (email) {
+      const subject = encodeURIComponent(`Application - ${vacancy.jobTitle || "OneRoot Vacancy"}`);
+      return `mailto:${email}?subject=${subject}`;
     }
 
     const supportPhone = normalizeDigits(state.config?.supportPhone);
@@ -1133,11 +1147,11 @@
     if (normalizeText(vacancy.applicationLink)) {
       return "Apply Online";
     }
-    if (normalizeText(vacancy.applicationEmail || state.config?.supportEmail)) {
-      return "Apply By Email";
-    }
     if (normalizeWhatsappNumber(vacancy.applicationPhone || state.config?.whatsappNumber)) {
       return "Apply On WhatsApp";
+    }
+    if (normalizeText(vacancy.applicationEmail || state.config?.supportEmail)) {
+      return "Apply By Email";
     }
     return "Contact OneRoot";
   }
