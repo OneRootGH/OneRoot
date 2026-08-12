@@ -59,6 +59,12 @@ INVENTORY_CATEGORY_LIBRARY = {
         "Snacks & Confectionery",
     ],
     "kitchen": [
+        "Meal Combos",
+        "Main Meals",
+        "Proteins & Extras",
+        "Sides",
+        "Drinks",
+        "Packaging & Add-ons",
         "Prepared Meals",
         "Soups & Stews",
         "Ingredients & Prep",

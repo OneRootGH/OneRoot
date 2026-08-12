@@ -134,6 +134,8 @@
       "equipmentSubmitBtn",
       "equipmentMessage",
       "laundryBookingForm",
+      "laundryComboSection",
+      "laundryComboQuickPickGrid",
       "laundryServiceSelect",
       "laundryCategoryFilterRow",
       "laundryQuickPickGrid",
@@ -595,6 +597,39 @@
     });
   }
 
+  function isLaundryComboItem(item) {
+    if (normalizeText(item?.businessAreaId) !== "laundry-services") {
+      return false;
+    }
+    const textBlob = [normalizeText(item?.name), normalizeText(item?.category)]
+      .join(" ")
+      .toLowerCase();
+    return textBlob.includes("+") || textBlob.includes("combo") || textBlob.includes(" set ");
+  }
+
+  function getFeaturedLaundryComboItems() {
+    const activeCategory = normalizeText(state.serviceFilters.laundryCategory);
+    return getLaundryCatalogBaseItems()
+      .filter((item) => isLaundryComboItem(item))
+      .filter((item) => {
+        if (!activeCategory) {
+          return true;
+        }
+        return getServiceCategoryLabel(item.category, "laundry") === activeCategory;
+      })
+      .sort((left, right) => {
+        const sourceDelta =
+          Number(normalizeText(right.source) === "inventory") -
+          Number(normalizeText(left.source) === "inventory");
+        return (
+          sourceDelta ||
+          compareCatalogItems(left, right) ||
+          Number(left.salesPrice || 0) - Number(right.salesPrice || 0)
+        );
+      })
+      .slice(0, 8);
+  }
+
   function getServiceCategoryLabel(category, serviceType) {
     const cleanCategory = normalizeText(category);
     if (!cleanCategory) {
@@ -982,6 +1017,21 @@
     );
   }
 
+  function renderLaundryComboQuickPicks() {
+    if (!elements.laundryComboSection || !elements.laundryComboQuickPickGrid) {
+      return;
+    }
+
+    const comboItems = getFeaturedLaundryComboItems();
+    elements.laundryComboSection.classList.toggle("hidden", comboItems.length === 0);
+    renderServiceQuickPicks(
+      elements.laundryComboQuickPickGrid,
+      comboItems,
+      normalizeText(elements.laundryServiceSelect?.value),
+      "laundry"
+    );
+  }
+
   function populateEquipmentOptions() {
     if (!elements.equipmentItemSelect) {
       return;
@@ -1018,6 +1068,7 @@
     syncServiceSelection(elements.laundryServiceSelect, items);
     if (!items.length) {
       elements.laundryServiceSelect.innerHTML = `<option value="">No laundry options available right now</option>`;
+      renderLaundryComboQuickPicks();
       renderLaundryQuickPicks();
       renderLaundryItemPreview();
       renderLaundrySelections();
@@ -1029,6 +1080,7 @@
       "laundry",
       "Select laundry service"
     );
+    renderLaundryComboQuickPicks();
     renderLaundryQuickPicks();
     renderLaundryItemPreview();
     renderLaundrySelections();
@@ -1167,6 +1219,7 @@
   }
 
   function renderLaundryItemPreview() {
+    renderLaundryComboQuickPicks();
     renderLaundryQuickPicks();
     renderServiceItemPreview(
       elements.laundryServicePreview,

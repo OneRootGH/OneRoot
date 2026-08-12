@@ -54,9 +54,9 @@
             <p class="eyebrow">Laundry Services</p>
             <h1>Fresh laundry, ready when you need it.</h1>
             <p class="section-note">
-              Book normal or express laundry, enter the number of items, choose
-              pickup or delivery, and include everything you want cleaned in
-              one request.
+              Book normal or express laundry, use ready-made combos for common
+              loads, choose pickup or delivery, and include everything you want
+              cleaned in one request.
             </p>
             <div class="hero-actions page-hero-actions">
               <a class="button button-primary" href="#book">Choose Laundry Service</a>
@@ -73,7 +73,7 @@
                 <p class="eyebrow">Laundry Request</p>
                 <h2>Book laundry service</h2>
               </div>
-              <p class="section-note">Choose Normal or Express service and include all the clothing or household items you want cleaned in one booking.</p>
+              <p class="section-note">Choose Normal or Express service, use a combo where it helps, and include all the clothing or household items you want cleaned in one booking.</p>
             </div>
 
             <form id="laundryBookingForm" class="checkout-form" novalidate>
@@ -88,10 +88,18 @@
                   </button>
                 </div>
 
+                <div id="laundryComboSection" class="service-quick-picks hidden">
+                  <div class="service-quick-picks-head">
+                    <span class="count-pill">Popular Combos</span>
+                    <p>Start with a ready-made laundry combo. When you use a combo, Item Count means the number of combo sets needed.</p>
+                  </div>
+                  <div id="laundryComboQuickPickGrid" class="service-quick-pick-grid"></div>
+                </div>
+
                 <div class="service-quick-picks">
                   <div class="service-quick-picks-head">
                     <span class="count-pill">Tap To Select</span>
-                    <p>Choose a laundry option first, then enter the item count and add it to your request.</p>
+                    <p>Choose any laundry service below, then enter the item count and add it to your request.</p>
                   </div>
                   <div id="laundryCategoryFilterRow" class="service-filter-chip-row"></div>
                   <div id="laundryQuickPickGrid" class="service-quick-pick-grid"></div>
@@ -178,6 +186,7 @@
               <h3>Choose the service, share the items, and let us handle the rest.</h3>
               <ul class="order-guide-list">
                 <li>Choose Normal or Express service.</li>
+                <li>Use Popular Combos for common loads like bedsheets and pillowcases.</li>
                 <li>Enter the item count and a short summary of the laundry load.</li>
                 <li>OneRoot confirms turnaround time, pickup, delivery, and final follow-up if needed.</li>
               </ul>
