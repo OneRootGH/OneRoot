@@ -662,23 +662,48 @@
       return true;
     }
 
+    if (itemType === "service") {
+      return true;
+    }
+
+    if (
+      [
+        "rent",
+        "equipment rental",
+        "water delivery",
+        "construction support",
+        "hand tools",
+        "powered tools",
+        "concrete & masonry",
+        "equipment & construction consumables"
+      ].includes(category)
+    ) {
+      return true;
+    }
+
     return [
       "equipment rental",
+      "rent",
       "water delivery",
       "construction support",
       "hand tools",
       "powered tools",
       "concrete & masonry",
+      "equipment & construction consumables",
+      "hammer",
+      "pick axe",
+      "pickaxe",
       "wheelbarrow",
       "drill",
       "shovel",
+      "nails",
       "head pan",
       "headpan",
       "vibrator",
       "cutting machine",
       "cutter",
       "impact drill"
-    ].some((keyword) => textBlob.includes(keyword)) || (itemType === "service" && category === "water delivery");
+    ].some((keyword) => textBlob.includes(keyword));
   }
 
   function compareCatalogItems(left, right) {
