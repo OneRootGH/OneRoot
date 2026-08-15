@@ -59,6 +59,8 @@
     searchTimer: null,
     latestResults: [],
     activeSearchRequest: 0,
+    searchAbortController: null,
+    productSearchCache: new Map(),
     resultPage: 0,
     currentSummary: null
   };
@@ -326,9 +328,12 @@
   async function fetchProducts(query) {
     const requestId = state.activeSearchRequest + 1;
     state.activeSearchRequest = requestId;
+    state.searchAbortController?.abort();
+    state.searchAbortController = new AbortController();
     const url = new URL("/app/api/pos/products", window.location.origin);
     const area = getSelectedArea();
     const category = getSelectedCategory();
+    const cacheKey = JSON.stringify({ query, area, category });
     if (query) {
       url.searchParams.set("q", query);
     }
@@ -338,24 +343,47 @@
     if (category) {
       url.searchParams.set("category", category);
     }
+    if (state.productSearchCache.has(cacheKey)) {
+      return state.productSearchCache.get(cacheKey);
+    }
 
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
-      credentials: "same-origin"
-    });
-    const payload = await response.json();
+    let response;
+    let payload;
+    try {
+      response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin",
+        signal: state.searchAbortController.signal
+      });
+      payload = await response.json();
+    } catch (error) {
+      if (error?.name === "AbortError") {
+        return null;
+      }
+      setStatus("Products could not be loaded right now.", "error");
+      return null;
+    }
     if (requestId !== state.activeSearchRequest) {
-      return [];
+      return null;
     }
     if (!response.ok || !payload.ok) {
       setStatus(payload.error || "Products could not be loaded.", "error");
-      return [];
+      return null;
     }
-    return payload.products || [];
+    const products = payload.products || [];
+    state.productSearchCache.set(cacheKey, products);
+    return products;
   }
 
   async function searchProducts(query) {
-    renderResults(await fetchProducts(query));
+    if (resultsHelperNode) {
+      resultsHelperNode.textContent = "Searching...";
+    }
+    const products = await fetchProducts(query);
+    if (!products) {
+      return;
+    }
+    renderResults(products);
   }
 
   async function addByBarcode(rawCode) {
@@ -554,7 +582,7 @@
     window.clearTimeout(state.searchTimer);
     state.searchTimer = window.setTimeout(() => {
       void searchProducts(searchInput.value.trim());
-    }, 120);
+    }, 80);
   }
 
   async function deleteSavedOrder(orderId, orderNumber) {

@@ -573,6 +573,15 @@ a { color: inherit; text-decoration: none; }
 .module-action-card a {
   text-decoration: none;
 }
+.social-post-card {
+  align-content: start;
+}
+.social-post-copy {
+  margin: 0.25rem 0 0;
+  color: var(--ink);
+  line-height: 1.55;
+  white-space: pre-wrap;
+}
 .module-inline-actions {
   margin-bottom: 1rem;
 }
@@ -832,6 +841,16 @@ textarea { resize: vertical; }
   margin-top: 0.38rem;
   font-size: 0.78rem;
   line-height: 1.35;
+}
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: 0.84rem;
+  color: var(--muted);
+}
+.checkbox-inline input {
+  width: auto;
 }
 .muted-box pre {
   white-space: pre-wrap;

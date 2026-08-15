@@ -86,12 +86,26 @@
       </section>
     {% endif %}
 
-    <form method="post" class="form-grid module-form-grid" id="generic-module-form">
+    <form method="post" enctype="multipart/form-data" class="form-grid module-form-grid" id="generic-module-form">
       {% for field in definition.fields %}
         <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
           <span>{{ field.label }}</span>
           {% if field.field_type == 'textarea' %}
             <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
+          {% elif field.field_type == 'file' %}
+            <input type="file" name="{{ field.name }}" accept="image/*,application/pdf">
+            {% if definition.key == 'expenses' and payload.get('receiptAttachmentUrl') %}
+              <span class="table-secondary">
+                Current receipt:
+                <a class="table-link" href="{{ payload.get('receiptAttachmentUrl') }}" target="_blank" rel="noopener">
+                  {{ payload.get('receiptAttachmentName') or 'Open receipt' }}
+                </a>
+              </span>
+              <span class="checkbox-inline">
+                <input type="checkbox" name="clearReceiptAttachment">
+                Remove current receipt
+              </span>
+            {% endif %}
           {% elif dynamic_category_field and field.name == dynamic_category_field %}
             <select
               name="{{ field.name }}"
@@ -228,6 +242,16 @@
             <small class="muted form-helper">Count the physical cash left at close after any cash moved out.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'closingECashCounted' %}
             <small class="muted form-helper">Enter the wallet balance left at close after the day's transactions and e-cash movements.</small>
+          {% elif definition.key == 'expenses' and field.name == 'category' %}
+            <small class="muted form-helper">Choose the spend type that matches this expense so reporting by business area stays clean.</small>
+          {% elif definition.key == 'expenses' and field.name == 'vendor' %}
+            <small class="muted form-helper">Use the shop, supplier, rider, or person you paid so staff can find it later.</small>
+          {% elif definition.key == 'expenses' and field.name == 'amount' %}
+            <small class="muted form-helper">Enter the total amount paid for this expense. The app adds it directly into expense totals.</small>
+          {% elif definition.key == 'expenses' and field.name == 'receiptUpload' %}
+            <small class="muted form-helper">Upload a receipt image or PDF now. The receipt status will switch to Uploaded automatically.</small>
+          {% elif definition.key == 'expenses' and field.name == 'receiptReference' %}
+            <small class="muted form-helper">Use the receipt number, MoMo reference, bank alert, or invoice number if you have one.</small>
           {% elif definition.key == 'customer_crm' and field.name == 'leadSource' %}
             <small class="muted form-helper">Use Facebook Page, WhatsApp, Website, Walk-in, or the real source so marketing reports stay accurate.</small>
           {% elif definition.key == 'customer_crm' and field.name == 'followUpDate' %}
@@ -291,6 +315,22 @@
         }
         areaField.addEventListener("change", renderDynamicCategories);
         renderDynamicCategories();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'expenses' %}
+    <script>
+      (function () {
+        const receiptInput = document.querySelector('input[name="receiptUpload"]');
+        const receiptStatusField = document.querySelector('select[name="receiptStatus"]');
+        if (!receiptInput || !receiptStatusField) {
+          return;
+        }
+        receiptInput.addEventListener("change", () => {
+          if (receiptInput.files && receiptInput.files.length) {
+            receiptStatusField.value = "Uploaded";
+          }
+        });
       })();
     </script>
   {% endif %}

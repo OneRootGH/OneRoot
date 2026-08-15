@@ -397,6 +397,7 @@
     }
 
     const whatsappNumbers = getWhatsappDisplayNumbers();
+    const facebookUrl = normalizeText(state.config.facebookUrl);
     const contactParts = [
       state.config.supportPhone ? `Phone: ${state.config.supportPhone}` : "",
       whatsappNumbers.length ? `WhatsApp: ${whatsappNumbers.join(" / ")}` : "",
@@ -405,14 +406,25 @@
     ].filter(Boolean);
 
     if (elements.heroContactLine) {
-      elements.heroContactLine.innerHTML = contactParts
+      const heroParts = contactParts
         .slice(0, 3)
-        .map((part) => `<span>${escapeHtml(part)}</span>`)
-        .join("");
+        .map((part) => `<span>${escapeHtml(part)}</span>`);
+      if (facebookUrl) {
+        heroParts.push(
+          `<a class="hero-tag-link" href="${escapeHtml(facebookUrl)}" target="_blank" rel="noopener">Facebook Page</a>`
+        );
+      }
+      elements.heroContactLine.innerHTML = heroParts.join("");
     }
 
     if (elements.footerContactLine) {
-      elements.footerContactLine.textContent = contactParts.join(" • ");
+      const footerParts = contactParts.map((part) => `<span>${escapeHtml(part)}</span>`);
+      if (facebookUrl) {
+        footerParts.push(
+          `<a class="footer-contact-link" href="${escapeHtml(facebookUrl)}" target="_blank" rel="noopener">Facebook Page</a>`
+        );
+      }
+      elements.footerContactLine.innerHTML = footerParts.join(" • ");
     }
   }
 

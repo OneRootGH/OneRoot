@@ -376,6 +376,23 @@ main {
   color: var(--forest-900);
 }
 
+.hero-tags a {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.6rem 0.85rem;
+  border-radius: 999px;
+  background: rgba(20, 58, 43, 0.14);
+  font-weight: 700;
+  color: var(--forest-900);
+  text-decoration: none;
+}
+
+.footer-contact-link {
+  color: var(--forest-900);
+  font-weight: 700;
+  text-decoration: none;
+}
+
 .hero-panel {
   display: grid;
   gap: 1rem;

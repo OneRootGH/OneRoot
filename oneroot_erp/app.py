@@ -33,6 +33,7 @@ from .registry import (
     BUSINESS_AREA_SHORT,
     BUSINESS_AREAS,
     EQUIPMENT_RENTAL_CATEGORY_OPTIONS,
+    EXPENSE_CATEGORY_LIBRARY,
     INVENTORY_CATEGORY_LIBRARY,
     JOB_VACANCY_STATUSES,
     MENU_GROUPS,
@@ -98,6 +99,8 @@ PRODUCT_IMAGE_ALLOWED_MIME_TYPES = {
     "image/gif",
     "image/svg+xml",
 }
+RECEIPT_ATTACHMENT_MAX_BYTES = 5 * 1024 * 1024
+RECEIPT_ATTACHMENT_ALLOWED_MIME_TYPES = PRODUCT_IMAGE_ALLOWED_MIME_TYPES | {"application/pdf"}
 PRODUCT_IMAGE_AREA_COLORS = {
     "water-equipment": "#2f6ea8",
     "cold-store-groceries": "#1f6b5b",
@@ -853,6 +856,14 @@ def inventory_category_map(products: list[Product] | None = None) -> dict[str, l
     }
 
 
+def expense_category_map() -> dict[str, list[str]]:
+    return {
+        area_id: sorted(set(categories))
+        for area_id, categories in EXPENSE_CATEGORY_LIBRARY.items()
+        if categories
+    }
+
+
 def load_service_offers_catalog(root_dir: str) -> list[dict[str, Any]]:
     service_path = Path(root_dir) / "website" / "service_offers.json"
     if not service_path.exists():
@@ -1395,6 +1406,25 @@ def encode_uploaded_product_image(file_storage) -> str:
         raise ValueError("Keep product images under 2 MB each.")
     encoded = base64.b64encode(data).decode("ascii")
     return f"data:{mime_type};base64,{encoded}"
+
+
+def encode_uploaded_receipt_attachment(file_storage) -> tuple[str, str, str]:
+    if not file_storage or not getattr(file_storage, "filename", ""):
+        return "", "", ""
+    mime_type = normalize_text(getattr(file_storage, "mimetype", "")).lower()
+    if mime_type not in RECEIPT_ATTACHMENT_ALLOWED_MIME_TYPES:
+        raise ValueError("Upload a receipt as PNG, JPG, WEBP, GIF, SVG, or PDF.")
+    data = file_storage.read()
+    if not data:
+        return "", "", ""
+    if len(data) > RECEIPT_ATTACHMENT_MAX_BYTES:
+        raise ValueError("Keep receipt files under 5 MB each.")
+    encoded = base64.b64encode(data).decode("ascii")
+    return (
+        f"data:{mime_type};base64,{encoded}",
+        normalize_text(getattr(file_storage, "filename", "")) or "receipt",
+        mime_type,
+    )
 
 
 def product_placeholder_svg_payload(name: str, category: str, area_id: str) -> str:
@@ -2156,12 +2186,156 @@ def sync_customer_crm_automation(db_session) -> None:
         set_module_record_metadata(record, MODULES["customer_crm"], payload)
 
 
+def latest_customer_crm_records(records: list[ModuleRecord]) -> list[ModuleRecord]:
+    latest_by_reference: dict[str, ModuleRecord] = {}
+    fallback_records: list[ModuleRecord] = []
+    for record in records:
+        payload = dict(record.payload or {})
+        reference = normalize_text(record.reference) or customer_reference_key(
+            payload.get("customerName"),
+            payload.get("customerPhone"),
+            payload.get("customerEmail"),
+        )
+        if not reference:
+            fallback_records.append(record)
+            continue
+        existing = latest_by_reference.get(reference)
+        if not existing or record.updated_at >= existing.updated_at:
+            latest_by_reference[reference] = record
+    deduped_records = list(latest_by_reference.values()) + fallback_records
+    deduped_records.sort(key=lambda item: (item.updated_at, item.created_at), reverse=True)
+    return deduped_records
+
+
+def build_weekly_facebook_post_ideas(records: list[ModuleRecord], *, area_filter: str = "", as_of: date | None = None) -> list[dict[str, Any]]:
+    today = as_of or date.today()
+    upcoming_monday = today + timedelta(days=(7 - today.weekday()) % 7 or 7)
+    scoped_area_filter = normalize_text(area_filter)
+    area_counts: dict[str, int] = defaultdict(int)
+    for record in records:
+        payload = dict(record.payload or {})
+        area_id = normalize_text(payload.get("businessAreaId")) or normalize_text(record.business_area_id)
+        if not area_id:
+            continue
+        if scoped_area_filter and area_id != scoped_area_filter:
+            continue
+        area_counts[area_id] += max(int(parse_amount(payload.get("paidOrderCount") or payload.get("orderCount") or 1)), 1)
+
+    ordered_area_ids = [
+        area_id
+        for area_id, _count in sorted(area_counts.items(), key=lambda item: (item[1], item[0]), reverse=True)
+    ]
+    seasonal_food_line = (
+        "Families are planning for the school run in August, so value bundles, quick meals, and restock posts are timely."
+        if today.month in {8, 9}
+        else "Convenient essentials and easy meal planning remain strong themes for repeat buying."
+    )
+    ideas_catalog = [
+        {
+            "areaId": "cold-store-groceries",
+            "title": "Back-To-School Essentials Push",
+            "audienceSegment": "Repeat",
+            "messageGoal": "Repeat Sales",
+            "trendNote": seasonal_food_line,
+            "message": (
+                "Back-to-school week is easier when the fridge and pantry are ready. "
+                "Order bread, cooking oil, fish, meat, sausages, groundnut paste, and drinking water from OneRoot Essentials. "
+                "Send us your list here on Facebook and we will help you prepare it quickly."
+            ),
+        },
+        {
+            "areaId": "laundry-services",
+            "title": "Busy Week Laundry Reminder",
+            "audienceSegment": "Repeat",
+            "messageGoal": "Repeat Sales",
+            "trendNote": "Convenience-led service posts work well when customers are balancing school, work, and home routines.",
+            "message": (
+                "Let OneRoot Laundry help you reset for the week. "
+                "Book Normal or Express washing, drying, ironing, and folding, and save yourself the after-work stress. "
+                "Message us now to schedule pickup or drop-off."
+            ),
+        },
+        {
+            "areaId": "kitchen",
+            "title": "Weekend Kitchen Sales Post",
+            "audienceSegment": "Lead",
+            "messageGoal": "Promo Push",
+            "trendNote": "Quick-order meal content performs best when the menu is clear, local, and easy to act on.",
+            "message": (
+                "Weekend food plans are sorted at OneRoot Kitchen. "
+                "Order jollof rice, fried rice, banku, spaghetti, fried chicken, fried fish, sides, and cold drinks for pickup or delivery. "
+                "Send us your order early so we can prepare it fresh."
+            ),
+        },
+        {
+            "areaId": "water-equipment",
+            "title": "Water & Rental Support Post",
+            "audienceSegment": "Community Account",
+            "messageGoal": "New Leads",
+            "trendNote": "Practical service posts do better when they focus on timing, reliability, and clear booking steps.",
+            "message": (
+                "Need water supply or site support items this week? "
+                "OneRoot can help with water delivery and equipment rentals such as wheelbarrows, shovels, head pans, cutting machines, drills, and nails. "
+                "Message the team now to book early and avoid delays."
+            ),
+        },
+    ]
+    if scoped_area_filter:
+        ordered_area_ids = [scoped_area_filter]
+    chosen_ideas: list[dict[str, Any]] = []
+    used_area_ids: set[str] = set()
+    for area_id in ordered_area_ids + [item["areaId"] for item in ideas_catalog]:
+        if area_id in used_area_ids:
+            continue
+        match = next((item for item in ideas_catalog if item["areaId"] == area_id), None)
+        if not match:
+            continue
+        used_area_ids.add(area_id)
+        chosen_ideas.append(match)
+        if len(chosen_ideas) == 4:
+            break
+
+    schedule_offsets = [0, 2, 4, 6]
+    rows: list[dict[str, Any]] = []
+    for index, idea in enumerate(chosen_ideas):
+        post_date = upcoming_monday + timedelta(days=schedule_offsets[index])
+        campaign_name = f"Facebook {idea['title']} {post_date.strftime('%d %b %Y')}"
+        rows.append(
+            {
+                "areaId": idea["areaId"],
+                "areaLabel": BUSINESS_AREA_SHORT.get(idea["areaId"], idea["areaId"]),
+                "title": idea["title"],
+                "scheduledDate": post_date.isoformat(),
+                "scheduledLabel": post_date.strftime("%a %d %b %Y"),
+                "audienceSegment": idea["audienceSegment"],
+                "messageGoal": idea["messageGoal"],
+                "trendNote": idea["trendNote"],
+                "message": idea["message"],
+                "launchHref": url_for(
+                    "module_form",
+                    module_key="whatsapp_campaigns",
+                    campaignDate=post_date.isoformat(),
+                    businessAreaId=idea["areaId"],
+                    campaignName=campaign_name,
+                    channelType="Facebook Page / Messenger",
+                    audienceSegment=idea["audienceSegment"],
+                    messageGoal=idea["messageGoal"],
+                    status="Draft",
+                    notes=idea["message"],
+                ),
+            }
+        )
+    return rows
+
+
 def build_growth_automation_context(db_session, *, area_filter: str = "") -> dict[str, Any]:
-    crm_records = db_session.scalars(
+    crm_records = latest_customer_crm_records(
+        db_session.scalars(
         select(ModuleRecord)
         .where(ModuleRecord.module_key == "customer_crm")
         .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
     ).all()
+    )
     if area_filter:
         crm_records = [
             record
@@ -2302,6 +2476,7 @@ def build_growth_automation_context(db_session, *, area_filter: str = "") -> dic
         "counts": counts,
         "followUps": follow_up_rows[:12],
         "playbooks": playbooks[:4],
+        "facebookPosts": build_weekly_facebook_post_ideas(crm_records, area_filter=area_filter),
         "segmentChart": segment_chart,
         "sourceChart": source_chart,
     }
@@ -4308,6 +4483,26 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
             {"label": "Revenue", "value": format_currency(total_amount), "note": "Sales captured in this list"},
             {"label": "Cost", "value": format_currency(total_cost), "note": "Linked item or service cost in this view"},
             {"label": "Profit", "value": format_currency(total_profit), "note": "Realized gross profit in this view"},
+        ]
+    elif definition.key == "expenses":
+        uploaded_receipts = sum(1 for record in records if normalize_text((record.payload or {}).get("receiptAttachmentUrl")))
+        cash_spend = round(
+            sum(
+                parse_amount(record.amount)
+                for record in records
+                if normalize_text((record.payload or {}).get("paymentMethod")).lower() == "cash"
+            ),
+            2,
+        )
+        cards = [
+            {"label": "Expense Records", "value": f"{len(records)}", "note": "Current filtered spend rows"},
+            {"label": "Total Spend", "value": format_currency(total_amount), "note": "All expense amounts captured in this view"},
+            {"label": "Cash Spend", "value": format_currency(cash_spend), "note": "Cash expenses recorded in this list"},
+            {
+                "label": "Receipts Uploaded",
+                "value": f"{uploaded_receipts}",
+                "note": f"{max(len(records) - uploaded_receipts, 0)} record{'s' if max(len(records) - uploaded_receipts, 0) != 1 else ''} still need receipts",
+            },
         ]
     elif definition.key == "mobile_money_transactions":
         mobile_money_summary = mobile_money_transaction_breakdown(records)
@@ -8566,8 +8761,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         set_module_record_metadata(record, MODULES["online_orders"], order_payload)
         return record
 
-    def parse_field_input(field: FieldDefinition, form_data) -> Any:
-        raw = form_data.get(field.name, "")
+    def parse_field_value(field: FieldDefinition, raw: Any) -> Any:
         if field.field_type == "number":
             return parse_amount(raw)
         if field.field_type == "checkbox":
@@ -8576,7 +8770,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return normalize_text(raw)
         if field.field_type == "month":
             return parse_month(raw)
+        if field.field_type == "file":
+            return ""
         return normalize_text(raw)
+
+    def parse_field_input(field: FieldDefinition, form_data) -> Any:
+        raw = form_data.get(field.name, "")
+        return parse_field_value(field, raw)
 
     def serialize_module_record(record: ModuleRecord) -> dict[str, Any]:
         payload = dict(record.payload or {})
@@ -11327,6 +11527,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 ):
                     continue
                 payload[field.name] = parse_field_input(field, request.form)
+            payload.pop("receiptUpload", None)
             if module_key == "apartments":
                 payload["businessAreaId"] = "rentals-apartments"
             elif module_key in SERVICE_MODULE_AREA_IDS:
@@ -11369,6 +11570,30 @@ def create_app(config: AppConfig | None = None) -> Flask:
             elif module_key == "sales":
                 payload["sourceType"] = normalize_text(payload.get("sourceType")) or "manual-sale"
                 payload["profitAmount"] = round(parse_amount(payload.get("amount")) - parse_amount(payload.get("costAmount")), 2)
+            elif module_key == "expenses":
+                receipt_attachment_url = normalize_text(payload.get("receiptAttachmentUrl"))
+                receipt_attachment_name = normalize_text(payload.get("receiptAttachmentName"))
+                receipt_attachment_type = normalize_text(payload.get("receiptAttachmentType"))
+                if request.form.get("clearReceiptAttachment") == "on":
+                    receipt_attachment_url = ""
+                    receipt_attachment_name = ""
+                    receipt_attachment_type = ""
+                uploaded_attachment_url, uploaded_attachment_name, uploaded_attachment_type = encode_uploaded_receipt_attachment(
+                    request.files.get("receiptUpload")
+                )
+                if uploaded_attachment_url:
+                    receipt_attachment_url = uploaded_attachment_url
+                    receipt_attachment_name = uploaded_attachment_name
+                    receipt_attachment_type = uploaded_attachment_type
+                payload["amount"] = round(abs(parse_amount(payload.get("amount"))), 2)
+                payload["receiptAttachmentUrl"] = receipt_attachment_url
+                payload["receiptAttachmentName"] = receipt_attachment_name
+                payload["receiptAttachmentType"] = receipt_attachment_type
+                payload["receiptStatus"] = (
+                    "Uploaded"
+                    if receipt_attachment_url
+                    else (normalize_text(payload.get("receiptStatus")) or "Pending")
+                )
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
             if form_errors:
@@ -11431,6 +11656,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("applicationPhone", app_config.whatsapp_number)
             record_payload.setdefault("applicationEmail", app_config.support_email)
             record_payload.setdefault("howToApply", default_job_vacancy_apply_text(app_config))
+        elif module_key == "whatsapp_campaigns":
+            record_payload.setdefault("campaignDate", date.today().isoformat())
+            record_payload.setdefault("channelType", "WhatsApp")
+            record_payload.setdefault("status", "Draft")
+        elif module_key == "expenses":
+            record_payload.setdefault("date", date.today().isoformat())
+            record_payload.setdefault("paymentMethod", "Cash")
+            record_payload.setdefault("receiptStatus", "Pending")
+        if request.method == "GET" and not record:
+            for field in definition.fields:
+                if field.name not in request.args:
+                    continue
+                query_value = request.args.get(field.name)
+                if query_value is None:
+                    continue
+                record_payload[field.name] = parse_field_value(field, query_value)
         if module_key == "apartments":
             record_payload.setdefault("businessAreaId", "rentals-apartments")
             field_map = {field.name: field for field in definition.fields}
@@ -11524,13 +11765,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "note": "Print or save the payslip for this payroll record.",
                 }
             )
+        category_map = expense_category_map() if module_key in {"expenses", "budgets", "forecast_plans", "recurring_controls"} else inventory_category_map()
         return render_template(
             "module_form.html",
             page_title=f"{definition.label} Form",
             definition=definition,
             record=record,
             payload=record_payload,
-            category_map=inventory_category_map(),
+            category_map=category_map,
             dynamic_category_field="category" if module_has_field(definition, "category") else "",
             module_quick_actions=module_quick_actions,
             mobile_money_day_helper=mobile_money_day_helper,

@@ -230,6 +230,29 @@
       </article>
     </section>
 
+    {% if growth_context.facebookPosts %}
+      <section class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Weekly Facebook Planner</p>
+            <h3>Suggested Posts For The Coming Week</h3>
+          </div>
+          <p class="muted list-summary">Built from live customer activity and timely campaign themes for the week ahead.</p>
+        </div>
+        <div class="card-grid two">
+          {% for item in growth_context.facebookPosts %}
+            <article class="metric-card module-action-card social-post-card">
+              <span>{{ item.scheduledLabel }} · {{ item.areaLabel }}</span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.trendNote }}</small>
+              <p class="social-post-copy">{{ item.message }}</p>
+              <a class="button subtle button-small" href="{{ item.launchHref }}">Open As Campaign Draft</a>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
     {% if growth_context.segmentChart or growth_context.sourceChart %}
       <section class="split-grid">
         <article class="card">
@@ -594,6 +617,15 @@
                   <span class="table-secondary">{{ record.payload.get('channelType', 'WhatsApp') }} · {{ record.payload.get('audienceSegment', 'All Customers') }} · Sent {{ record.payload.get('sentCount', 0) }}</span>
                 {% elif definition.key == 'campaign_roi' %}
                   <span class="table-secondary">{{ record.payload.get('channelType', 'Channel') }} · Leads {{ record.payload.get('leadsCount', 0) }} · ROI {{ (record.payload.get('roiPercent', 0)) }}%</span>
+                {% elif definition.key == 'expenses' %}
+                  <span class="table-secondary">
+                    {{ record.payload.get('category', 'Expense') }} ·
+                    {{ record.payload.get('paymentMethod', 'Payment Method not saved') }} ·
+                    Receipt {{ record.payload.get('receiptStatus', 'Pending') }}
+                    {% if record.payload.get('receiptReference') %}
+                      · Ref {{ record.payload.get('receiptReference') }}
+                    {% endif %}
+                  </span>
                 {% endif %}
               </td>
               <td>{{ record.updated_at }}</td>
@@ -601,6 +633,9 @@
                 {% if definition.editable %}
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit</a>
+                    {% if definition.key == 'expenses' and record.payload.get('receiptAttachmentUrl') %}
+                      <a class="table-link" href="{{ record.payload.get('receiptAttachmentUrl') }}" target="_blank" rel="noopener">Receipt</a>
+                    {% endif %}
                     {% if definition.key == 'salary_records' %}
                       <a class="table-link" href="{{ url_for('salary_payslip', record_id=record.id) }}">Payslip</a>
                     {% endif %}
