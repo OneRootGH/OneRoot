@@ -3519,6 +3519,27 @@ def pos_business_area_options() -> list[tuple[str, str]]:
     return [(value, label) for value, label in BUSINESS_AREA_OPTIONS if value != "laundry-services"]
 
 
+def pos_order_line_names(lines: list[PosOrderLine], *, area_id: str = "") -> list[str]:
+    selected_area = normalize_text(area_id)
+    names: list[str] = []
+    for line in lines:
+        if selected_area and normalize_text(line.business_area_id) != selected_area:
+            continue
+        line_name = normalize_text(line.name)
+        if line_name:
+            names.append(line_name)
+    return names
+
+
+def pos_order_item_summary(lines: list[PosOrderLine], *, area_id: str = "", limit: int = 3) -> str:
+    names = pos_order_line_names(lines, area_id=area_id)
+    if not names:
+        return ""
+    if len(names) <= limit:
+        return ", ".join(names)
+    return f"{', '.join(names[:limit])} + {len(names) - limit} more"
+
+
 def service_module_field_sections(definition: ModuleDefinition) -> list[dict[str, Any]]:
     field_map = {field.name: field for field in definition.fields}
     sections = []
@@ -7667,6 +7688,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "supportPhone": app_config.support_phone,
             "whatsappNumber": app_config.whatsapp_number,
             "alternateWhatsappNumber": app_config.alternate_whatsapp_number,
+            "facebookUrl": app_config.facebook_url,
             "supportEmail": app_config.support_email,
             "pickupNote": app_config.pickup_note,
             "paymentMethods": [
@@ -8734,6 +8756,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             item_count += order_items
             payment_mix[payment_method] += order_total
             business_areas.update(order_area_ids)
+            item_names = pos_order_line_names(order.lines, area_id=selected_area)
             order_rows.append(
                 {
                     "id": order.id,
@@ -8743,6 +8766,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "customerName": order.customer_name,
                     "itemCount": round(order_items, 2),
                     "totalAmount": round(order_total, 2),
+                    "itemNames": item_names,
+                    "itemSummary": pos_order_item_summary(order.lines, area_id=selected_area),
                     "businessAreaIds": sorted(order_area_ids),
                     "receiptUrl": url_for("pos_receipt", order_id=order.id),
                 }
@@ -8893,26 +8918,40 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def sync_generated_sales_for_pos(order_date: date, area_ids: list[str], db_session=None) -> None:
         db = db_session or g.db
         unique_area_ids = sorted({area_id for area_id in area_ids if area_id})
+        if not unique_area_ids:
+            return
+
+        orders = db.scalars(
+            select(PosOrder)
+            .options(selectinload(PosOrder.lines))
+            .where(PosOrder.order_date == order_date)
+        ).all()
+        area_totals: dict[str, dict[str, float]] = {
+            area_id: {"totalAmount": 0.0, "totalCost": 0.0, "orderCount": 0.0}
+            for area_id in unique_area_ids
+        }
+
+        for order in orders:
+            order_area_totals: dict[str, dict[str, float]] = defaultdict(lambda: {"amount": 0.0, "cost": 0.0})
+            for line in order.lines:
+                area_id = normalize_text(line.business_area_id)
+                if area_id not in area_totals:
+                    continue
+                order_area_totals[area_id]["amount"] += parse_amount(line.total_amount)
+                order_area_totals[area_id]["cost"] += parse_amount(line.cost_amount)
+
+            for area_id, totals in order_area_totals.items():
+                if totals["amount"] <= 0:
+                    continue
+                area_totals[area_id]["totalAmount"] += totals["amount"]
+                area_totals[area_id]["totalCost"] += totals["cost"]
+                area_totals[area_id]["orderCount"] += 1
+
         for area_id in unique_area_ids:
-            orders = db.scalars(
-                select(PosOrder)
-                .options(selectinload(PosOrder.lines))
-                .where(PosOrder.order_date == order_date)
-            ).all()
-            total_amount = 0.0
-            total_cost = 0.0
-            order_count = 0
-            for order in orders:
-                order_area_total = 0.0
-                order_area_cost = 0.0
-                for line in order.lines:
-                    if line.business_area_id == area_id:
-                        order_area_total += parse_amount(line.total_amount)
-                        order_area_cost += parse_amount(line.cost_amount)
-                if order_area_total > 0:
-                    total_amount += order_area_total
-                    total_cost += order_area_cost
-                    order_count += 1
+            totals = area_totals.get(area_id) or {}
+            total_amount = round(parse_amount(totals.get("totalAmount")), 2)
+            total_cost = round(parse_amount(totals.get("totalCost")), 2)
+            order_count = int(parse_amount(totals.get("orderCount")))
 
             reference = f"pos-summary|{order_date.isoformat()}|{area_id}"
             record = db.scalar(
@@ -8931,8 +8970,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "id": record.id if record else uuid4().hex,
                 "date": order_date.isoformat(),
                 "businessAreaId": area_id,
-                "amount": round(total_amount, 2),
-                "costAmount": round(total_cost, 2),
+                "amount": total_amount,
+                "costAmount": total_cost,
                 "profitAmount": round(total_amount - total_cost, 2),
                 "notes": f"[POS Sync] {order_count} order{'s' if order_count != 1 else ''} captured in POS for {BUSINESS_AREA_SHORT.get(area_id, area_id)}.",
                 "sourceType": "pos-summary",
@@ -12332,9 +12371,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
         initial_category = normalize_text(request.args.get("category"))
         initial_search = normalize_text(request.args.get("q"))
         summary = build_pos_counter_summary(order_date, initial_area)
-        recent_orders = g.db.scalars(
+        recent_orders_raw = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(20)
         ).all()
+        recent_orders = [
+            {
+                "id": order.id,
+                "order_number": order.order_number,
+                "order_date": order.order_date.isoformat(),
+                "customer_name": normalize_text(order.customer_name),
+                "payment_method": normalize_text(order.payment_method) or "Unspecified",
+                "item_count": round(parse_amount(order.item_count), 2),
+                "total_amount": round(parse_amount(order.total_amount), 2),
+                "item_summary": pos_order_item_summary(order.lines),
+                "item_names": pos_order_line_names(order.lines),
+            }
+            for order in recent_orders_raw
+        ]
         active_products = load_pos_products(
             g.db,
             area_filter=initial_area,
@@ -12455,6 +12508,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_create_order():
         payload = request.get_json(silent=True) or {}
         order_date = parse_date(payload.get("orderDate")) or date.today()
+        selected_area = normalize_text(payload.get("areaId"))
         payment_method = normalize_text(payload.get("paymentMethod")) or "Cash"
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         if not items:
@@ -12530,7 +12584,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.flush()
         sync_generated_sales_for_pos(order_date, order.business_area_ids)
         sync_existing_pos_closeouts(order_date, order.business_area_ids)
-        sync_customer_crm_automation(g.db)
+        if normalize_text(order.customer_name) or normalize_text(order.customer_phone):
+            sync_customer_crm_automation(g.db)
         audit("pos", "POS", "create", f"{order.order_number} saved", order.id, f"{order.item_count:g} items · {format_currency(order.total_amount)}")
         g.db.commit()
         saved_order = {
@@ -12551,7 +12606,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "totalAmount": order.total_amount,
                 "itemCount": order.item_count,
                 "order": saved_order,
-                "summary": build_pos_counter_summary(order_date, ""),
+                "summary": build_pos_counter_summary(order_date, selected_area),
             }
         )
 
@@ -12592,7 +12647,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         sync_generated_sales_for_pos(order_date, sorted(affected_area_ids))
         sync_existing_pos_closeouts(order_date, sorted(affected_area_ids))
-        sync_customer_crm_automation(g.db)
+        if normalize_text(order.customer_name) or normalize_text(order.customer_phone):
+            sync_customer_crm_automation(g.db)
         audit(
             "pos",
             "POS",
@@ -12602,6 +12658,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             f"{customer_name} · {item_count:g} items removed · {format_currency(total_amount)}",
         )
         g.db.commit()
+        selected_area = request.args.get("area") or request.headers.get("X-OneRoot-Area", "")
         return jsonify(
             {
                 "ok": True,
@@ -12612,6 +12669,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "itemCount": item_count,
                     "totalAmount": total_amount,
                 },
+                "summary": build_pos_counter_summary(order_date, normalize_text(selected_area)),
             }
         )
 
@@ -12715,6 +12773,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "staff_role_label": staff_role_label,
             "staff_role_labels": STAFF_WORK_ROLE_LABELS,
             "mobile_money_expected_closing": mobile_money_expected_closing,
+            "facebook_page_url": app_config.facebook_url,
             "static_asset_version": current_static_asset_version(),
         }
 

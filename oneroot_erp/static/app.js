@@ -409,7 +409,10 @@
         <td>${escapeHtml(order.orderNumber)}</td>
         <td>${escapeHtml(order.orderDate)}</td>
         <td>${escapeHtml(order.customerName || "Walk-in")}</td>
-        <td>${escapeHtml(order.itemCount)}</td>
+        <td>
+          <strong>${escapeHtml(order.itemCount)}</strong>
+          <span class="table-secondary">${escapeHtml(order.itemSummary || "Item names will appear here after save.")}</span>
+        </td>
         <td>${escapeHtml(order.paymentMethod || "Unspecified")}</td>
         <td>${formatCurrency(order.totalAmount)}</td>
         <td>
@@ -559,7 +562,8 @@
       method: "DELETE",
       credentials: "same-origin",
       headers: {
-        Accept: "application/json"
+        Accept: "application/json",
+        "X-OneRoot-Area": getSelectedArea()
       }
     });
     const result = await response.json();
@@ -570,7 +574,11 @@
     if (lastOrderNode?.textContent === orderNumber) {
       setLastReceipt(null);
     }
-    await refreshSummary();
+    if (result.summary) {
+      renderSummary(result.summary);
+    } else {
+      await refreshSummary();
+    }
     setStatus(`${result.deleted.orderNumber} deleted and added to the audit trail.`);
   }
 
@@ -733,6 +741,7 @@
 
     const payload = {
       orderDate: getOrderDate(),
+      areaId: getSelectedArea(),
       paymentMethod: paymentMethodInput?.value,
       customerName: customerNameInput?.value,
       customerPhone: customerPhoneInput?.value,
@@ -765,7 +774,11 @@
     renderCart();
     resetDraftFields();
     setLastReceipt(result.order || null);
-    await refreshSummary();
+    if (result.summary) {
+      renderSummary(result.summary);
+    } else {
+      await refreshSummary();
+    }
     setStatus(`${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.`);
     if (searchInput) {
       searchInput.focus();

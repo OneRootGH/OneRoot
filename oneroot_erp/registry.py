@@ -679,6 +679,7 @@ CUSTOMER_STATUSES = [
 ]
 LEAD_SOURCES = [
     ("Website", "Website"),
+    ("Facebook Page", "Facebook Page"),
     ("POS", "POS"),
     ("Online Order", "Online Order"),
     ("Laundry", "Laundry"),
@@ -708,6 +709,7 @@ PROMOTION_STATUSES = [
 ]
 CAMPAIGN_CHANNELS = [
     ("WhatsApp", "WhatsApp"),
+    ("Facebook Page / Messenger", "Facebook Page / Messenger"),
     ("SMS", "SMS"),
     ("Phone Follow-Up", "Phone Follow-Up"),
     ("Social Media", "Social Media"),

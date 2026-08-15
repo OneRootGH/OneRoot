@@ -34,6 +34,7 @@ class AppConfig:
     support_phone: str
     whatsapp_number: str
     alternate_whatsapp_number: str
+    facebook_url: str
     support_email: str
     pickup_note: str
 
@@ -85,6 +86,11 @@ def load_config() -> AppConfig:
             os.getenv("ONEROOT_ALT_WHATSAPP_NUMBER") or "0544995005"
         ).strip()
         or "0544995005",
+        facebook_url=(
+            os.getenv("ONEROOT_FACEBOOK_URL")
+            or "https://web.facebook.com/profile.php?id=61577723615704"
+        ).strip()
+        or "https://web.facebook.com/profile.php?id=61577723615704",
         support_email=(os.getenv("ONEROOT_SUPPORT_EMAIL") or "orders@oneroot.shop").strip() or "orders@oneroot.shop",
         pickup_note=(
             os.getenv("ONEROOT_PICKUP_NOTE")

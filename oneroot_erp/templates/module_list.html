@@ -5,7 +5,13 @@
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }}</h3>
-        <p class="muted compact-copy">Search, filter, and export without leaving this page.</p>
+        <p class="muted compact-copy">
+          {% if definition.key in ['customer_crm', 'promotions', 'whatsapp_campaigns', 'campaign_roi'] %}
+            Work customer follow-up, WhatsApp, Facebook, and campaign tracking from one faster growth desk.
+          {% else %}
+            Search, filter, and export without leaving this page.
+          {% endif %}
+        </p>
       </div>
       <div class="toolbar compact-toolbar">
         <a class="button subtle" href="{{ url_for('module_export', module_key=definition.key, q=search, area=area_filter, status=status_filter, category=category_filter, month=month_filter, date_from=date_from, date_to=date_to) }}">Export CSV</a>
@@ -163,8 +169,15 @@
             <p class="eyebrow">Growth Automation</p>
             <h3>Live Customer Follow-Up Queue</h3>
           </div>
-          <p class="muted list-summary">{{ growth_context.followUps|length }} customer{% if growth_context.followUps|length != 1 %}s{% endif %} ready for action.</p>
+          <div class="toolbar compact-toolbar">
+            {% if facebook_page_url %}
+              <a class="button subtle button-small" href="{{ facebook_page_url }}" target="_blank" rel="noopener">Facebook Page</a>
+            {% endif %}
+            <a class="button subtle button-small" href="{{ url_for('module_form', module_key='whatsapp_campaigns') }}">New WhatsApp Campaign</a>
+            <a class="button subtle button-small" href="{{ url_for('module_form', module_key='promotions') }}">New Promotion</a>
+          </div>
         </div>
+        <p class="muted list-summary">{{ growth_context.followUps|length }} customer{% if growth_context.followUps|length != 1 %}s{% endif %} ready for action.</p>
         <ul class="stack-list compact reminder-stack">
           {% for item in growth_context.followUps %}
             <li class="stack-list-item-row">
@@ -173,6 +186,9 @@
                 <span>{{ item.automationLabel }} · {{ item.customerSegment }} · {{ item.leadSource }}</span>
                 <span>{{ item.businessAreaSummary or 'Shared Operations' }} · Orders {{ item.orderCount }} · Paid {{ item.paidOrderCount }}</span>
                 <span>{% if item.followUpDate %}Follow up {{ item.followUpDate }}{% else %}No follow-up date saved{% endif %} · Value {{ item.lifetimeValue|currency }}</span>
+                {% if item.recommendedOffer %}
+                  <span>Best next offer: {{ item.recommendedOffer }}</span>
+                {% endif %}
               </div>
               <div class="stack-list-actions">
                 <a class="button subtle button-small" href="{{ url_for('module_form', module_key='customer_crm', record_id=item.id) }}">Open</a>

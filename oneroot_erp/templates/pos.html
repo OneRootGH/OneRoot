@@ -258,7 +258,10 @@
               <td>{{ order.order_number }}</td>
               <td>{{ order.order_date }}</td>
               <td>{{ order.customer_name or 'Walk-in' }}</td>
-              <td>{{ order.item_count }}</td>
+              <td>
+                <strong>{{ order.item_count }}</strong>
+                <span class="table-secondary">{{ order.item_summary or 'Item names will appear here after save.' }}</span>
+              </td>
               <td>{{ order.payment_method }}</td>
               <td>{{ order.total_amount|currency }}</td>
               <td>

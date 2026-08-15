@@ -5,7 +5,13 @@
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }} Form</h3>
-        <p class="muted">Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.</p>
+        <p class="muted">
+          {% if definition.key in ['customer_crm', 'promotions', 'whatsapp_campaigns', 'campaign_roi'] %}
+            Use this growth form to keep follow-up, promotions, WhatsApp, and Facebook-driven activity clean and easy to work with later.
+          {% else %}
+            Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.
+          {% endif %}
+        </p>
       </div>
       <div class="toolbar">
         <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back to {{ definition.label }}</a>
@@ -222,6 +228,18 @@
             <small class="muted form-helper">Count the physical cash left at close after any cash moved out.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'closingECashCounted' %}
             <small class="muted form-helper">Enter the wallet balance left at close after the day's transactions and e-cash movements.</small>
+          {% elif definition.key == 'customer_crm' and field.name == 'leadSource' %}
+            <small class="muted form-helper">Use Facebook Page, WhatsApp, Website, Walk-in, or the real source so marketing reports stay accurate.</small>
+          {% elif definition.key == 'customer_crm' and field.name == 'followUpDate' %}
+            <small class="muted form-helper">Set the next date staff should call, WhatsApp, or follow up from Facebook or another source.</small>
+          {% elif definition.key == 'promotions' and field.name == 'promotionType' %}
+            <small class="muted form-helper">Use Bundle, Discount, Referral, or Loyalty Reward so staff can quickly understand the offer type.</small>
+          {% elif definition.key == 'whatsapp_campaigns' and field.name == 'channelType' %}
+            <small class="muted form-helper">Choose WhatsApp, Facebook Page / Messenger, SMS, or Phone Follow-Up so campaign results match the real channel used.</small>
+          {% elif definition.key == 'whatsapp_campaigns' and field.name == 'campaignName' %}
+            <small class="muted form-helper">Use a simple name staff can recognize fast, such as Back-To-School Groceries or Laundry Win-Back August.</small>
+          {% elif definition.key == 'campaign_roi' and field.name == 'channelType' %}
+            <small class="muted form-helper">Track the same channel used in the real campaign so ROI remains easy to compare across WhatsApp and Facebook.</small>
           {% endif %}
         </label>
       {% endfor %}
