@@ -32,6 +32,7 @@ from .registry import (
     BUSINESS_AREA_OPTIONS,
     BUSINESS_AREA_SHORT,
     BUSINESS_AREAS,
+    CASHBOOK_ACCOUNT_SUGGESTIONS,
     EQUIPMENT_RENTAL_CATEGORY_OPTIONS,
     EXPENSE_CATEGORY_LIBRARY,
     INVENTORY_CATEGORY_LIBRARY,
@@ -67,6 +68,8 @@ SERVICE_LINE_ITEMS_KEY = "lineItems"
 POS_FOOD_SALES_AREA_IDS = {"kitchen"}
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
+CASHBOOK_MONEY_IN_TYPES = {"Cash In", "Bank Withdrawal"}
+CASHBOOK_MONEY_OUT_TYPES = {"Cash Out", "Bank Deposit", "Bank Charge"}
 SERVICE_ITEM_FIELD_MAP = {
     "laundry_tickets": "laundryItem",
     "equipment_rental_bookings": "equipmentItem",
@@ -3478,6 +3481,43 @@ def format_module_amount(definition: ModuleDefinition, value: Any) -> str:
     return format_currency(amount)
 
 
+def cashbook_entry_preview(payload: dict[str, Any]) -> dict[str, Any]:
+    entry_type = normalize_text(payload.get("entryType")) or "Cash In"
+    amount = round(abs(parse_amount(payload.get("amount"))), 2)
+    account_name = normalize_text(payload.get("accountName")) or "Selected Account"
+    area_id = normalize_text(payload.get("businessAreaId")) or "shared-operations"
+    area_label = BUSINESS_AREA_SHORT.get(area_id, BUSINESS_AREA_LABELS.get(area_id, area_id or "Shared Operations"))
+    payment_method = normalize_text(payload.get("paymentMethod")) or "Cash"
+    direction_label = "Money In"
+    impact_note = f"Adds money into {account_name}."
+    if entry_type in CASHBOOK_MONEY_OUT_TYPES:
+        direction_label = "Money Out"
+        impact_note = f"Removes money from {account_name}."
+    elif entry_type == "Transfer":
+        direction_label = "Internal Transfer"
+        impact_note = f"Use {account_name} as the receiving or active account and note the matching side in Reference or Notes."
+
+    entry_guide = {
+        "Cash In": "Use this when cash or a bank receipt comes into the selected account and increases what you hold.",
+        "Cash Out": "Use this when you pay out from the selected cash or bank account and need a clean outgoing trail.",
+        "Bank Deposit": "Use this when you move physical cash into a bank account. Put the receiving bank account here and mention the source cash drawer in Notes if needed.",
+        "Bank Withdrawal": "Use this when money leaves the bank and comes into a cash point. Put the receiving cash point here and the bank reference in Reference.",
+        "Transfer": "Use this for internal movement between OneRoot accounts. Keep the receiving account in Account and mention the source account in Notes.",
+        "Bank Charge": "Use this for direct deductions, fees, and bank charges that reduce the account balance.",
+    }.get(entry_type, "Record the movement against the active OneRoot account so balances and reviews stay clean.")
+
+    return {
+        "entryType": entry_type,
+        "amount": amount,
+        "accountName": account_name,
+        "areaLabel": area_label,
+        "paymentMethod": payment_method,
+        "directionLabel": direction_label,
+        "impactNote": impact_note,
+        "entryGuide": entry_guide,
+    }
+
+
 SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
     "profits": ("Profit Center", "profits_page", None),
@@ -4504,6 +4544,30 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
                 "note": f"{max(len(records) - uploaded_receipts, 0)} record{'s' if max(len(records) - uploaded_receipts, 0) != 1 else ''} still need receipts",
             },
         ]
+    elif definition.key == "cashbook_entries":
+        inflow_total = round(
+            sum(parse_amount(record.amount) for record in records if normalize_text((record.payload or {}).get("entryType")) in CASHBOOK_MONEY_IN_TYPES),
+            2,
+        )
+        outflow_total = round(
+            sum(parse_amount(record.amount) for record in records if normalize_text((record.payload or {}).get("entryType")) in CASHBOOK_MONEY_OUT_TYPES),
+            2,
+        )
+        transfer_count = sum(1 for record in records if normalize_text((record.payload or {}).get("entryType")) == "Transfer")
+        account_count = len(
+            {
+                normalize_text((record.payload or {}).get("accountName"))
+                for record in records
+                if normalize_text((record.payload or {}).get("accountName"))
+            }
+        )
+        net_movement = round(inflow_total - outflow_total, 2)
+        cards = [
+            {"label": "Entries In View", "value": f"{len(records)}", "note": f"Accounts covered: {account_count or 0}"},
+            {"label": "Money In", "value": format_currency(inflow_total), "note": "Cash received and bank withdrawals increasing available money"},
+            {"label": "Money Out", "value": format_currency(outflow_total), "note": "Cash paid out, bank deposits, and bank charges reducing available money"},
+            {"label": "Net Movement", "value": format_currency(net_movement), "note": f"Transfers captured: {transfer_count}"},
+        ]
     elif definition.key == "mobile_money_transactions":
         mobile_money_summary = mobile_money_transaction_breakdown(records)
         cards = [
@@ -4558,84 +4622,44 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
         reconciliation_summary = mobile_money_reconciliation_breakdown(records)
         cards = [
             {
-                "label": "Reconciliation Days",
+                "label": "Closeout Days",
                 "value": f"{reconciliation_summary['recordCount']}",
                 "note": f"Current status: {reconciliation_summary['statusLabel']}",
             },
             {
-                "label": "Opening Float",
-                "value": format_currency(reconciliation_summary["openingCashTotal"]),
-                "note": "Opening cash available before any top-up or customer transaction.",
-            },
-            {
-                "label": "Cash Top-Up",
-                "value": format_currency(reconciliation_summary["cashTopUpTotal"]),
-                "note": "Additional cash added to float during the filtered reconciliation period.",
-            },
-            {
-                "label": "Opening E-Cash",
-                "value": format_currency(reconciliation_summary["openingECashTotal"]),
-                "note": "Wallet float available before serving customers.",
-            },
-            {
-                "label": "E-Cash Top-Up",
-                "value": format_currency(reconciliation_summary["eCashTopUpTotal"]),
-                "note": "Extra wallet float added during the filtered reconciliation period.",
-            },
-            {
-                "label": "Cash Removed",
-                "value": format_currency(reconciliation_summary["cashRemovedTotal"]),
-                "note": "Cash taken out from float for banking, handover, or safekeeping.",
-            },
-            {
-                "label": "E-Cash Removed",
-                "value": format_currency(reconciliation_summary["eCashRemovedTotal"]),
-                "note": "Wallet float moved out to bank or another wallet source.",
-            },
-            {
-                "label": "Cash In Total",
+                "label": "Cash In",
                 "value": format_currency(reconciliation_summary["cashInValueTotal"]),
-                "note": "Full customer value deposited into wallets according to reconciliation rows.",
+                "note": "Customer deposits handled during the filtered period.",
             },
             {
-                "label": "Cash Out Total",
+                "label": "Cash Out",
                 "value": format_currency(reconciliation_summary["cashOutValueTotal"]),
-                "note": "Full customer value paid out from the float according to reconciliation rows.",
+                "note": "Customer withdrawals paid out from float during the filtered period.",
             },
             {
-                "label": "Service Fees",
+                "label": "Fees Earned",
                 "value": format_currency(reconciliation_summary["serviceFeesTotal"]),
-                "note": f"Operating expense: {format_currency(reconciliation_summary['operatingExpenseTotal'])}",
+                "note": f"Operating expense captured: {format_currency(reconciliation_summary['operatingExpenseTotal'])}",
             },
             {
-                "label": "Expected Closing",
-                "value": format_currency(reconciliation_summary["expectedClosingTotal"]),
-                "note": "Calculated closing cash based on opening float, movements, fees, and expenses.",
-            },
-            {
-                "label": "Counted Closing",
+                "label": "Cash Left Counted",
                 "value": format_currency(reconciliation_summary["closingCountedTotal"]),
-                "note": f"Balanced days: {reconciliation_summary['balancedCount']}",
+                "note": f"Expected cash left: {format_currency(reconciliation_summary['expectedClosingTotal'])}",
             },
             {
-                "label": "Variance",
-                "value": format_currency(reconciliation_summary["varianceTotal"]),
-                "note": "Difference between expected closing and counted closing cash.",
-            },
-            {
-                "label": "Expected E-Cash",
-                "value": format_currency(reconciliation_summary["expectedECashTotal"]),
-                "note": "Calculated wallet balance based on opening e-cash and today's movements.",
-            },
-            {
-                "label": "Counted E-Cash",
+                "label": "E-Cash Left Counted",
                 "value": format_currency(reconciliation_summary["closingECashCountedTotal"]),
-                "note": f"Balanced wallet days: {reconciliation_summary['eCashBalancedCount']}",
+                "note": f"Expected e-cash left: {format_currency(reconciliation_summary['expectedECashTotal'])}",
+            },
+            {
+                "label": "Cash Variance",
+                "value": format_currency(reconciliation_summary["varianceTotal"]),
+                "note": f"Balanced cash days: {reconciliation_summary['balancedCount']}",
             },
             {
                 "label": "E-Cash Variance",
                 "value": format_currency(reconciliation_summary["eCashVarianceTotal"]),
-                "note": "Difference between expected e-cash and counted e-cash.",
+                "note": f"Balanced e-cash days: {reconciliation_summary['eCashBalancedCount']}",
             },
         ]
     elif definition.key == "forecast_plans":
@@ -11563,6 +11587,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 delivery_dispatch_rollup(payload)
             elif module_key == "mobile_money_reconciliations":
                 payload["businessAreaId"] = "mobile-money"
+                provider_value = normalize_text(payload.get("provider")) or "MTN Mobile Money"
+                target_date = parse_date(payload.get("date")) or date.today()
+                day_rollup = mobile_money_transaction_day_rollup(g.db, target_date, provider_value)
+                preview_snapshot = mobile_money_live_balance_snapshot(g.db, target_date, provider_value)
+                if normalize_text(request.form.get("openingCash")) == "":
+                    payload["openingCash"] = preview_snapshot["openingCash"]
+                if normalize_text(request.form.get("openingECash")) == "":
+                    payload["openingECash"] = preview_snapshot["openingECash"]
+                if not normalize_text(payload.get("cashTopUpSource")) and normalize_text(preview_snapshot.get("cashTopUpSource")):
+                    payload["cashTopUpSource"] = normalize_text(preview_snapshot.get("cashTopUpSource"))
+                if not normalize_text(payload.get("eCashTopUpSource")) and normalize_text(preview_snapshot.get("eCashTopUpSource")):
+                    payload["eCashTopUpSource"] = normalize_text(preview_snapshot.get("eCashTopUpSource"))
+                payload["provider"] = provider_value
+                payload["cashInValue"] = round(day_rollup["cashInValueTotal"], 2)
+                payload["cashOutValue"] = round(day_rollup["cashOutValueTotal"], 2)
+                payload["serviceFees"] = round(day_rollup["feeTotal"], 2)
             elif module_key == "mobile_money_transactions":
                 payload["businessAreaId"] = "mobile-money"
                 payload["floatImpact"] = normalize_text(payload.get("floatImpact")) or mobile_money_default_float_impact(payload.get("serviceType"))
@@ -11627,12 +11667,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
             record_payload.setdefault("provider", "MTN Mobile Money")
+            reconciliation_target_date = parse_date(record_payload.get("date")) or date.today()
+            reconciliation_provider = normalize_text(record_payload.get("provider")) or "MTN Mobile Money"
             preview_snapshot = mobile_money_live_balance_snapshot(
                 g.db,
-                parse_date(record_payload.get("date")) or date.today(),
-                normalize_text(record_payload.get("provider")),
+                reconciliation_target_date,
+                reconciliation_provider,
             )
-            setup_profile = dict(MOBILE_MONEY_STARTUP_PROFILES.get(normalize_text(record_payload.get("provider")) or "MTN Mobile Money") or {})
+            setup_profile = dict(MOBILE_MONEY_STARTUP_PROFILES.get(reconciliation_provider) or {})
+            day_rollup = mobile_money_transaction_day_rollup(g.db, reconciliation_target_date, reconciliation_provider)
             if not normalize_text(record_payload.get("openingCash")):
                 record_payload["openingCash"] = preview_snapshot["openingCash"]
             if not normalize_text(record_payload.get("openingECash")):
@@ -11641,6 +11684,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 record_payload["cashTopUpSource"] = normalize_text(setup_profile.get("cashTopUpSource"))
             if not normalize_text(record_payload.get("eCashTopUpSource")) and normalize_text(setup_profile.get("eCashTopUpSource")):
                 record_payload["eCashTopUpSource"] = normalize_text(setup_profile.get("eCashTopUpSource"))
+            record_payload["provider"] = reconciliation_provider
+            record_payload["cashInValue"] = round(day_rollup["cashInValueTotal"], 2)
+            record_payload["cashOutValue"] = round(day_rollup["cashOutValueTotal"], 2)
+            record_payload["serviceFees"] = round(day_rollup["feeTotal"], 2)
         elif module_key == "mobile_money_transactions":
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
@@ -11664,6 +11711,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("date", date.today().isoformat())
             record_payload.setdefault("paymentMethod", "Cash")
             record_payload.setdefault("receiptStatus", "Pending")
+        elif module_key == "cashbook_entries":
+            record_payload.setdefault("date", date.today().isoformat())
+            record_payload.setdefault("businessAreaId", "shared-operations")
+            record_payload.setdefault("entryType", "Cash In")
+            record_payload.setdefault("paymentMethod", "Cash")
+            record_payload.setdefault("accountName", "Main Cash Drawer")
         if request.method == "GET" and not record:
             for field in definition.fields:
                 if field.name not in request.args:
@@ -11745,6 +11798,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         module_quick_actions = []
         mobile_money_day_helper = None
         mobile_money_live_snapshot = None
+        mobile_money_closeout_preview = None
         if module_key == "mobile_money_reconciliations":
             mobile_money_day_helper = mobile_money_transaction_day_rollup(
                 g.db,
@@ -11757,6 +11811,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 parse_date(record_payload.get("date")) or date.today(),
                 normalize_text(record_payload.get("provider")),
             )
+        if module_key == "mobile_money_reconciliations":
+            cash_counted_present = normalize_text(record_payload.get("closingCashCounted")) != ""
+            ecash_counted_present = normalize_text(record_payload.get("closingECashCounted")) != ""
+            mobile_money_closeout_preview = {
+                "cashExpected": mobile_money_expected_closing(record_payload),
+                "eCashExpected": mobile_money_expected_ecash(record_payload),
+                "cashCounted": round(parse_amount(record_payload.get("closingCashCounted")), 2) if cash_counted_present else None,
+                "eCashCounted": round(parse_amount(record_payload.get("closingECashCounted")), 2) if ecash_counted_present else None,
+                "cashVariance": mobile_money_variance(record_payload) if cash_counted_present else None,
+                "eCashVariance": mobile_money_ecash_variance(record_payload) if ecash_counted_present else None,
+                "cashStatus": mobile_money_status(record_payload) if cash_counted_present else "Awaiting Cash Count",
+                "eCashStatus": mobile_money_ecash_status(record_payload) if ecash_counted_present else "Awaiting E-Cash Count",
+            }
+            module_quick_actions.append(
+                {
+                    "label": "Open Mobile Money Counter",
+                    "href": url_for(
+                        "module_list",
+                        module_key="mobile_money_transactions",
+                        provider=normalize_text(record_payload.get("provider")),
+                        date_from=record_payload.get("date") or date.today().isoformat(),
+                        date_to=record_payload.get("date") or date.today().isoformat(),
+                    ),
+                    "note": "See completed transactions, live float, and today’s closeout together.",
+                }
+            )
         if module_key == "salary_records" and record:
             module_quick_actions.append(
                 {
@@ -11765,7 +11845,72 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "note": "Print or save the payslip for this payroll record.",
                 }
             )
+        if module_key == "expenses":
+            if user_has_access(g.current_user, "cashbook_entries"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Cashbook",
+                        "href": url_for("module_list", module_key="cashbook_entries"),
+                        "note": "Match the payment against cash or bank movement when needed.",
+                    }
+                )
+        if module_key == "cashbook_entries":
+            if user_has_access(g.current_user, "expenses"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Expenses",
+                        "href": url_for("module_list", module_key="expenses"),
+                        "note": "Use Expenses for spend details and receipts, then keep cash or bank movement here.",
+                    }
+                )
+            if user_has_access(g.current_user, "sales_summary"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Daily Sales Summary",
+                        "href": url_for("sales_summary_page"),
+                        "note": "Compare cash and bank movement with day sales totals.",
+                    }
+                )
         category_map = expense_category_map() if module_key in {"expenses", "budgets", "forecast_plans", "recurring_controls"} else inventory_category_map()
+        if module_key == "mobile_money_reconciliations":
+            return render_template(
+                "mobile_money_reconciliation_form.html",
+                page_title=f"{definition.label} Form",
+                definition=definition,
+                record=record,
+                payload=record_payload,
+                module_quick_actions=module_quick_actions,
+                mobile_money_day_helper=mobile_money_day_helper,
+                mobile_money_live_snapshot=mobile_money_live_snapshot,
+                mobile_money_closeout_preview=mobile_money_closeout_preview,
+                mobile_money_field_map={field.name: field for field in definition.fields},
+                today_iso=date.today().isoformat(),
+            )
+        if module_key == "expenses":
+            return render_template(
+                "expenses_form.html",
+                page_title=f"{definition.label} Form",
+                definition=definition,
+                record=record,
+                payload=record_payload,
+                category_map=expense_category_map(),
+                module_quick_actions=module_quick_actions,
+                expense_field_map={field.name: field for field in definition.fields},
+                today_iso=date.today().isoformat(),
+            )
+        if module_key == "cashbook_entries":
+            return render_template(
+                "cashbook_form.html",
+                page_title=f"{definition.label} Form",
+                definition=definition,
+                record=record,
+                payload=record_payload,
+                module_quick_actions=module_quick_actions,
+                cashbook_field_map={field.name: field for field in definition.fields},
+                cashbook_preview=cashbook_entry_preview(record_payload),
+                cashbook_account_suggestions=CASHBOOK_ACCOUNT_SUGGESTIONS,
+                today_iso=date.today().isoformat(),
+            )
         return render_template(
             "module_form.html",
             page_title=f"{definition.label} Form",

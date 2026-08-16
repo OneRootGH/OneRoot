@@ -578,6 +578,17 @@ CASHBOOK_ENTRY_TYPES = [
     ("Transfer", "Transfer"),
     ("Bank Charge", "Bank Charge"),
 ]
+CASHBOOK_ACCOUNT_SUGGESTIONS = [
+    "Main Cash Drawer",
+    "Business Bank Account",
+    "MTN MoMo Physical Cash Float",
+    "MTN MoMo E-Cash Float",
+    "Kitchen Cash Drawer",
+    "Cold Store Cash Drawer",
+    "Laundry Desk Cash",
+    "Equipment Rental Cash",
+    "Apartment Rent Collections",
+]
 SALARY_PAYMENT_STATUSES = [
     ("Pending", "Pending"),
     ("Part Paid", "Part Paid"),
@@ -1028,7 +1039,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "petty_cash_budgets": ModuleDefinition(
         key="petty_cash_budgets",
-        label="Petty Cash Budgets",
+        label="Petty Cash Limits",
         legacy_collection="pettyCashBudgets",
         menu_group="Finance",
         amount_field="budgetAmount",
@@ -1091,11 +1102,18 @@ MODULES: dict[str, ModuleDefinition] = {
         status_field="entryType",
         fields=[
             FieldDefinition("date", "Date", "date", True),
-            FieldDefinition("accountName", "Account", "text", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition(
+                "accountName",
+                "Cash / Bank Account",
+                "text",
+                True,
+                placeholder="Example: Main Cash Drawer or Business Bank Account",
+            ),
             FieldDefinition("entryType", "Entry Type", "select", True, CASHBOOK_ENTRY_TYPES),
             FieldDefinition("amount", "Amount", "number", True),
             FieldDefinition("paymentMethod", "Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
-            FieldDefinition("reference", "Reference", "text"),
+            FieldDefinition("reference", "Reference", "text", placeholder="Bank alert, receipt no., transfer ref, or teller no."),
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),

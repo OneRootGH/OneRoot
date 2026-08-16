@@ -626,6 +626,15 @@
                       · Ref {{ record.payload.get('receiptReference') }}
                     {% endif %}
                   </span>
+                {% elif definition.key == 'cashbook_entries' %}
+                  <span class="table-secondary">
+                    {{ business_area_short.get(record.payload.get('businessAreaId', ''), 'Shared Operations') }} ·
+                    {{ record.payload.get('entryType', 'Entry') }} ·
+                    {{ record.payload.get('paymentMethod', 'Payment Method not saved') }}
+                    {% if record.payload.get('reference') %}
+                      · Ref {{ record.payload.get('reference') }}
+                    {% endif %}
+                  </span>
                 {% endif %}
               </td>
               <td>{{ record.updated_at }}</td>

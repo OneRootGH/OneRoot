@@ -1,0 +1,313 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set current_area = payload.get('businessAreaId', 'shared-operations') %}
+  {% set current_amount = payload.get('amount', 0) %}
+
+  <article class="card module-hero compact-module-hero">
+    <div class="card-header compact-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }}</h3>
+        <p class="muted compact-copy">Record the real cash or bank movement clearly so you can explain what came in, what went out, and which account was affected.</p>
+      </div>
+      <div class="toolbar compact-toolbar">
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back To Cashbook</a>
+        {% if module_quick_actions %}
+          {% for action in module_quick_actions %}
+            <a class="button subtle" href="{{ action.href }}">{{ action.label }}</a>
+          {% endfor %}
+        {% endif %}
+      </div>
+    </div>
+  </article>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Direction</span>
+      <strong id="cashbook-preview-direction">{{ cashbook_preview.directionLabel }}</strong>
+      <small id="cashbook-preview-impact">{{ cashbook_preview.impactNote }}</small>
+    </article>
+    <article class="metric-card">
+      <span>Amount</span>
+      <strong id="cashbook-preview-amount">{{ current_amount|currency }}</strong>
+      <small>Movement amount being captured now</small>
+    </article>
+    <article class="metric-card">
+      <span>Account</span>
+      <strong id="cashbook-preview-account">{{ cashbook_preview.accountName }}</strong>
+      <small>Selected cash or bank account</small>
+    </article>
+    <article class="metric-card">
+      <span>Business Area</span>
+      <strong id="cashbook-preview-area">{{ cashbook_preview.areaLabel }}</strong>
+      <small>Used to separate finance review by area</small>
+    </article>
+  </section>
+
+  <section class="finance-form-layout">
+    <form method="post" class="card finance-form-main">
+      <section class="form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">1. Movement Basics</p>
+            <h3>Pick the day, area, account, and movement type</h3>
+          </div>
+        </div>
+        <p class="finance-form-note">This tells the app which account changed and what kind of movement happened.</p>
+        <div class="form-grid">
+          <label>
+            <span>{{ cashbook_field_map['date'].label }}</span>
+            <input type="date" name="date" value="{{ payload.get('date', today_iso) }}" required>
+          </label>
+          <label>
+            <span>{{ cashbook_field_map['businessAreaId'].label }}</span>
+            <select id="cashbook-area-field" name="businessAreaId" required>
+              <option value="">Select Business Area</option>
+              {% for value, label in cashbook_field_map['businessAreaId'].options %}
+                <option value="{{ value }}" {% if current_area == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label class="span-2">
+            <span>{{ cashbook_field_map['accountName'].label }}</span>
+            <input type="text" id="cashbook-account-field" name="accountName" list="cashbook-account-list" value="{{ payload.get('accountName', '') }}" placeholder="{{ cashbook_field_map['accountName'].placeholder }}" required>
+            <datalist id="cashbook-account-list">
+              {% for item in cashbook_account_suggestions %}
+                <option value="{{ item }}"></option>
+              {% endfor %}
+            </datalist>
+          </label>
+          <label>
+            <span>{{ cashbook_field_map['entryType'].label }}</span>
+            <select id="cashbook-entry-type-field" name="entryType" required>
+              <option value="">Select Entry Type</option>
+              {% for value, label in cashbook_field_map['entryType'].options %}
+                <option value="{{ value }}" {% if payload.get('entryType', '') == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>{{ cashbook_field_map['paymentMethod'].label }}</span>
+            <select id="cashbook-payment-field" name="paymentMethod">
+              <option value="">Select Payment Method</option>
+              {% for value, label in cashbook_field_map['paymentMethod'].options %}
+                <option value="{{ value }}" {% if payload.get('paymentMethod', '') == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+        </div>
+        <div class="quick-choice-row">
+          {% for item in cashbook_account_suggestions %}
+            <button class="button subtle button-small cashbook-account-pick" type="button" data-account="{{ item }}">{{ item }}</button>
+          {% endfor %}
+        </div>
+      </section>
+
+      <section class="form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">2. Amount And Reference</p>
+            <h3>Enter the value and traceable reference</h3>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>{{ cashbook_field_map['amount'].label }}</span>
+            <input type="number" id="cashbook-amount-field" name="amount" step="{{ cashbook_field_map['amount'].step }}" value="{{ payload.get('amount', '') }}" placeholder="0.00" required>
+          </label>
+          <label>
+            <span>{{ cashbook_field_map['reference'].label }}</span>
+            <input type="text" name="reference" value="{{ payload.get('reference', '') }}" placeholder="{{ cashbook_field_map['reference'].placeholder }}">
+          </label>
+          <label class="span-2">
+            <span>{{ cashbook_field_map['notes'].label }}</span>
+            <textarea name="notes" rows="{{ cashbook_field_map['notes'].rows }}" placeholder="Example: Source account, destination account, teller detail, or short reason for the movement">{{ payload.get('notes', '') }}</textarea>
+          </label>
+        </div>
+      </section>
+
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save Cashbook Entry</button>
+        <a class="button subtle" href="{{ url_for('module_form', module_key=definition.key) }}">Clear</a>
+      </div>
+    </form>
+
+    <aside class="finance-form-sidebar">
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Entry Guide</p>
+            <h3>How This Movement Will Read</h3>
+          </div>
+        </div>
+        <div class="finance-preview-grid">
+          <article class="mini-card">
+            <span>Direction</span>
+            <strong id="cashbook-side-direction">{{ cashbook_preview.directionLabel }}</strong>
+            <small id="cashbook-side-impact">{{ cashbook_preview.impactNote }}</small>
+          </article>
+          <article class="mini-card">
+            <span>Payment Method</span>
+            <strong id="cashbook-side-payment">{{ cashbook_preview.paymentMethod }}</strong>
+            <small>How the movement happened</small>
+          </article>
+          <article class="mini-card">
+            <span>Account</span>
+            <strong id="cashbook-side-account">{{ cashbook_preview.accountName }}</strong>
+            <small>Cash or bank account affected</small>
+          </article>
+          <article class="mini-card">
+            <span>Area</span>
+            <strong id="cashbook-side-area">{{ cashbook_preview.areaLabel }}</strong>
+            <small>Business area carrying the movement</small>
+          </article>
+        </div>
+        <p class="finance-form-note" id="cashbook-entry-guide">{{ cashbook_preview.entryGuide }}</p>
+      </article>
+
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Quick Rules</p>
+            <h3>Keep The Book Clean</h3>
+          </div>
+        </div>
+        <ol class="mobile-money-reconciliation-steps">
+          <li>Use one row for each real movement of money.</li>
+          <li>Use `Reference` for bank alert, teller, MoMo, or receipt number whenever possible.</li>
+          <li>Use `Notes` to mention the matching source or destination account for deposits, withdrawals, and transfers.</li>
+        </ol>
+      </article>
+
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">When To Use It</p>
+            <h3>Cashbook Vs Expense</h3>
+          </div>
+        </div>
+        <p class="finance-form-note">Use `Cashbook / Bankbook` for the movement of money itself. Use `Expenses` when you need the spend description, category, vendor, and receipt trail.</p>
+      </article>
+    </aside>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (() => {
+      const entryTypeField = document.getElementById("cashbook-entry-type-field");
+      const amountField = document.getElementById("cashbook-amount-field");
+      const accountField = document.getElementById("cashbook-account-field");
+      const areaField = document.getElementById("cashbook-area-field");
+      const paymentField = document.getElementById("cashbook-payment-field");
+      const accountButtons = document.querySelectorAll(".cashbook-account-pick");
+
+      const entryGuideMap = {
+        "Cash In": {
+          direction: "Money In",
+          impact: (account) => `Adds money into ${account}.`,
+          guide: "Use this when cash or a bank receipt comes into the selected account and increases what you hold."
+        },
+        "Cash Out": {
+          direction: "Money Out",
+          impact: (account) => `Removes money from ${account}.`,
+          guide: "Use this when you pay out from the selected cash or bank account and need a clean outgoing trail."
+        },
+        "Bank Deposit": {
+          direction: "Money Out",
+          impact: (account) => `Treats ${account} as the receiving bank account for deposited cash.`,
+          guide: "Use this when you move physical cash into a bank account. Mention the source cash drawer in Notes."
+        },
+        "Bank Withdrawal": {
+          direction: "Money In",
+          impact: (account) => `Treats ${account} as the receiving cash point after the withdrawal.`,
+          guide: "Use this when money leaves the bank and comes into a cash point. Keep the bank reference in Reference."
+        },
+        "Transfer": {
+          direction: "Internal Transfer",
+          impact: (account) => `Use ${account} as the active or receiving account and state the matching side in Notes.`,
+          guide: "Use this for internal movement between OneRoot accounts so the audit trail remains clear."
+        },
+        "Bank Charge": {
+          direction: "Money Out",
+          impact: (account) => `Reduces ${account} by the direct fee or charge.`,
+          guide: "Use this for deductions, charges, and fees taken directly by the bank or provider."
+        }
+      };
+
+      const formatCurrency = (value) => {
+        return new Intl.NumberFormat("en-GH", {
+          style: "currency",
+          currency: "GHS",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(value || 0);
+      };
+
+      const syncPreview = () => {
+        const account = accountField?.value || "Selected Account";
+        const entryType = entryTypeField?.value || "Cash In";
+        const area = areaField?.selectedOptions?.[0]?.textContent || "Shared Operations";
+        const payment = paymentField?.selectedOptions?.[0]?.textContent || "Cash";
+        const amount = Number.parseFloat(amountField?.value || "0");
+        const guide = entryGuideMap[entryType] || entryGuideMap["Cash In"];
+
+        const directionNodes = [
+          document.getElementById("cashbook-preview-direction"),
+          document.getElementById("cashbook-side-direction"),
+        ];
+        const impactNodes = [
+          document.getElementById("cashbook-preview-impact"),
+          document.getElementById("cashbook-side-impact"),
+        ];
+        const amountNode = document.getElementById("cashbook-preview-amount");
+        const accountNodes = [
+          document.getElementById("cashbook-preview-account"),
+          document.getElementById("cashbook-side-account"),
+        ];
+        const areaNodes = [
+          document.getElementById("cashbook-preview-area"),
+          document.getElementById("cashbook-side-area"),
+        ];
+        const paymentNode = document.getElementById("cashbook-side-payment");
+        const guideNode = document.getElementById("cashbook-entry-guide");
+
+        directionNodes.forEach((node) => {
+          if (node) node.textContent = guide.direction;
+        });
+        impactNodes.forEach((node) => {
+          if (node) node.textContent = guide.impact(account);
+        });
+        if (amountNode) amountNode.textContent = formatCurrency(Number.isFinite(amount) ? amount : 0);
+        accountNodes.forEach((node) => {
+          if (node) node.textContent = account;
+        });
+        areaNodes.forEach((node) => {
+          if (node) node.textContent = area;
+        });
+        if (paymentNode) paymentNode.textContent = payment;
+        if (guideNode) guideNode.textContent = guide.guide;
+      };
+
+      [entryTypeField, amountField, accountField, areaField, paymentField].forEach((element) => {
+        if (!element) {
+          return;
+        }
+        element.addEventListener("input", syncPreview);
+        element.addEventListener("change", syncPreview);
+      });
+
+      accountButtons.forEach((button) => {
+        button.addEventListener("click", () => {
+          if (accountField) {
+            accountField.value = button.dataset.account || "";
+            syncPreview();
+            accountField.focus();
+          }
+        });
+      });
+
+      syncPreview();
+    })();
+  </script>
+{% endblock %}

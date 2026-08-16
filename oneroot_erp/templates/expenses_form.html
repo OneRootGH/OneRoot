@@ -1,0 +1,320 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set current_area = payload.get('businessAreaId', '') %}
+  {% set current_amount = payload.get('amount', 0) %}
+  {% set current_receipt_uploaded = payload.get('receiptAttachmentUrl') or payload.get('receiptStatus') == 'Uploaded' %}
+
+  <article class="card module-hero compact-module-hero">
+    <div class="card-header compact-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }}</h3>
+        <p class="muted compact-copy">Capture what was spent, who was paid, how it was paid, and the receipt in one clean flow that staff can finish quickly.</p>
+      </div>
+      <div class="toolbar compact-toolbar">
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back To Expenses</a>
+        {% if module_quick_actions %}
+          {% for action in module_quick_actions %}
+            <a class="button subtle" href="{{ action.href }}">{{ action.label }}</a>
+          {% endfor %}
+        {% endif %}
+      </div>
+    </div>
+  </article>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Amount</span>
+      <strong id="expense-preview-amount">{{ current_amount|currency }}</strong>
+      <small>Total expense amount being captured now</small>
+    </article>
+    <article class="metric-card">
+      <span>Payment Method</span>
+      <strong id="expense-preview-payment">{{ payload.get('paymentMethod', 'Cash') or 'Cash' }}</strong>
+      <small>How the money left OneRoot</small>
+    </article>
+    <article class="metric-card">
+      <span>Receipt Status</span>
+      <strong id="expense-preview-receipt">{{ 'Uploaded' if current_receipt_uploaded else payload.get('receiptStatus', 'Pending') }}</strong>
+      <small>Attach the image or PDF if available</small>
+    </article>
+    <article class="metric-card">
+      <span>Business Area</span>
+      <strong id="expense-preview-area">{{ business_area_short.get(current_area, 'Choose Area') }}</strong>
+      <small>Used for area spending and profitability reports</small>
+    </article>
+  </section>
+
+  <section class="finance-form-layout">
+    <form method="post" enctype="multipart/form-data" class="card finance-form-main">
+      <section class="form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">1. Spend Details</p>
+            <h3>Choose area, date, category, and vendor</h3>
+          </div>
+        </div>
+        <p class="finance-form-note">This part explains what the expense was for and where it belongs in OneRoot reporting.</p>
+        <div class="form-grid">
+          <label>
+            <span>{{ expense_field_map['businessAreaId'].label }}</span>
+            <select name="businessAreaId" id="expense-area-field" required>
+              <option value="">Select Business Area</option>
+              {% for value, label in expense_field_map['businessAreaId'].options %}
+                <option value="{{ value }}" {% if current_area == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>{{ expense_field_map['date'].label }}</span>
+            <input type="date" name="date" value="{{ payload.get('date', today_iso) }}" required>
+          </label>
+          <label>
+            <span>{{ expense_field_map['category'].label }}</span>
+            <select name="category" id="expense-category-field" data-current="{{ payload.get('category', '') }}" required>
+              <option value="">Select Expense Category</option>
+            </select>
+          </label>
+          <label>
+            <span>{{ expense_field_map['vendor'].label }}</span>
+            <input type="text" name="vendor" value="{{ payload.get('vendor', '') }}" placeholder="{{ expense_field_map['vendor'].placeholder or 'Shop, supplier, person, or service paid' }}" required>
+          </label>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">2. Payment</p>
+            <h3>Enter the amount and payment trail</h3>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>{{ expense_field_map['amount'].label }}</span>
+            <input type="number" id="expense-amount-field" name="amount" step="{{ expense_field_map['amount'].step }}" value="{{ payload.get('amount', '') }}" placeholder="0.00" required>
+          </label>
+          <label>
+            <span>{{ expense_field_map['paymentMethod'].label }}</span>
+            <select name="paymentMethod" id="expense-payment-field" required>
+              <option value="">Select Payment Method</option>
+              {% for value, label in expense_field_map['paymentMethod'].options %}
+                <option value="{{ value }}" {% if payload.get('paymentMethod', '') == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>{{ expense_field_map['receiptStatus'].label }}</span>
+            <select name="receiptStatus" id="expense-receipt-status-field" required>
+              <option value="">Select Receipt Status</option>
+              {% for value, label in expense_field_map['receiptStatus'].options %}
+                <option value="{{ value }}" {% if payload.get('receiptStatus', '') == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>{{ expense_field_map['receiptReference'].label }}</span>
+            <input type="text" name="receiptReference" value="{{ payload.get('receiptReference', '') }}" placeholder="{{ expense_field_map['receiptReference'].placeholder }}">
+          </label>
+        </div>
+      </section>
+
+      <section class="form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">3. Notes And Receipt</p>
+            <h3>Add description, notes, and upload evidence</h3>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label class="span-2">
+            <span>{{ expense_field_map['description'].label }}</span>
+            <textarea name="description" rows="{{ expense_field_map['description'].rows }}" placeholder="Short description of what was bought or paid for">{{ payload.get('description', '') }}</textarea>
+          </label>
+          <label class="span-2">
+            <span>{{ expense_field_map['receiptUpload'].label }}</span>
+            <input type="file" name="receiptUpload" id="expense-receipt-upload" accept="image/*,application/pdf">
+            {% if payload.get('receiptAttachmentUrl') %}
+              <span class="table-secondary">
+                Current receipt:
+                <a class="table-link" href="{{ payload.get('receiptAttachmentUrl') }}" target="_blank" rel="noopener">
+                  {{ payload.get('receiptAttachmentName') or 'Open receipt' }}
+                </a>
+              </span>
+              <span class="checkbox-inline">
+                <input type="checkbox" name="clearReceiptAttachment">
+                Remove current receipt
+              </span>
+            {% endif %}
+          </label>
+          <label class="span-2">
+            <span>{{ expense_field_map['notes'].label }}</span>
+            <textarea name="notes" rows="{{ expense_field_map['notes'].rows }}" placeholder="Anything staff should remember later, such as why this was urgent or which team used it">{{ payload.get('notes', '') }}</textarea>
+          </label>
+        </div>
+      </section>
+
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save Expense</button>
+        <a class="button subtle" href="{{ url_for('module_form', module_key=definition.key) }}">Clear</a>
+      </div>
+    </form>
+
+    <aside class="finance-form-sidebar">
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Quick Reminder</p>
+            <h3>Use Expense Vs Cashbook</h3>
+          </div>
+        </div>
+        <ol class="mobile-money-reconciliation-steps">
+          <li>Use `Expenses` to explain what was spent, which area spent it, and to attach the receipt.</li>
+          <li>Use `Cashbook / Bankbook` when you need the actual money movement trail in cash or bank.</li>
+          <li>If both matter, save the expense here and record the money movement in the cashbook too.</li>
+        </ol>
+      </article>
+
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Live Preview</p>
+            <h3>Entry Snapshot</h3>
+          </div>
+        </div>
+        <div class="finance-preview-grid">
+          <article class="mini-card">
+            <span>Area</span>
+            <strong id="expense-side-area">{{ business_area_short.get(current_area, 'Choose Area') }}</strong>
+            <small>Area selected for this spend</small>
+          </article>
+          <article class="mini-card">
+            <span>Category</span>
+            <strong id="expense-side-category">{{ payload.get('category', 'Choose Category') or 'Choose Category' }}</strong>
+            <small>Spend type used in reports</small>
+          </article>
+          <article class="mini-card">
+            <span>Vendor</span>
+            <strong id="expense-side-vendor">{{ payload.get('vendor', 'Add Vendor') or 'Add Vendor' }}</strong>
+            <small>Who received the payment</small>
+          </article>
+          <article class="mini-card">
+            <span>Receipt</span>
+            <strong id="expense-side-receipt">{{ 'Uploaded' if current_receipt_uploaded else payload.get('receiptStatus', 'Pending') }}</strong>
+            <small>Receipt image or PDF status</small>
+          </article>
+        </div>
+      </article>
+    </aside>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (() => {
+      const areaField = document.getElementById("expense-area-field");
+      const categoryField = document.getElementById("expense-category-field");
+      const receiptInput = document.getElementById("expense-receipt-upload");
+      const receiptStatusField = document.getElementById("expense-receipt-status-field");
+      const amountField = document.getElementById("expense-amount-field");
+      const paymentField = document.getElementById("expense-payment-field");
+      const vendorField = document.querySelector('input[name="vendor"]');
+      const categoryMap = {{ category_map|tojson }};
+
+      const formatCurrency = (value) => {
+        return new Intl.NumberFormat("en-GH", {
+          style: "currency",
+          currency: "GHS",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(value || 0);
+      };
+
+      const renderDynamicCategories = () => {
+        if (!areaField || !categoryField) {
+          return;
+        }
+        const selectedArea = areaField.value || "";
+        const options = selectedArea && categoryMap[selectedArea] ? categoryMap[selectedArea] : [];
+        const selectedValue = categoryField.value || categoryField.dataset.current || "";
+        categoryField.innerHTML = '<option value="">Select Expense Category</option>';
+        options.forEach((category) => {
+          const option = document.createElement("option");
+          option.value = category;
+          option.textContent = category;
+          if (category === selectedValue) {
+            option.selected = true;
+          }
+          categoryField.appendChild(option);
+        });
+        if (selectedValue && !options.includes(selectedValue)) {
+          const customOption = document.createElement("option");
+          customOption.value = selectedValue;
+          customOption.textContent = selectedValue;
+          customOption.selected = true;
+          categoryField.appendChild(customOption);
+        }
+      };
+
+      const syncPreview = () => {
+        const amount = Number.parseFloat(amountField?.value || "0");
+        const areaLabel = areaField?.selectedOptions?.[0]?.textContent || "Choose Area";
+        const paymentLabel = paymentField?.selectedOptions?.[0]?.textContent || "Cash";
+        const receiptLabel = receiptStatusField?.selectedOptions?.[0]?.textContent || "Pending";
+        const vendorLabel = vendorField?.value || "Add Vendor";
+        const categoryLabel = categoryField?.selectedOptions?.[0]?.textContent || "Choose Category";
+
+        const amountNode = document.getElementById("expense-preview-amount");
+        const paymentNode = document.getElementById("expense-preview-payment");
+        const receiptNode = document.getElementById("expense-preview-receipt");
+        const areaNode = document.getElementById("expense-preview-area");
+        const sideAreaNode = document.getElementById("expense-side-area");
+        const sideCategoryNode = document.getElementById("expense-side-category");
+        const sideVendorNode = document.getElementById("expense-side-vendor");
+        const sideReceiptNode = document.getElementById("expense-side-receipt");
+
+        if (amountNode) amountNode.textContent = formatCurrency(Number.isFinite(amount) ? amount : 0);
+        if (paymentNode) paymentNode.textContent = paymentLabel;
+        if (receiptNode) receiptNode.textContent = receiptLabel;
+        if (areaNode) areaNode.textContent = areaLabel;
+        if (sideAreaNode) sideAreaNode.textContent = areaLabel;
+        if (sideCategoryNode) sideCategoryNode.textContent = categoryLabel;
+        if (sideVendorNode) sideVendorNode.textContent = vendorLabel;
+        if (sideReceiptNode) sideReceiptNode.textContent = receiptLabel;
+      };
+
+      if (areaField) {
+        areaField.addEventListener("change", () => {
+          renderDynamicCategories();
+          syncPreview();
+        });
+      }
+      if (categoryField) {
+        categoryField.addEventListener("change", syncPreview);
+      }
+      if (amountField) {
+        amountField.addEventListener("input", syncPreview);
+      }
+      if (paymentField) {
+        paymentField.addEventListener("change", syncPreview);
+      }
+      if (vendorField) {
+        vendorField.addEventListener("input", syncPreview);
+      }
+      if (receiptStatusField) {
+        receiptStatusField.addEventListener("change", syncPreview);
+      }
+      if (receiptInput && receiptStatusField) {
+        receiptInput.addEventListener("change", () => {
+          if (receiptInput.files && receiptInput.files.length) {
+            receiptStatusField.value = "Uploaded";
+            syncPreview();
+          }
+        });
+      }
+
+      renderDynamicCategories();
+      syncPreview();
+    })();
+  </script>
+{% endblock %}

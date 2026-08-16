@@ -1,0 +1,409 @@
+{% extends "base.html" %}
+{% block content %}
+  {% set cash_variance = mobile_money_closeout_preview.cashVariance %}
+  {% set ecash_variance = mobile_money_closeout_preview.eCashVariance %}
+  {% set cash_tone = 'is-highlight' if cash_variance is not none and cash_variance == 0 else ('is-danger' if cash_variance is not none and cash_variance < 0 else ('is-warning' if cash_variance is not none and cash_variance > 0 else '')) %}
+  {% set ecash_tone = 'is-highlight' if ecash_variance is not none and ecash_variance == 0 else ('is-danger' if ecash_variance is not none and ecash_variance < 0 else ('is-warning' if ecash_variance is not none and ecash_variance > 0 else '')) %}
+
+  <article class="card module-hero compact-module-hero">
+    <div class="card-header compact-header">
+      <div>
+        <p class="eyebrow">{{ definition.menu_group }}</p>
+        <h3>{{ definition.label }}</h3>
+        <p class="muted compact-copy">Close the MoMo counter in one flow: confirm start float, note extra cash or e-cash added, then count what is left at the end of the day.</p>
+      </div>
+      <div class="toolbar compact-toolbar">
+        <a class="button subtle" href="{{ url_for('module_list', module_key=definition.key) }}">Back To Reconciliation</a>
+        {% if module_quick_actions %}
+          <a class="button subtle" href="{{ module_quick_actions[0].href }}">{{ module_quick_actions[0].label }}</a>
+        {% endif %}
+      </div>
+    </div>
+  </article>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Start Cash</span>
+      <strong>{{ payload.get('openingCash', 0)|currency }}</strong>
+      <small>Physical cash available at the start of the day</small>
+    </article>
+    <article class="metric-card">
+      <span>Start E-Cash</span>
+      <strong>{{ payload.get('openingECash', 0)|currency }}</strong>
+      <small>E-cash wallet available before serving customers</small>
+    </article>
+    <article class="metric-card">
+      <span>Cash Left Now</span>
+      <strong>{{ mobile_money_live_snapshot.physicalCashAvailable|currency }}</strong>
+      <small>{{ mobile_money_live_snapshot.basisNote }}</small>
+    </article>
+    <article class="metric-card">
+      <span>E-Cash Left Now</span>
+      <strong>{{ mobile_money_live_snapshot.eCashAvailable|currency }}</strong>
+      <small>Working float left {{ mobile_money_live_snapshot.workingFloatAvailable|currency }}</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Completed Txns</span>
+      <strong>{{ mobile_money_day_helper.completedCount if mobile_money_day_helper else 0 }}</strong>
+      <small>{{ payload.get('provider', 'MTN Mobile Money') }} on {{ payload.get('date', today_iso) }}</small>
+    </article>
+    <article class="metric-card">
+      <span>Cash In</span>
+      <strong>{{ payload.get('cashInValue', 0)|currency }}</strong>
+      <small>Auto-filled from completed deposits and top-ups that bring in cash</small>
+    </article>
+    <article class="metric-card">
+      <span>Cash Out</span>
+      <strong>{{ payload.get('cashOutValue', 0)|currency }}</strong>
+      <small>Auto-filled from completed withdrawals and payouts</small>
+    </article>
+    <article class="metric-card">
+      <span>Fees Earned</span>
+      <strong>{{ payload.get('serviceFees', 0)|currency }}</strong>
+      <small>Commission already pulled from completed mobile money sales</small>
+    </article>
+  </section>
+
+  <section class="mobile-money-reconciliation-layout">
+    <form method="post" class="card mobile-money-reconciliation-form" id="mobile-money-reconciliation-form">
+      <input type="hidden" name="cashInValue" id="momo-cash-in-hidden" value="{{ payload.get('cashInValue', 0) }}">
+      <input type="hidden" name="cashOutValue" id="momo-cash-out-hidden" value="{{ payload.get('cashOutValue', 0) }}">
+      <input type="hidden" name="serviceFees" id="momo-fees-hidden" value="{{ payload.get('serviceFees', 0) }}">
+
+      <section class="form-section mobile-money-form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">1. Start Of Day</p>
+            <h3>Choose the day and starting float</h3>
+          </div>
+          <a
+            class="button subtle"
+            id="momo-refresh-link"
+            href="{{ url_for('module_form', module_key=definition.key, date=payload.get('date', today_iso), provider=payload.get('provider', 'MTN Mobile Money')) }}"
+          >
+            Reload Figures
+          </a>
+        </div>
+        <p class="mobile-money-reconciliation-note">Use Reload Figures after changing the date or provider so the app refreshes completed transaction totals for that counter day.</p>
+        <div class="form-grid">
+          <label>
+            <span>{{ mobile_money_field_map['date'].label }}</span>
+            <input type="date" id="momo-date" name="date" value="{{ payload.get('date', today_iso) }}" required>
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['provider'].label }}</span>
+            <select id="momo-provider" name="provider" required>
+              <option value="">Select Provider</option>
+              {% for value, label in mobile_money_field_map['provider'].options %}
+                <option value="{{ value }}" {% if payload.get('provider', '') == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['openingCash'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['openingCash'].step }}" id="momo-opening-cash" name="openingCash" value="{{ payload.get('openingCash', '') }}" required>
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['openingECash'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['openingECash'].step }}" id="momo-opening-ecash" name="openingECash" value="{{ payload.get('openingECash', '') }}" required>
+          </label>
+        </div>
+      </section>
+
+      <section class="form-section mobile-money-form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">2. Float Movements</p>
+            <h3>Record extra float and any amount moved out</h3>
+          </div>
+        </div>
+        <p class="mobile-money-reconciliation-note">Only fill what actually changed outside normal customer transactions. Leave the rest at zero or blank.</p>
+        <div class="form-grid">
+          <label>
+            <span>{{ mobile_money_field_map['cashTopUp'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['cashTopUp'].step }}" id="momo-cash-topup" name="cashTopUp" value="{{ payload.get('cashTopUp', '') }}">
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['cashTopUpSource'].label }}</span>
+            <input type="text" name="cashTopUpSource" value="{{ payload.get('cashTopUpSource', '') }}" placeholder="Example: Cash drawer top-up or owner cash">
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['eCashTopUp'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['eCashTopUp'].step }}" id="momo-ecash-topup" name="eCashTopUp" value="{{ payload.get('eCashTopUp', '') }}">
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['eCashTopUpSource'].label }}</span>
+            <input type="text" name="eCashTopUpSource" value="{{ payload.get('eCashTopUpSource', '') }}" placeholder="Example: Bank transfer or agent wallet top-up">
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['cashRemoved'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['cashRemoved'].step }}" id="momo-cash-removed" name="cashRemoved" value="{{ payload.get('cashRemoved', '') }}">
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['eCashRemoved'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['eCashRemoved'].step }}" id="momo-ecash-removed" name="eCashRemoved" value="{{ payload.get('eCashRemoved', '') }}">
+          </label>
+          <label class="span-2">
+            <span>{{ mobile_money_field_map['operatingExpense'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['operatingExpense'].step }}" id="momo-operating-expense" name="operatingExpense" value="{{ payload.get('operatingExpense', '') }}" placeholder="Any direct cost or small spend taken from the MoMo counter">
+          </label>
+        </div>
+      </section>
+
+      <section class="form-section mobile-money-form-section">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">3. End Of Day Close</p>
+            <h3>Count what is left and save the closeout</h3>
+          </div>
+        </div>
+        <div class="form-grid">
+          <label>
+            <span>{{ mobile_money_field_map['closingCashCounted'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['closingCashCounted'].step }}" id="momo-closing-cash" name="closingCashCounted" value="{{ payload.get('closingCashCounted', '') }}" required>
+          </label>
+          <label>
+            <span>{{ mobile_money_field_map['closingECashCounted'].label }}</span>
+            <input type="number" step="{{ mobile_money_field_map['closingECashCounted'].step }}" id="momo-closing-ecash" name="closingECashCounted" value="{{ payload.get('closingECashCounted', '') }}" required>
+          </label>
+          <label class="span-2">
+            <span>{{ mobile_money_field_map['notes'].label }}</span>
+            <textarea name="notes" rows="{{ mobile_money_field_map['notes'].rows }}" placeholder="Short note about shortages, extra cash, or unusual transactions">{{ payload.get('notes', '') }}</textarea>
+          </label>
+        </div>
+      </section>
+
+      <div class="form-actions">
+        <button class="button primary" type="submit">Save Closeout</button>
+        <a class="button subtle" href="{{ url_for('module_form', module_key=definition.key) }}">Clear</a>
+      </div>
+    </form>
+
+    <aside class="mobile-money-reconciliation-sidebar">
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Auto Totals</p>
+            <h3>Pulled From Mobile Money Sales</h3>
+          </div>
+        </div>
+        <div class="mobile-money-auto-grid">
+          <article class="mini-card">
+            <span>Handled Value</span>
+            <strong>{{ (mobile_money_day_helper.handledValueTotal if mobile_money_day_helper else 0)|currency }}</strong>
+            <small>Full value processed for this day</small>
+          </article>
+          <article class="mini-card">
+            <span>Cash In</span>
+            <strong>{{ payload.get('cashInValue', 0)|currency }}</strong>
+            <small>Auto-synced from completed transactions</small>
+          </article>
+          <article class="mini-card">
+            <span>Cash Out</span>
+            <strong>{{ payload.get('cashOutValue', 0)|currency }}</strong>
+            <small>Auto-synced from completed transactions</small>
+          </article>
+          <article class="mini-card">
+            <span>Fees Earned</span>
+            <strong>{{ payload.get('serviceFees', 0)|currency }}</strong>
+            <small>Commission saved from mobile money sales</small>
+          </article>
+          <article class="mini-card">
+            <span>Cash Top-Up</span>
+            <strong>{{ mobile_money_live_snapshot.cashTopUp|currency }}</strong>
+            <small>Extra physical cash already on this day</small>
+          </article>
+          <article class="mini-card">
+            <span>E-Cash Top-Up</span>
+            <strong>{{ mobile_money_live_snapshot.eCashTopUp|currency }}</strong>
+            <small>Extra wallet float already on this day</small>
+          </article>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Closeout Preview</p>
+            <h3>Expected Versus Counted</h3>
+          </div>
+        </div>
+        <section class="card-grid two">
+          <article class="metric-card">
+            <span>Expected Cash Left</span>
+            <strong id="momo-expected-cash">{{ mobile_money_closeout_preview.cashExpected|currency }}</strong>
+            <small>What the counter should hold after the day’s movements</small>
+          </article>
+          <article class="metric-card">
+            <span>Expected E-Cash Left</span>
+            <strong id="momo-expected-ecash">{{ mobile_money_closeout_preview.eCashExpected|currency }}</strong>
+            <small>What the wallet should show at close</small>
+          </article>
+          <article class="metric-card {% if cash_variance is not none and cash_variance != 0 %}warning{% endif %}">
+            <span>Cash Variance</span>
+            <strong id="momo-cash-variance">{{ mobile_money_closeout_preview.cashVariance|currency if mobile_money_closeout_preview.cashVariance is not none else '—' }}</strong>
+            <small id="momo-cash-status">{{ mobile_money_closeout_preview.cashStatus }}</small>
+          </article>
+          <article class="metric-card {% if ecash_variance is not none and ecash_variance != 0 %}warning{% endif %}">
+            <span>E-Cash Variance</span>
+            <strong id="momo-ecash-variance">{{ mobile_money_closeout_preview.eCashVariance|currency if mobile_money_closeout_preview.eCashVariance is not none else '—' }}</strong>
+            <small id="momo-ecash-status">{{ mobile_money_closeout_preview.eCashStatus }}</small>
+          </article>
+        </section>
+        <div class="mobile-money-reconciliation-chip-row">
+          <span class="status-chip {{ cash_tone }}" id="momo-cash-chip">{{ mobile_money_closeout_preview.cashStatus }}</span>
+          <span class="status-chip {{ ecash_tone }}" id="momo-ecash-chip">{{ mobile_money_closeout_preview.eCashStatus }}</span>
+        </div>
+      </article>
+
+      <article class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Simple Workflow</p>
+            <h3>What Staff Need To Do</h3>
+          </div>
+        </div>
+        <ol class="mobile-money-reconciliation-steps">
+          <li>Confirm the day and starting cash plus e-cash.</li>
+          <li>Enter only extra float added, float moved out, or direct MoMo counter expense.</li>
+          <li>Count the physical cash left, check the wallet left, and save the closeout.</li>
+        </ol>
+      </article>
+    </aside>
+  </section>
+{% endblock %}
+
+{% block scripts %}
+  <script>
+    (() => {
+      const numberValue = (id) => {
+        const element = document.getElementById(id);
+        if (!element) {
+          return 0;
+        }
+        const parsed = Number.parseFloat(element.value || "0");
+        return Number.isFinite(parsed) ? parsed : 0;
+      };
+
+      const formatCurrency = (value) => {
+        return new Intl.NumberFormat("en-GH", {
+          style: "currency",
+          currency: "GHS",
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        }).format(value || 0);
+      };
+
+      const updateStatusChip = (chipId, statusId, varianceId, variance) => {
+        const chip = document.getElementById(chipId);
+        const status = document.getElementById(statusId);
+        const varianceNode = document.getElementById(varianceId);
+        if (!chip || !status || !varianceNode) {
+          return;
+        }
+
+        if (variance === null) {
+          varianceNode.textContent = "—";
+          status.textContent = chipId === "momo-cash-chip" ? "Awaiting Cash Count" : "Awaiting E-Cash Count";
+          chip.textContent = status.textContent;
+          chip.className = "status-chip";
+          return;
+        }
+
+        let label = "Balanced";
+        let tone = "is-highlight";
+        if (variance > 0.009) {
+          label = "Over Counted";
+          tone = "is-warning";
+        } else if (variance < -0.009) {
+          label = "Short";
+          tone = "is-danger";
+        }
+
+        varianceNode.textContent = formatCurrency(variance);
+        status.textContent = label;
+        chip.textContent = label;
+        chip.className = `status-chip ${tone}`;
+      };
+
+      const updatePreview = () => {
+        const cashIn = numberValue("momo-cash-in-hidden");
+        const cashOut = numberValue("momo-cash-out-hidden");
+        const fees = numberValue("momo-fees-hidden");
+        const openingCash = numberValue("momo-opening-cash");
+        const openingECash = numberValue("momo-opening-ecash");
+        const cashTopUp = numberValue("momo-cash-topup");
+        const ecashTopUp = numberValue("momo-ecash-topup");
+        const cashRemoved = numberValue("momo-cash-removed");
+        const ecashRemoved = numberValue("momo-ecash-removed");
+        const operatingExpense = numberValue("momo-operating-expense");
+
+        const expectedCash = openingCash + cashTopUp + cashIn + fees - cashOut - cashRemoved - operatingExpense;
+        const expectedECash = openingECash + ecashTopUp + cashOut - cashIn - ecashRemoved;
+        const cashCountInput = document.getElementById("momo-closing-cash");
+        const ecashCountInput = document.getElementById("momo-closing-ecash");
+        const cashCounted = cashCountInput && cashCountInput.value !== "" ? Number.parseFloat(cashCountInput.value) : null;
+        const ecashCounted = ecashCountInput && ecashCountInput.value !== "" ? Number.parseFloat(ecashCountInput.value) : null;
+        const cashVariance = cashCounted === null || Number.isNaN(cashCounted) ? null : cashCounted - expectedCash;
+        const ecashVariance = ecashCounted === null || Number.isNaN(ecashCounted) ? null : ecashCounted - expectedECash;
+
+        const expectedCashNode = document.getElementById("momo-expected-cash");
+        const expectedECashNode = document.getElementById("momo-expected-ecash");
+        if (expectedCashNode) {
+          expectedCashNode.textContent = formatCurrency(expectedCash);
+        }
+        if (expectedECashNode) {
+          expectedECashNode.textContent = formatCurrency(expectedECash);
+        }
+
+        updateStatusChip("momo-cash-chip", "momo-cash-status", "momo-cash-variance", cashVariance);
+        updateStatusChip("momo-ecash-chip", "momo-ecash-status", "momo-ecash-variance", ecashVariance);
+      };
+
+      const updateRefreshLink = () => {
+        const refreshLink = document.getElementById("momo-refresh-link");
+        const provider = document.getElementById("momo-provider");
+        const date = document.getElementById("momo-date");
+        if (!refreshLink || !provider || !date) {
+          return;
+        }
+        const url = new URL(refreshLink.href, window.location.origin);
+        url.searchParams.set("provider", provider.value || "MTN Mobile Money");
+        url.searchParams.set("date", date.value || "{{ today_iso }}");
+        refreshLink.href = url.pathname + url.search;
+      };
+
+      const watchedInputs = [
+        "momo-opening-cash",
+        "momo-opening-ecash",
+        "momo-cash-topup",
+        "momo-ecash-topup",
+        "momo-cash-removed",
+        "momo-ecash-removed",
+        "momo-operating-expense",
+        "momo-closing-cash",
+        "momo-closing-ecash",
+      ];
+
+      watchedInputs.forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) {
+          element.addEventListener("input", updatePreview);
+        }
+      });
+
+      ["momo-provider", "momo-date"].forEach((id) => {
+        const element = document.getElementById(id);
+        if (element) {
+          element.addEventListener("change", updateRefreshLink);
+        }
+      });
+
+      updateRefreshLink();
+      updatePreview();
+    })();
+  </script>
+{% endblock %}

@@ -1093,6 +1093,82 @@ textarea { resize: vertical; }
   padding-bottom: 0;
   border-bottom: 0;
 }
+.mobile-money-reconciliation-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.18fr) minmax(320px, 0.82fr);
+  gap: 1rem;
+  align-items: start;
+}
+.mobile-money-reconciliation-form,
+.mobile-money-reconciliation-sidebar {
+  display: grid;
+  gap: 1rem;
+}
+.mobile-money-reconciliation-sidebar {
+  position: sticky;
+  top: 1rem;
+}
+.mobile-money-form-section .form-grid {
+  margin-top: 0.8rem;
+}
+.mobile-money-reconciliation-note {
+  margin: -0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+.mobile-money-auto-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.mobile-money-reconciliation-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+.mobile-money-reconciliation-steps {
+  margin: 0;
+  padding-left: 1.15rem;
+  display: grid;
+  gap: 0.5rem;
+  line-height: 1.55;
+}
+.finance-form-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.14fr) minmax(320px, 0.86fr);
+  gap: 1rem;
+  align-items: start;
+}
+.finance-form-main,
+.finance-form-sidebar {
+  display: grid;
+  gap: 1rem;
+}
+.finance-form-sidebar {
+  position: sticky;
+  top: 1rem;
+}
+.finance-form-note {
+  margin: -0.2rem 0 0;
+  color: var(--muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+.finance-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+.quick-choice-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 0.85rem;
+}
+.cashbook-account-pick {
+  flex: 0 0 auto;
+}
 .pos-serving-note {
   margin: 0;
   line-height: 1.25;
@@ -1887,6 +1963,8 @@ thead th {
   .card-grid.three,
   .card-grid.four,
   .card-grid.two,
+  .finance-form-layout,
+  .mobile-money-reconciliation-layout,
   .attendance-desk-layout,
   .pos-quick-grid,
   .pos-control-grid,
@@ -1987,8 +2065,14 @@ thead th {
     grid-template-columns: 1fr;
   }
   .mobile-money-filter-grid,
-  .mobile-money-counter-ribbon {
+  .mobile-money-counter-ribbon,
+  .mobile-money-auto-grid,
+  .finance-preview-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .finance-form-sidebar,
+  .mobile-money-reconciliation-sidebar {
+    position: static;
   }
   .stack-list-item-row,
   .stack-list-actions {
