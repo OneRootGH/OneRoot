@@ -7949,6 +7949,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return default_staff_role_for_access_role("viewer")
         return normalize_staff_role(getattr(user, "staff_role", ""), fallback_role=getattr(user, "role", "viewer"))
 
+    def attendance_is_optional_for_user(user: User | None) -> bool:
+        if not user:
+            return False
+        role_key = normalize_role_key(getattr(user, "role", "viewer"))
+        staff_role = normalize_staff_role(
+            getattr(user, "staff_role", ""),
+            fallback_role=getattr(user, "role", "viewer"),
+        )
+        return role_key in {"owner", "operations"} or staff_role == "Operations Manager"
+
     def attendance_shift_type_for_timestamp(timestamp: datetime) -> str:
         hour = timestamp.hour
         if 5 <= hour < 12:
@@ -8009,6 +8019,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return None
 
         target_date = current_local_datetime().date()
+        attendance_optional = attendance_is_optional_for_user(user)
         record = attendance_record_for_user(user, target_date)
         payload = dict(record.payload if record else {})
         check_in_time = normalize_text(payload.get("checkInTime"))
@@ -8039,14 +8050,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 tone = "muted"
                 can_check_in = False
             else:
-                status_note = "No check-in time saved yet for today."
-                tone = "warning"
+                status_note = (
+                    "Attendance is optional for your role. Check in or out whenever you need to."
+                    if attendance_optional
+                    else "No check-in time saved yet for today."
+                )
+                tone = "muted" if attendance_optional else "warning"
                 can_check_in = True
             can_check_out = False
         else:
-            status_label = "Not Checked In"
-            status_note = f"No attendance has been saved for {target_date.strftime('%A, %d %b %Y')} yet."
-            tone = "warning"
+            status_label = "Attendance Optional" if attendance_optional else "Not Checked In"
+            status_note = (
+                "Attendance is optional for your role. You can check in or out anytime."
+                if attendance_optional
+                else f"No attendance has been saved for {target_date.strftime('%A, %d %b %Y')} yet."
+            )
+            tone = "muted" if attendance_optional else "warning"
             can_check_in = True
             can_check_out = False
 
@@ -8069,6 +8088,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     def attendance_check_in_required(user: User | None) -> bool:
         if not user or not user_has_access(user, "workforce_attendance"):
+            return False
+        if attendance_is_optional_for_user(user):
             return False
         return True
 
