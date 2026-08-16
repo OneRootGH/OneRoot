@@ -19,6 +19,7 @@
   const counterProfitNode = document.getElementById("pos-counter-profit");
   const ledgerTotalNode = document.getElementById("pos-ledger-total");
   const foodSalesNode = document.getElementById("pos-food-sales");
+  const kitchenOpenBalanceNode = document.getElementById("pos-kitchen-open-balance");
   const laundrySalesNode = document.getElementById("pos-laundry-sales");
   const equipmentSalesNode = document.getElementById("pos-equipment-sales");
   const areaLabelNode = document.getElementById("pos-area-label");
@@ -480,6 +481,9 @@
     }
     if (foodSalesNode) {
       foodSalesNode.textContent = formatCurrency(summary.foodSalesTotal);
+    }
+    if (kitchenOpenBalanceNode) {
+      kitchenOpenBalanceNode.textContent = formatCurrency(summary.kitchenOpenBalance);
     }
     if (laundrySalesNode) {
       laundrySalesNode.textContent = formatCurrency(summary.laundrySalesTotal);

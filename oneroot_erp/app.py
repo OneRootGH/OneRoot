@@ -9468,6 +9468,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def build_pos_counter_summary(order_date: date, area_id: str = "") -> dict[str, Any]:
         selected_area = normalize_text(area_id)
         mobile_money_in_scope = not selected_area or selected_area == "mobile-money"
+        kitchen_in_scope = not selected_area or selected_area in POS_FOOD_SALES_AREA_IDS
         mobile_money_snapshot = mobile_money_day_snapshot(g.db, order_date)
         all_orders = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == order_date).order_by(desc(PosOrder.updated_at))
@@ -9544,6 +9545,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"] and mobile_money_snapshot["recognizedSalesTotal"] > 0:
             daily_sales_total = round(daily_sales_total + mobile_money_snapshot["recognizedSalesTotal"], 2)
 
+        kitchen_open_balance = 0.0
+        if kitchen_in_scope:
+            kitchen_records = g.db.scalars(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "kitchen_orders",
+                    ModuleRecord.record_date == order_date,
+                )
+            ).all()
+            kitchen_open_balance = round(
+                sum(
+                    max(parse_amount(row["balance"]), 0)
+                    for row in build_kitchen_service_rows(kitchen_records)
+                    if normalize_text(row["status"]) not in {"completed", "cancelled"}
+                ),
+                2,
+            )
+
         reference = f"pos-closeout|{order_date.isoformat()}|{selected_area or 'all'}"
         closeout_record = g.db.scalar(
             select(ModuleRecord).where(
@@ -9584,6 +9602,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 sum(amount for area_key, amount in daily_sales_by_area.items() if area_key in POS_FOOD_SALES_AREA_IDS),
                 2,
             ),
+            "kitchenOpenBalance": kitchen_open_balance if kitchen_in_scope else 0.0,
             "laundrySalesTotal": round(
                 sum(amount for area_key, amount in daily_sales_by_area.items() if area_key in POS_LAUNDRY_SALES_AREA_IDS),
                 2,
