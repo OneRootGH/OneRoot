@@ -134,11 +134,14 @@
         {% if selected_order.servicePaymentsManaged %}
           <article class="mini-card">
             <p class="eyebrow">Service Desk Sync</p>
-            <strong>Laundry and equipment website requests now open linked service records automatically.</strong>
+            <strong>Laundry, kitchen, and equipment website requests now open linked service records automatically.</strong>
             <span class="muted">Update payment from the linked service payment screen so balances, profit, and daily sales stay in one place.</span>
             <div class="row-actions">
               {% if selected_order.linkedLaundryTicketId %}
                 <a class="button subtle" href="{{ url_for('service_payment_form', module_key='laundry_tickets', record_id=selected_order.linkedLaundryTicketId) }}">Open Laundry Payment</a>
+              {% endif %}
+              {% if selected_order.linkedKitchenOrderId %}
+                <a class="button subtle" href="{{ url_for('service_payment_form', module_key='kitchen_orders', record_id=selected_order.linkedKitchenOrderId) }}">Open Kitchen Payment</a>
               {% endif %}
               {% if selected_order.linkedEquipmentBookingId %}
                 <a class="button subtle" href="{{ url_for('service_payment_form', module_key='equipment_rental_bookings', record_id=selected_order.linkedEquipmentBookingId) }}">Open Equipment Payment</a>
@@ -160,7 +163,7 @@
               {% endfor %}
             </select>
           </label>
-          {% if selected_order.servicePaymentsManaged %}
+          {% if selected_order.serviceManagedOnly %}
             <article class="mini-card">
               <strong>Payment {{ selected_order.paymentStatus|replace('-', ' ')|title }}</strong>
               <span class="muted">Quoted {{ selected_order.totalAmount|currency }}</span>

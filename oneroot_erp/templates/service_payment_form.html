@@ -18,7 +18,7 @@
     <article class="metric-card">
       <span>Total Due</span>
       <strong>
-        {% if definition.key == 'laundry_tickets' %}
+        {% if definition.key in ['laundry_tickets', 'kitchen_orders'] %}
           {{ service_row.amountDue|currency }}
         {% else %}
           {{ service_row.totalDue|currency }}
@@ -48,7 +48,15 @@
       <div class="card-header">
         <div>
           <p class="eyebrow">Request Summary</p>
-          <h3>{% if definition.key == 'laundry_tickets' %}{{ service_row.customerName }}{% else %}{{ service_row.equipmentItem }}{% endif %}</h3>
+          <h3>
+            {% if definition.key == 'laundry_tickets' %}
+              {{ service_row.customerName }}
+            {% elif definition.key == 'kitchen_orders' %}
+              {{ service_row.customerName }}
+            {% else %}
+              {{ service_row.equipmentItem }}
+            {% endif %}
+          </h3>
         </div>
       </div>
       <ul class="stack-list compact">
@@ -56,6 +64,21 @@
           <li><strong>Service</strong><span>{{ service_row.itemSummary }} · {{ service_row.serviceCategory }} · {{ service_row.serviceType }}</span></li>
           <li><strong>Pricing</strong><span>{{ service_row.pieces or 1 }} piece{% if (service_row.pieces or 1) != 1 %}s{% endif %} @ {{ service_row.unitRate|currency }}</span></li>
           <li><strong>Dates</strong><span>Ticket {{ service_row.ticketDate or '—' }} · Due {{ service_row.dueDate or '—' }} · Ready {{ service_row.readyDate or '—' }}</span></li>
+          {% if service_row.lineItems %}
+            <li>
+              <strong>Items</strong>
+              <span>
+                {% for item in service_row.lineItems %}
+                  {{ item.quantity }} x {{ item.name }}{% if item.category %} ({{ item.category }}){% endif %}{% if not loop.last %} · {% endif %}
+                {% endfor %}
+              </span>
+            </li>
+          {% endif %}
+        {% elif definition.key == 'kitchen_orders' %}
+          <li><strong>Order</strong><span>{{ service_row.itemSummary }} · {{ service_row.kitchenCategory }} · {{ service_row.orderType }}</span></li>
+          <li><strong>Pricing</strong><span>{{ service_row.quantity or 1 }} item{% if (service_row.quantity or 1) != 1 %}s{% endif %} @ {{ service_row.unitRate|currency }}</span></li>
+          <li><strong>Dates</strong><span>Order {{ service_row.orderDate or '—' }} · Ready {{ service_row.readyDate or '—' }}</span></li>
+          <li><strong>Service Mode</strong><span>{{ service_row.deliveryMode }}</span></li>
           {% if service_row.lineItems %}
             <li>
               <strong>Items</strong>

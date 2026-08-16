@@ -733,7 +733,13 @@
       return;
     }
     renderSummary(result.summary);
-    setStatus(`Counter closeout saved for ${result.closeout.areaLabel} at ${formatCurrency(result.closeout.totalAmount)}. Variance ${formatCurrency(result.closeout.cashVariance)}.`);
+    const attendanceNote = result.attendanceMessage ? ` ${result.attendanceMessage}` : "";
+    setStatus(`Counter closeout saved for ${result.closeout.areaLabel} at ${formatCurrency(result.closeout.totalAmount)}. Variance ${formatCurrency(result.closeout.cashVariance)}.${attendanceNote}`);
+    if (result.attendanceRedirect) {
+      window.setTimeout(() => {
+        window.location.href = result.attendanceRedirect;
+      }, 900);
+    }
   });
 
   historyBody?.addEventListener("click", async (event) => {

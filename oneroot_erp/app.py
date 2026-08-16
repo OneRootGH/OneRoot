@@ -72,14 +72,17 @@ CASHBOOK_MONEY_IN_TYPES = {"Cash In", "Bank Withdrawal"}
 CASHBOOK_MONEY_OUT_TYPES = {"Cash Out", "Bank Deposit", "Bank Charge"}
 SERVICE_ITEM_FIELD_MAP = {
     "laundry_tickets": "laundryItem",
+    "kitchen_orders": "kitchenItem",
     "equipment_rental_bookings": "equipmentItem",
 }
 SERVICE_COST_FIELD_MAP = {
     "laundry_tickets": "costAmount",
+    "kitchen_orders": "costAmount",
     "equipment_rental_bookings": "costAmount",
 }
 SERVICE_LEGACY_PAYMENT_FIELDS = {
     "laundry_tickets": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
+    "kitchen_orders": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
     "equipment_rental_bookings": {"amountPaid", "paymentDate", "paymentMethod", "paymentReference"},
 }
 POS_CASH_PAYMENT_METHODS = {"cash", "cash on delivery"}
@@ -1656,6 +1659,61 @@ def customer_reference_key(name: Any = "", phone: Any = "", email: Any = "") -> 
     return ""
 
 
+def customer_crm_reference(payload: dict[str, Any]) -> str:
+    return customer_reference_key(
+        payload.get("customerName"),
+        payload.get("customerPhone"),
+        payload.get("customerEmail"),
+    )
+
+
+def merge_customer_crm_payload(primary_payload: dict[str, Any], duplicate_payload: dict[str, Any]) -> dict[str, Any]:
+    merged = dict(primary_payload)
+    for key in ("customerName", "customerPhone", "customerEmail", "businessAreaId", "customerSegment", "leadSource", "preferredContact", "lastOrderDate"):
+        if not normalize_text(merged.get(key)) and normalize_text(duplicate_payload.get(key)):
+            merged[key] = duplicate_payload.get(key)
+
+    primary_capture = parse_date(merged.get("captureDate"))
+    duplicate_capture = parse_date(duplicate_payload.get("captureDate"))
+    if duplicate_capture and (not primary_capture or duplicate_capture < primary_capture):
+        merged["captureDate"] = duplicate_capture.isoformat()
+
+    primary_follow_up = parse_date(merged.get("followUpDate"))
+    duplicate_follow_up = parse_date(duplicate_payload.get("followUpDate"))
+    if duplicate_follow_up and (not primary_follow_up or duplicate_follow_up < primary_follow_up):
+        merged["followUpDate"] = duplicate_follow_up.isoformat()
+
+    primary_status = normalize_text(merged.get("status"))
+    duplicate_status = normalize_text(duplicate_payload.get("status"))
+    if duplicate_status == "Do Not Disturb":
+        merged["status"] = duplicate_status
+    elif not primary_status and duplicate_status:
+        merged["status"] = duplicate_status
+
+    merged["lifetimeValue"] = round(
+        max(parse_amount(merged.get("lifetimeValue")), parse_amount(duplicate_payload.get("lifetimeValue"))),
+        2,
+    )
+    merged["orderCount"] = max(int(parse_amount(merged.get("orderCount"))), int(parse_amount(duplicate_payload.get("orderCount"))))
+    merged["paidOrderCount"] = max(
+        int(parse_amount(merged.get("paidOrderCount"))),
+        int(parse_amount(duplicate_payload.get("paidOrderCount"))),
+    )
+    merged["pendingValue"] = round(
+        max(parse_amount(merged.get("pendingValue")), parse_amount(duplicate_payload.get("pendingValue"))),
+        2,
+    )
+
+    note_parts: list[str] = []
+    for value in (merged.get("notes"), duplicate_payload.get("notes")):
+        note_text = normalize_text(value)
+        if note_text and note_text not in note_parts:
+            note_parts.append(note_text)
+    if note_parts:
+        merged["notes"] = "\n\n".join(note_parts)
+    return merged
+
+
 def business_area_summary(area_ids: list[str] | set[str] | tuple[str, ...]) -> str:
     clean_ids = [normalize_text(area_id) for area_id in area_ids if normalize_text(area_id)]
     if not clean_ids:
@@ -1695,6 +1753,7 @@ def marketing_lead_source(values: set[str]) -> str:
         "Referral",
         "Website",
         "Online Order",
+        "Kitchen",
         "WhatsApp",
         "Social Media",
         "POS",
@@ -1919,6 +1978,7 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 [
                     "online_orders",
                     "laundry_tickets",
+                    "kitchen_orders",
                     "equipment_rental_bookings",
                     "apartments",
                 ]
@@ -1971,6 +2031,23 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 revenue_amount=payment_summary["paidTotal"],
                 pending_amount=payment_summary["balance"],
                 count_order=parse_amount(payload.get("amountDue")) > 0,
+                count_paid_order=payment_summary["paidTotal"] > 0,
+                preferred_contact="WhatsApp",
+                notes=payload.get("notes"),
+            )
+            continue
+        if record.module_key == "kitchen_orders":
+            payment_summary = service_payment_summary(record.module_key, payload)
+            register_order_activity(
+                name=payload.get("customerName"),
+                phone=payload.get("customerPhone"),
+                email="",
+                activity_date=parse_date(payload.get("orderDate")) or record.record_date,
+                lead_source="Kitchen",
+                area_ids=[normalize_text(payload.get("businessAreaId")) or "kitchen"],
+                revenue_amount=payment_summary["paidTotal"],
+                pending_amount=payment_summary["balance"],
+                count_order=service_total_due(record.module_key, payload) > 0,
                 count_paid_order=payment_summary["paidTotal"] > 0,
                 preferred_contact="WhatsApp",
                 notes=payload.get("notes"),
@@ -2122,7 +2199,28 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
 
 def sync_customer_crm_automation(db_session) -> None:
     existing_records = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_crm")).all()
-    record_by_reference = {normalize_text(record.reference): record for record in existing_records if normalize_text(record.reference)}
+    record_groups: dict[str, list[ModuleRecord]] = defaultdict(list)
+    for record in existing_records:
+        payload = dict(record.payload or {})
+        reference = customer_crm_reference(payload) or normalize_text(record.reference)
+        if not reference:
+            continue
+        record_groups[reference].append(record)
+
+    record_by_reference: dict[str, ModuleRecord] = {}
+    duplicate_records: list[ModuleRecord] = []
+    for reference, grouped_records in record_groups.items():
+        sorted_records = sorted(grouped_records, key=lambda item: (item.updated_at, item.created_at), reverse=True)
+        primary_record = sorted_records[0]
+        primary_payload = dict(primary_record.payload or {})
+        for duplicate_record in sorted_records[1:]:
+            primary_payload = merge_customer_crm_payload(primary_payload, dict(duplicate_record.payload or {}))
+            duplicate_records.append(duplicate_record)
+        if customer_crm_reference(primary_payload):
+            primary_payload["updatedAt"] = normalize_text(primary_payload.get("updatedAt")) or primary_record.updated_at.isoformat()
+            set_module_record_metadata(primary_record, MODULES["customer_crm"], primary_payload)
+        record_by_reference[reference] = primary_record
+
     seen_references: set[str] = set()
 
     for snapshot in build_customer_activity_snapshots(db_session):
@@ -2176,7 +2274,11 @@ def sync_customer_crm_automation(db_session) -> None:
             db_session.add(record)
         set_module_record_metadata(record, MODULES["customer_crm"], payload)
 
+    duplicate_ids = {record.id for record in duplicate_records}
     for record in existing_records:
+        if record.id in duplicate_ids:
+            db_session.delete(record)
+            continue
         reference = normalize_text(record.reference)
         if not reference:
             continue
@@ -2194,11 +2296,7 @@ def latest_customer_crm_records(records: list[ModuleRecord]) -> list[ModuleRecor
     fallback_records: list[ModuleRecord] = []
     for record in records:
         payload = dict(record.payload or {})
-        reference = normalize_text(record.reference) or customer_reference_key(
-            payload.get("customerName"),
-            payload.get("customerPhone"),
-            payload.get("customerEmail"),
-        )
+        reference = customer_crm_reference(payload) or normalize_text(record.reference)
         if not reference:
             fallback_records.append(record)
             continue
@@ -2645,6 +2743,8 @@ def service_total_due(module_key: str, payload: dict[str, Any]) -> float:
         return round(sum(parse_amount(item.get("lineTotal")) for item in line_items), 2)
     if module_key == "laundry_tickets":
         return round(parse_amount(payload.get("amountDue")), 2)
+    if module_key == "kitchen_orders":
+        return round(parse_amount(payload.get("amountDue")), 2)
     if module_key == "equipment_rental_bookings":
         return round(parse_amount(payload.get("rentalFee")) + parse_amount(payload.get("damageCharge")), 2)
     return 0.0
@@ -2662,6 +2762,11 @@ def laundry_piece_count(payload: dict[str, Any]) -> int:
     return pieces if pieces > 0 else 1
 
 
+def kitchen_order_quantity(payload: dict[str, Any]) -> int:
+    quantity = int(round(parse_amount(payload.get("itemQuantity"))))
+    return quantity if quantity > 0 else 1
+
+
 def equipment_rental_days(payload: dict[str, Any]) -> int:
     out_date = parse_date(payload.get("outDate"))
     due_date = parse_date(payload.get("dueDate"))
@@ -2676,6 +2781,10 @@ def service_pricing_multiplier(module_key: str, payload: dict[str, Any]) -> floa
         pieces = laundry_piece_count(payload)
         payload["pieces"] = pieces
         return float(pieces)
+    if module_key == "kitchen_orders":
+        quantity = kitchen_order_quantity(payload)
+        payload["itemQuantity"] = quantity
+        return float(quantity)
     if module_key == "equipment_rental_bookings":
         rental_days = equipment_rental_days(payload)
         payload["rentalDays"] = rental_days
@@ -2696,6 +2805,7 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
             raw_item.get("name")
             or raw_item.get("item")
             or raw_item.get("laundryItem")
+            or raw_item.get("kitchenItem")
             or raw_item.get("equipmentItem")
         )
         if not item_name:
@@ -2761,6 +2871,35 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
                         "name": item_name,
                         "category": normalize_text(payload.get("serviceCategory")),
                         "businessAreaId": "laundry-services",
+                        "itemType": "service",
+                    }
+                ),
+            }
+        ]
+
+    if module_key == "kitchen_orders":
+        item_name = normalize_text(payload.get("kitchenItem")) or normalize_text(payload.get("itemSummary"))
+        if not item_name:
+            return []
+        quantity = kitchen_order_quantity(payload)
+        total_due = round(parse_amount(payload.get("amountDue")), 2)
+        total_cost = round(parse_amount(payload.get("costAmount")), 2)
+        divisor = quantity if quantity > 0 else 1
+        return [
+            {
+                "name": item_name,
+                "category": normalize_text(payload.get("kitchenCategory")),
+                "quantity": quantity,
+                "unitPrice": round(total_due / divisor, 2) if total_due > 0 else 0.0,
+                "costPrice": round(total_cost / divisor, 2) if total_cost > 0 else 0.0,
+                "rentalDays": 1,
+                "lineTotal": total_due,
+                "lineCost": total_cost,
+                "imageUrl": product_image_src(
+                    {
+                        "name": item_name,
+                        "category": normalize_text(payload.get("kitchenCategory")),
+                        "businessAreaId": "kitchen",
                         "itemType": "service",
                     }
                 ),
@@ -2835,6 +2974,18 @@ def sync_service_line_item_rollup(module_key: str, payload: dict[str, Any]) -> N
             else f"{items[0]['name']} (+{len(items) - 1} more)"
         )
         payload["serviceCategory"] = categories[0] if len(set(categories)) == 1 and categories else "Mixed Items"
+        return
+
+    if module_key == "kitchen_orders":
+        payload["itemQuantity"] = sum(max(int(parse_amount(item.get("quantity"))), 0) for item in items) or 1
+        payload["amountDue"] = round(sum(parse_amount(item.get("lineTotal")) for item in items), 2)
+        payload["costAmount"] = round(sum(parse_amount(item.get("lineCost")) for item in items), 2)
+        payload["kitchenItem"] = (
+            items[0]["name"]
+            if len(items) == 1
+            else f"{items[0]['name']} (+{len(items) - 1} more)"
+        )
+        payload["kitchenCategory"] = categories[0] if len(set(categories)) == 1 and categories else "Mixed Kitchen Items"
         return
 
     if module_key == "equipment_rental_bookings":
@@ -3072,6 +3223,10 @@ def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str,
         payload["amountDue"] = round(parse_amount(match.sales_price) * multiplier, 2)
         if normalize_text(match.category):
             payload["serviceCategory"] = normalize_text(match.category)
+    elif module_key == "kitchen_orders":
+        payload["amountDue"] = round(parse_amount(match.sales_price) * multiplier, 2)
+        if normalize_text(match.category):
+            payload["kitchenCategory"] = normalize_text(match.category)
     elif module_key == "equipment_rental_bookings":
         payload["rentalFee"] = round(parse_amount(match.sales_price) * multiplier, 2)
         if normalize_text(match.category):
@@ -3092,7 +3247,14 @@ def sales_profit_amount(payload: dict[str, Any]) -> float:
     if amount <= 0:
         return 0.0
     source_type = normalize_text(payload.get("sourceType")).lower()
-    if source_type in {"manual-sale", "pos-summary", "online-order-payments", "laundry-payment", "equipment-rental-payment"}:
+    if source_type in {
+        "manual-sale",
+        "pos-summary",
+        "online-order-payments",
+        "laundry-payment",
+        "kitchen-order-payment",
+        "equipment-rental-payment",
+    }:
         return round(amount - cost_amount, 2)
     return 0.0
 
@@ -3540,6 +3702,7 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "cashbook_entries": "entryType",
     "mobile_money_transactions": "serviceType",
     "laundry_tickets": "serviceCategory",
+    "kitchen_orders": "kitchenCategory",
     "equipment_rental_bookings": "equipmentCategory",
     "mobile_money_reconciliations": "provider",
     "suppliers": "category",
@@ -3564,6 +3727,7 @@ MODULE_FILTER_CATEGORY_LABELS = {
     "entryType": "Entry Type",
     "serviceType": "Service Type",
     "serviceCategory": "Laundry Category",
+    "kitchenCategory": "Kitchen Category",
     "equipmentItem": "Equipment Item",
     "equipmentCategory": "Rental Category",
     "provider": "Provider",
@@ -3583,6 +3747,7 @@ MODULE_FILTER_CATEGORY_LABELS = {
 
 SERVICE_MODULE_AREA_IDS = {
     "laundry_tickets": "laundry-services",
+    "kitchen_orders": "kitchen",
     "equipment_rental_bookings": "water-equipment",
 }
 
@@ -3602,6 +3767,23 @@ SERVICE_MODULE_SECTIONS = {
             "Promise & Completion",
             "Track when the job is due, when it is ready, and the current delivery status.",
             ["dueDate", "readyDate", "status", "notes"],
+        ),
+    ],
+    "kitchen_orders": [
+        (
+            "Order Intake",
+            "Capture the order source, customer, and service mode first so the kitchen can act quickly without missing direct walk-ins, takeaways, or website food requests.",
+            ["orderDate", "customerName", "customerPhone", "orderType", "deliveryMode", "kitchenCategory"],
+        ),
+        (
+            "Items & Pricing",
+            "Select one or more kitchen items so the amount due and kitchen cost calculate from the saved kitchen menu automatically.",
+            ["kitchenItem", "itemSummary", "itemQuantity", "amountDue", "costAmount"],
+        ),
+        (
+            "Preparation & Completion",
+            "Track what is being prepared, what is ready, and what has been fully served or delivered.",
+            ["readyDate", "status", "notes"],
         ),
     ],
     "equipment_rental_bookings": [
@@ -3672,6 +3854,8 @@ def module_record_category_value(definition: ModuleDefinition, record: ModuleRec
 
 def module_record_open_balance(definition: ModuleDefinition, payload: dict[str, Any]) -> float:
     if definition.key == "laundry_tickets":
+        return service_payment_summary(definition.key, payload)["balance"]
+    if definition.key == "kitchen_orders":
         return service_payment_summary(definition.key, payload)["balance"]
     if definition.key == "equipment_rental_bookings":
         return service_payment_summary(definition.key, payload)["balance"]
@@ -3886,7 +4070,95 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
     return rows
 
 
-def build_service_module_context(definition: ModuleDefinition, rows: list[dict[str, Any]]) -> dict[str, Any]:
+def build_kitchen_service_rows(records: list[ModuleRecord]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    today = date.today()
+    for record in records:
+        payload = record.payload or {}
+        line_items = service_line_items("kitchen_orders", payload)
+        payment_summary = service_payment_summary("kitchen_orders", payload)
+        amount_due = payment_summary["totalDue"]
+        amount_paid = payment_summary["paidTotal"]
+        balance = payment_summary["balance"]
+        status = normalize_text(payload.get("status")) or "Received"
+        ready_date = parse_date(payload.get("readyDate"))
+        item_summary = service_line_items_brief("kitchen_orders", payload) if line_items else (normalize_text(payload.get("kitchenItem")) or "Kitchen Order")
+        quantity = (
+            sum(max(int(parse_amount(item.get("quantity"))), 0) for item in line_items)
+            if line_items
+            else kitchen_order_quantity(payload)
+        )
+        rows.append(
+            {
+                "record": record,
+                "id": record.id,
+                "customerName": normalize_text(payload.get("customerName")) or record.title or "Walk-in Customer",
+                "customerPhone": normalize_phone(payload.get("customerPhone")),
+                "orderType": normalize_text(payload.get("orderType")) or "Walk-in",
+                "deliveryMode": normalize_text(payload.get("deliveryMode")) or "Takeaway",
+                "kitchenCategory": normalize_text(payload.get("kitchenCategory")) or "Prepared Meals",
+                "kitchenItem": normalize_text(payload.get("kitchenItem")),
+                "itemSummary": item_summary,
+                "itemDetail": normalize_text(payload.get("itemSummary")),
+                "quantity": quantity,
+                "lineItems": line_items,
+                "lineItemCount": len(line_items),
+                "orderDate": parse_date(payload.get("orderDate")) or record.record_date,
+                "readyDate": ready_date,
+                "status": status,
+                "amountDue": amount_due,
+                "amountPaid": amount_paid,
+                "costAmount": payment_summary["totalCost"],
+                "profitAmount": payment_summary["profitRecognized"],
+                "unitRate": round(amount_due / quantity, 2) if quantity > 0 else amount_due,
+                "paymentCount": len(payment_summary["payments"]),
+                "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
+                "payments": payment_summary["payments"],
+                "balance": balance,
+                "linkedOnlineOrderId": normalize_text(payload.get("linkedOnlineOrderId")),
+                "linkedOnlineOrderNumber": normalize_text(payload.get("linkedOnlineOrderNumber")),
+                "isReady": status == "Ready",
+                "isCompleted": status == "Completed",
+                "isOpen": status not in {"Completed", "Cancelled"},
+                "isOutstanding": bool(balance > 0 and status not in {"Completed", "Cancelled"}),
+                "isDueToday": bool(ready_date == today and status not in {"Completed", "Cancelled"}),
+            }
+        )
+    return rows
+
+
+def service_sales_snapshot(
+    db_session,
+    area_id: str,
+    *,
+    date_from: date | None = None,
+    date_to: date | None = None,
+) -> dict[str, float]:
+    sales_definition = MODULES["sales"]
+    sales_records = filter_module_records(
+        db_session.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "sales")
+            .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all(),
+        sales_definition,
+        area_filter=area_id,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    return {
+        "salesTotal": round(sum(parse_amount((record.payload or {}).get("amount")) for record in sales_records), 2),
+        "profitTotal": round(sum(module_record_profit_amount(record) for record in sales_records), 2),
+        "transactionCount": float(len(sales_records)),
+    }
+
+
+def build_service_module_context(
+    definition: ModuleDefinition,
+    rows: list[dict[str, Any]],
+    *,
+    sales_snapshot: dict[str, float] | None = None,
+) -> dict[str, Any]:
     if definition.key == "laundry_tickets":
         status_counts: dict[str, int] = defaultdict(int)
         category_counts: dict[str, int] = defaultdict(int)
@@ -3927,6 +4199,49 @@ def build_service_module_context(definition: ModuleDefinition, rows: list[dict[s
                 "secondaryHeading": "Laundry Item",
                 "dateHeading": "Ticket Date",
                 "eventHeading": "Due / Ready",
+                "amountHeading": "Due / Paid / Balance",
+            },
+        }
+
+    if definition.key == "kitchen_orders":
+        status_counts: dict[str, int] = defaultdict(int)
+        category_counts: dict[str, int] = defaultdict(int)
+        for row in rows:
+            status_counts[row["status"]] += 1
+            category_counts[row["kitchenCategory"]] += 1
+        kitchen_sales_total = round(parse_amount((sales_snapshot or {}).get("salesTotal")), 2)
+        kitchen_profit_total = round(parse_amount((sales_snapshot or {}).get("profitTotal")), 2)
+        kitchen_transaction_count = int(parse_amount((sales_snapshot or {}).get("transactionCount")))
+        return {
+            "intro": "Capture each food request here, collect payment when money is actually received, and keep manual kitchen orders, website food orders, and reported kitchen sales aligned.",
+            "cards": [
+                {"label": "Orders In View", "value": f"{len(rows)}", "note": "Filtered kitchen requests"},
+                {"label": "Open Balance", "value": format_currency(sum(row["balance"] for row in rows)), "note": "Kitchen collections still open"},
+                {"label": "All Kitchen Sales", "value": format_currency(kitchen_sales_total), "note": f"{kitchen_transaction_count} synced kitchen sale record{'s' if kitchen_transaction_count != 1 else ''}"},
+                {"label": "All Kitchen Profit", "value": format_currency(kitchen_profit_total), "note": "POS, website, and kitchen desk profit combined"},
+            ],
+            "statusChart": build_chart_rows(
+                [{"label": status, "short": status, "amount": count} for status, count in sorted(status_counts.items()) if count > 0],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--accent)",
+            ),
+            "mixChart": build_chart_rows(
+                [{"label": name, "short": name, "amount": count} for name, count in sorted(category_counts.items()) if count > 0],
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+            ),
+            "mixEyebrow": "Kitchen Category Mix",
+            "mixTitle": "Most Ordered Kitchen Items",
+            "watchTitle": "Kitchen Preparation Watch",
+            "watchItems": [row for row in rows if row["isReady"] or row["isOutstanding"] or row["isDueToday"]][:10],
+            "table": {
+                "primaryHeading": "Customer",
+                "secondaryHeading": "Kitchen Items",
+                "dateHeading": "Order Date",
+                "eventHeading": "Ready / Delivery",
                 "amountHeading": "Due / Paid / Balance",
             },
         }
@@ -5438,6 +5753,8 @@ def status_for_module_record(definition: ModuleDefinition, payload: dict[str, An
 def reference_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
     if definition.key == "sales" and normalize_text(payload.get("sourceType")) == "pos-summary":
         return normalize_text(payload.get("linkedGeneratedSalesKey"))
+    if definition.key == "customer_crm":
+        return customer_crm_reference(payload) or normalize_text(payload.get("reference"))
     if definition.key == "apartments":
         suite = normalize_text(payload.get("suite"))
         month_key = parse_month(payload.get("month"))
@@ -7753,7 +8070,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def attendance_check_in_required(user: User | None) -> bool:
         if not user or not user_has_access(user, "workforce_attendance"):
             return False
-        return normalize_role_key(getattr(user, "role", "viewer")) not in {"owner", "admin"}
+        return True
 
     def attendance_is_checked_in(user: User | None, target_date: date | None = None) -> bool:
         if not attendance_check_in_required(user):
@@ -7805,6 +8122,98 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if attendance_check_in_required(user) and not attendance_is_checked_in(user) and not attendance_path_allowed(next_path):
             return attendance_gate_target_path()
         return next_path
+
+    def save_attendance_clock_action(user: User | None, action: str, *, now_local: datetime | None = None) -> dict[str, Any]:
+        clean_action = normalize_text(action).lower()
+        if clean_action not in {"check-in", "check-out"}:
+            return {"ok": False, "error": "Choose Check In or Check Out to save attendance."}
+        if not user:
+            return {"ok": False, "error": "Sign in required."}
+
+        definition = MODULES["workforce_attendance"]
+        target_timestamp = now_local or current_local_datetime()
+        attendance_date = target_timestamp.date()
+        clock_time = target_timestamp.strftime("%H:%M")
+        record = attendance_record_for_user(user, attendance_date)
+        is_new = record is None
+
+        if record:
+            payload = dict(record.payload or {})
+        else:
+            payload = {
+                "id": uuid4().hex,
+                "createdAt": datetime.utcnow().isoformat(),
+                "shiftDate": attendance_date.isoformat(),
+                "businessAreaId": "shared-operations",
+                "staffName": attendance_display_name_for_user(user),
+                "staffRole": attendance_staff_role_for_user(user),
+                "shiftType": attendance_shift_type_for_timestamp(target_timestamp),
+                "breakMinutes": 0,
+                "approvalStatus": "Draft",
+                "notes": "",
+                "reference": attendance_reference_for_user(user, attendance_date),
+            }
+            record = ModuleRecord(id=payload["id"], module_key=definition.key, created_at=datetime.utcnow())
+            g.db.add(record)
+
+        payload.setdefault("id", record.id)
+        payload.setdefault("createdAt", record.created_at.isoformat())
+        payload["shiftDate"] = normalize_text(payload.get("shiftDate")) or attendance_date.isoformat()
+        payload["reference"] = normalize_text(payload.get("reference")) or attendance_reference_for_user(user, attendance_date)
+        payload["staffName"] = normalize_text(payload.get("staffName")) or attendance_display_name_for_user(user)
+        payload["staffRole"] = normalize_text(payload.get("staffRole")) or attendance_staff_role_for_user(user)
+        payload["shiftType"] = normalize_text(payload.get("shiftType")) or attendance_shift_type_for_timestamp(target_timestamp)
+        payload["businessAreaId"] = normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        payload["approvalStatus"] = normalize_text(payload.get("approvalStatus")) or "Draft"
+
+        has_check_in = bool(parse_time_value(payload.get("checkInTime")))
+        has_check_out = bool(parse_time_value(payload.get("checkOutTime")))
+
+        if clean_action == "check-in":
+            if has_check_in and not has_check_out:
+                return {
+                    "ok": False,
+                    "error": f"You are already checked in today at {normalize_text(payload.get('checkInTime'))}.",
+                }
+            if has_check_out:
+                return {"ok": False, "error": "You already checked out today. Open the attendance record if you need to adjust it."}
+            payload["checkInTime"] = clock_time
+            payload["shiftStart"] = normalize_text(payload.get("shiftStart")) or clock_time
+            success_message = f"Checked in at {clock_time}."
+            audit_action = "check-in"
+            audit_detail = f"{payload['staffName']} checked in at {clock_time}."
+        else:
+            if not has_check_in:
+                return {"ok": False, "error": "Check in first before checking out."}
+            if has_check_out:
+                return {
+                    "ok": False,
+                    "error": f"You already checked out today at {normalize_text(payload.get('checkOutTime'))}.",
+                }
+            payload["checkOutTime"] = clock_time
+            payload["shiftEnd"] = normalize_text(payload.get("shiftEnd")) or clock_time
+            success_message = f"Checked out at {clock_time}."
+            audit_action = "check-out"
+            audit_detail = f"{payload['staffName']} checked out at {clock_time}."
+
+        payload["updatedAt"] = datetime.utcnow().isoformat()
+        workforce_rollup(payload)
+        set_module_record_metadata(record, definition, payload)
+        audit(
+            "workforce_attendance",
+            definition.label,
+            audit_action,
+            payload["staffName"],
+            record.id,
+            audit_detail if not is_new else f"{audit_detail} Daily attendance record opened automatically.",
+        )
+        return {
+            "ok": True,
+            "record": record,
+            "payload": payload,
+            "message": success_message,
+            "clockTime": clock_time,
+        }
 
     def apartment_document_bundle(record_id: str) -> dict[str, Any] | None:
         record = g.db.get(ModuleRecord, record_id)
@@ -7865,6 +8274,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         fixed_total = compute_order_fixed_total(items)
         quoted_total = parse_amount(payload.get("quotedTotal"))
         total_amount = quoted_total if quoted_total > 0 else fixed_total
+        linked_laundry_ticket_id = normalize_text(payload.get("linkedLaundryTicketId"))
+        linked_kitchen_order_id = normalize_text(payload.get("linkedKitchenOrderId"))
+        linked_equipment_booking_id = normalize_text(payload.get("linkedEquipmentBookingId"))
+        service_payments_managed = bool(
+            linked_laundry_ticket_id
+            or linked_kitchen_order_id
+            or linked_equipment_booking_id
+        )
+        sales_items_count = len(online_order_sales_items(payload))
         return {
             "id": record.id,
             "orderNumber": normalize_text(payload.get("orderNumber")),
@@ -7893,12 +8311,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "createdAt": normalize_text(payload.get("createdAt")) or record.created_at.isoformat(),
             "updatedAt": normalize_text(payload.get("updatedAt")) or record.updated_at.isoformat(),
             "inventoryPostedAt": normalize_text(payload.get("inventoryPostedAt")),
-            "linkedLaundryTicketId": normalize_text(payload.get("linkedLaundryTicketId")),
-            "linkedEquipmentBookingId": normalize_text(payload.get("linkedEquipmentBookingId")),
-            "servicePaymentsManaged": bool(
-                normalize_text(payload.get("linkedLaundryTicketId"))
-                or normalize_text(payload.get("linkedEquipmentBookingId"))
-            ),
+            "linkedLaundryTicketId": linked_laundry_ticket_id,
+            "linkedKitchenOrderId": linked_kitchen_order_id,
+            "linkedEquipmentBookingId": linked_equipment_booking_id,
+            "servicePaymentsManaged": service_payments_managed,
+            "serviceManagedOnly": bool(service_payments_managed and sales_items_count == 0),
         }
 
     def build_public_config() -> dict[str, Any]:
@@ -8060,6 +8477,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def linked_service_payload_key(module_key: str) -> str:
         if module_key == "laundry_tickets":
             return "linkedLaundryTicketId"
+        if module_key == "kitchen_orders":
+            return "linkedKitchenOrderId"
         if module_key == "equipment_rental_bookings":
             return "linkedEquipmentBookingId"
         return ""
@@ -8075,6 +8494,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 for item in items
                 if isinstance(item, dict) and normalize_text(item.get("businessAreaId")) == "laundry-services"
             ]
+        if module_key == "kitchen_orders":
+            return [
+                dict(item)
+                for item in items
+                if isinstance(item, dict) and normalize_text(item.get("businessAreaId")) == "kitchen"
+            ]
         if module_key == "equipment_rental_bookings":
             return [
                 dict(item)
@@ -8086,10 +8511,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def online_order_sales_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         filtered_items: list[dict[str, Any]] = []
+        linked_kitchen_order_id = normalize_text(payload.get("linkedKitchenOrderId"))
         for item in items:
             if not isinstance(item, dict):
                 continue
             if normalize_text(item.get("businessAreaId")) == "laundry-services":
+                continue
+            if linked_kitchen_order_id and normalize_text(item.get("businessAreaId")) == "kitchen":
                 continue
             if online_order_item_matches_equipment_service(item):
                 continue
@@ -8116,6 +8544,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "cancelled": "Cancelled",
         }.get(status, "Received")
 
+    def kitchen_status_from_online_order_status(value: Any) -> str:
+        status = normalize_text(value).lower()
+        return {
+            "preparing": "Preparing",
+            "ready": "Ready",
+            "fulfilled": "Completed",
+            "completed": "Completed",
+            "cancelled": "Cancelled",
+        }.get(status, "Received")
+
     def equipment_status_from_online_order_status(value: Any) -> str:
         return "Cancelled" if normalize_text(value).lower() == "cancelled" else "Booked"
 
@@ -8126,6 +8564,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "in progress": "preparing",
                 "ready": "ready",
                 "delivered": "fulfilled",
+                "cancelled": "cancelled",
+            }.get(status, "")
+        if module_key == "kitchen_orders":
+            return {
+                "preparing": "preparing",
+                "ready": "ready",
+                "completed": "fulfilled",
                 "cancelled": "cancelled",
             }.get(status, "")
         if module_key == "equipment_rental_bookings":
@@ -8159,6 +8604,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 lines.append(f"Preferred time: {preferred_time}")
             if delivery_address:
                 lines.append(f"Site / address: {delivery_address}")
+        elif module_key == "kitchen_orders":
+            preferred_time = normalize_text(order_payload.get("preferredTime"))
+            delivery_mode = normalize_text(order_payload.get("deliveryMode"))
+            if delivery_mode:
+                lines.append(f"Service mode: {delivery_mode}")
+            if preferred_time:
+                lines.append(f"Preferred time: {preferred_time}")
         else:
             delivery_address = normalize_text(order_payload.get("deliveryAddress"))
             if delivery_address:
@@ -8239,20 +8691,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
         total_due = round(payment_summary["totalDue"], 2)
         paid_total = round(payment_summary["paidTotal"], 2)
         last_payment = payment_summary["payments"][-1] if payment_summary["payments"] else {}
-        if total_due > 0:
-            order_payload["quotedTotal"] = total_due
-        order_payload["paidAmount"] = paid_total
-        order_payload["paymentDate"] = normalize_text(last_payment.get("paymentDate"))
-        order_payload["paymentMethod"] = normalize_text(last_payment.get("paymentMethod")) or normalize_text(order_payload.get("paymentMethod"))
-        if paid_total <= 0:
-            order_payload["paymentStatus"] = "pending"
-        elif total_due > 0 and paid_total + 0.009 < total_due:
-            order_payload["paymentStatus"] = "part-paid"
-        else:
-            order_payload["paymentStatus"] = "paid"
-        mapped_status = online_order_status_from_service_status(module_key, service_payload)
-        if mapped_status:
-            order_payload["status"] = mapped_status
+        service_managed_only = not online_order_sales_items(order_payload)
+        if service_managed_only:
+            if total_due > 0:
+                order_payload["quotedTotal"] = total_due
+            order_payload["paidAmount"] = paid_total
+            order_payload["paymentDate"] = normalize_text(last_payment.get("paymentDate"))
+            order_payload["paymentMethod"] = normalize_text(last_payment.get("paymentMethod")) or normalize_text(order_payload.get("paymentMethod"))
+            if paid_total <= 0:
+                order_payload["paymentStatus"] = "pending"
+            elif total_due > 0 and paid_total + 0.009 < total_due:
+                order_payload["paymentStatus"] = "part-paid"
+            else:
+                order_payload["paymentStatus"] = "paid"
+            mapped_status = online_order_status_from_service_status(module_key, service_payload)
+            if mapped_status:
+                order_payload["status"] = mapped_status
         link_key = linked_service_payload_key(module_key)
         if link_key:
             order_payload[link_key] = service_record.id
@@ -8299,7 +8753,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "status": (
                     laundry_status_from_online_order_status(order_payload.get("status"))
                     if module_key == "laundry_tickets"
-                    else equipment_status_from_online_order_status(order_payload.get("status"))
+                    else (
+                        kitchen_status_from_online_order_status(order_payload.get("status"))
+                        if module_key == "kitchen_orders"
+                        else equipment_status_from_online_order_status(order_payload.get("status"))
+                    )
                 ),
             }
 
@@ -8322,6 +8780,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             service_payload["serviceType"] = infer_laundry_service_type(order_payload, line_items or service_line_items(module_key, service_payload))
             service_payload["deliveryMode"] = online_order_to_laundry_delivery_mode(order_payload.get("deliveryMode"))
             service_payload["dueDate"] = preferred_date_value or normalize_text(service_payload.get("dueDate"))
+            service_payload.setdefault("itemSummary", normalize_text(order_payload.get("orderNotes")))
+            if normalize_text(order_payload.get("status")).lower() == "cancelled":
+                service_payload["status"] = "Cancelled"
+        elif module_key == "kitchen_orders":
+            service_payload.setdefault("orderDate", preferred_date_value or created_date.isoformat())
+            service_payload["orderType"] = "Online"
+            service_payload["deliveryMode"] = normalize_text(order_payload.get("deliveryMode")) or normalize_text(service_payload.get("deliveryMode")) or "Takeaway"
+            service_payload["readyDate"] = preferred_date_value or normalize_text(service_payload.get("readyDate"))
             service_payload.setdefault("itemSummary", normalize_text(order_payload.get("orderNotes")))
             if normalize_text(order_payload.get("status")).lower() == "cancelled":
                 service_payload["status"] = "Cancelled"
@@ -8353,7 +8819,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         db = db_session or g.db
         order_payload = dict(order_record.payload or {})
         linked_records: list[tuple[str, ModuleRecord]] = []
-        for module_key in ("laundry_tickets", "equipment_rental_bookings"):
+        for module_key in ("laundry_tickets", "kitchen_orders", "equipment_rental_bookings"):
             linked_record = upsert_service_record_from_online_order(order_record, module_key, db_session=db)
             link_key = linked_service_payload_key(module_key)
             if linked_record and link_key:
@@ -8557,6 +9023,44 @@ def create_app(config: AppConfig | None = None) -> Flask:
             sync_linked_online_order_from_service_record(record, record.module_key, db_session=db)
             return
 
+        if record.module_key == "kitchen_orders":
+            area_id = normalize_text(payload.get("businessAreaId")) or "kitchen"
+            customer = normalize_text(payload.get("customerName")) or "Customer"
+            item_summary = normalize_text(payload.get("kitchenItem")) or "Kitchen Order"
+            prefix = f"kitchen-order-payment|{record.id}"
+            payment_summary = service_payment_summary(record.module_key, payload)
+            kept_references = set()
+            for index, payment in enumerate(payment_summary["payments"], start=1):
+                reference = f"{prefix}|{payment['id']}"
+                kept_references.add(reference)
+                payment_date = parse_date(payment.get("paymentDate")) or parse_date(payload.get("orderDate")) or record.record_date
+                upsert_generated_sale(
+                    db,
+                    reference=reference,
+                    sale_date=payment_date,
+                    business_area_id=area_id,
+                    amount=payment.get("amountPaid", 0),
+                    cost_amount=payment.get("costAmount", 0),
+                    profit_amount=payment.get("profitAmount", 0),
+                    source_type="kitchen-order-payment",
+                    source_label="Kitchen Payment",
+                    note=f"[Kitchen Sync] Payment {index} for {item_summary} from {customer}.",
+                )
+            stale_records = db.scalars(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "sales",
+                    or_(
+                        ModuleRecord.reference == prefix,
+                        ModuleRecord.reference.ilike(f"{prefix}|%"),
+                    ),
+                )
+            ).all()
+            for stale_record in stale_records:
+                if stale_record.reference not in kept_references:
+                    db.delete(stale_record)
+            sync_linked_online_order_from_service_record(record, record.module_key, db_session=db)
+            return
+
         if record.module_key == "equipment_rental_bookings":
             area_id = normalize_text(payload.get("businessAreaId")) or "water-equipment"
             customer = normalize_text(payload.get("customerName")) or "Customer"
@@ -8626,10 +9130,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order_number = normalize_text(payload.get("orderNumber"))
         payment_status = normalize_text(payload.get("paymentStatus")).lower()
         paid_amount = parse_amount(payload.get("paidAmount"))
-        items = online_order_sales_items(payload)
-        order_total = parse_amount(payload.get("quotedTotal")) or compute_order_fixed_total(items)
-        area_totals = build_online_order_area_totals(items, order_total=order_total)
-        area_costs = build_online_order_area_costs(items)
+        all_items = payload.get("items") if isinstance(payload.get("items"), list) else []
+        sales_items = online_order_sales_items(payload)
+        order_total = parse_amount(payload.get("quotedTotal")) or compute_order_fixed_total(all_items)
+        area_totals = build_online_order_area_totals(sales_items, order_total=order_total)
+        area_costs = build_online_order_area_costs(sales_items)
         payment_date = parse_date(payload.get("paymentDate")) or parse_date(payload.get("updatedAt")) or date.today()
 
         existing_records = db.scalars(
@@ -9647,6 +10152,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @login_required
     def logout():
         user = g.current_user
+        if attendance_check_in_required(user) and attendance_is_checked_in(user):
+            save_attendance_clock_action(user, "check-out")
         audit("access", "Access", "logout", f"{user.full_name or user.username} signed out", user.id)
         g.db.commit()
         session.clear()
@@ -9660,87 +10167,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             request.form.get("next"),
             request.referrer or url_for("module_list", module_key="workforce_attendance"),
         )
-        if action not in {"check-in", "check-out"}:
-            flash("Choose Check In or Check Out to save attendance.", "warning")
+        result = save_attendance_clock_action(g.current_user, action)
+        if not result.get("ok"):
+            flash(normalize_text(result.get("error")) or "Attendance could not be saved.", "warning")
             return redirect(next_path)
-
-        definition = MODULES["workforce_attendance"]
-        now_local = current_local_datetime()
-        attendance_date = now_local.date()
-        clock_time = now_local.strftime("%H:%M")
-        record = attendance_record_for_user(g.current_user, attendance_date)
-        is_new = record is None
-
-        if record:
-            payload = dict(record.payload or {})
-        else:
-            payload = {
-                "id": uuid4().hex,
-                "createdAt": datetime.utcnow().isoformat(),
-                "shiftDate": attendance_date.isoformat(),
-                "businessAreaId": "shared-operations",
-                "staffName": attendance_display_name_for_user(g.current_user),
-                "staffRole": attendance_staff_role_for_user(g.current_user),
-                "shiftType": attendance_shift_type_for_timestamp(now_local),
-                "breakMinutes": 0,
-                "approvalStatus": "Draft",
-                "notes": "",
-                "reference": attendance_reference_for_user(g.current_user, attendance_date),
-            }
-            record = ModuleRecord(id=payload["id"], module_key=definition.key, created_at=datetime.utcnow())
-            g.db.add(record)
-
-        payload.setdefault("id", record.id)
-        payload.setdefault("createdAt", record.created_at.isoformat())
-        payload["shiftDate"] = normalize_text(payload.get("shiftDate")) or attendance_date.isoformat()
-        payload["reference"] = normalize_text(payload.get("reference")) or attendance_reference_for_user(g.current_user, attendance_date)
-        payload["staffName"] = normalize_text(payload.get("staffName")) or attendance_display_name_for_user(g.current_user)
-        payload["staffRole"] = normalize_text(payload.get("staffRole")) or attendance_staff_role_for_user(g.current_user)
-        payload["shiftType"] = normalize_text(payload.get("shiftType")) or attendance_shift_type_for_timestamp(now_local)
-        payload["businessAreaId"] = normalize_text(payload.get("businessAreaId")) or "shared-operations"
-        payload["approvalStatus"] = normalize_text(payload.get("approvalStatus")) or "Draft"
-
-        has_check_in = bool(parse_time_value(payload.get("checkInTime")))
-        has_check_out = bool(parse_time_value(payload.get("checkOutTime")))
-
-        if action == "check-in":
-            if has_check_in and not has_check_out:
-                flash(f"You are already checked in today at {normalize_text(payload.get('checkInTime'))}.", "warning")
-                return redirect(next_path)
-            if has_check_out:
-                flash("You already checked out today. Open the attendance record if you need to adjust it.", "warning")
-                return redirect(next_path)
-            payload["checkInTime"] = clock_time
-            payload["shiftStart"] = normalize_text(payload.get("shiftStart")) or clock_time
-            success_message = f"Checked in at {clock_time}."
-            audit_action = "check-in"
-            audit_detail = f"{payload['staffName']} checked in at {clock_time}."
-        else:
-            if not has_check_in:
-                flash("Check in first before checking out.", "warning")
-                return redirect(next_path)
-            if has_check_out:
-                flash(f"You already checked out today at {normalize_text(payload.get('checkOutTime'))}.", "warning")
-                return redirect(next_path)
-            payload["checkOutTime"] = clock_time
-            payload["shiftEnd"] = normalize_text(payload.get("shiftEnd")) or clock_time
-            success_message = f"Checked out at {clock_time}."
-            audit_action = "check-out"
-            audit_detail = f"{payload['staffName']} checked out at {clock_time}."
-
-        payload["updatedAt"] = datetime.utcnow().isoformat()
-        workforce_rollup(payload)
-        set_module_record_metadata(record, definition, payload)
-        audit(
-            "workforce_attendance",
-            definition.label,
-            audit_action,
-            payload["staffName"],
-            record.id,
-            audit_detail if not is_new else f"{audit_detail} Daily attendance record opened automatically.",
-        )
         g.db.commit()
-        flash(success_message, "success")
+        flash(normalize_text(result.get("message")) or "Attendance saved.", "success")
         return redirect(next_path)
 
     @app.route("/app/")
@@ -10830,29 +11262,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order_before = serialize_online_order(record)
         linked_service_managed = bool(
             normalize_text(payload.get("linkedLaundryTicketId"))
+            or normalize_text(payload.get("linkedKitchenOrderId"))
             or normalize_text(payload.get("linkedEquipmentBookingId"))
             or online_order_items_for_service_module(payload, "laundry_tickets")
+            or online_order_items_for_service_module(payload, "kitchen_orders")
             or online_order_items_for_service_module(payload, "equipment_rental_bookings")
         )
+        service_managed_only = bool(linked_service_managed and not online_order_sales_items(payload))
         new_status = normalize_text(request.form.get("status")).lower() or order_before["status"]
         payment_status = (
             order_before["paymentStatus"]
-            if linked_service_managed
+            if service_managed_only
             else (normalize_text(request.form.get("payment_status")).lower() or order_before["paymentStatus"])
         )
         quoted_total_raw = normalize_text(request.form.get("quoted_total"))
-        paid_amount_raw = "" if linked_service_managed else normalize_text(request.form.get("paid_amount"))
-        payment_date = order_before["paymentDate"] if linked_service_managed else normalize_text(request.form.get("payment_date"))
+        paid_amount_raw = "" if service_managed_only else normalize_text(request.form.get("paid_amount"))
+        payment_date = order_before["paymentDate"] if service_managed_only else normalize_text(request.form.get("payment_date"))
         staff_notes = normalize_text(request.form.get("staff_notes"))
         history_note = normalize_text(request.form.get("history_note"))
 
-        quoted_total = order_before["totalAmount"] if linked_service_managed else (parse_amount(quoted_total_raw) if quoted_total_raw else order_before["totalAmount"])
-        if not linked_service_managed and quoted_total <= 0:
+        quoted_total = order_before["totalAmount"] if service_managed_only else (parse_amount(quoted_total_raw) if quoted_total_raw else order_before["totalAmount"])
+        if not service_managed_only and quoted_total <= 0:
             quoted_total = order_before["fixedTotal"]
-        paid_amount = order_before["paidAmount"] if linked_service_managed else (parse_amount(paid_amount_raw) if paid_amount_raw else order_before["paidAmount"])
-        if not linked_service_managed and payment_status == "paid" and paid_amount <= 0:
+        paid_amount = order_before["paidAmount"] if service_managed_only else (parse_amount(paid_amount_raw) if paid_amount_raw else order_before["paidAmount"])
+        if not service_managed_only and payment_status == "paid" and paid_amount <= 0:
             paid_amount = quoted_total
-        if not linked_service_managed and payment_status == "paid" and not payment_date:
+        if not service_managed_only and payment_status == "paid" and not payment_date:
             payment_date = date.today().isoformat()
 
         payload["status"] = new_status
@@ -11062,12 +11497,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 date_from=date_from,
                 date_to=date_to,
             )
-            service_rows = (
-                build_laundry_service_rows(records)
-                if module_key == "laundry_tickets"
-                else build_equipment_service_rows(records)
+            if module_key == "laundry_tickets":
+                service_rows = build_laundry_service_rows(records)
+            elif module_key == "kitchen_orders":
+                service_rows = build_kitchen_service_rows(records)
+            else:
+                service_rows = build_equipment_service_rows(records)
+            service_context = build_service_module_context(
+                definition,
+                service_rows,
+                sales_snapshot=service_sales_snapshot(
+                    g.db,
+                    service_area,
+                    date_from=date_from,
+                    date_to=date_to,
+                )
+                if module_key == "kitchen_orders"
+                else None,
             )
-            service_context = build_service_module_context(definition, service_rows)
             module_quick_actions = []
             if definition.editable:
                 module_quick_actions.append(
@@ -11121,6 +11568,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == module_key)
             .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
+        if module_key == "customer_crm":
+            all_records = latest_customer_crm_records(all_records)
         records = filter_module_records(
             all_records,
             definition,
@@ -11487,6 +11936,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == module_key)
             .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
+        if module_key == "customer_crm":
+            all_records = latest_customer_crm_records(all_records)
         records = filter_module_records(
             all_records,
             definition,
@@ -11646,7 +12097,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     g.db.add(record)
                 set_module_record_metadata(record, definition, payload)
                 sync_generated_sales_for_module_record(record)
-                if module_key in {"customer_crm", "apartments", "laundry_tickets", "equipment_rental_bookings", "delivery_dispatch"}:
+                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch"}:
                     sync_customer_crm_automation(g.db)
                 audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
                 g.db.commit()
@@ -11749,8 +12200,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         if module_key in SERVICE_MODULE_AREA_IDS:
             record_payload.setdefault("businessAreaId", SERVICE_MODULE_AREA_IDS[module_key])
-            default_status = "Received" if module_key == "laundry_tickets" else "Booked"
+            default_status = "Received" if module_key in {"laundry_tickets", "kitchen_orders"} else "Booked"
             record_payload.setdefault(definition.status_field, default_status)
+            if module_key == "kitchen_orders":
+                record_payload.setdefault("orderDate", date.today().isoformat())
+                record_payload.setdefault("orderType", "Walk-in")
+                record_payload.setdefault("deliveryMode", "Takeaway")
+                record_payload.setdefault("customerName", "Walk-in Customer")
             sync_service_line_item_rollup(module_key, record_payload)
             service_area = SERVICE_MODULE_AREA_IDS[module_key]
             inventory_reference_products = service_reference_products(g.db, module_key)
@@ -11991,11 +12447,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 flash("Service payment captured.", "success")
                 return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
 
-        service_row = (
-            build_laundry_service_rows([record])[0]
-            if module_key == "laundry_tickets"
-            else build_equipment_service_rows([record])[0]
-        )
+        if module_key == "laundry_tickets":
+            service_row = build_laundry_service_rows([record])[0]
+        elif module_key == "kitchen_orders":
+            service_row = build_kitchen_service_rows([record])[0]
+        else:
+            service_row = build_equipment_service_rows([record])[0]
         return render_template(
             "service_payment_form.html",
             page_title=f"{definition.label} Payment",
@@ -13073,6 +13530,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
         closing_cash_counted_raw = parse_amount(payload.get("closingCashCounted"))
         if opening_cash_raw < 0 or closing_cash_counted_raw < 0:
             return jsonify({"ok": False, "error": "Opening cash and counted close cash cannot be below zero."}), 400
+        attendance_result = None
+        if attendance_check_in_required(g.current_user) and attendance_is_checked_in(g.current_user):
+            attendance_result = save_attendance_clock_action(g.current_user, "check-out")
+            if not attendance_result.get("ok"):
+                return jsonify(
+                    {
+                        "ok": False,
+                        "error": normalize_text(attendance_result.get("error")) or "Please check out before closing the counter.",
+                    }
+                ), 400
 
         reference = f"pos-closeout|{summary['orderDate']}|{area_id or 'all'}"
         record = g.db.scalar(
@@ -13128,7 +13595,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             f"{summary['orderCount']} orders · {format_currency(summary['totalAmount'])}",
         )
         g.db.commit()
-        return jsonify({"ok": True, "closeout": closeout_payload, "summary": build_pos_counter_summary(order_date, area_id)})
+        return jsonify(
+            {
+                "ok": True,
+                "closeout": closeout_payload,
+                "summary": build_pos_counter_summary(order_date, area_id),
+                "attendanceMessage": normalize_text(attendance_result.get("message")) if attendance_result else "",
+                "attendanceRedirect": attendance_gate_target_path() if attendance_result else "",
+            }
+        )
 
     @app.route("/app/audit")
     @access_required("audit")

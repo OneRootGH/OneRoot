@@ -150,6 +150,19 @@
         {% else %}
           <li><span>No laundry jobs need special follow-up right now.</span></li>
         {% endfor %}
+      {% elif definition.key == 'kitchen_orders' %}
+        {% for item in service_context.watchItems %}
+          <li>
+            <strong>{{ item.customerName }} · {{ item.itemSummary }}</strong>
+            <span>
+              {{ item.kitchenCategory }} · {{ item.orderType }} ·
+              {% if item.isReady %}Ready{% elif item.isOutstanding %}Open Balance{% elif item.isDueToday %}Due Today{% else %}Open{% endif %}
+              · {{ item.balance|currency }} balance
+            </span>
+          </li>
+        {% else %}
+          <li><span>No kitchen orders need special follow-up right now.</span></li>
+        {% endfor %}
       {% else %}
         {% for item in service_context.watchItems %}
           <li>
@@ -204,6 +217,48 @@
                 <td>
                   Due {{ row.dueDate or '—' }}
                   <span class="table-secondary">Ready {{ row.readyDate or '—' }} · {{ row.deliveryMode }}</span>
+                </td>
+                <td>
+                  {{ row.amountDue|currency }}
+                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }} · Profit {{ row.profitAmount|currency }}</span>
+                </td>
+                <td>{{ row.status }}</td>
+                <td>
+                  <div class="row-actions">
+                    <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                    <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">Payment</a>
+                    {% if row.linkedOnlineOrderId %}
+                      <a class="table-link" href="{{ url_for('online_orders_desk', order_id=row.linkedOnlineOrderId) }}">Order</a>
+                    {% endif %}
+                    <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
+                      <input type="hidden" name="q" value="{{ search }}">
+                      <input type="hidden" name="status" value="{{ status_filter }}">
+                      <input type="hidden" name="category" value="{{ category_filter }}">
+                      <input type="hidden" name="date_from" value="{{ date_from }}">
+                      <input type="hidden" name="date_to" value="{{ date_to }}">
+                      <button class="text-button danger-text" type="submit">Delete</button>
+                    </form>
+                  </div>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="7">No records yet.</td></tr>
+            {% endfor %}
+          {% elif definition.key == 'kitchen_orders' %}
+            {% for row in service_rows %}
+              <tr>
+                <td>
+                  {{ row.customerName }}
+                  {% if row.customerPhone %}<span class="table-secondary">{{ row.customerPhone }}</span>{% endif %}
+                </td>
+                <td>
+                  {{ row.itemSummary }}
+                  <span class="table-secondary">{{ row.kitchenCategory }} · {{ row.orderType }}{% if row.quantity %} · {{ row.quantity }} items @ {{ row.unitRate|currency }}{% endif %}{% if row.lineItemCount > 1 %} · {{ row.lineItemCount }} lines{% endif %}{% if row.itemDetail %} · {{ row.itemDetail }}{% endif %}{% if row.linkedOnlineOrderNumber %} · Web {{ row.linkedOnlineOrderNumber }}{% endif %}</span>
+                </td>
+                <td>{{ row.orderDate or '—' }}</td>
+                <td>
+                  Ready {{ row.readyDate or '—' }}
+                  <span class="table-secondary">{{ row.deliveryMode }} · {{ row.status }}</span>
                 </td>
                 <td>
                   {{ row.amountDue|currency }}

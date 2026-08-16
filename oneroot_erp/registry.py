@@ -136,6 +136,7 @@ ROLE_ACCESS_KEYS = {
         "maintenance_records",
         "laundry_tickets",
         "equipment_rental_bookings",
+        "kitchen_orders",
         "salary_records",
         "workforce_attendance",
         "job_vacancies",
@@ -177,6 +178,7 @@ ROLE_ACCESS_KEYS = {
         "maintenance_records",
         "laundry_tickets",
         "equipment_rental_bookings",
+        "kitchen_orders",
         "salary_records",
         "workforce_attendance",
         "job_vacancies",
@@ -235,6 +237,7 @@ ROLE_ACCESS_KEYS = {
         "mobile_money_transactions",
         "laundry_tickets",
         "equipment_rental_bookings",
+        "kitchen_orders",
         "maintenance_records",
         "workforce_attendance",
         "job_vacancies",
@@ -274,6 +277,7 @@ ROLE_ACCESS_KEYS = {
         "mobile_money_transactions",
         "laundry_tickets",
         "equipment_rental_bookings",
+        "kitchen_orders",
         "workforce_attendance",
         "knowledge_base",
         "customer_crm",
@@ -289,6 +293,7 @@ ROLE_ACCESS_KEYS = {
         "sales",
         "online_orders",
         "mobile_money_transactions",
+        "kitchen_orders",
     },
     "mobile-money-agent": {
         "dashboard",
@@ -509,6 +514,27 @@ EQUIPMENT_RENTAL_CATEGORY_OPTIONS = [
 ]
 EQUIPMENT_RENTAL_STATUSES = ["Booked", "Out", "Returned", "Cancelled"]
 EQUIPMENT_CONDITIONS = ["Good", "Fair", "Damaged"]
+KITCHEN_ORDER_TYPES = [
+    ("Walk-in", "Walk-in"),
+    ("Takeaway", "Takeaway"),
+    ("Delivery", "Delivery"),
+    ("Pre-order", "Pre-order"),
+    ("Online", "Online"),
+]
+KITCHEN_ORDER_CATEGORY_OPTIONS = [
+    ("Meal Combos", "Meal Combos"),
+    ("Main Meals", "Main Meals"),
+    ("Proteins & Extras", "Proteins & Extras"),
+    ("Sides", "Sides"),
+    ("Drinks", "Drinks"),
+    ("Packaging & Add-ons", "Packaging & Add-ons"),
+    ("Prepared Meals", "Prepared Meals"),
+    ("Soups & Stews", "Soups & Stews"),
+    ("Ingredients & Prep", "Ingredients & Prep"),
+    ("Kitchen Service Charges", "Kitchen Service Charges"),
+]
+KITCHEN_DELIVERY_MODES = ["Eat In", "Takeaway", "Pickup", "Delivery"]
+KITCHEN_ORDER_STATUSES = ["Received", "Preparing", "Ready", "Completed", "Cancelled"]
 LEDGER_PARTY_TYPES = [
     ("tenant", "Tenant"),
     ("customer", "Customer"),
@@ -1149,6 +1175,37 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "kitchen_orders": ModuleDefinition(
+        key="kitchen_orders",
+        label="Kitchen Orders",
+        legacy_collection="kitchenOrders",
+        menu_group="Services",
+        amount_field="amountDue",
+        date_field="orderDate",
+        title_field="customerName",
+        status_field="status",
+        fields=[
+            FieldDefinition("orderDate", "Order Date", "date", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("customerName", "Customer Name", "text"),
+            FieldDefinition("customerPhone", "Customer Phone", "text"),
+            FieldDefinition("orderType", "Order Type", "select", True, KITCHEN_ORDER_TYPES),
+            FieldDefinition("deliveryMode", "Delivery Mode", "select", False, [(item, item) for item in KITCHEN_DELIVERY_MODES]),
+            FieldDefinition("kitchenCategory", "Kitchen Category", "select", False, KITCHEN_ORDER_CATEGORY_OPTIONS),
+            FieldDefinition("kitchenItem", "Kitchen Item", "text", True),
+            FieldDefinition("itemSummary", "Additional Details", "textarea"),
+            FieldDefinition("itemQuantity", "Quantity", "number", False, step="1"),
+            FieldDefinition("amountDue", "Amount Due", "number", True),
+            FieldDefinition("costAmount", "Kitchen Cost", "number"),
+            FieldDefinition("amountPaid", "Amount Paid", "number"),
+            FieldDefinition("paymentDate", "Payment Date", "date"),
+            FieldDefinition("paymentMethod", "Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
+            FieldDefinition("paymentReference", "Payment Reference", "text"),
+            FieldDefinition("readyDate", "Ready Date", "date"),
+            FieldDefinition("status", "Status", "select", True, [(item, item) for item in KITCHEN_ORDER_STATUSES]),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
     "equipment_rental_bookings": ModuleDefinition(
         key="equipment_rental_bookings",
         label="Equipment Rentals",
@@ -1716,7 +1773,7 @@ MENU_GROUPS = [
         "Operations",
         [
             ("Property & Work Orders", ["apartments", "security_deposit_records", "maintenance_records"]),
-            ("Service Desk", ["laundry_tickets", "equipment_rental_bookings"]),
+            ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
         ],
     ),
     (

@@ -54,7 +54,7 @@
 
     <form method="post" class="service-form-stack">
       <input type="hidden" name="businessAreaId" value="{{ payload.get('businessAreaId', '') }}">
-      {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] %}
+      {% if definition.key in ['laundry_tickets', 'kitchen_orders', 'equipment_rental_bookings'] %}
         <input type="hidden" name="lineItemsJson" id="service-line-items-json">
       {% endif %}
       {% for section in section_fields %}
@@ -78,7 +78,7 @@
                   {% elif field.field_type == 'select' %}
                     <select
                       name="{{ field.name }}"
-                      {% if field.name == 'serviceCategory' %}id="service-category"{% elif field.name == 'equipmentCategory' %}id="equipment-category"{% endif %}
+                      {% if field.name == 'serviceCategory' %}id="service-category"{% elif field.name == 'kitchenCategory' %}id="kitchen-category"{% elif field.name == 'equipmentCategory' %}id="equipment-category"{% endif %}
                       {% if field.required %}required{% endif %}
                     >
                       <option value="">Select {{ field.label }}</option>
@@ -96,6 +96,16 @@
                       placeholder="Choose or type laundry item"
                       {% if field.required %}required{% endif %}
                     >
+                  {% elif definition.key == 'kitchen_orders' and field.name == 'kitchenItem' %}
+                    <input
+                      type="text"
+                      name="{{ field.name }}"
+                      id="kitchen-item"
+                      value="{{ payload.get(field.name, '') }}"
+                      list="service-reference-options"
+                      placeholder="Choose or type kitchen item"
+                      {% if field.required %}required{% endif %}
+                    >
                   {% elif definition.key == 'equipment_rental_bookings' and field.name == 'equipmentItem' %}
                     <input
                       type="text"
@@ -111,7 +121,7 @@
                       type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
                       {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
                       name="{{ field.name }}"
-                      {% if field.name == 'pieces' %}id="laundry-pieces"{% elif field.name == 'amountDue' %}id="laundry-amount-due"{% elif field.name == 'costAmount' %}id="service-cost-amount"{% elif field.name == 'rentalDays' %}id="equipment-rental-days"{% elif field.name == 'rentalFee' %}id="equipment-rental-fee"{% elif field.name == 'outDate' %}id="equipment-out-date"{% elif field.name == 'dueDate' %}id="equipment-due-date"{% endif %}
+                      {% if field.name == 'pieces' %}id="laundry-pieces"{% elif field.name == 'itemQuantity' %}id="kitchen-item-quantity"{% elif field.name == 'amountDue' %}id="service-amount-due"{% elif field.name == 'costAmount' %}id="service-cost-amount"{% elif field.name == 'rentalDays' %}id="equipment-rental-days"{% elif field.name == 'rentalFee' %}id="equipment-rental-fee"{% elif field.name == 'outDate' %}id="equipment-out-date"{% elif field.name == 'dueDate' %}id="equipment-due-date"{% endif %}
                       step="{{ field.step if field.field_type == 'number' else '' }}"
                       value="{{ payload.get(field.name, '') }}"
                       placeholder="{{ field.placeholder or field.label }}"
@@ -122,14 +132,14 @@
               {% endif %}
             {% endfor %}
           </div>
-          {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] and loop.index == 2 %}
+          {% if definition.key in ['laundry_tickets', 'kitchen_orders', 'equipment_rental_bookings'] and loop.index == 2 %}
             <div class="service-line-builder">
               <div class="service-line-builder-head">
                 <div>
                   <p class="eyebrow">Request Items</p>
                   <h3>Build One Customer Request</h3>
                 </div>
-                <p class="muted">Add multiple laundry or equipment items for the same customer before you save.</p>
+                <p class="muted">Add multiple items for the same customer before you save the request.</p>
               </div>
               <div class="form-grid service-line-builder-grid">
                 {% if definition.key == 'equipment_rental_bookings' %}
@@ -173,7 +183,7 @@
       </section>
     {% endif %}
 
-    {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] and reference_product_options %}
+    {% if definition.key in ['laundry_tickets', 'kitchen_orders', 'equipment_rental_bookings'] and reference_product_options %}
       <datalist id="service-reference-options">
         {% for item in reference_product_options %}
           <option value="{{ item }}"></option>
@@ -183,18 +193,22 @@
   </article>
 {% endblock %}
 {% block scripts %}
-  {% if definition.key in ['laundry_tickets', 'equipment_rental_bookings'] %}
+  {% if definition.key in ['laundry_tickets', 'kitchen_orders', 'equipment_rental_bookings'] %}
     <script>
       (function () {
         const serviceKey = {{ definition.key|tojson }};
         const catalog = {{ reference_product_catalog|tojson }};
         const existingLineItems = {{ existing_line_items|tojson }};
+        const isLaundry = serviceKey === "laundry_tickets";
+        const isKitchen = serviceKey === "kitchen_orders";
+        const isEquipment = serviceKey === "equipment_rental_bookings";
 
         const fields = {
-          item: document.getElementById(serviceKey === "laundry_tickets" ? "laundry-item" : "equipment-item"),
-          category: document.getElementById(serviceKey === "laundry_tickets" ? "service-category" : "equipment-category"),
+          item: document.getElementById(isLaundry ? "laundry-item" : (isKitchen ? "kitchen-item" : "equipment-item")),
+          category: document.getElementById(isLaundry ? "service-category" : (isKitchen ? "kitchen-category" : "equipment-category")),
           pieces: document.getElementById("laundry-pieces"),
-          amountDue: document.getElementById("laundry-amount-due"),
+          kitchenQuantity: document.getElementById("kitchen-item-quantity"),
+          amountDue: document.getElementById("service-amount-due"),
           costAmount: document.getElementById("service-cost-amount"),
           rentalDays: document.getElementById("equipment-rental-days"),
           rentalFee: document.getElementById("equipment-rental-fee"),
@@ -284,7 +298,7 @@
             fields.previewContainer.innerHTML = `
               <article class="service-item-preview-card is-empty">
                 <strong>No item selected yet.</strong>
-                <p>Choose a laundry or equipment item above to preview price, cost, and image before adding it to the request.</p>
+                <p>Choose a saved service item above to preview price, cost, and image before adding it to the request.</p>
               </article>
             `;
             return;
@@ -303,7 +317,7 @@
                 <strong>${typedName}</strong>
                 <span>${category}</span>
                 <span>Price ${priceLabel} · Cost ${costLabel}</span>
-                ${notes ? `<p>${notes}</p>` : `<p>${serviceKey === "laundry_tickets" ? "Saved laundry pricing will multiply by item count." : "Saved rental pricing will multiply by quantity and rental days."}</p>`}
+                ${notes ? `<p>${notes}</p>` : `<p>${isLaundry ? "Saved laundry pricing will multiply by item count." : (isKitchen ? "Saved kitchen pricing will multiply by quantity." : "Saved rental pricing will multiply by quantity and rental days.")}</p>`}
               </div>
             </article>
           `;
@@ -326,12 +340,19 @@
         }
 
         function currentUnits() {
-          if (serviceKey === "laundry_tickets") {
+          if (isLaundry) {
             const pieces = Math.max(Math.round(parseNumber(fields.pieces ? fields.pieces.value : "1")), 1);
             if (fields.pieces) {
               fields.pieces.value = String(pieces);
             }
             return pieces;
+          }
+          if (isKitchen) {
+            const quantity = Math.max(Math.round(parseNumber(fields.kitchenQuantity ? fields.kitchenQuantity.value : "1")), 1);
+            if (fields.kitchenQuantity) {
+              fields.kitchenQuantity.value = String(quantity);
+            }
+            return quantity;
           }
           const derivedDays = deriveRentalDays();
           const typedDays = Math.max(Math.round(parseNumber(fields.rentalDays ? fields.rentalDays.value : "1")), 1);
@@ -349,15 +370,15 @@
             return;
           }
           const units = currentUnits();
-          const quantity = serviceKey === "equipment_rental_bookings"
+          const quantity = isEquipment
             ? Math.max(Math.round(parseNumber(fields.equipmentQuantity ? fields.equipmentQuantity.value : "1")), 1)
             : 1;
           ensureSelectValue(fields.category, match.category);
           fields.costAmount.value = formatAmount(match.costPrice * units * quantity);
-          if (serviceKey === "laundry_tickets" && fields.amountDue) {
+          if ((isLaundry || isKitchen) && fields.amountDue) {
             fields.amountDue.value = formatAmount(match.salesPrice * units);
           }
-          if (serviceKey === "equipment_rental_bookings" && fields.rentalFee) {
+          if (isEquipment && fields.rentalFee) {
             fields.rentalFee.value = formatAmount(match.salesPrice * units * quantity);
           }
           renderPreview();
@@ -369,7 +390,7 @@
             return null;
           }
           const match = currentCatalogMatch();
-          if (serviceKey === "laundry_tickets") {
+          if (isLaundry) {
             const pieces = Math.max(Math.round(parseNumber(fields.pieces ? fields.pieces.value : "1")), 1);
             const amountDue = parseNumber(fields.amountDue ? fields.amountDue.value : "0");
             const costAmount = parseNumber(fields.costAmount ? fields.costAmount.value : "0");
@@ -379,6 +400,22 @@
               quantity: pieces,
               unitPrice: pieces > 0 ? amountDue / pieces : amountDue,
               costPrice: pieces > 0 ? costAmount / pieces : costAmount,
+              rentalDays: 1,
+              lineTotal: amountDue,
+              lineCost: costAmount,
+              imageUrl: resolveImageUrl(match),
+            };
+          }
+          if (isKitchen) {
+            const quantity = Math.max(Math.round(parseNumber(fields.kitchenQuantity ? fields.kitchenQuantity.value : "1")), 1);
+            const amountDue = parseNumber(fields.amountDue ? fields.amountDue.value : "0");
+            const costAmount = parseNumber(fields.costAmount ? fields.costAmount.value : "0");
+            return {
+              name: itemName,
+              category: String(fields.category ? fields.category.value : "").trim(),
+              quantity,
+              unitPrice: quantity > 0 ? amountDue / quantity : amountDue,
+              costPrice: quantity > 0 ? costAmount / quantity : costAmount,
               rentalDays: 1,
               lineTotal: amountDue,
               lineCost: costAmount,
@@ -405,10 +442,13 @@
 
         function clearDraftInputs() {
           fields.item.value = "";
-          if (serviceKey === "laundry_tickets" && fields.pieces) {
+          if (isLaundry && fields.pieces) {
             fields.pieces.value = "1";
           }
-          if (serviceKey === "equipment_rental_bookings" && fields.equipmentQuantity) {
+          if (isKitchen && fields.kitchenQuantity) {
+            fields.kitchenQuantity.value = "1";
+          }
+          if (isEquipment && fields.equipmentQuantity) {
             fields.equipmentQuantity.value = "1";
           }
           if (fields.amountDue) {
@@ -433,7 +473,7 @@
         function recalcTotals() {
           const categories = [...new Set(lineItems.map((item) => String(item.category || "").trim()).filter(Boolean))];
           const totalCost = lineItems.reduce((sum, item) => sum + parseNumber(item.lineCost), 0);
-          if (serviceKey === "laundry_tickets") {
+          if (isLaundry) {
             const totalDue = lineItems.reduce((sum, item) => sum + parseNumber(item.lineTotal), 0);
             const totalPieces = lineItems.reduce((sum, item) => sum + Math.max(Math.round(parseNumber(item.quantity)), 0), 0) || 1;
             if (fields.amountDue) {
@@ -444,6 +484,18 @@
             }
             if (fields.category) {
               ensureSelectValue(fields.category, categories.length === 1 ? categories[0] : "Mixed Items");
+            }
+          } else if (isKitchen) {
+            const totalDue = lineItems.reduce((sum, item) => sum + parseNumber(item.lineTotal), 0);
+            const totalQuantity = lineItems.reduce((sum, item) => sum + Math.max(Math.round(parseNumber(item.quantity)), 0), 0) || 1;
+            if (fields.amountDue) {
+              fields.amountDue.value = formatAmount(totalDue);
+            }
+            if (fields.kitchenQuantity) {
+              fields.kitchenQuantity.value = String(totalQuantity);
+            }
+            if (fields.category) {
+              ensureSelectValue(fields.category, categories.length === 1 ? categories[0] : "Mixed Kitchen Items");
             }
           } else {
             const totalRentalFee = lineItems.reduce((sum, item) => sum + parseNumber(item.lineTotal), 0);
@@ -473,9 +525,11 @@
           }
           fields.lineItemsContainer.innerHTML = lineItems
             .map((item, index) => {
-              const quantityText = serviceKey === "laundry_tickets"
+              const quantityText = isLaundry
                 ? `${item.quantity} piece${item.quantity === 1 ? "" : "s"}`
-                : `${item.quantity} unit${item.quantity === 1 ? "" : "s"} · ${item.rentalDays} day${item.rentalDays === 1 ? "" : "s"}`;
+                : (isKitchen
+                    ? `${item.quantity} item${item.quantity === 1 ? "" : "s"}`
+                    : `${item.quantity} unit${item.quantity === 1 ? "" : "s"} · ${item.rentalDays} day${item.rentalDays === 1 ? "" : "s"}`);
               return `
                 <article class="service-line-item">
                   <div class="stack-list-media">
@@ -535,6 +589,7 @@
         [
           fields.item,
           fields.pieces,
+          fields.kitchenQuantity,
           fields.rentalDays,
           fields.outDate,
           fields.dueDate,
