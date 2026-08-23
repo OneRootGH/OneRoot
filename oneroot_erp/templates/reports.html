@@ -6,7 +6,10 @@
         <p class="eyebrow">Filters</p>
         <h3>Management Reporting Scope</h3>
       </div>
-      <a class="button subtle" href="{{ url_for('reports_export', month=month_filter, area=area_filter) }}">Export Report CSV</a>
+      <div class="toolbar">
+        <a class="button subtle" href="{{ url_for('reports_stock_risk_export', area=area_filter) }}">Export Stock Risk CSV</a>
+        <a class="button subtle" href="{{ url_for('reports_export', month=month_filter, area=area_filter) }}">Export Report CSV</a>
+      </div>
     </div>
     <form class="form-grid">
       <label>
@@ -43,7 +46,7 @@
     <article class="metric-card">
       <span>Gross Profit</span>
       <strong>{{ profit_total|currency }}</strong>
-      <small>{{ gross_margin_percent }}% gross margin in this scope</small>
+      <small>{{ gross_margin_percent }}% gross margin before operating costs</small>
     </article>
     <article class="metric-card {% if expenses_total < 0 %}warning{% endif %}">
       <span>Expenses</span>
@@ -79,12 +82,12 @@
     <article class="metric-card {% if operating_total < 0 %}warning{% endif %}">
       <span>Operating Profit</span>
       <strong>{{ operating_total|currency }}</strong>
-      <small>After expenses, petty cash, payroll, and maintenance</small>
+      <small>{{ operating_margin_percent }}% operating margin after expenses, petty cash, payroll, and maintenance</small>
     </article>
     <article class="metric-card {% if net_total < 0 %}warning{% endif %}">
       <span>Net Position</span>
       <strong>{{ net_total|currency }}</strong>
-      <small>{{ operating_margin_percent }}% net margin after depreciation</small>
+      <small>{{ net_margin_percent }}% net margin after depreciation</small>
     </article>
     <article class="metric-card warning">
       <span>Supplier Balance</span>
@@ -285,40 +288,99 @@
         </table>
       </div>
     </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card warning">
+      <span>Expired</span>
+      <strong>{{ expired_risk_count }}</strong>
+      <small>Items that should be removed or discarded now</small>
+    </article>
+    <article class="metric-card">
+      <span>About To Expire</span>
+      <strong>{{ expiring_soon_risk_count }}</strong>
+      <small>Items within the current expiry warning window</small>
+    </article>
+    <article class="metric-card">
+      <span>Near Stock Out</span>
+      <strong>{{ near_stock_out_risk_count }}</strong>
+      <small>Items already at or below minimum stock level</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Stock Out</span>
+      <strong>{{ stock_out_risk_count }}</strong>
+      <small>Items with zero or negative stock left</small>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Inventory Risk</p>
+          <h3>Expiry & Stock Line List</h3>
+        </div>
+        <div class="toolbar">
+          <a class="button subtle" href="{{ url_for('inventory', area=area_filter) if area_filter else url_for('inventory') }}">Open Inventory</a>
+        </div>
+      </div>
+      <div class="table-wrap tall">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Area</th>
+              <th>Category</th>
+              <th>Stock</th>
+              <th>Min</th>
+              <th>Expiry</th>
+              <th>Risk</th>
+              <th>Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in inventory_risk_rows %}
+              <tr>
+                <td>
+                  {{ row.name }}
+                  <span class="table-secondary">{{ row.sku }}</span>
+                </td>
+                <td>{{ row.areaShort }}</td>
+                <td>{{ row.category }}</td>
+                <td>{{ row.quantityDisplay }}</td>
+                <td>{{ row.minStockLevel }}</td>
+                <td>
+                  {{ row.expiryDate or '—' }}
+                  <span class="table-secondary">{{ row.expiryStatus }}</span>
+                </td>
+                <td class="{% if row.isExpired or row.isStockOut %}negative-text{% endif %}">{{ row.riskSummary }}</td>
+                <td>{{ row.actionSummary }}</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8">No expiry or stock-risk items are flagged in this scope right now.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
 
     <article class="card">
       <div class="card-header">
         <div>
           <p class="eyebrow">Attention Queue</p>
-          <h3>Low Stock & Recurring Watch</h3>
+          <h3>Recurring Controls Watch</h3>
         </div>
       </div>
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Recurring Controls</p>
-        <ul class="stack-list compact">
-          {% for record in recurring_alerts %}
-            <li>
-              <strong>{{ record.title }}</strong>
-              <span>{{ record.payload.get('nextDueDate', '') }} · {{ record.status }}</span>
-            </li>
-          {% else %}
-            <li><span>No recurring items are due soon right now.</span></li>
-          {% endfor %}
-        </ul>
-      </div>
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Low Stock</p>
-        <ul class="stack-list compact">
-          {% for item in low_stock_items %}
-            <li>
-              <strong>{{ item.name }}</strong>
-              <span>{{ business_area_short.get(item.business_area_id, item.business_area_id) }} · {{ item.quantity_on_hand }} left</span>
-            </li>
-          {% else %}
-            <li><span>No low stock items are flagged right now.</span></li>
-          {% endfor %}
-        </ul>
-      </div>
+      <ul class="stack-list compact">
+        {% for record in recurring_alerts %}
+          <li>
+            <strong>{{ record.title }}</strong>
+            <span>{{ record.payload.get('nextDueDate', '') }} · {{ record.status }}</span>
+          </li>
+        {% else %}
+          <li><span>No recurring items are due soon right now.</span></li>
+        {% endfor %}
+      </ul>
     </article>
   </section>
 

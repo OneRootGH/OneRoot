@@ -1341,6 +1341,163 @@ def product_matches_expiry_filter(item_or_payload: Product | dict[str, Any], exp
     return True
 
 
+def product_min_stock_level(item_or_payload: Product | dict[str, Any]) -> int:
+    raw_value = item_or_payload.min_stock_level if isinstance(item_or_payload, Product) else item_or_payload.get("minStockLevel", item_or_payload.get("min_stock_level", 0))
+    return max(int(parse_amount(raw_value)), 0)
+
+
+def product_stock_risk_status(item_or_payload: Product | dict[str, Any]) -> dict[str, Any]:
+    if not product_tracks_inventory(item_or_payload):
+        return {
+            "label": "Service",
+            "tone": "muted",
+            "quantityOnHand": 0.0,
+            "minStockLevel": 0,
+            "isStockOut": False,
+            "isNearStockOut": False,
+        }
+    quantity_on_hand = parse_amount(
+        item_or_payload.quantity_on_hand if isinstance(item_or_payload, Product) else item_or_payload.get("quantityOnHand", 0)
+    )
+    min_stock_level = product_min_stock_level(item_or_payload)
+    if not product_quantity_known(item_or_payload):
+        return {
+            "label": "Quantity Not Tracked",
+            "tone": "muted",
+            "quantityOnHand": quantity_on_hand,
+            "minStockLevel": min_stock_level,
+            "isStockOut": False,
+            "isNearStockOut": False,
+        }
+    if quantity_on_hand <= 0:
+        return {
+            "label": "Stock Out",
+            "tone": "danger",
+            "quantityOnHand": quantity_on_hand,
+            "minStockLevel": min_stock_level,
+            "isStockOut": True,
+            "isNearStockOut": False,
+        }
+    if min_stock_level > 0 and quantity_on_hand <= min_stock_level:
+        return {
+            "label": "Near Stock Out",
+            "tone": "warning",
+            "quantityOnHand": quantity_on_hand,
+            "minStockLevel": min_stock_level,
+            "isStockOut": False,
+            "isNearStockOut": True,
+        }
+    return {
+        "label": "Healthy Stock",
+        "tone": "ok",
+        "quantityOnHand": quantity_on_hand,
+        "minStockLevel": min_stock_level,
+        "isStockOut": False,
+        "isNearStockOut": False,
+    }
+
+
+def inventory_risk_action_summary(*, is_expired: bool, is_expiring_soon: bool, is_stock_out: bool, is_near_stock_out: bool) -> str:
+    if is_expired and is_stock_out:
+        return "Discard the expired item and restock only if demand is still active."
+    if is_expired:
+        return "Remove from sale and discard immediately."
+    if is_stock_out and is_expiring_soon:
+        return "Replenish carefully and confirm fresh stock before restocking."
+    if is_stock_out:
+        return "Reorder or replenish immediately."
+    if is_expiring_soon and is_near_stock_out:
+        return "Sell through quickly and restock cautiously to avoid waste."
+    if is_expiring_soon:
+        return "Push quick sales, markdown, or use before the expiry date."
+    if is_near_stock_out:
+        return "Reorder soon before the item reaches zero stock."
+    return "Monitor this item."
+
+
+def build_inventory_risk_rows(products: list[Product], *, area_filter: str = "", today_value: date | None = None) -> list[dict[str, Any]]:
+    selected_area = normalize_text(area_filter)
+    today_key = today_value or date.today()
+    rows: list[dict[str, Any]] = []
+    for product in products:
+        if not product.active or not product_tracks_inventory(product):
+            continue
+        if selected_area and normalize_text(product.business_area_id) != selected_area:
+            continue
+        expiry_meta = product_expiry_status(product, today_key)
+        stock_meta = product_stock_risk_status(product)
+        is_expired = bool(expiry_meta["isExpired"])
+        is_expiring_soon = bool(expiry_meta["isExpiringSoon"])
+        is_stock_out = bool(stock_meta["isStockOut"])
+        is_near_stock_out = bool(stock_meta["isNearStockOut"])
+        if not any((is_expired, is_expiring_soon, is_stock_out, is_near_stock_out)):
+            continue
+
+        risk_flags: list[str] = []
+        if is_expired:
+            risk_flags.append("Expired")
+        elif is_expiring_soon:
+            risk_flags.append("About to Expire")
+        if is_stock_out:
+            risk_flags.append("Stock Out")
+        elif is_near_stock_out:
+            risk_flags.append("Near Stock Out")
+
+        risk_rank = 6
+        if is_expired and is_stock_out:
+            risk_rank = 1
+        elif is_expired:
+            risk_rank = 2
+        elif is_stock_out:
+            risk_rank = 3
+        elif is_expiring_soon and is_near_stock_out:
+            risk_rank = 4
+        elif is_expiring_soon:
+            risk_rank = 5
+
+        rows.append(
+            {
+                "productId": product.id,
+                "name": normalize_text(product.name) or "Unnamed Item",
+                "sku": ensure_product_sku(product),
+                "areaId": normalize_text(product.business_area_id),
+                "areaLabel": BUSINESS_AREA_LABELS.get(normalize_text(product.business_area_id), normalize_text(product.business_area_id) or "Shared Operations"),
+                "areaShort": BUSINESS_AREA_SHORT.get(normalize_text(product.business_area_id), normalize_text(product.business_area_id) or "Shared"),
+                "category": normalize_text(product.category) or "Uncategorized",
+                "quantityOnHand": round(parse_amount(product.quantity_on_hand), 2),
+                "quantityDisplay": format_product_stock_badge(product),
+                "minStockLevel": product_min_stock_level(product),
+                "expiryDate": expiry_meta["expiryDate"].isoformat() if expiry_meta["expiryDate"] else "",
+                "expiryStatus": "About to Expire" if is_expiring_soon else expiry_meta["label"],
+                "daysLeft": expiry_meta["daysLeft"],
+                "stockStatus": stock_meta["label"],
+                "riskFlags": risk_flags,
+                "riskSummary": " · ".join(risk_flags),
+                "riskRank": risk_rank,
+                "actionSummary": inventory_risk_action_summary(
+                    is_expired=is_expired,
+                    is_expiring_soon=is_expiring_soon,
+                    is_stock_out=is_stock_out,
+                    is_near_stock_out=is_near_stock_out,
+                ),
+                "isExpired": is_expired,
+                "isExpiringSoon": is_expiring_soon,
+                "isStockOut": is_stock_out,
+                "isNearStockOut": is_near_stock_out,
+            }
+        )
+
+    rows.sort(
+        key=lambda item: (
+            item["riskRank"],
+            item["daysLeft"] if item["daysLeft"] is not None else 9999,
+            item["quantityOnHand"],
+            item["name"],
+        )
+    )
+    return rows
+
+
 def normalize_product_record(product: Product) -> bool:
     changed = False
     if normalize_equipment_inventory_category(product):
@@ -6885,6 +7042,13 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
             ),
             2,
         )
+        transaction_total = sum(
+            1
+            for record in records
+            if record.module_key == "sales"
+            and record_in_month_scope(record, month_value)
+            and record.business_area_id == area_id
+        )
         expense_total = round(
             sum(
                 record.amount
@@ -6944,22 +7108,28 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
         )
         operating_total = round(profit_total - expense_total - petty_cash_total - salary_total - maintenance_total, 2)
         net_total = round(operating_total - depreciation_total, 2)
+        operating_cost_total = round(expense_total + petty_cash_total + salary_total + maintenance_total + depreciation_total, 2)
         rows.append(
             {
                 "areaId": area_id,
                 "areaLabel": area["label"],
                 "areaShort": area["short"],
+                "transactionCount": transaction_total,
                 "salesTotal": sales_total,
                 "costTotal": cost_total,
                 "profitTotal": profit_total,
+                "grossMarginPercent": round((profit_total / sales_total) * 100, 2) if sales_total > 0 else 0.0,
                 "expenseTotal": expense_total,
                 "salaryTotal": salary_total,
                 "pettyCashTotal": petty_cash_total,
                 "maintenanceTotal": maintenance_total,
                 "depreciationTotal": depreciation_total,
+                "operatingCostTotal": operating_cost_total,
                 "operatingTotal": operating_total,
+                "operatingMarginPercent": round((operating_total / sales_total) * 100, 2) if sales_total > 0 else 0.0,
                 "supplierBalance": supplier_balance,
                 "netTotal": net_total,
+                "netMarginPercent": round((net_total / sales_total) * 100, 2) if sales_total > 0 else 0.0,
             }
         )
     rows.sort(key=lambda item: item["salesTotal"], reverse=True)
@@ -10416,18 +10586,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def profits_page():
         month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
         area_filter = normalize_text(request.args.get("area"))
+        all_records = g.db.scalars(select(ModuleRecord).order_by(desc(ModuleRecord.updated_at))).all()
         sales_records = g.db.scalars(
             select(ModuleRecord)
             .where(ModuleRecord.module_key == "sales")
             .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
         detail_rows = profit_detail_rows(sales_records, month_filter, area_filter)
+        reporting_area_rows = report_area_rows(all_records, month_filter)
+        if area_filter:
+            reporting_area_rows = [row for row in reporting_area_rows if row["areaId"] == area_filter]
 
         sales_total = round(sum(row["salesTotal"] for row in detail_rows), 2)
         cost_total = round(sum(row["costTotal"] for row in detail_rows), 2)
         profit_total = round(sum(row["profitTotal"] for row in detail_rows), 2)
         transaction_total = sum(row["transactionCount"] for row in detail_rows)
         gross_margin_percent = round((profit_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
+        expenses_total = round(sum(parse_amount(row["expenseTotal"]) for row in reporting_area_rows), 2)
+        salary_total = round(sum(parse_amount(row["salaryTotal"]) for row in reporting_area_rows), 2)
+        petty_cash_total = round(sum(parse_amount(row["pettyCashTotal"]) for row in reporting_area_rows), 2)
+        maintenance_total = round(sum(parse_amount(row["maintenanceTotal"]) for row in reporting_area_rows), 2)
+        depreciation_total = round(sum(parse_amount(row["depreciationTotal"]) for row in reporting_area_rows), 2)
+        operating_cost_total = round(sum(parse_amount(row["operatingCostTotal"]) for row in reporting_area_rows), 2)
+        operating_total = round(profit_total - expenses_total - petty_cash_total - salary_total - maintenance_total, 2)
+        net_total = round(operating_total - depreciation_total, 2)
+        operating_margin_percent = round((operating_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
+        net_margin_percent = round((net_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
 
         area_map: dict[str, dict[str, Any]] = {}
         source_map: dict[str, dict[str, Any]] = {}
@@ -10482,12 +10666,36 @@ def create_app(config: AppConfig | None = None) -> Flask:
             daily_entry["profitTotal"] = round(daily_entry["profitTotal"] + row["profitTotal"], 2)
             daily_entry["transactionCount"] += row["transactionCount"]
 
-        area_rows = sorted(area_map.values(), key=lambda item: (item["profitTotal"], item["salesTotal"]), reverse=True)
+        detail_area_map = area_map
+        area_rows = sorted(
+            (
+                {
+                    **row,
+                    "transactionCount": detail_area_map.get(row["areaId"], {}).get("transactionCount", row.get("transactionCount", 0)),
+                }
+                for row in reporting_area_rows
+                if any(
+                    abs(parse_amount(row.get(metric)))
+                    for metric in (
+                        "salesTotal",
+                        "profitTotal",
+                        "expenseTotal",
+                        "salaryTotal",
+                        "pettyCashTotal",
+                        "maintenanceTotal",
+                        "depreciationTotal",
+                        "netTotal",
+                    )
+                )
+            ),
+            key=lambda item: (item["netTotal"], item["profitTotal"], item["salesTotal"]),
+            reverse=True,
+        )
         source_rows = sorted(source_map.values(), key=lambda item: (item["profitTotal"], item["salesTotal"]), reverse=True)
         daily_rows = sorted(daily_map.values(), key=lambda item: item["day"])
 
         best_area = area_rows[0] if area_rows else None
-        weakest_area = min(area_rows, key=lambda item: item["profitTotal"]) if area_rows else None
+        weakest_area = min(area_rows, key=lambda item: item["netTotal"]) if area_rows else None
 
         return render_template(
             "profits.html",
@@ -10499,6 +10707,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             cost_total=cost_total,
             profit_total=profit_total,
             gross_margin_percent=gross_margin_percent,
+            expenses_total=expenses_total,
+            salary_total=salary_total,
+            petty_cash_total=petty_cash_total,
+            maintenance_total=maintenance_total,
+            depreciation_total=depreciation_total,
+            operating_cost_total=operating_cost_total,
+            operating_total=operating_total,
+            operating_margin_percent=operating_margin_percent,
+            net_total=net_total,
+            net_margin_percent=net_margin_percent,
             transaction_total=transaction_total,
             best_area=best_area,
             weakest_area=weakest_area,
@@ -10508,9 +10726,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             recent_profit_rows=detail_rows[:40],
             profit_area_chart=build_chart_rows(
                 [
-                    {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["profitTotal"]}
+                    {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["netTotal"]}
                     for row in area_rows
-                    if abs(parse_amount(row["profitTotal"])) > 0
+                    if abs(parse_amount(row["netTotal"])) > 0
                 ],
                 label_key="label",
                 value_key="amount",
@@ -10732,6 +10950,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         petty_cash_total = round(sum(record.amount for record in filtered_records if record.module_key == "petty_cash"), 2)
         maintenance_total = round(sum(parse_amount(row["maintenanceTotal"]) for row in area_rows), 2)
         depreciation_total = round(sum(parse_amount(row["depreciationTotal"]) for row in area_rows), 2)
+        operating_cost_total = round(sum(parse_amount(row["operatingCostTotal"]) for row in area_rows), 2)
         supplier_balance = round(
             sum(supplier_outstanding(record.payload or {}) for record in filtered_records if record.module_key == "suppliers"),
             2,
@@ -10751,7 +10970,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         operating_total = round(profit_total - expenses_total - petty_cash_total - salary_total - maintenance_total, 2)
         net_total = round(operating_total - depreciation_total, 2)
         gross_margin_percent = round((profit_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
-        operating_margin_percent = round((net_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
+        operating_margin_percent = round((operating_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
+        net_margin_percent = round((net_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
         area_rows = [
             row
             for row in area_rows
@@ -10760,12 +10980,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "maintenanceTotal", "depreciationTotal", "supplierBalance", "netTotal")
             )
         ]
-        low_stock_items = g.db.scalars(
-            select(Product)
-            .where(Product.track_inventory.is_(True), Product.active.is_(True), Product.quantity_on_hand <= Product.min_stock_level)
-            .order_by(Product.quantity_on_hand.asc(), Product.name.asc())
-            .limit(12)
-        ).all()
+        inventory_risk_rows = build_inventory_risk_rows(
+            g.db.scalars(
+                select(Product)
+                .where(Product.active.is_(True))
+                .order_by(Product.name.asc())
+            ).all(),
+            area_filter=area_filter,
+        )
         recurring_alerts = [
             record
             for record in g.db.scalars(
@@ -10791,12 +11013,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             petty_cash_total=petty_cash_total,
             maintenance_total=maintenance_total,
             depreciation_total=depreciation_total,
+            operating_cost_total=operating_cost_total,
             operating_total=operating_total,
             supplier_balance=supplier_balance,
             apartment_exposure=apartment_exposure,
             online_open_balance=online_open_balance,
             gross_margin_percent=gross_margin_percent,
             operating_margin_percent=operating_margin_percent,
+            net_margin_percent=net_margin_percent,
             net_total=net_total,
             report_sales_chart=build_chart_rows(
                 [
@@ -10841,13 +11065,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 short_key="short",
                 positive_color="var(--accent)",
             ),
-            low_stock_items=low_stock_items,
             recurring_alerts=recurring_alerts,
             area_rows=area_rows,
             target_progress_rows=target_progress_rows,
             target_total=round(sum(row["target"] for row in target_progress_rows), 2),
             target_actual_total=round(sum(row["actual"] for row in target_progress_rows), 2),
             target_areas_on_track=sum(1 for row in target_progress_rows if row["isOnTarget"]),
+            inventory_risk_rows=inventory_risk_rows,
+            expired_risk_count=sum(1 for row in inventory_risk_rows if row["isExpired"]),
+            expiring_soon_risk_count=sum(1 for row in inventory_risk_rows if row["isExpiringSoon"]),
+            near_stock_out_risk_count=sum(1 for row in inventory_risk_rows if row["isNearStockOut"]),
+            stock_out_risk_count=sum(1 for row in inventory_risk_rows if row["isStockOut"]),
             business_area_options=BUSINESS_AREA_OPTIONS,
             recent_audits=g.db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(10)).all(),
         )
@@ -10865,21 +11093,59 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "month",
             "areaId",
             "areaLabel",
+            "transactionCount",
             "salesTotal",
             "costTotal",
             "profitTotal",
+            "grossMarginPercent",
             "expenseTotal",
             "salaryTotal",
             "pettyCashTotal",
             "maintenanceTotal",
             "depreciationTotal",
+            "operatingCostTotal",
             "operatingTotal",
+            "operatingMarginPercent",
             "supplierBalance",
             "netTotal",
+            "netMarginPercent",
         ]
         rows = [{"month": month_filter, **row} for row in area_rows]
         return csv_download(
             f"oneroot-reports-{month_filter}{'-' + area_filter if area_filter else ''}.csv",
+            headers,
+            rows,
+        )
+
+    @app.route("/app/reports/stock-risk.csv")
+    @access_required("reports")
+    def reports_stock_risk_export():
+        area_filter = normalize_text(request.args.get("area"))
+        rows = build_inventory_risk_rows(
+            g.db.scalars(
+                select(Product)
+                .where(Product.active.is_(True))
+                .order_by(Product.name.asc())
+            ).all(),
+            area_filter=area_filter,
+        )
+        headers = [
+            "areaId",
+            "areaLabel",
+            "name",
+            "sku",
+            "category",
+            "quantityOnHand",
+            "quantityDisplay",
+            "minStockLevel",
+            "expiryDate",
+            "expiryStatus",
+            "stockStatus",
+            "riskSummary",
+            "actionSummary",
+        ]
+        return csv_download(
+            f"oneroot-stock-risk{'-' + area_filter if area_filter else ''}.csv",
             headers,
             rows,
         )

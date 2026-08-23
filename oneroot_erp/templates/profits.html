@@ -43,25 +43,48 @@
     <article class="metric-card">
       <span>Gross Profit</span>
       <strong>{{ profit_total|currency }}</strong>
-      <small>{{ gross_margin_percent }}% gross margin</small>
+      <small>{{ gross_margin_percent }}% gross margin before operating costs</small>
+    </article>
+    <article class="metric-card">
+      <span>Net Profit</span>
+      <strong>{{ net_total|currency }}</strong>
+      <small>{{ net_margin_percent }}% net margin after expenses and depreciation</small>
+    </article>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Operating Costs</span>
+      <strong>{{ operating_cost_total|currency }}</strong>
+      <small>Expenses, petty cash, payroll, maintenance, and depreciation</small>
+    </article>
+    <article class="metric-card {% if operating_total < 0 %}warning{% endif %}">
+      <span>Operating Profit</span>
+      <strong>{{ operating_total|currency }}</strong>
+      <small>{{ operating_margin_percent }}% operating margin before depreciation</small>
     </article>
     <article class="metric-card">
       <span>Transactions</span>
       <strong>{{ transaction_total }}</strong>
       <small>Captured sales transactions in this filter</small>
     </article>
+    <article class="metric-card">
+      <span>Gross Margin</span>
+      <strong>{{ gross_margin_percent }}%</strong>
+      <small>Direct margin before overheads</small>
+    </article>
   </section>
 
   <section class="card-grid four">
     <article class="metric-card">
-      <span>Best Area</span>
+      <span>Best Net Area</span>
       <strong>{{ best_area.areaShort if best_area else '—' }}</strong>
-      <small>{% if best_area %}{{ best_area.profitTotal|currency }} profit{% else %}No area profit yet{% endif %}</small>
+      <small>{% if best_area %}{{ best_area.netTotal|currency }} net profit{% else %}No area net profit yet{% endif %}</small>
     </article>
-    <article class="metric-card {% if weakest_area and weakest_area.profitTotal < 0 %}warning{% endif %}">
-      <span>Watch Area</span>
+    <article class="metric-card {% if weakest_area and weakest_area.netTotal < 0 %}warning{% endif %}">
+      <span>Watch Net Area</span>
       <strong>{{ weakest_area.areaShort if weakest_area else '—' }}</strong>
-      <small>{% if weakest_area %}{{ weakest_area.profitTotal|currency }} profit{% else %}No area profit yet{% endif %}</small>
+      <small>{% if weakest_area %}{{ weakest_area.netTotal|currency }} net profit{% else %}No area net profit yet{% endif %}</small>
     </article>
     <article class="metric-card">
       <span>Profit Sources</span>
@@ -80,7 +103,7 @@
       <div class="card-header">
         <div>
           <p class="eyebrow">Charts</p>
-          <h3>Profit By Business Area</h3>
+          <h3>Net Profit By Business Area</h3>
         </div>
       </div>
       {% if profit_area_chart %}
@@ -98,7 +121,7 @@
           {% endfor %}
         </div>
       {% else %}
-        <p class="muted">Profit by area will appear once paid sales exist in this scope.</p>
+        <p class="muted">Net profit by area will appear once paid sales and operating costs exist in this scope.</p>
       {% endif %}
     </article>
 
@@ -200,33 +223,37 @@
       </div>
     </div>
     <div class="table-wrap">
-      <table>
-        <thead>
-          <tr>
-            <th>Area</th>
-            <th>Transactions</th>
-            <th>Sales</th>
-            <th>Cost</th>
-            <th>Profit</th>
-            <th>Margin</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in area_rows %}
+        <table>
+          <thead>
             <tr>
-              <td>{{ row.areaLabel }}</td>
-              <td>{{ row.transactionCount }}</td>
-              <td>{{ row.salesTotal|currency }}</td>
-              <td>{{ row.costTotal|currency }}</td>
-              <td class="{% if row.profitTotal < 0 %}negative-text{% endif %}">{{ row.profitTotal|currency }}</td>
-              <td>{% if row.salesTotal > 0 %}{{ ((row.profitTotal / row.salesTotal) * 100)|round(2) }}%{% else %}0.00%{% endif %}</td>
+              <th>Area</th>
+              <th>Transactions</th>
+              <th>Sales</th>
+              <th>Cost</th>
+              <th>Gross Profit</th>
+              <th>Operating Costs</th>
+              <th>Net Profit</th>
+              <th>Net Margin</th>
             </tr>
-          {% else %}
-            <tr><td colspan="6">No business area profit rows are available for this filter yet.</td></tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {% for row in area_rows %}
+              <tr>
+                <td>{{ row.areaLabel }}</td>
+                <td>{{ row.transactionCount }}</td>
+                <td>{{ row.salesTotal|currency }}</td>
+                <td>{{ row.costTotal|currency }}</td>
+                <td class="{% if row.profitTotal < 0 %}negative-text{% endif %}">{{ row.profitTotal|currency }}</td>
+                <td>{{ row.operatingCostTotal|currency }}</td>
+                <td class="{% if row.netTotal < 0 %}negative-text{% endif %}">{{ row.netTotal|currency }}</td>
+                <td>{{ row.netMarginPercent }}%</td>
+              </tr>
+            {% else %}
+              <tr><td colspan="8">No business area profit rows are available for this filter yet.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
   </section>
 
   <section class="card">
