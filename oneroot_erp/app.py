@@ -3793,11 +3793,46 @@ def knowledge_rollup(payload: dict[str, Any]) -> None:
         payload["status"] = explicit_status or "Draft"
 
 
+def attendance_clock_entries(payload: dict[str, Any]) -> list[dict[str, str]]:
+    """Return same-day clock intervals, including a backwards-compatible legacy interval."""
+    entries: list[dict[str, str]] = []
+    raw_entries = payload.get("clockEntries")
+    if isinstance(raw_entries, list):
+        for entry in raw_entries:
+            if not isinstance(entry, dict):
+                continue
+            check_in_time = normalize_text(entry.get("checkInTime"))
+            check_out_time = normalize_text(entry.get("checkOutTime"))
+            if parse_time_value(check_in_time):
+                entries.append({"checkInTime": check_in_time, "checkOutTime": check_out_time})
+    if entries:
+        return entries
+
+    # Attendance records created before same-day return shifts used one pair of fields.
+    check_in_time = normalize_text(payload.get("checkInTime"))
+    check_out_time = normalize_text(payload.get("checkOutTime"))
+    if parse_time_value(check_in_time):
+        return [{"checkInTime": check_in_time, "checkOutTime": check_out_time}]
+    return []
+
+
 def workforce_rollup(payload: dict[str, Any]) -> None:
     break_minutes = parse_amount(payload.get("breakMinutes"))
     scheduled_hours = hours_between_times(payload.get("shiftStart"), payload.get("shiftEnd"), break_minutes=break_minutes)
-    worked_hours = hours_between_times(payload.get("checkInTime"), payload.get("checkOutTime"), break_minutes=break_minutes)
-    late_minutes = minutes_late(payload.get("shiftStart"), payload.get("checkInTime"))
+    clock_entries = attendance_clock_entries(payload)
+    completed_hours = sum(
+        hours_between_times(entry.get("checkInTime"), entry.get("checkOutTime"))
+        for entry in clock_entries
+        if parse_time_value(entry.get("checkOutTime"))
+    )
+    worked_hours = round(max(completed_hours - (break_minutes / 60), 0), 2)
+    first_check_in = clock_entries[0]["checkInTime"] if clock_entries else ""
+    active_entry = next((entry for entry in reversed(clock_entries) if not parse_time_value(entry.get("checkOutTime"))), None)
+    last_check_out = "" if active_entry else (clock_entries[-1]["checkOutTime"] if clock_entries else "")
+    payload["clockEntries"] = clock_entries
+    payload["checkInTime"] = first_check_in
+    payload["checkOutTime"] = last_check_out
+    late_minutes = minutes_late(payload.get("shiftStart"), first_check_in)
     payload["scheduledHours"] = scheduled_hours
     payload["workedHours"] = worked_hours
     payload["overtimeHours"] = round(max(worked_hours - scheduled_hours, 0), 2)
@@ -3806,7 +3841,9 @@ def workforce_rollup(payload: dict[str, Any]) -> None:
     explicit_status = normalize_text(payload.get("attendanceStatus"))
     if explicit_status == "Off Duty":
         return
-    if parse_time_value(payload.get("checkOutTime")):
+    if active_entry:
+        payload["attendanceStatus"] = "Late" if late_minutes > 0 else "Present"
+    elif parse_time_value(payload.get("checkOutTime")):
         payload["attendanceStatus"] = "Checked Out"
     elif parse_time_value(payload.get("checkInTime")):
         payload["attendanceStatus"] = "Late" if late_minutes > 0 else "Present"
@@ -8410,27 +8447,29 @@ def create_app(config: AppConfig | None = None) -> Flask:
         attendance_optional = attendance_is_optional_for_user(user)
         record = attendance_record_for_user(user, target_date)
         payload = dict(record.payload if record else {})
-        check_in_time = normalize_text(payload.get("checkInTime"))
+        clock_entries = attendance_clock_entries(payload)
+        active_entry = next((entry for entry in reversed(clock_entries) if not parse_time_value(entry.get("checkOutTime"))), None)
+        check_in_time = normalize_text(active_entry.get("checkInTime")) if active_entry else normalize_text(payload.get("checkInTime"))
         check_out_time = normalize_text(payload.get("checkOutTime"))
         worked_hours = parse_amount(payload.get("workedHours"))
         stored_status = normalize_text(payload.get("attendanceStatus")) or normalize_text(getattr(record, "status", ""))
 
-        if check_out_time:
-            status_label = "Checked Out"
-            status_note = (
-                f"{check_in_time or 'Start not saved'} to {check_out_time} · {worked_hours:.2f} hrs worked"
-                if worked_hours > 0
-                else f"Checked out at {check_out_time}"
-            )
-            tone = "success"
-            can_check_in = False
-            can_check_out = False
-        elif check_in_time:
+        if active_entry:
             status_label = "Checked In"
             status_note = f"Checked in at {check_in_time}. Tap Check Out when the shift ends."
             tone = "accent"
             can_check_in = False
             can_check_out = True
+        elif check_out_time:
+            status_label = "Checked Out"
+            status_note = (
+                f"{len(clock_entries) or 1} shift(s) completed · {worked_hours:.2f} hrs worked"
+                if worked_hours > 0
+                else f"Checked out at {check_out_time}"
+            )
+            tone = "success"
+            can_check_in = True
+            can_check_out = False
         elif record:
             status_label = stored_status or "Scheduled"
             if status_label == "Off Duty":
@@ -8488,12 +8527,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if not record:
             return False
         payload = dict(record.payload or {})
-        check_in_time = normalize_text(payload.get("checkInTime"))
-        check_out_time = normalize_text(payload.get("checkOutTime"))
+        clock_entries = attendance_clock_entries(payload)
+        active_entry = next((entry for entry in reversed(clock_entries) if not parse_time_value(entry.get("checkOutTime"))), None)
         stored_status = normalize_text(payload.get("attendanceStatus")) or normalize_text(getattr(record, "status", ""))
-        if stored_status == "Off Duty" or check_out_time:
+        if stored_status == "Off Duty":
             return False
-        return bool(check_in_time)
+        return active_entry is not None
 
     def attendance_path_allowed(path: Any) -> bool:
         candidate = safe_next_path(path, attendance_gate_target_path())
@@ -8575,32 +8614,34 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload["businessAreaId"] = normalize_text(payload.get("businessAreaId")) or "shared-operations"
         payload["approvalStatus"] = normalize_text(payload.get("approvalStatus")) or "Draft"
 
-        has_check_in = bool(parse_time_value(payload.get("checkInTime")))
-        has_check_out = bool(parse_time_value(payload.get("checkOutTime")))
+        clock_entries = attendance_clock_entries(payload)
+        active_entry = next((entry for entry in reversed(clock_entries) if not parse_time_value(entry.get("checkOutTime"))), None)
 
         if clean_action == "check-in":
-            if has_check_in and not has_check_out:
+            if active_entry:
                 return {
                     "ok": False,
-                    "error": f"You are already checked in today at {normalize_text(payload.get('checkInTime'))}.",
+                    "error": f"You are already checked in today at {normalize_text(active_entry.get('checkInTime'))}.",
                 }
-            if has_check_out:
-                return {"ok": False, "error": "You already checked out today. Open the attendance record if you need to adjust it."}
-            payload["checkInTime"] = clock_time
+            clock_entries.append({"checkInTime": clock_time, "checkOutTime": ""})
+            payload["clockEntries"] = clock_entries
+            payload["checkInTime"] = normalize_text(clock_entries[0].get("checkInTime"))
+            payload["checkOutTime"] = ""
             payload["shiftStart"] = normalize_text(payload.get("shiftStart")) or clock_time
-            success_message = f"Checked in at {clock_time}."
+            success_message = (
+                f"Checked in again at {clock_time}."
+                if len(clock_entries) > 1
+                else f"Checked in at {clock_time}."
+            )
             audit_action = "check-in"
             audit_detail = f"{payload['staffName']} checked in at {clock_time}."
         else:
-            if not has_check_in:
+            if not active_entry:
                 return {"ok": False, "error": "Check in first before checking out."}
-            if has_check_out:
-                return {
-                    "ok": False,
-                    "error": f"You already checked out today at {normalize_text(payload.get('checkOutTime'))}.",
-                }
+            active_entry["checkOutTime"] = clock_time
+            payload["clockEntries"] = clock_entries
             payload["checkOutTime"] = clock_time
-            payload["shiftEnd"] = normalize_text(payload.get("shiftEnd")) or clock_time
+            payload["shiftEnd"] = clock_time
             success_message = f"Checked out at {clock_time}."
             audit_action = "check-out"
             audit_detail = f"{payload['staffName']} checked out at {clock_time}."
