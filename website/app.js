@@ -112,6 +112,7 @@
       "equipmentBookingForm",
       "equipmentItemSelect",
       "equipmentCategoryFilterRow",
+      "equipmentSearchInput",
       "equipmentQuickPickGrid",
       "equipmentItemPreview",
       "equipmentAddItemBtn",
@@ -138,6 +139,7 @@
       "laundryComboQuickPickGrid",
       "laundryServiceSelect",
       "laundryCategoryFilterRow",
+      "laundrySearchInput",
       "laundryQuickPickGrid",
       "laundryServicePreview",
       "laundryAddItemBtn",
@@ -209,6 +211,8 @@
     });
     elements.equipmentItemSelect?.addEventListener("change", renderEquipmentItemPreview);
     elements.laundryServiceSelect?.addEventListener("change", renderLaundryItemPreview);
+    elements.equipmentSearchInput?.addEventListener("input", () => populateEquipmentOptions());
+    elements.laundrySearchInput?.addEventListener("input", () => populateLaundryOptions());
 
     elements.checkoutForm?.addEventListener("input", persistCustomerDraftFromForm);
     elements.equipmentBookingForm?.addEventListener("input", persistServiceCustomerDraftFromForms);
@@ -399,6 +403,7 @@
     const whatsappNumbers = getWhatsappDisplayNumbers();
     const facebookUrl = normalizeText(state.config.facebookUrl);
     const contactParts = [
+      state.config.location ? `Location: ${state.config.location}` : "",
       state.config.supportPhone ? `Phone: ${state.config.supportPhone}` : "",
       whatsappNumbers.length ? `WhatsApp: ${whatsappNumbers.join(" / ")}` : "",
       state.config.supportEmail ? `Email: ${state.config.supportEmail}` : "",
@@ -591,21 +596,25 @@
 
   function getEquipmentCatalogItems() {
     const activeCategory = normalizeText(state.serviceFilters.equipmentCategory);
+    const searchText = normalizeText(elements.equipmentSearchInput?.value).toLowerCase();
     return getEquipmentCatalogBaseItems().filter((item) => {
-      if (!activeCategory) {
-        return true;
-      }
-      return getServiceCategoryLabel(item.category, "equipment") === activeCategory;
+      const matchesCategory = !activeCategory || getServiceCategoryLabel(item.category, "equipment") === activeCategory;
+      const matchesSearch = !searchText || [item.name, item.category, item.sku, item.barcode]
+        .map((value) => normalizeText(value).toLowerCase())
+        .some((value) => value.includes(searchText));
+      return matchesCategory && matchesSearch;
     });
   }
 
   function getLaundryCatalogItems() {
     const activeCategory = normalizeText(state.serviceFilters.laundryCategory);
+    const searchText = normalizeText(elements.laundrySearchInput?.value).toLowerCase();
     return getLaundryCatalogBaseItems().filter((item) => {
-      if (!activeCategory) {
-        return true;
-      }
-      return getServiceCategoryLabel(item.category, "laundry") === activeCategory;
+      const matchesCategory = !activeCategory || getServiceCategoryLabel(item.category, "laundry") === activeCategory;
+      const matchesSearch = !searchText || [item.name, item.category, item.sku, item.barcode]
+        .map((value) => normalizeText(value).toLowerCase())
+        .some((value) => value.includes(searchText));
+      return matchesCategory && matchesSearch;
     });
   }
 

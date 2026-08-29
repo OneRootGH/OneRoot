@@ -49,6 +49,7 @@
   const statusNode = document.getElementById("pos-status");
   const lastOrderNode = document.getElementById("pos-last-order-number");
   const lastReceiptLink = document.getElementById("pos-last-receipt");
+  const posDesk = document.querySelector("[data-pos-desk]")?.dataset.posDesk || "general";
 
   if (!searchInput || !resultsContainer || !cartContainer || !saveButton) {
     return;
@@ -333,12 +334,18 @@
     const url = new URL("/app/api/pos/products", window.location.origin);
     const area = getSelectedArea();
     const category = getSelectedCategory();
+    if (posDesk === "food") {
+      url.searchParams.set("desk", "food");
+    }
     const cacheKey = JSON.stringify({ query, area, category });
     if (query) {
       url.searchParams.set("q", query);
     }
     if (area) {
       url.searchParams.set("area", area);
+    }
+    if (posDesk === "food") {
+      url.searchParams.set("desk", "food");
     }
     if (category) {
       url.searchParams.set("category", category);
@@ -722,6 +729,7 @@
       body: JSON.stringify({
         orderDate: getOrderDate(),
         areaId: getSelectedArea(),
+        desk: posDesk,
         openingCash: parseMoneyInput(openingCashInput),
         closingCashCounted: parseMoneyInput(closingCashInput)
       })
@@ -776,6 +784,7 @@
     const payload = {
       orderDate: getOrderDate(),
       areaId: getSelectedArea(),
+      desk: posDesk,
       paymentMethod: paymentMethodInput?.value,
       customerName: customerNameInput?.value,
       customerPhone: customerPhoneInput?.value,

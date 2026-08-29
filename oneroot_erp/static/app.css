@@ -980,6 +980,25 @@ textarea { resize: vertical; }
   text-transform: uppercase;
   color: var(--muted);
 }
+.pos-locked-area {
+  display: grid;
+  gap: 0.24rem;
+  min-height: 2.95rem;
+  padding: 0.52rem 0.78rem;
+  border: 1px solid #d6dce7;
+  border-radius: 0.88rem;
+  background: #f5f8f5;
+}
+.pos-locked-area span {
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.pos-locked-area strong {
+  font-size: 0.86rem;
+  color: var(--green-dark);
+}
 .pos-search-dominant {
   min-width: 0;
 }
@@ -1519,6 +1538,22 @@ textarea { resize: vertical; }
   background: #faf6ee;
   display: grid;
   gap: 0.25rem;
+}
+.user-role-setup-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.8rem;
+  margin-top: 0.85rem;
+}
+.user-role-setup-grid .mini-card {
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.18s ease, border-color 0.18s ease;
+}
+.user-role-setup-grid .mini-card:hover,
+.user-role-setup-grid .mini-card:focus-visible {
+  transform: translateY(-2px);
+  border-color: var(--green);
 }
 .pos-payment-dock {
   margin-bottom: 0.65rem;
@@ -2103,6 +2138,9 @@ thead th {
   }
   .pos-counter-ribbon {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .user-role-setup-grid {
+    grid-template-columns: 1fr;
   }
   .pos-counter-pill-wide {
     grid-column: span 2;

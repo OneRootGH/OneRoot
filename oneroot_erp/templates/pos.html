@@ -1,11 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card pos-workbench">
+  <section class="card pos-workbench" data-pos-desk="{{ 'food' if food_pos_mode else 'general' }}">
     <div class="pos-workbench-bar">
       <div class="pos-workbench-title">
-        <h3>Checkout</h3>
+        <h3>{% if food_pos_mode %}Kitchen Checkout{% else %}Checkout{% endif %}</h3>
         <p class="muted pos-serving-note">
-          Fast counter view. Press <strong>/</strong> to jump to search.
+          {% if food_pos_mode %}OneRoot Kitchen meals and drinks only. Press <strong>/</strong> to search quickly.{% else %}Fast counter view. Press <strong>/</strong> to jump to search.{% endif %}
         </p>
       </div>
       <div class="toolbar pos-workbench-tools">
@@ -98,7 +98,7 @@
               <span>Scan</span>
               <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
             </label>
-            <label>
+            {% if not food_pos_mode %}<label>
               <span>Area</span>
               <select id="pos-area-filter">
                 <option value="">All POS Areas</option>
@@ -106,7 +106,9 @@
                   <option value="{{ value }}" {% if initial_area == value %}selected{% endif %}>{{ label }}</option>
                 {% endfor %}
               </select>
-            </label>
+            </label>{% else %}
+              <div class="pos-locked-area"><span>Counter</span><strong>OneRoot Kitchen</strong></div>
+            {% endif %}
             <label class="pos-category-select">
               <span>Category</span>
               <select id="pos-category-filter">

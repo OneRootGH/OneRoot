@@ -162,6 +162,26 @@
     </article>
   </section>
 
+  <section class="card user-role-setup-card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Two-Person Operating Setup</p>
+        <h3>Create the two core working accounts</h3>
+      </div>
+    </div>
+    <p class="muted">Use these as the first two staff accounts. Set each person’s actual name, username, phone, and private password in the form above.</p>
+    <div class="user-role-setup-grid">
+      <a class="mini-card" href="{{ url_for('users_page', preset='frontline-service-lead') }}">
+        <strong>1. Retail &amp; Service Lead</strong>
+        <span>POS, Food POS, inventory, barcode updates, laundry, equipment, online orders, dispatch, attendance, and customer records.</span>
+      </a>
+      <a class="mini-card" href="{{ url_for('users_page', preset='operations-controls-lead') }}">
+        <strong>2. Operations &amp; Controls Lead</strong>
+        <span>Expenses, mobile money, cash controls, maintenance, workforce, suppliers, reporting, and marketing campaigns.</span>
+      </a>
+    </div>
+  </section>
+
   <section class="split-grid">
     <article class="card">
       <div class="card-header">

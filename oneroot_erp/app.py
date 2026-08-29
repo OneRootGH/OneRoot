@@ -3659,6 +3659,12 @@ def normalize_role_key(value: Any) -> str:
         "finance & controls": "finance",
         "operations": "operations",
         "operations manager": "operations",
+        "frontline-service-lead": "frontline-service-lead",
+        "retail & service lead": "frontline-service-lead",
+        "retail and service lead": "frontline-service-lead",
+        "operations-controls-lead": "operations-controls-lead",
+        "operations & controls lead": "operations-controls-lead",
+        "operations and controls lead": "operations-controls-lead",
         "apartment-manager": "apartment-manager",
         "apartment manager": "apartment-manager",
         "sales-stock-operator": "sales-stock-operator",
@@ -3695,6 +3701,8 @@ def default_staff_role_for_access_role(value: Any) -> str:
         "admin": "Manager",
         "finance": "Finance Officer",
         "operations": "Operations Manager",
+        "frontline-service-lead": "Front Desk / Service Desk Officer",
+        "operations-controls-lead": "Operations Manager",
         "apartment-manager": "Apartment Manager",
         "sales-stock-operator": "Stock Officer",
         "cashier": "POS Cashier",
@@ -3847,6 +3855,7 @@ SIDEBAR_LINK_LABELS = {
     "inventory": ("Inventory", "inventory", None),
     "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
     "pos": ("POS", "pos_page", None),
+    "food_pos": ("Food POS", "food_pos_page", None),
     "workbook": ("Excel Workbook", "download_workbook", None),
     "audit": ("Audit Trail", "audit_page", None),
     "online_orders": ("Online Orders", "online_orders_desk", None),
@@ -7901,7 +7910,8 @@ def build_sidebar(user: User | None = None):
             links = []
             section_active = False
             for key in keys:
-                if allowed_keys and key not in allowed_keys:
+                access_key = "pos" if key == "food_pos" else key
+                if allowed_keys and access_key not in allowed_keys:
                     continue
                 if key in SIDEBAR_LINK_LABELS:
                     label, endpoint, module = SIDEBAR_LINK_LABELS[key]
@@ -7909,7 +7919,9 @@ def build_sidebar(user: User | None = None):
                     label, endpoint, module = MODULES[key].label, "module_list", key
                 else:
                     continue
-                is_active = (module and active_module == module) or (not module and active_endpoint == endpoint)
+                is_food_pos = key == "food_pos" and normalize_text(request.args.get("desk")) == "food"
+                is_general_pos = key == "pos" and normalize_text(request.args.get("desk")) != "food"
+                is_active = is_food_pos or is_general_pos or ((module and active_module == module) or (not module and active_endpoint == endpoint))
                 section_active = section_active or is_active
                 links.append(
                     {
@@ -8518,6 +8530,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "facebookUrl": app_config.facebook_url,
             "supportEmail": app_config.support_email,
             "pickupNote": app_config.pickup_note,
+            "location": "Amasaman, Medie, Ghana",
             "paymentMethods": [
                 "Cash On Delivery",
                 "Mobile Money",
@@ -11155,6 +11168,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def users_page():
         editing_id = normalize_text(request.args.get("edit"))
         search_text = normalize_text(request.args.get("q"))
+        preset_role = normalize_role_key(request.args.get("preset"))
         editing_user = g.db.get(User, editing_id) if editing_id else None
         form_user = {
             "id": editing_user.id if editing_user else "",
@@ -11167,6 +11181,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "login_enabled": bool(editing_user.login_enabled) if editing_user else True,
             "notes": editing_user.notes if editing_user else "",
         }
+        if not editing_user and preset_role in {"frontline-service-lead", "operations-controls-lead"}:
+            form_user["role"] = preset_role
+            form_user["staff_role"] = default_staff_role_for_access_role(preset_role)
+            form_user["notes"] = ROLE_DESCRIPTIONS[preset_role]
 
         if request.method == "POST":
             user_id = normalize_text(request.form.get("id")) or uuid4().hex
@@ -13513,11 +13531,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             rows,
         )
 
+    @app.route("/app/food-pos")
+    @access_required("pos")
+    def food_pos_page():
+        return redirect(url_for("pos_page", desk="food"))
+
     @app.route("/app/pos")
     @access_required("pos")
     def pos_page():
         order_date = parse_date(request.args.get("date")) or date.today()
-        initial_area = normalize_text(request.args.get("area"))
+        food_pos_mode = normalize_text(request.args.get("desk")) == "food"
+        initial_area = "kitchen" if food_pos_mode else normalize_text(request.args.get("area"))
         initial_category = normalize_text(request.args.get("category"))
         initial_search = normalize_text(request.args.get("q"))
         summary = build_pos_counter_summary(order_date, initial_area)
@@ -13566,6 +13590,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             initial_area=initial_area,
             initial_category=initial_category,
             initial_search=initial_search,
+            food_pos_mode=food_pos_mode,
         )
 
     @app.route("/app/pos/<order_id>/receipt")
@@ -13614,7 +13639,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @access_required("pos", api=True)
     def pos_products_api():
         q = normalize_text(request.args.get("q"))
-        area = normalize_text(request.args.get("area"))
+        area = "kitchen" if normalize_text(request.args.get("desk")) == "food" else normalize_text(request.args.get("area"))
         category = normalize_text(request.args.get("category"))
         products = load_pos_products(
             g.db,
@@ -13650,7 +13675,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @access_required("pos", api=True)
     def pos_summary_api():
         order_date = parse_date(request.args.get("orderDate")) or date.today()
-        area_id = normalize_text(request.args.get("area"))
+        area_id = "kitchen" if normalize_text(request.args.get("desk")) == "food" else normalize_text(request.args.get("area"))
         return jsonify({"ok": True, "summary": build_pos_counter_summary(order_date, area_id)})
 
     @app.route("/app/api/pos/orders", methods=["POST"])
@@ -13658,7 +13683,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_create_order():
         payload = request.get_json(silent=True) or {}
         order_date = parse_date(payload.get("orderDate")) or date.today()
-        selected_area = normalize_text(payload.get("areaId"))
+        food_pos_mode = normalize_text(payload.get("desk")) == "food"
+        selected_area = "kitchen" if food_pos_mode else normalize_text(payload.get("areaId"))
         payment_method = normalize_text(payload.get("paymentMethod")) or "Cash"
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         if not items:
@@ -13671,6 +13697,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         }
         if len(products) != len(set(product_ids)):
             return jsonify({"ok": False, "error": "One or more items could not be found."}), 400
+        if food_pos_mode and any(normalize_text(product.business_area_id) != "kitchen" for product in products.values()):
+            return jsonify({"ok": False, "error": "Food POS accepts OneRoot Kitchen items only."}), 400
 
         order_id = uuid4().hex
         order_number = f"POS-{order_date.strftime('%Y%m%d')}-{order_id[:4].upper()}"
@@ -13828,7 +13856,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_closeout_api():
         payload = request.get_json(silent=True) or {}
         order_date = parse_date(payload.get("orderDate")) or date.today()
-        area_id = normalize_text(payload.get("areaId"))
+        area_id = "kitchen" if normalize_text(payload.get("desk")) == "food" else normalize_text(payload.get("areaId"))
         summary = build_pos_counter_summary(order_date, area_id)
         if summary["orderCount"] <= 0:
             return jsonify({"ok": False, "error": "No POS orders are available for this date and area."}), 400
