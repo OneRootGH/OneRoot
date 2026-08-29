@@ -230,6 +230,29 @@
       </article>
     </section>
 
+    {% if growth_context.actionTemplates %}
+      <section class="card">
+        <div class="card-header compact">
+          <div>
+            <p class="eyebrow">Ready-To-Run Growth Actions</p>
+            <h3>Start a focused campaign in one click</h3>
+          </div>
+          <p class="muted list-summary">Each action opens as a tracked draft. Review the message, send only to customers who have agreed to hear from OneRoot, then record results.</p>
+        </div>
+        <div class="card-grid two">
+          {% for item in growth_context.actionTemplates %}
+            <article class="metric-card module-action-card">
+              <span>{{ item.channel }} · {{ item.audience }}</span>
+              <strong>{{ item.title }}</strong>
+              <small>{{ item.why }}</small>
+              <p class="social-post-copy">{{ item.message }}</p>
+              <a class="button primary button-small" href="{{ item.launchHref }}">Use This Campaign</a>
+            </article>
+          {% endfor %}
+        </div>
+      </section>
+    {% endif %}
+
     {% if growth_context.facebookPosts %}
       <section class="card">
         <div class="card-header compact">

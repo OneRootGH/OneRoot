@@ -2586,6 +2586,72 @@ def build_weekly_facebook_post_ideas(records: list[ModuleRecord], *, area_filter
     return rows
 
 
+def build_growth_action_templates(*, as_of: date | None = None) -> list[dict[str, Any]]:
+    """Return ready-to-launch campaign actions that staff can tailor before sending."""
+    campaign_date = (as_of or date.today()).isoformat()
+    templates = [
+        {
+            "title": "New Customer Welcome",
+            "channel": "WhatsApp",
+            "areaId": "shared-operations",
+            "audience": "New leads and first-time buyers",
+            "why": "Reply within one day with a warm welcome and one clear next step.",
+            "message": "Hello from OneRoot Essentials. Thank you for connecting with us. We can help with groceries, meals, laundry, water, equipment rentals, and daily essentials. What do you need today?",
+            "goal": "New Leads",
+        },
+        {
+            "title": "Weekly Essentials Restock",
+            "channel": "WhatsApp",
+            "areaId": "cold-store-groceries",
+            "audience": "Repeat grocery and household customers",
+            "why": "A short weekly restock reminder turns routine household needs into repeat orders.",
+            "message": "Your weekly essentials are ready at OneRoot. Send your shopping list for groceries, frozen foods, drinks, water, and household items, and we will confirm pickup or delivery.",
+            "goal": "Repeat Sales",
+        },
+        {
+            "title": "Lunch-Time Kitchen Drop",
+            "channel": "WhatsApp",
+            "areaId": "kitchen",
+            "audience": "Nearby workers, families, and past food customers",
+            "why": "Time-limited meal messages work best when the menu and order action are simple.",
+            "message": "Lunch is ready at OneRoot Kitchen. Order jollof, fried rice, banku, spaghetti, chicken, fish, sides, and cold drinks for pickup or delivery. Reply with your order now.",
+            "goal": "Promo Push",
+        },
+        {
+            "title": "Bring A Friend Reward",
+            "channel": "WhatsApp",
+            "areaId": "shared-operations",
+            "audience": "Repeat and VIP customers",
+            "why": "Referral rewards give satisfied customers a clear reason to introduce OneRoot to another household.",
+            "message": "Love OneRoot? Refer a friend or neighbor for groceries, food, laundry, water, or rentals. Ask us about the referral thank-you available when their first order is completed.",
+            "goal": "New Leads",
+        },
+        {
+            "title": "Dormant Customer Check-In",
+            "channel": "WhatsApp",
+            "areaId": "shared-operations",
+            "audience": "Customers who have not ordered recently",
+            "why": "A personal reactivation message is more useful than a broad discount blast.",
+            "message": "Hello from OneRoot Essentials. We have not served you in a while and would love to help again. Are you due for groceries, food, laundry, water, or a service booking this week?",
+            "goal": "Repeat Sales",
+        },
+    ]
+    for template in templates:
+        template["launchHref"] = url_for(
+            "module_form",
+            module_key="whatsapp_campaigns",
+            campaignDate=campaign_date,
+            businessAreaId=template["areaId"],
+            campaignName=template["title"],
+            channelType=template["channel"],
+            audienceSegment="Repeat" if "Repeat" in template["audience"] else "Lead",
+            messageGoal=template["goal"],
+            status="Draft",
+            notes=template["message"],
+        )
+    return templates
+
+
 def build_growth_automation_context(db_session, *, area_filter: str = "") -> dict[str, Any]:
     crm_records = latest_customer_crm_records(
         db_session.scalars(
@@ -2734,6 +2800,7 @@ def build_growth_automation_context(db_session, *, area_filter: str = "") -> dic
         "counts": counts,
         "followUps": follow_up_rows[:12],
         "playbooks": playbooks[:4],
+        "actionTemplates": build_growth_action_templates(),
         "facebookPosts": build_weekly_facebook_post_ideas(crm_records, area_filter=area_filter),
         "segmentChart": segment_chart,
         "sourceChart": source_chart,
@@ -7903,7 +7970,30 @@ def build_sidebar(user: User | None = None):
     items = []
     active_endpoint = request.endpoint or ""
     active_module = request.view_args.get("module_key") if request.view_args else ""
-    for group_label, sections in MENU_GROUPS:
+    role_key = normalize_role_key(getattr(user, "role", ""))
+    staff_role = normalize_staff_role(
+        getattr(user, "staff_role", ""),
+        fallback_role=getattr(user, "role", "viewer"),
+    )
+    workspace_manager = role_key in {"owner", "admin", "operations"} or staff_role in {"Manager", "Operations Manager"}
+    menu_groups = list(MENU_GROUPS)
+    if not workspace_manager:
+        # Frontline staff get only the tools they need, without the full management workspace.
+        daily_work_sections = [
+            ("Counter & Orders", ["pos", "food_pos", "online_orders", "delivery_dispatch"]),
+            ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
+            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance"]),
+        ]
+        menu_groups = [("Daily Work", daily_work_sections)] + [
+            (group_label, [
+                section for section in sections
+                if not (group_label == "Operations" and section[0] == "Service Desk")
+                and not (group_label == "People" and section[0] == "Payroll, Schedules & Training")
+            ])
+            for group_label, sections in MENU_GROUPS
+            if group_label != "Workspace"
+        ]
+    for group_label, sections in menu_groups:
         rendered_sections = []
         group_active = False
         for section_label, keys in sections:
