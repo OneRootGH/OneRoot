@@ -1826,7 +1826,7 @@ def customer_crm_reference(payload: dict[str, Any]) -> str:
 
 def merge_customer_crm_payload(primary_payload: dict[str, Any], duplicate_payload: dict[str, Any]) -> dict[str, Any]:
     merged = dict(primary_payload)
-    for key in ("customerName", "customerPhone", "customerEmail", "businessAreaId", "customerSegment", "leadSource", "preferredContact", "lastOrderDate"):
+    for key in ("customerName", "customerPhone", "customerEmail", "businessAreaId", "customerSegment", "leadSource", "preferredContact", "marketingConsent", "lastOrderDate"):
         if not normalize_text(merged.get(key)) and normalize_text(duplicate_payload.get(key)):
             merged[key] = duplicate_payload.get(key)
 
@@ -2446,6 +2446,122 @@ def sync_customer_crm_automation(db_session) -> None:
             continue
         payload["status"] = normalize_text(payload.get("status")) or "Inactive"
         set_module_record_metadata(record, MODULES["customer_crm"], payload)
+
+
+def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None) -> None:
+    """Create one consent-aware campaign draft per actionable customer segment each day."""
+    today = as_of or date.today()
+    crm_records = latest_customer_crm_records(
+        db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_crm")).all()
+    )
+    eligible_by_tag: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    consent_needed = 0
+    for record in crm_records:
+        payload = dict(record.payload or {})
+        if normalize_text(payload.get("status")) == "Do Not Disturb":
+            continue
+        if not normalize_text(payload.get("customerPhone")):
+            continue
+        consent = normalize_text(payload.get("marketingConsent"))
+        if consent == "Opted Out":
+            continue
+        if consent != "Opted In":
+            consent_needed += 1
+            continue
+        tag = normalize_text(payload.get("automationTag")) or "check-in"
+        if tag in {"new-lead", "pending-order", "win-back", "cross-sell", "vip-care"}:
+            eligible_by_tag[tag].append(payload)
+
+    campaign_specs = {
+        "new-lead": ("Welcome New Leads", "New Leads", "Welcome new contacts, introduce OneRoot, and ask what they need today."),
+        "pending-order": ("Complete Pending Orders", "Order Recovery", "Help customers finish pending orders with a short, clear follow-up."),
+        "win-back": ("Win Back Dormant Customers", "Repeat Sales", "Reconnect with customers who have not ordered recently using one helpful offer."),
+        "cross-sell": ("Cross-Sell OneRoot Services", "Repeat Sales", "Introduce existing customers to a second relevant OneRoot service."),
+        "vip-care": ("VIP Care Follow-Up", "Repeat Sales", "Thank high-value customers and offer priority support or a tailored bundle."),
+    }
+    existing = {
+        normalize_text(record.reference): record
+        for record in db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "whatsapp_campaigns")).all()
+    }
+    for tag, customer_payloads in eligible_by_tag.items():
+        if not customer_payloads:
+            continue
+        title, goal, instruction = campaign_specs[tag]
+        reference = f"marketing-automation|{today.isoformat()}|{tag}"
+        record = existing.get(reference)
+        payload = dict(record.payload or {}) if record else {}
+        payload.update(
+            {
+                "id": payload.get("id") or (record.id if record else uuid4().hex),
+                "reference": reference,
+                "campaignDate": today.isoformat(),
+                "businessAreaId": "shared-operations",
+                "campaignName": title,
+                "channelType": "WhatsApp",
+                "audienceSegment": "Repeat" if tag != "new-lead" else "Lead",
+                "messageGoal": goal,
+                "sentCount": parse_amount(payload.get("sentCount")),
+                "responseCount": parse_amount(payload.get("responseCount")),
+                "orderCount": parse_amount(payload.get("orderCount")),
+                "revenueGenerated": parse_amount(payload.get("revenueGenerated")),
+                "status": normalize_text(payload.get("status")) or "Ready",
+                "followUpDate": today.isoformat(),
+                "notes": (
+                    f"Auto-prepared for {len(customer_payloads)} opted-in customer(s). {instruction} "
+                    "Use the CRM follow-up queue to send the personal WhatsApp links and record the results here."
+                ),
+                "automationTag": tag,
+                "autoPrepared": True,
+                "eligibleCustomerCount": len(customer_payloads),
+                "updatedAt": datetime.utcnow().isoformat(),
+            }
+        )
+        if not record:
+            record = ModuleRecord(
+                id=payload["id"],
+                module_key="whatsapp_campaigns",
+                reference=reference,
+                created_at=datetime.utcnow(),
+            )
+            db_session.add(record)
+        set_module_record_metadata(record, MODULES["whatsapp_campaigns"], payload)
+
+    if consent_needed:
+        reference = f"marketing-automation|{today.isoformat()}|consent-capture"
+        record = existing.get(reference)
+        if not record:
+            payload = {
+                "id": uuid4().hex,
+                "reference": reference,
+                "campaignDate": today.isoformat(),
+                "businessAreaId": "shared-operations",
+                "campaignName": "Marketing Consent Capture",
+                "channelType": "Phone Follow-Up",
+                "audienceSegment": "Lead",
+                "messageGoal": "New Leads",
+                "sentCount": 0,
+                "responseCount": 0,
+                "orderCount": 0,
+                "revenueGenerated": 0,
+                "status": "Ready",
+                "followUpDate": today.isoformat(),
+                "notes": (
+                    f"{consent_needed} contact(s) have no recorded marketing consent. Ask them at checkout or during service follow-up "
+                    "whether they want OneRoot offers on WhatsApp, then update their CRM record to Opted In or Opted Out."
+                ),
+                "automationTag": "consent-capture",
+                "autoPrepared": True,
+                "eligibleCustomerCount": consent_needed,
+                "updatedAt": datetime.utcnow().isoformat(),
+            }
+            record = ModuleRecord(
+                id=payload["id"],
+                module_key="whatsapp_campaigns",
+                reference=reference,
+                created_at=datetime.utcnow(),
+            )
+            db_session.add(record)
+            set_module_record_metadata(record, MODULES["whatsapp_campaigns"], payload)
 
 
 def latest_customer_crm_records(records: list[ModuleRecord]) -> list[ModuleRecord]:
@@ -11764,6 +11880,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         growth_context: dict[str, Any] | None = None
         if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
             sync_customer_crm_automation(g.db)
+            sync_marketing_campaign_automation(g.db)
             g.db.commit()
         search = normalize_text(request.args.get("q"))
         if module_key == "apartments":

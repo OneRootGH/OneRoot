@@ -1479,6 +1479,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("customerSegment", "Customer Segment", "select", False, CUSTOMER_SEGMENTS),
             FieldDefinition("leadSource", "Lead Source", "select", False, LEAD_SOURCES),
             FieldDefinition("preferredContact", "Preferred Contact", "select", False, CONTACT_PREFERENCES),
+            FieldDefinition("marketingConsent", "Marketing Consent", "select", False, [("Unknown", "Unknown / Ask Customer"), ("Opted In", "Opted In"), ("Opted Out", "Opted Out")]),
             FieldDefinition("lastOrderDate", "Last Order Date", "date"),
             FieldDefinition("followUpDate", "Follow-Up Date", "date"),
             FieldDefinition("lifetimeValue", "Lifetime Value", "number"),
