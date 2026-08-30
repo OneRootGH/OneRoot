@@ -4052,7 +4052,7 @@ def user_can_view_dashboard(user: User | None) -> bool:
         getattr(user, "staff_role", ""),
         fallback_role=getattr(user, "role", "viewer"),
     )
-    return role_key in {"owner", "admin", "operations"} or staff_role in {"Manager", "Operations Manager"}
+    return role_key in {"owner", "operations"} or staff_role in {"Manager", "Operations Manager"}
 
 
 def build_chart_rows(
