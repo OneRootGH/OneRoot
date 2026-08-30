@@ -1966,6 +1966,11 @@ def build_customer_growth_message(snapshot: dict[str, Any], *, support_phone: st
             "When you are nearby, you can also order food, groceries, laundry, water, or equipment support through OneRoot. "
             "Reply with what you need and we will prepare it for you." + support_line
         )
+    if action_tag == "laundry-return":
+        return (
+            f"Hello {customer_name}, OneRoot Laundry is ready for your next wash day. "
+            "Choose Normal or Express washing, drying, ironing, and folding, then reply here to arrange drop-off or pickup." + support_line
+        )
     return (
         f"Hello {customer_name}, this is OneRoot Essentials checking in. "
         f"We are available to support you with {offer_copy}.{support_line}"
@@ -2004,6 +2009,8 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 "mobileMoneyServiceCount": 0,
                 "mobileMoneyFeeEarned": 0.0,
                 "lastMobileMoneyDate": None,
+                "laundryServiceCount": 0,
+                "lastLaundryDate": None,
                 "transactionMarketingConsent": "",
                 "hasApartmentProfile": False,
                 "firstCaptureDate": record_date,
@@ -2225,11 +2232,12 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
             continue
         if record.module_key == "laundry_tickets":
             payment_summary = service_payment_summary(record.module_key, payload)
+            laundry_date = parse_date(payload.get("ticketDate")) or record.record_date
             register_order_activity(
                 name=payload.get("customerName"),
                 phone=payload.get("customerPhone"),
                 email="",
-                activity_date=parse_date(payload.get("ticketDate")) or record.record_date,
+                activity_date=laundry_date,
                 lead_source="Laundry",
                 area_ids=[normalize_text(payload.get("businessAreaId")) or "laundry-services"],
                 revenue_amount=payment_summary["paidTotal"],
@@ -2239,6 +2247,18 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 preferred_contact="WhatsApp",
                 notes=payload.get("notes"),
             )
+            laundry_bucket = ensure_bucket(
+                name=payload.get("customerName"),
+                phone=payload.get("customerPhone"),
+                record_date=laundry_date,
+            )
+            if laundry_bucket:
+                laundry_bucket["laundryServiceCount"] += 1
+                if laundry_date and (not laundry_bucket["lastLaundryDate"] or laundry_date > laundry_bucket["lastLaundryDate"]):
+                    laundry_bucket["lastLaundryDate"] = laundry_date
+                laundry_consent = normalize_text(payload.get("marketingConsent"))
+                if laundry_consent in {"Opted In", "Opted Out"}:
+                    laundry_bucket["transactionMarketingConsent"] = laundry_consent
             continue
         if record.module_key == "kitchen_orders":
             payment_summary = service_payment_summary(record.module_key, payload)
@@ -2342,6 +2362,15 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 automation_tag = "momo-welcome"
                 automation_label = "Invite MoMo customer to essentials"
                 follow_up_date = follow_up_date or min(bucket["lastMobileMoneyDate"] + timedelta(days=1), today + timedelta(days=2))
+            elif (
+                bucket["laundryServiceCount"]
+                and bucket["lastLaundryDate"]
+                and 14 <= (today - bucket["lastLaundryDate"]).days <= 45
+            ):
+                status = "Follow Up"
+                automation_tag = "laundry-return"
+                automation_label = "Invite laundry customer back"
+                follow_up_date = follow_up_date or today
             elif bucket["paidOrderCount"] == 0:
                 status = "Follow Up"
                 automation_tag = "new-lead"
@@ -2393,11 +2422,12 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 "sortRank": {
                     "pending-order": 1,
                     "momo-welcome": 2,
-                    "new-lead": 3,
-                    "win-back": 4,
-                    "cross-sell": 5,
-                    "vip-care": 6,
-                    "check-in": 7,
+                    "laundry-return": 3,
+                    "new-lead": 4,
+                    "win-back": 5,
+                    "cross-sell": 6,
+                    "vip-care": 7,
+                    "check-in": 8,
                 }.get(automation_tag, 9),
             }
         )
@@ -2479,6 +2509,8 @@ def sync_customer_crm_automation(db_session) -> None:
                 "mobileMoneyServiceCount": int(parse_amount(snapshot.get("mobileMoneyServiceCount"))),
                 "mobileMoneyFeeEarned": round(parse_amount(snapshot.get("mobileMoneyFeeEarned")), 2),
                 "lastMobileMoneyDate": snapshot.get("lastMobileMoneyDate").isoformat() if snapshot.get("lastMobileMoneyDate") else "",
+                "laundryServiceCount": int(parse_amount(snapshot.get("laundryServiceCount"))),
+                "lastLaundryDate": snapshot.get("lastLaundryDate").isoformat() if snapshot.get("lastLaundryDate") else "",
                 "daysSinceLastOrder": snapshot.get("daysSinceLastOrder"),
                 "whatsappUrl": snapshot.get("whatsappUrl"),
                 "reminderMessage": snapshot.get("reminderMessage"),
@@ -2534,7 +2566,7 @@ def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None)
             consent_needed += 1
             continue
         tag = normalize_text(payload.get("automationTag")) or "check-in"
-        if tag in {"new-lead", "pending-order", "win-back", "cross-sell", "vip-care", "momo-welcome"}:
+        if tag in {"new-lead", "pending-order", "win-back", "cross-sell", "vip-care", "momo-welcome", "laundry-return"}:
             eligible_by_tag[tag].append(payload)
 
     campaign_specs = {
@@ -2544,6 +2576,7 @@ def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None)
         "cross-sell": ("Cross-Sell OneRoot Services", "Repeat Sales", "Introduce existing customers to a second relevant OneRoot service."),
         "vip-care": ("VIP Care Follow-Up", "Repeat Sales", "Thank high-value customers and offer priority support or a tailored bundle."),
         "momo-welcome": ("MoMo To Essentials Welcome", "Cross-Sell", "Thank opted-in MoMo customers and offer one convenient OneRoot service for their next visit."),
+        "laundry-return": ("Laundry Return Reminder", "Repeat Sales", "Invite opted-in laundry customers back for Normal or Express service, pickup, or drop-off."),
     }
     existing = {
         normalize_text(record.reference): record
@@ -2908,10 +2941,12 @@ def build_growth_automation_context(db_session, *, area_filter: str = "") -> dic
         key=lambda item: (
             {
                 "pending-order": 1,
-                "new-lead": 2,
-                "win-back": 3,
-                "cross-sell": 4,
-                "vip-care": 5,
+                "momo-welcome": 2,
+                "laundry-return": 3,
+                "new-lead": 4,
+                "win-back": 5,
+                "cross-sell": 6,
+                "vip-care": 7,
             }.get(item["automationTag"], 9),
             item["followUpDate"] or "9999-12-31",
             -(item["lifetimeValue"]),
@@ -2924,6 +2959,7 @@ def build_growth_automation_context(db_session, *, area_filter: str = "") -> dic
         "pendingOrders": sum(1 for item in follow_up_rows if item["automationTag"] == "pending-order"),
         "winBack": sum(1 for item in follow_up_rows if item["automationTag"] == "win-back"),
         "crossSell": sum(1 for item in follow_up_rows if item["automationTag"] == "cross-sell"),
+        "laundryReturns": sum(1 for item in follow_up_rows if item["automationTag"] == "laundry-return"),
         "vip": sum(1 for item in follow_up_rows if item["customerSegment"] == "VIP"),
         "whatsappReady": sum(1 for item in follow_up_rows if item["whatsappUrl"]),
         "activePromotions": active_promo_count,
@@ -2956,6 +2992,15 @@ def build_growth_automation_context(db_session, *, area_filter: str = "") -> dic
                 "audience": f"{counts['crossSell']} one-area customer(s)",
                 "note": "Move customers from one OneRoot service into a second one to deepen repeat buying.",
                 "href": url_for("module_list", module_key="customer_crm"),
+            }
+        )
+    if counts["laundryReturns"] > 0:
+        playbooks.append(
+            {
+                "title": "Laundry Return Reminder",
+                "audience": f"{counts['laundryReturns']} laundry customer(s) due for a follow-up",
+                "note": "Offer Normal or Express service, then make pickup or drop-off the next easy step.",
+                "href": url_for("module_form", module_key="whatsapp_campaigns"),
             }
         )
     if counts["vip"] > 0:

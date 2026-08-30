@@ -1191,6 +1191,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("readyDate", "Ready Date", "date"),
             FieldDefinition("deliveryMode", "Delivery Mode", "select", False, [(item, item) for item in LAUNDRY_DELIVERY_MODES]),
             FieldDefinition("status", "Status", "select", True, [(item, item) for item in LAUNDRY_STATUSES]),
+            FieldDefinition("marketingConsent", "Marketing Consent", "select", False, [("Unknown", "Do Not Market / Ask Customer"), ("Opted In", "Opted In For Offers"), ("Opted Out", "Opted Out")]),
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),

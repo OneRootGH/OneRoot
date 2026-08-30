@@ -256,7 +256,7 @@
             <small class="muted form-helper">Use Facebook Page, WhatsApp, Website, Walk-in, or the real source so marketing reports stay accurate.</small>
           {% elif definition.key == 'customer_crm' and field.name == 'followUpDate' %}
             <small class="muted form-helper">Set the next date staff should call, WhatsApp, or follow up from Facebook or another source.</small>
-          {% elif definition.key in ['customer_crm', 'mobile_money_transactions'] and field.name == 'marketingConsent' %}
+          {% elif definition.key in ['customer_crm', 'mobile_money_transactions', 'laundry_tickets'] and field.name == 'marketingConsent' %}
             <small class="muted form-helper">Choose Opted In only after the customer agrees to receive OneRoot marketing messages. Opted Out and Do Not Disturb are excluded from marketing automation.</small>
           {% elif definition.key == 'promotions' and field.name == 'promotionType' %}
             <small class="muted form-helper">Use Bundle, Discount, Referral, or Loyalty Reward so staff can quickly understand the offer type.</small>
