@@ -2202,3 +2202,53 @@ thead th {
     padding: 0;
   }
 }
+/* Public tenant pages use the same restrained OneRoot palette without staff navigation. */
+.tenant-portal-body {
+  min-height: 100vh;
+  background: radial-gradient(circle at top right, rgba(184, 211, 151, 0.5), transparent 36%), #f7f3ea;
+}
+
+.tenant-login-shell, .tenant-portal-shell {
+  width: min(1180px, calc(100% - 32px));
+  margin: 0 auto;
+  padding: 28px 0 48px;
+}
+
+.tenant-login-shell {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+}
+
+.tenant-login-card {
+  width: min(100%, 500px);
+  padding: 34px;
+  border-radius: 28px;
+  background: rgba(255, 253, 248, 0.95);
+  box-shadow: 0 22px 50px rgba(25, 63, 44, 0.16);
+}
+
+.tenant-brand, .tenant-account-bar, .tenant-portal-header, .tenant-portal-hero {
+  display: flex;
+  align-items: center;
+}
+
+.tenant-brand { gap: 10px; color: var(--ink); font-weight: 800; text-decoration: none; }
+.tenant-brand img { width: 42px; height: 42px; object-fit: contain; }
+.tenant-login-form { display: grid; gap: 16px; margin: 24px 0 16px; }
+.tenant-login-help { font-size: 0.9rem; line-height: 1.6; }
+.tenant-portal-header { justify-content: space-between; gap: 16px; margin-bottom: 26px; }
+.tenant-account-bar { gap: 12px; flex-wrap: wrap; justify-content: flex-end; color: var(--muted); font-size: 0.9rem; }
+.tenant-portal-hero { justify-content: space-between; gap: 20px; padding: 30px; border-radius: 24px; color: #fff; background: linear-gradient(135deg, #153e2e, #286245); margin-bottom: 20px; }
+.tenant-portal-hero h1 { margin: 4px 0; color: #fff; }
+.tenant-portal-hero p { margin: 0; color: rgba(255,255,255,.8); }
+.tenant-status { padding: 9px 13px; border-radius: 999px; background: rgba(255,255,255,.16); font-weight: 700; }
+.tenant-portal-grid { align-items: start; }
+
+@media (max-width: 680px) {
+  .tenant-login-shell, .tenant-portal-shell { width: min(100% - 20px, 1180px); padding-top: 12px; }
+  .tenant-login-card { padding: 24px; border-radius: 20px; }
+  .tenant-portal-header, .tenant-portal-hero { align-items: flex-start; flex-direction: column; }
+  .tenant-account-bar { justify-content: flex-start; }
+  .tenant-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

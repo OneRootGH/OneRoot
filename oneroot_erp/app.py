@@ -26,7 +26,7 @@ from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
 from .config import AppConfig, load_config
 from .importer import bootstrap_database
-from .models import AuditLog, Base, ModuleRecord, PosOrder, PosOrderLine, Product, User
+from .models import AuditLog, Base, ModuleRecord, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .registry import (
     BUSINESS_AREA_LABELS,
     BUSINESS_AREA_OPTIONS,
@@ -3984,6 +3984,56 @@ def verify_password(raw_password: str, stored_hash: str) -> bool:
     return stored == candidate
 
 
+def tenant_portal_account_error(db_session, payload: dict[str, Any]) -> str:
+    username = normalize_text(payload.get("tenantPortalUsername")).lower()
+    password = normalize_text(payload.get("tenantPortalPassword"))
+    account_id = normalize_text(payload.get("tenantPortalAccountId"))
+    if not username:
+        return ""
+    if not normalize_text(payload.get("suite")) or not normalize_text(payload.get("tenantName")):
+        return "Save the suite and tenant name before enabling tenant portal access."
+    existing = db_session.scalar(select(TenantPortalAccount).where(TenantPortalAccount.username == username))
+    if existing and existing.id != account_id:
+        return "That tenant portal username is already in use. Choose a different username."
+    if not existing and len(password) < 6:
+        return "Set a tenant portal password of at least 6 characters when creating a new account."
+    return ""
+
+
+def sync_tenant_portal_account(db_session, payload: dict[str, Any]) -> TenantPortalAccount | None:
+    """Create, update, disable, or reset a tenant account from an apartment record."""
+    username = normalize_text(payload.get("tenantPortalUsername")).lower()
+    raw_password = normalize_text(payload.get("tenantPortalPassword"))
+    account_id = normalize_text(payload.get("tenantPortalAccountId"))
+    if not username:
+        return None
+    account = db_session.get(TenantPortalAccount, account_id) if account_id else None
+    if not account:
+        account = db_session.scalar(select(TenantPortalAccount).where(TenantPortalAccount.username == username))
+    if not account:
+        account = TenantPortalAccount(
+            id=uuid4().hex,
+            suite=normalize_text(payload.get("suite")),
+            tenant_name=normalize_text(payload.get("tenantName")),
+            username=username,
+            password_hash=password_hash(raw_password),
+            active=normalize_text(payload.get("tenantPortalActive")) != "No",
+        )
+        db_session.add(account)
+    else:
+        account.suite = normalize_text(payload.get("suite"))
+        account.tenant_name = normalize_text(payload.get("tenantName"))
+        account.username = username
+        account.active = normalize_text(payload.get("tenantPortalActive")) != "No"
+        if raw_password:
+            account.password_hash = password_hash(raw_password)
+    payload["tenantPortalAccountId"] = account.id
+    payload["tenantPortalUsername"] = username
+    payload["tenantPortalActive"] = "Yes" if account.active else "No"
+    payload.pop("tenantPortalPassword", None)
+    return account
+
+
 def normalize_role_key(value: Any) -> str:
     raw = normalize_text(value).strip().lower().replace("_", "-")
     role_aliases = {
@@ -5702,6 +5752,9 @@ APARTMENT_FORM_SECTIONS = [
             "guarantorName",
             "guarantorPhone",
             "occupantsCount",
+            "tenantPortalUsername",
+            "tenantPortalPassword",
+            "tenantPortalActive",
         ],
     ),
     (
@@ -10652,6 +10705,27 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def public_page(filename: str):
         return send_from_directory(Path(app_config.root_dir) / "website", filename, max_age=0)
 
+    def active_tenant_portal_account() -> TenantPortalAccount | None:
+        account_id = normalize_text(session.get("tenant_portal_account_id"))
+        if not account_id:
+            return None
+        account = g.db.get(TenantPortalAccount, account_id)
+        if not account or not account.active:
+            session.pop("tenant_portal_account_id", None)
+            return None
+        return account
+
+    def tenant_portal_login_required(view):
+        @wraps(view)
+        def wrapped(*args, **kwargs):
+            account = active_tenant_portal_account()
+            if not account:
+                return redirect(url_for("tenant_portal_login"))
+            g.tenant_portal_account = account
+            return view(*args, **kwargs)
+
+        return wrapped
+
     @app.route("/")
     def home():
         return public_page("index.html")
@@ -10701,6 +10775,102 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/track-order.html")
     def track_order_page():
         return public_page("track-order.html")
+
+    @app.route("/tenant/login", methods=["GET", "POST"])
+    def tenant_portal_login():
+        if active_tenant_portal_account():
+            return redirect(url_for("tenant_portal_dashboard"))
+        if request.method == "POST":
+            username = normalize_text(request.form.get("username")).lower()
+            raw_password = normalize_text(request.form.get("password"))
+            account = g.db.scalar(select(TenantPortalAccount).where(TenantPortalAccount.username == username))
+            if not account or not account.active or not verify_password(raw_password, account.password_hash):
+                flash("The tenant portal username or password is not correct.", "error")
+            else:
+                session["tenant_portal_account_id"] = account.id
+                return redirect(url_for("tenant_portal_dashboard"))
+        return render_template("tenant_portal_login.html", page_title="Tenant Portal")
+
+    @app.route("/tenant/logout", methods=["POST"])
+    def tenant_portal_logout():
+        session.pop("tenant_portal_account_id", None)
+        flash("You have signed out of the tenant portal.", "success")
+        return redirect(url_for("tenant_portal_login"))
+
+    @app.route("/tenant")
+    @tenant_portal_login_required
+    def tenant_portal_dashboard():
+        account = g.tenant_portal_account
+        suite_records = [
+            record
+            for record in g.db.scalars(
+                select(ModuleRecord)
+                .where(ModuleRecord.module_key == "apartments")
+                .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+            ).all()
+            if normalize_text((record.payload or {}).get("suite")) == account.suite
+            and normalize_text((record.payload or {}).get("tenantName")).lower() == account.tenant_name.lower()
+        ]
+        latest_record = suite_records[0] if suite_records else None
+        profile = apartment_profile(latest_record) if latest_record else None
+        statement_rows = apartment_statement_rows(latest_record, suite_records) if latest_record else []
+        requests = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "tenant_portal_requests")
+            .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+        ).all()
+        requests = [
+            record
+            for record in requests
+            if normalize_text((record.payload or {}).get("suite")) == account.suite
+            and normalize_text((record.payload or {}).get("tenantName")).lower() == account.tenant_name.lower()
+        ][:12]
+        return render_template(
+            "tenant_portal.html",
+            page_title="Tenant Portal",
+            account=account,
+            profile=profile,
+            statement_rows=statement_rows[:12],
+            statement_totals=apartment_statement_totals(statement_rows),
+            requests=requests,
+        )
+
+    @app.route("/tenant/requests", methods=["POST"])
+    @tenant_portal_login_required
+    def tenant_portal_create_request():
+        account = g.tenant_portal_account
+        description = normalize_text(request.form.get("description"))
+        if not description:
+            flash("Please describe the request before sending it.", "error")
+            return redirect(url_for("tenant_portal_dashboard"))
+        payload = {
+            "id": uuid4().hex,
+            "requestDate": date.today().isoformat(),
+            "businessAreaId": "rentals-apartments",
+            "suite": account.suite,
+            "tenantName": account.tenant_name,
+            "tenantPhone": normalize_text(request.form.get("tenantPhone")),
+            "requestType": normalize_text(request.form.get("requestType")) or "Maintenance",
+            "priority": normalize_text(request.form.get("priority")) or "Medium",
+            "description": description,
+            "preferredAccessTime": normalize_text(request.form.get("preferredAccessTime")),
+            "assignedTo": "",
+            "dueDate": "",
+            "estimatedCost": 0,
+            "status": "Open",
+            "completionDate": "",
+            "tenantConfirmation": "Pending",
+            "notes": "Submitted through the secure tenant portal.",
+            "updatedAt": datetime.utcnow().isoformat(),
+        }
+        record = ModuleRecord(id=payload["id"], module_key="tenant_portal_requests", created_at=datetime.utcnow())
+        set_module_record_metadata(record, MODULES["tenant_portal_requests"], payload)
+        g.db.add(record)
+        sync_tenant_request_work_order(record, g.db)
+        audit("tenant_portal_requests", "Tenant Portal", "create", f"{account.suite} request", record.id, "Submitted by tenant portal account")
+        g.db.commit()
+        flash("Your request has been sent to OneRoot and a work order has been opened.", "success")
+        return redirect(url_for("tenant_portal_dashboard"))
 
     @app.route("/operations")
     @app.route("/operations/")
@@ -12996,6 +13166,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
+            if module_key == "apartments":
+                portal_error = tenant_portal_account_error(g.db, payload)
+                if portal_error:
+                    form_errors.append(portal_error)
             if form_errors:
                 record_payload = payload
                 for message in form_errors:
@@ -13004,6 +13178,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if not record:
                     record = ModuleRecord(id=payload["id"], module_key=module_key, created_at=datetime.utcnow())
                     g.db.add(record)
+                if module_key == "apartments":
+                    sync_tenant_portal_account(g.db, payload)
                 set_module_record_metadata(record, definition, payload)
                 if module_key == "tenant_portal_requests":
                     sync_tenant_request_work_order(record, g.db)

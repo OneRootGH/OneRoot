@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>My Suite | OneRoot Essentials</title>
+    <link rel="icon" href="{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}" type="image/png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=static_asset_version) }}">
+  </head>
+  <body class="tenant-portal-body">
+    <main class="tenant-portal-shell">
+      <header class="tenant-portal-header">
+        <a class="tenant-brand" href="/"><img src="{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}" alt="OneRoot Essentials"><span>OneRoot Essentials</span></a>
+        <div class="tenant-account-bar"><span>{{ account.tenant_name }} · {{ account.suite }} Suite</span><form method="post" action="{{ url_for('tenant_portal_logout') }}"><button class="button subtle button-small" type="submit">Sign Out</button></form></div>
+      </header>
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+      {% endwith %}
+      <section class="tenant-portal-hero">
+        <div><p class="eyebrow">My Apartment Account</p><h1>{{ account.suite }} Suite</h1><p>{{ account.tenant_name }} · OneRoot Rentals & Apartments</p></div>
+        {% if profile %}<span class="tenant-status">{{ profile.alertLabel }}</span>{% endif %}
+      </section>
+      {% if profile %}
+        <section class="card-grid four tenant-summary-grid">
+          <article class="metric-card"><span>Rent Balance</span><strong>{{ profile.rentBalance|currency }}</strong><small>Next due {{ profile.nextRentDueDate or 'Not set' }}</small></article>
+          <article class="metric-card"><span>Bills Balance</span><strong>{{ profile.billsBalance|currency }}</strong><small>Bill due {{ profile.billDueDate or 'Not set' }}</small></article>
+          <article class="metric-card warning"><span>Total Outstanding</span><strong>{{ profile.outstanding|currency }}</strong><small>{{ profile.alertLabel }}</small></article>
+          <article class="metric-card"><span>Credit Held</span><strong>{{ profile.creditBalance|currency }}</strong><small>Advance payment on account</small></article>
+        </section>
+        <section class="split-grid tenant-portal-grid">
+          <article class="card"><div class="card-header compact"><div><p class="eyebrow">Current Month</p><h3>Rent & Bill Breakdown</h3></div><span>{{ profile.month or 'Latest record' }}</span></div>
+            <ul class="stack-list compact"><li><strong>{{ profile.rentSummaryLabel }}</strong><span>Due {{ profile.rentDue|currency }} · Paid {{ profile.rentPaid|currency }}</span></li><li><strong>Water</strong><span>{{ profile.waterBill|currency }}</span></li><li><strong>Toilet</strong><span>{{ profile.toiletBill|currency }}</span></li><li><strong>Sweeping / Gutter</strong><span>{{ profile.sweepingBill|currency }}</span></li><li><strong>Waste Management</strong><span>{{ profile.wasteBill|currency }}</span></li>{% for item in profile.customCharges %}<li><strong>{{ item.label }}</strong><span>{{ item.amount|currency }}</span></li>{% endfor %}</ul>
+          </article>
+          <article class="card"><div class="card-header compact"><div><p class="eyebrow">Send OneRoot A Request</p><h3>Maintenance Or Account Help</h3></div></div>
+            <form method="post" action="{{ url_for('tenant_portal_create_request') }}" class="form-grid"><label><span>Request Type</span><select name="requestType"><option>Maintenance</option><option>Inspection</option><option>Utility</option><option>Access</option><option>Other</option></select></label><label><span>Urgency</span><select name="priority"><option>Medium</option><option>Low</option><option>High</option><option>Critical</option></select></label><label><span>Phone For Follow-Up</span><input name="tenantPhone" value="{{ profile.tenantPhone }}"></label><label><span>Preferred Access Time</span><input name="preferredAccessTime" placeholder="Example: After 5pm"></label><label class="span-2"><span>Describe The Request</span><textarea name="description" rows="4" required placeholder="Tell us what you need help with."></textarea></label><div class="form-actions span-2"><button class="button primary" type="submit">Send Request</button></div></form>
+          </article>
+        </section>
+        <section class="card"><div class="card-header compact"><div><p class="eyebrow">Account History</p><h3>Recent Rent & Bill Position</h3></div><span>Total paid {{ statement_totals.rentPaid|currency }} rent · {{ statement_totals.billsPaid|currency }} bills</span></div><div class="table-wrap"><table><thead><tr><th>Month</th><th>Rent Due</th><th>Rent Paid</th><th>Bills Due</th><th>Bills Paid</th><th>Balance</th></tr></thead><tbody>{% for row in statement_rows %}<tr><td>{{ row.month }}</td><td>{{ row.rentDue|currency }}</td><td>{{ row.rentPaid|currency }}</td><td>{{ row.billsDue|currency }}</td><td>{{ row.billsPaid|currency }}</td><td>{{ row.runningBalance|currency }}</td></tr>{% else %}<tr><td colspan="6">No monthly entries have been recorded yet.</td></tr>{% endfor %}</tbody></table></div></section>
+        <section class="card"><div class="card-header compact"><div><p class="eyebrow">My Requests</p><h3>Request Status</h3></div></div><div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Details</th><th>Status</th><th>Due</th></tr></thead><tbody>{% for request in requests %}<tr><td>{{ request.record_date or '—' }}</td><td>{{ request.payload.get('requestType') }}</td><td>{{ request.payload.get('description') }}</td><td>{{ request.status }}</td><td>{{ request.payload.get('dueDate') or '—' }}</td></tr>{% else %}<tr><td colspan="5">No requests submitted yet.</td></tr>{% endfor %}</tbody></table></div></section>
+      {% else %}
+        <section class="card"><h3>Your suite record is being prepared</h3><p class="muted">Please contact OneRoot Essentials so the latest apartment account can be linked to this portal.</p></section>
+      {% endif %}
+    </main>
+  </body>
+</html>

@@ -17,7 +17,8 @@
         {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
         name="{{ field.name }}"
         step="{{ field.step if field.field_type == 'number' else '' }}"
-        value="{{ payload.get(field.name, '') }}"
+        value="{% if field.field_type != 'password' %}{{ payload.get(field.name, '') }}{% endif %}"
+        {% if field.field_type == 'password' %}placeholder="Leave blank to keep the current password"{% endif %}
         {% if field.required %}required{% endif %}
       >
     {% endif %}
@@ -51,6 +52,10 @@
         <li>
           <strong>Monthly bills paid</strong>
           <span>Use the <strong>Monthly Bills & Custom Charges</strong> section for the monthly bills, then enter <strong>Bill Amount Paid</strong>, <strong>Bill Payment Date</strong>, <strong>Bill Payment Method</strong>, and <strong>Bill Payment Reference</strong> there.</span>
+        </li>
+        <li>
+          <strong>Tenant portal access</strong>
+          <span>Under <strong>Tenant Profile</strong>, set a username and a password of at least 6 characters to create the tenant’s secure portal account. Leave the password blank on later edits unless you are resetting it.</span>
         </li>
       </div>
 

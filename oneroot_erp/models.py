@@ -42,6 +42,19 @@ class User(Base):
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
 
 
+class TenantPortalAccount(Base):
+    __tablename__ = "tenant_portal_accounts"
+
+    id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    suite: Mapped[str] = mapped_column(String(100), index=True)
+    tenant_name: Mapped[str] = mapped_column(String(200), default="", index=True)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    password_hash: Mapped[str] = mapped_column(String(255), default="")
+    active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, onupdate=utcnow)
+
+
 class ModuleRecord(Base):
     __tablename__ = "module_records"
     __table_args__ = (

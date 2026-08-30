@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Tenant Portal | OneRoot Essentials</title>
+    <link rel="icon" href="{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}" type="image/png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=static_asset_version) }}">
+  </head>
+  <body class="tenant-portal-body">
+    <main class="tenant-login-shell">
+      <section class="tenant-login-card">
+        <a class="tenant-brand" href="/">
+          <img src="{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}" alt="OneRoot Essentials">
+          <span>OneRoot Essentials</span>
+        </a>
+        <p class="eyebrow">Apartment Residents</p>
+        <h1>Tenant Portal</h1>
+        <p class="muted">View your suite account, current rent and bills, and send a maintenance or account request directly to OneRoot.</p>
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% for category, message in messages %}<div class="flash {{ category }}">{{ message }}</div>{% endfor %}
+        {% endwith %}
+        <form method="post" class="tenant-login-form">
+          <label><span>Username</span><input name="username" autocomplete="username" required></label>
+          <label><span>Password</span><input type="password" name="password" autocomplete="current-password" required></label>
+          <button class="button primary" type="submit">Sign In To My Suite</button>
+        </form>
+        <p class="muted tenant-login-help">Need access or a password reset? Contact OneRoot Essentials on 0544995005 or WhatsApp 0242847065.</p>
+        <a class="button subtle" href="/">Back To OneRoot.shop</a>
+      </section>
+    </main>
+  </body>
+</html>
