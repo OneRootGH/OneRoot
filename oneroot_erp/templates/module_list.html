@@ -345,6 +345,34 @@
     </section>
   {% endif %}
 
+  {% if definition.key == 'supplier_price_updates' %}
+    <section class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Reorder Watch</p>
+          <h3>Stock Items To Review With Suppliers</h3>
+        </div>
+        <p class="muted list-summary">Stock-out and near-stock-out items from the live inventory.</p>
+      </div>
+      <ul class="stack-list compact reminder-stack">
+        {% for item in supplier_reorder_items %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy">
+              <strong>{{ item.name }}</strong>
+              <span>{{ item.areaLabel }} · {{ item.category or 'Uncategorised' }}</span>
+              <span>{{ item.stockStatus }} · Stock {{ item.quantityOnHand }}</span>
+            </div>
+            <div class="stack-list-actions">
+              <a class="button subtle button-small" href="{{ url_for('module_form', module_key='supplier_price_updates', productName=item.name, businessAreaId=item.areaId, category=item.category) }}">Record Supplier Price</a>
+            </div>
+          </li>
+        {% else %}
+          <li><span>No stock-out or near-stock-out items need supplier follow-up right now.</span></li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
   {% if definition.key in ['mobile_money_transactions', 'mobile_money_reconciliations'] and mobile_money_live_snapshot %}
     <section class="card">
       <div class="card-header compact">
@@ -619,6 +647,16 @@
                   <span class="table-secondary">Cost {{ (record.payload.get('purchaseCost', 0))|currency }} · Dep {{ (record.payload.get('accumulatedDepreciation', 0))|currency }}</span>
                 {% elif definition.key == 'maintenance_records' %}
                   <span class="table-secondary">{{ record.payload.get('workOrderNumber', 'No work order ref') }} · Est {{ (record.payload.get('estimatedCost', 0))|currency }}</span>
+                {% elif definition.key == 'tenant_portal_requests' %}
+                  <span class="table-secondary">{{ record.payload.get('suite', 'Suite') }} · {{ record.payload.get('requestType', 'Request') }} · {{ record.payload.get('priority', 'Medium') }}</span>
+                {% elif definition.key == 'customer_service_cases' %}
+                  <span class="table-secondary">{{ record.payload.get('caseType', 'Customer Case') }} · {{ record.payload.get('channel', 'Walk-in') }} · Due {{ record.payload.get('dueDate') or 'Not set' }}</span>
+                {% elif definition.key == 'kitchen_recipe_plans' %}
+                  <span class="table-secondary">Cost {{ (record.payload.get('totalRecipeCost', 0))|currency }} · Sales {{ (record.payload.get('projectedSales', 0))|currency }} · Margin {{ record.payload.get('marginPercent', 0) }}%</span>
+                {% elif definition.key == 'catering_quotes' %}
+                  <span class="table-secondary">Deposit {{ (record.payload.get('depositPaid', 0))|currency }} · Balance {{ (record.payload.get('balanceDue', 0))|currency }} · Event {{ record.payload.get('eventDate') or 'To confirm' }}</span>
+                {% elif definition.key == 'supplier_price_updates' %}
+                  <span class="table-secondary">{{ record.payload.get('supplierName', 'Supplier') }} · Prev {{ (record.payload.get('oldUnitCost', 0))|currency }} · Qty {{ record.payload.get('quantityReceived', 0) }}</span>
                 {% elif definition.key == 'knowledge_base' %}
                   <span class="table-secondary">{{ record.payload.get('entryType', 'Entry') }} · {{ record.payload.get('audienceRole', 'All Staff') }}</span>
                 {% elif definition.key == 'workforce_attendance' %}

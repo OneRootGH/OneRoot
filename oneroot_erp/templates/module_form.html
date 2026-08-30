@@ -211,6 +211,24 @@
               placeholder="Calculated automatically from dispatch amounts"
               readonly
             >
+          {% elif definition.key == 'kitchen_recipe_plans' and field.name in ['totalRecipeCost', 'costPerServing', 'projectedSales', 'projectedProfit', 'marginPercent'] %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from servings, prices, and production costs"
+              readonly
+            >
+          {% elif definition.key == 'catering_quotes' and field.name in ['depositRequired', 'balanceDue'] %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from quote and deposit"
+              readonly
+            >
           {% else %}
             <input
               type="{{ 'text' if field.field_type == 'month' else field.field_type }}"

@@ -395,6 +395,32 @@ ROLE_ACCESS_KEYS = {
     },
 }
 
+# Keep the new desks focused on the people who run each workflow. Owners and
+# admins retain full access while frontline teams see only their related work.
+for _role_key in ("owner", "admin"):
+    ROLE_ACCESS_KEYS[_role_key].update(
+        {
+            "kitchen_recipe_plans",
+            "customer_service_cases",
+            "tenant_portal_requests",
+            "catering_quotes",
+            "supplier_price_updates",
+        }
+    )
+ROLE_ACCESS_KEYS["finance"].update({"supplier_price_updates", "catering_quotes"})
+ROLE_ACCESS_KEYS["operations"].update(
+    {"kitchen_recipe_plans", "customer_service_cases", "tenant_portal_requests", "catering_quotes", "supplier_price_updates"}
+)
+ROLE_ACCESS_KEYS["frontline-service-lead"].update({"kitchen_recipe_plans", "customer_service_cases", "catering_quotes"})
+ROLE_ACCESS_KEYS["operations-controls-lead"].update({"customer_service_cases", "tenant_portal_requests", "supplier_price_updates"})
+ROLE_ACCESS_KEYS["apartment-manager"].update({"tenant_portal_requests", "customer_service_cases"})
+ROLE_ACCESS_KEYS["sales-stock-operator"].update({"kitchen_recipe_plans", "customer_service_cases", "catering_quotes", "supplier_price_updates"})
+ROLE_ACCESS_KEYS["cashier"].update({"catering_quotes", "customer_service_cases"})
+ROLE_ACCESS_KEYS["laundry-desk"].add("customer_service_cases")
+ROLE_ACCESS_KEYS["equipment-desk"].add("customer_service_cases")
+ROLE_ACCESS_KEYS["delivery-dispatch"].update({"customer_service_cases", "catering_quotes"})
+ROLE_ACCESS_KEYS["marketing-crm"].update({"customer_service_cases", "catering_quotes"})
+
 SUITE_NAMES = [
     "Peace",
     "Grace",
@@ -1226,6 +1252,38 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "kitchen_recipe_plans": ModuleDefinition(
+        key="kitchen_recipe_plans",
+        label="Kitchen Recipe Costing & Production",
+        legacy_collection="kitchenRecipePlans",
+        menu_group="Services",
+        amount_field="projectedProfit",
+        date_field="recipeDate",
+        title_field="recipeName",
+        status_field="productionStatus",
+        fields=[
+            FieldDefinition("recipeDate", "Planning Date", "date", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("recipeName", "Meal / Recipe Name", "text", True),
+            FieldDefinition("kitchenCategory", "Kitchen Category", "select", False, KITCHEN_ORDER_CATEGORY_OPTIONS),
+            FieldDefinition("recipeSummary", "Ingredients & Preparation Summary", "textarea"),
+            FieldDefinition("servingCount", "Planned Servings", "number", True, step="1"),
+            FieldDefinition("sellingPricePerServing", "Selling Price Per Serving", "number", True),
+            FieldDefinition("ingredientCost", "Ingredient Cost", "number"),
+            FieldDefinition("packagingCost", "Packaging Cost", "number"),
+            FieldDefinition("overheadCost", "Fuel / Other Production Cost", "number"),
+            FieldDefinition("totalRecipeCost", "Total Recipe Cost", "number"),
+            FieldDefinition("costPerServing", "Cost Per Serving", "number"),
+            FieldDefinition("projectedSales", "Projected Sales", "number"),
+            FieldDefinition("projectedProfit", "Projected Gross Profit", "number"),
+            FieldDefinition("marginPercent", "Projected Margin %", "number"),
+            FieldDefinition("actualProduced", "Actual Servings Produced", "number", False, step="1"),
+            FieldDefinition("actualSold", "Actual Servings Sold", "number", False, step="1"),
+            FieldDefinition("wasteQuantity", "Waste / Spoilage Servings", "number", False, step="1"),
+            FieldDefinition("productionStatus", "Production Status", "select", True, [("Planned", "Planned"), ("In Production", "In Production"), ("Ready", "Ready"), ("Completed", "Completed"), ("Cancelled", "Cancelled")]),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
     "equipment_rental_bookings": ModuleDefinition(
         key="equipment_rental_bookings",
         label="Equipment Rentals",
@@ -1403,6 +1461,31 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "supplier_price_updates": ModuleDefinition(
+        key="supplier_price_updates",
+        label="Supplier Price & Reorder Intelligence",
+        legacy_collection="supplierPriceUpdates",
+        menu_group="Procurement",
+        amount_field="newUnitCost",
+        date_field="purchaseDate",
+        title_field="productName",
+        status_field="receiptStatus",
+        fields=[
+            FieldDefinition("purchaseDate", "Purchase / Price Date", "date", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("supplierName", "Supplier Name", "text", True),
+            FieldDefinition("productSku", "Product SKU / Barcode", "text"),
+            FieldDefinition("productName", "Inventory Item Name", "text", True),
+            FieldDefinition("category", "Product Category", "text"),
+            FieldDefinition("oldUnitCost", "Previous Unit Cost", "number"),
+            FieldDefinition("newUnitCost", "New Unit Cost", "number", True),
+            FieldDefinition("quantityReceived", "Quantity Received", "number", False, step="1"),
+            FieldDefinition("receiptStatus", "Receipt Status", "select", True, [("Price Check", "Price Check Only"), ("Received", "Received Into Stock"), ("Pending", "Pending Delivery")]),
+            FieldDefinition("invoiceReference", "Invoice / Receipt Reference", "text"),
+            FieldDefinition("nextReviewDate", "Next Price Review", "date"),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
     "asset_records": ModuleDefinition(
         key="asset_records",
         label="Asset Register & Depreciation",
@@ -1489,6 +1572,93 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("lifetimeValue", "Lifetime Value", "number"),
             FieldDefinition("status", "Status", "select", True, CUSTOMER_STATUSES),
             FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
+    "customer_service_cases": ModuleDefinition(
+        key="customer_service_cases",
+        label="Customer Service Inbox & Complaints",
+        legacy_collection="customerServiceCases",
+        menu_group="Growth",
+        amount_field="goodwillCost",
+        date_field="caseDate",
+        title_field="customerName",
+        status_field="status",
+        fields=[
+            FieldDefinition("caseDate", "Case Date", "date", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("customerName", "Customer Name", "text", True),
+            FieldDefinition("customerPhone", "Customer Phone", "text"),
+            FieldDefinition("channel", "Channel", "select", True, [("Walk-in", "Walk-in"), ("WhatsApp", "WhatsApp"), ("Phone", "Phone"), ("Website", "Website"), ("Facebook", "Facebook / Messenger")]),
+            FieldDefinition("caseType", "Case Type", "select", True, [("Complaint", "Complaint"), ("Question", "Question / Enquiry"), ("Refund", "Refund Request"), ("Delivery", "Delivery Issue"), ("Service Recovery", "Service Recovery"), ("Feedback", "Feedback / Compliment")]),
+            FieldDefinition("priority", "Priority", "select", True, MAINTENANCE_PRIORITIES),
+            FieldDefinition("description", "Customer Message / Issue", "textarea", True),
+            FieldDefinition("assignedTo", "Assigned To", "text"),
+            FieldDefinition("dueDate", "Response Due Date", "date"),
+            FieldDefinition("status", "Status", "select", True, [("Open", "Open"), ("In Progress", "In Progress"), ("Waiting On Customer", "Waiting On Customer"), ("Resolved", "Resolved"), ("Closed", "Closed")]),
+            FieldDefinition("resolution", "Resolution / Follow-Up", "textarea"),
+            FieldDefinition("resolvedDate", "Resolved Date", "date"),
+            FieldDefinition("goodwillCost", "Refund / Goodwill Cost", "number"),
+            FieldDefinition("notes", "Internal Notes", "textarea"),
+        ],
+    ),
+    "catering_quotes": ModuleDefinition(
+        key="catering_quotes",
+        label="Catering, Bulk Orders & Quotations",
+        legacy_collection="cateringQuotes",
+        menu_group="Sales",
+        amount_field="quotedTotal",
+        date_field="quoteDate",
+        title_field="customerName",
+        status_field="status",
+        fields=[
+            FieldDefinition("quoteDate", "Quote Date", "date", True),
+            FieldDefinition("eventDate", "Event / Delivery Date", "date"),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("customerName", "Customer / Organisation", "text", True),
+            FieldDefinition("customerPhone", "Customer Phone", "text"),
+            FieldDefinition("customerEmail", "Customer Email", "text"),
+            FieldDefinition("eventType", "Event Type", "select", True, [("Catering", "Catering"), ("Bulk Food Order", "Bulk Food Order"), ("Office / Community Order", "Office / Community Order"), ("Party / Celebration", "Party / Celebration")]),
+            FieldDefinition("guestCount", "Guest / Quantity Count", "number", False, step="1"),
+            FieldDefinition("menuSummary", "Menu / Items Requested", "textarea", True),
+            FieldDefinition("deliveryAddress", "Event / Delivery Location", "textarea"),
+            FieldDefinition("quotedTotal", "Quoted Total", "number", True),
+            FieldDefinition("depositPercent", "Deposit Required %", "number"),
+            FieldDefinition("depositRequired", "Deposit Required", "number"),
+            FieldDefinition("depositPaid", "Deposit Paid", "number"),
+            FieldDefinition("paymentDate", "Deposit Payment Date", "date"),
+            FieldDefinition("paymentMethod", "Deposit Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
+            FieldDefinition("paymentReference", "Deposit Payment Reference", "text"),
+            FieldDefinition("balanceDue", "Balance Due", "number"),
+            FieldDefinition("status", "Quote Status", "select", True, [("Draft", "Draft"), ("Sent", "Sent"), ("Accepted", "Accepted"), ("In Production", "In Production"), ("Completed", "Completed"), ("Cancelled", "Cancelled")]),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
+    "tenant_portal_requests": ModuleDefinition(
+        key="tenant_portal_requests",
+        label="Tenant Portal & Maintenance Requests",
+        legacy_collection="tenantPortalRequests",
+        menu_group="Property",
+        amount_field="estimatedCost",
+        date_field="requestDate",
+        title_field="tenantName",
+        status_field="status",
+        fields=[
+            FieldDefinition("requestDate", "Request Date", "date", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("suite", "Suite", "select", True, [(name, name) for name in SUITE_NAMES]),
+            FieldDefinition("tenantName", "Tenant Name", "text", True),
+            FieldDefinition("tenantPhone", "Tenant Phone", "text"),
+            FieldDefinition("requestType", "Request Type", "select", True, [("Maintenance", "Maintenance Repair"), ("Inspection", "Inspection Request"), ("Utility", "Utility / Bill Query"), ("Access", "Access / Key Request"), ("Other", "Other")]),
+            FieldDefinition("priority", "Urgency", "select", True, MAINTENANCE_PRIORITIES),
+            FieldDefinition("description", "Request Details", "textarea", True),
+            FieldDefinition("preferredAccessTime", "Preferred Access Time", "text"),
+            FieldDefinition("assignedTo", "Assigned To", "text"),
+            FieldDefinition("dueDate", "Response / Completion Due", "date"),
+            FieldDefinition("estimatedCost", "Estimated Cost", "number"),
+            FieldDefinition("status", "Status", "select", True, [("Open", "Open"), ("Scheduled", "Scheduled"), ("In Progress", "In Progress"), ("Resolved", "Resolved"), ("Closed", "Closed")]),
+            FieldDefinition("completionDate", "Completion Date", "date"),
+            FieldDefinition("tenantConfirmation", "Tenant Confirmation", "select", False, [("Pending", "Pending"), ("Confirmed", "Confirmed"), ("Not Required", "Not Required")]),
+            FieldDefinition("notes", "Internal Notes", "textarea"),
         ],
     ),
     "promotions": ModuleDefinition(
@@ -1794,8 +1964,8 @@ MENU_GROUPS = [
     (
         "Operations",
         [
-            ("Property & Work Orders", ["apartments", "security_deposit_records", "maintenance_records"]),
-            ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
+            ("Property & Work Orders", ["apartments", "tenant_portal_requests", "security_deposit_records", "maintenance_records"]),
+            ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
         ],
     ),
     (
@@ -1803,13 +1973,13 @@ MENU_GROUPS = [
         [
             ("Payroll, Schedules & Training", ["salary_records", "workforce_attendance", "knowledge_base"]),
             ("Recruitment", ["job_vacancies"]),
-            ("Suppliers", ["suppliers"]),
+            ("Suppliers", ["suppliers", "supplier_price_updates"]),
         ],
     ),
     (
         "Growth",
         [
-            ("Customers & Marketing", ["customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"]),
+            ("Customers & Marketing", ["customer_crm", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
         ],
     ),
     (

@@ -4232,6 +4232,11 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "knowledge_base": "entryType",
     "workforce_attendance": "shiftType",
     "job_vacancies": "employmentType",
+    "kitchen_recipe_plans": "kitchenCategory",
+    "customer_service_cases": "caseType",
+    "tenant_portal_requests": "requestType",
+    "catering_quotes": "eventType",
+    "supplier_price_updates": "category",
 }
 
 MODULE_FILTER_CATEGORY_LABELS = {
@@ -4255,6 +4260,9 @@ MODULE_FILTER_CATEGORY_LABELS = {
     "entryType": "Entry Type",
     "shiftType": "Shift Type",
     "employmentType": "Employment Type",
+    "caseType": "Case Type",
+    "requestType": "Request Type",
+    "eventType": "Event Type",
     "status": "Status",
 }
 
@@ -6227,6 +6235,161 @@ def delivery_dispatch_rollup(payload: dict[str, Any]) -> None:
     rider_cost = parse_amount(payload.get("riderCost"))
     payload["deliveryMargin"] = round(delivery_fee - rider_cost, 2)
     payload["outstandingAmount"] = round(max(order_total - cash_collected, 0), 2)
+
+
+def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
+    """Calculate a practical recipe plan without posting any sale until food is sold."""
+    servings = max(parse_amount(payload.get("servingCount")), 0)
+    selling_price = max(parse_amount(payload.get("sellingPricePerServing")), 0)
+    total_cost = round(
+        max(parse_amount(payload.get("ingredientCost")), 0)
+        + max(parse_amount(payload.get("packagingCost")), 0)
+        + max(parse_amount(payload.get("overheadCost")), 0),
+        2,
+    )
+    projected_sales = round(servings * selling_price, 2)
+    projected_profit = round(projected_sales - total_cost, 2)
+    payload["businessAreaId"] = "kitchen"
+    payload["totalRecipeCost"] = total_cost
+    payload["costPerServing"] = round(total_cost / servings, 2) if servings else 0.0
+    payload["projectedSales"] = projected_sales
+    payload["projectedProfit"] = projected_profit
+    payload["marginPercent"] = round((projected_profit / projected_sales) * 100, 2) if projected_sales else 0.0
+
+
+def catering_quote_rollup(payload: dict[str, Any]) -> None:
+    quoted_total = max(parse_amount(payload.get("quotedTotal")), 0)
+    deposit_percent = parse_amount(payload.get("depositPercent"))
+    if deposit_percent <= 0:
+        deposit_percent = 50.0
+    deposit_percent = min(deposit_percent, 100.0)
+    deposit_paid = min(max(parse_amount(payload.get("depositPaid")), 0), quoted_total)
+    payload["depositPercent"] = deposit_percent
+    payload["depositRequired"] = round(quoted_total * deposit_percent / 100, 2)
+    payload["balanceDue"] = round(max(quoted_total - deposit_paid, 0), 2)
+
+
+def supplier_price_update_product(db_session, payload: dict[str, Any], previous_payload: dict[str, Any] | None = None) -> None:
+    """Apply received stock once, using the edit delta rather than double-counting it."""
+    previous_payload = previous_payload or {}
+    linked_id = normalize_text(previous_payload.get("linkedProductId")) or normalize_text(payload.get("linkedProductId"))
+    product = db_session.get(Product, linked_id) if linked_id else None
+    if not product:
+        lookup = normalize_text(payload.get("productSku"))
+        name = normalize_text(payload.get("productName"))
+        products = db_session.scalars(select(Product).order_by(Product.name.asc())).all()
+        product = next(
+            (
+                item
+                for item in products
+                if lookup
+                and lookup.lower() in {normalize_text(item.sku).lower(), normalize_text(item.barcode).lower()}
+            ),
+            None,
+        ) or next((item for item in products if name and normalize_text(item.name).lower() == name.lower()), None)
+    if not product:
+        payload["inventoryUpdateNote"] = "No matching inventory item was found. The supplier price record was kept without changing stock."
+        return
+
+    previous_received = parse_amount(previous_payload.get("quantityReceived")) if normalize_text(previous_payload.get("receiptStatus")) == "Received" else 0.0
+    current_received = parse_amount(payload.get("quantityReceived")) if normalize_text(payload.get("receiptStatus")) == "Received" else 0.0
+    quantity_delta = round(current_received - previous_received, 2)
+    product.cost_price = max(parse_amount(payload.get("newUnitCost")), 0)
+    if quantity_delta and normalized_product_item_type(product.item_type, product.track_inventory) != "service":
+        product.quantity_on_hand = round(parse_amount(product.quantity_on_hand) + quantity_delta, 2)
+        product.quantity_known = True
+    normalize_product_record(product)
+    payload["linkedProductId"] = product.id
+    payload["productName"] = product.name
+    payload["productSku"] = normalize_text(product.sku) or normalize_text(product.barcode)
+    payload["businessAreaId"] = normalize_text(product.business_area_id) or normalize_text(payload.get("businessAreaId"))
+    payload["category"] = normalize_text(product.category) or normalize_text(payload.get("category"))
+    payload["inventoryUpdateNote"] = (
+        f"Updated {product.name}; stock changed by {quantity_delta:g}."
+        if quantity_delta
+        else f"Updated latest unit cost for {product.name}."
+    )
+
+
+def sync_tenant_request_work_order(request_record: ModuleRecord, db_session) -> None:
+    payload = dict(request_record.payload or {})
+    reference = f"tenant-request-work-order|{request_record.id}"
+    work_order = db_session.scalar(
+        select(ModuleRecord).where(ModuleRecord.module_key == "maintenance_records", ModuleRecord.reference == reference)
+    )
+    if not work_order:
+        work_order = ModuleRecord(id=uuid4().hex, module_key="maintenance_records", reference=reference, created_at=datetime.utcnow())
+        db_session.add(work_order)
+    work_payload = dict(work_order.payload or {})
+    work_payload.update(
+        {
+            "id": work_order.id,
+            "reportedDate": payload.get("requestDate") or date.today().isoformat(),
+            "businessAreaId": "rentals-apartments",
+            "workOrderNumber": normalize_text(work_payload.get("workOrderNumber")) or f"TEN-{request_record.id[:6].upper()}",
+            "requestSource": "Tenant",
+            "workOrderType": "Inspection" if normalize_text(payload.get("requestType")) == "Inspection" else "Corrective",
+            "location": normalize_text(payload.get("suite")),
+            "assetItem": "Tenant request",
+            "issue": normalize_text(payload.get("description")) or "Tenant request",
+            "priority": normalize_text(payload.get("priority")) or "Medium",
+            "status": "Completed" if normalize_text(payload.get("status")) in {"Resolved", "Closed"} else normalize_text(payload.get("status")) or "Open",
+            "assignedTo": normalize_text(payload.get("assignedTo")),
+            "dueDate": payload.get("dueDate"),
+            "completedDate": payload.get("completionDate"),
+            "estimatedCost": parse_amount(payload.get("estimatedCost")),
+            "resolutionSummary": normalize_text(payload.get("notes")),
+            "notes": f"Created from tenant request for {normalize_text(payload.get('tenantName')) or 'tenant'} in {normalize_text(payload.get('suite'))}.",
+        }
+    )
+    maintenance_rollup(work_payload)
+    set_module_record_metadata(work_order, MODULES["maintenance_records"], work_payload)
+    payload["workOrderId"] = work_order.id
+    request_record.payload = payload
+
+
+def sync_catering_quote_handoff(quote_record: ModuleRecord, db_session) -> ModuleRecord | None:
+    """Turn an accepted quote into one Kitchen Order, without duplicating customer data."""
+    payload = dict(quote_record.payload or {})
+    status = normalize_text(payload.get("status"))
+    if status not in {"Accepted", "In Production", "Completed"}:
+        return None
+    reference = f"catering-quote-kitchen|{quote_record.id}"
+    kitchen_record = db_session.scalar(
+        select(ModuleRecord).where(ModuleRecord.module_key == "kitchen_orders", ModuleRecord.reference == reference)
+    )
+    if not kitchen_record:
+        kitchen_record = ModuleRecord(id=uuid4().hex, module_key="kitchen_orders", reference=reference, created_at=datetime.utcnow())
+        db_session.add(kitchen_record)
+    kitchen_payload = dict(kitchen_record.payload or {})
+    kitchen_payload.update(
+        {
+            "id": kitchen_record.id,
+            "orderDate": payload.get("quoteDate") or date.today().isoformat(),
+            "businessAreaId": "kitchen",
+            "customerName": normalize_text(payload.get("customerName")),
+            "customerPhone": normalize_text(payload.get("customerPhone")),
+            "orderType": "Pre-Order",
+            "deliveryMode": "Delivery" if normalize_text(payload.get("deliveryAddress")) else "Takeaway",
+            "kitchenCategory": "Meal Combos",
+            "kitchenItem": f"Catering: {normalize_text(payload.get('eventType')) or 'Bulk Order'}",
+            "itemSummary": normalize_text(payload.get("menuSummary")),
+            "itemQuantity": parse_amount(payload.get("guestCount")),
+            "amountDue": parse_amount(payload.get("quotedTotal")),
+            "amountPaid": parse_amount(payload.get("depositPaid")),
+            "paymentDate": payload.get("paymentDate"),
+            "paymentMethod": payload.get("paymentMethod"),
+            "paymentReference": payload.get("paymentReference"),
+            "readyDate": payload.get("eventDate"),
+            "status": "Completed" if status == "Completed" else ("Preparing" if status == "In Production" else "Received"),
+            "notes": f"Created from catering quote {quote_record.reference or quote_record.id}. {normalize_text(payload.get('deliveryAddress'))}",
+        }
+    )
+    apply_service_payment_rollup("kitchen_orders", kitchen_payload)
+    set_module_record_metadata(kitchen_record, MODULES["kitchen_orders"], kitchen_payload)
+    payload["kitchenOrderId"] = kitchen_record.id
+    quote_record.payload = payload
+    return kitchen_record
 
 
 def status_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
@@ -12584,6 +12747,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "note": "Review the sales ledger that receives synced counter and service payments.",
                 }
             )
+        supplier_reorder_items: list[dict[str, Any]] = []
+        if module_key == "supplier_price_updates":
+            supplier_reorder_items = [
+                item
+                for item in build_inventory_risk_rows(g.db.scalars(select(Product).where(Product.active.is_(True))).all())
+                if item["isStockOut"] or item["isNearStockOut"]
+            ][:10]
         target_area = area_filter
         target_month = month_filter or (date_from.strftime("%Y-%m") if date_from else date.today().strftime("%Y-%m"))
         return render_template(
@@ -12616,6 +12786,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             growth_context=growth_context,
             mobile_money_reconciliation_summary=mobile_money_reconciliation_summary,
             mobile_money_live_snapshot=mobile_money_live_snapshot,
+            supplier_reorder_items=supplier_reorder_items,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")
@@ -12766,6 +12937,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 campaign_roi_rollup(payload)
             elif module_key == "delivery_dispatch":
                 delivery_dispatch_rollup(payload)
+            elif module_key == "kitchen_recipe_plans":
+                kitchen_recipe_rollup(payload)
+            elif module_key == "catering_quotes":
+                catering_quote_rollup(payload)
+            elif module_key == "tenant_portal_requests":
+                payload["businessAreaId"] = "rentals-apartments"
+            elif module_key == "supplier_price_updates":
+                supplier_price_update_product(g.db, payload, record_payload)
             elif module_key == "mobile_money_reconciliations":
                 payload["businessAreaId"] = "mobile-money"
                 provider_value = normalize_text(payload.get("provider")) or "MTN Mobile Money"
@@ -12826,8 +13005,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     record = ModuleRecord(id=payload["id"], module_key=module_key, created_at=datetime.utcnow())
                     g.db.add(record)
                 set_module_record_metadata(record, definition, payload)
+                if module_key == "tenant_portal_requests":
+                    sync_tenant_request_work_order(record, g.db)
+                if module_key == "catering_quotes":
+                    linked_kitchen_order = sync_catering_quote_handoff(record, g.db)
+                    if linked_kitchen_order:
+                        sync_generated_sales_for_module_record(linked_kitchen_order, g.db)
                 sync_generated_sales_for_module_record(record)
-                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "mobile_money_transactions"}:
+                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "mobile_money_transactions", "catering_quotes", "customer_service_cases"}:
                     sync_customer_crm_automation(g.db)
                     sync_marketing_campaign_automation(g.db)
                 audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
@@ -12845,6 +13030,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
             knowledge_rollup(record_payload)
         elif module_key == "workforce_attendance":
             workforce_rollup(record_payload)
+        elif module_key == "kitchen_recipe_plans":
+            record_payload.setdefault("recipeDate", date.today().isoformat())
+            record_payload.setdefault("businessAreaId", "kitchen")
+            record_payload.setdefault("productionStatus", "Planned")
+            kitchen_recipe_rollup(record_payload)
+        elif module_key == "catering_quotes":
+            record_payload.setdefault("quoteDate", date.today().isoformat())
+            record_payload.setdefault("businessAreaId", "kitchen")
+            record_payload.setdefault("depositPercent", 50)
+            record_payload.setdefault("status", "Draft")
+            catering_quote_rollup(record_payload)
+        elif module_key == "tenant_portal_requests":
+            record_payload.setdefault("requestDate", date.today().isoformat())
+            record_payload.setdefault("businessAreaId", "rentals-apartments")
+            record_payload.setdefault("priority", "Medium")
+            record_payload.setdefault("status", "Open")
+            record_payload.setdefault("tenantConfirmation", "Pending")
+        elif module_key == "customer_service_cases":
+            record_payload.setdefault("caseDate", date.today().isoformat())
+            record_payload.setdefault("channel", "Walk-in")
+            record_payload.setdefault("caseType", "Question")
+            record_payload.setdefault("priority", "Medium")
+            record_payload.setdefault("status", "Open")
+        elif module_key == "supplier_price_updates":
+            record_payload.setdefault("purchaseDate", date.today().isoformat())
+            record_payload.setdefault("receiptStatus", "Price Check")
         elif module_key == "mobile_money_reconciliations":
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
