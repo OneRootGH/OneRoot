@@ -792,6 +792,7 @@ PLANNING_TYPES = [
 ]
 CUSTOMER_SEGMENTS = [
     ("Lead", "Lead"),
+    ("MoMo Contact", "Mobile Money Contact"),
     ("Walk-in", "Walk-in"),
     ("Repeat", "Repeat"),
     ("VIP", "VIP"),
@@ -816,6 +817,7 @@ LEAD_SOURCES = [
     ("Referral", "Referral"),
     ("Walk-in", "Walk-in"),
     ("Apartment", "Apartment"),
+    ("Mobile Money", "Mobile Money"),
     ("Social Media", "Social Media"),
     ("Flyer", "Flyer"),
 ]
@@ -1373,6 +1375,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("floatImpact", "Float Impact", "select", False, MOBILE_MONEY_FLOAT_IMPACTS),
             FieldDefinition("reference", "Reference", "text"),
             FieldDefinition("status", "Status", "select", True, MOBILE_MONEY_TRANSACTION_STATUSES),
+            FieldDefinition("marketingConsent", "Marketing Consent", "select", False, [("Unknown", "Do Not Market / Ask Customer"), ("Opted In", "Opted In For Offers"), ("Opted Out", "Opted Out")]),
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),

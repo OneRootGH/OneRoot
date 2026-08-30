@@ -1910,6 +1910,7 @@ def marketing_lead_source(values: set[str]) -> str:
         "Referral",
         "Website",
         "Online Order",
+        "Mobile Money",
         "Kitchen",
         "WhatsApp",
         "Social Media",
@@ -1959,6 +1960,12 @@ def build_customer_growth_message(snapshot: dict[str, Any], *, support_phone: st
             f"Hello {customer_name}, thank you for being one of OneRoot Essentials' valued customers. "
             f"Our team is ready to support your next {top_area_label} order quickly.{support_line}"
         )
+    if action_tag == "momo-welcome":
+        return (
+            f"Hello {customer_name}, thank you for using OneRoot Mobile Money. "
+            "When you are nearby, you can also order food, groceries, laundry, water, or equipment support through OneRoot. "
+            "Reply with what you need and we will prepare it for you." + support_line
+        )
     return (
         f"Hello {customer_name}, this is OneRoot Essentials checking in. "
         f"We are available to support you with {offer_copy}.{support_line}"
@@ -1994,6 +2001,10 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 "paidOrderCount": 0,
                 "lifetimeValue": 0.0,
                 "pendingValue": 0.0,
+                "mobileMoneyServiceCount": 0,
+                "mobileMoneyFeeEarned": 0.0,
+                "lastMobileMoneyDate": None,
+                "transactionMarketingConsent": "",
                 "hasApartmentProfile": False,
                 "firstCaptureDate": record_date,
                 "lastActivityDate": record_date,
@@ -2108,6 +2119,9 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
             bucket["manualFollowUpDate"] = manual_follow_up
         bucket["manualNotes"] = first_non_empty_text(bucket.get("manualNotes"), payload.get("notes"))
         bucket["preferredContact"] = first_non_empty_text(bucket.get("preferredContact"), payload.get("preferredContact"))
+        saved_consent = normalize_text(payload.get("marketingConsent"))
+        if saved_consent in {"Opted In", "Opted Out"}:
+            bucket["transactionMarketingConsent"] = saved_consent
         bucket["leadSources"].add(normalize_text(payload.get("leadSource")) or "Walk-in")
         if normalize_text(payload.get("businessAreaId")):
             bucket["businessAreaIds"].add(normalize_text(payload.get("businessAreaId")))
@@ -2128,6 +2142,39 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
             count_paid_order=True,
             preferred_contact="WhatsApp",
         )
+
+    mobile_money_records = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "mobile_money_transactions")
+    ).all()
+    for record in mobile_money_records:
+        payload = dict(record.payload or {})
+        if not mobile_money_transaction_is_completed(payload):
+            continue
+        customer_name = normalize_text(payload.get("customerName"))
+        customer_phone = normalize_text(payload.get("customerPhone"))
+        if not customer_name and not customer_phone:
+            continue
+        transaction_date = parse_date(payload.get("date")) or record.record_date
+        bucket = ensure_bucket(
+            name=customer_name,
+            phone=customer_phone,
+            record_date=transaction_date,
+        )
+        if not bucket:
+            continue
+        bucket["leadSources"].add("Mobile Money")
+        bucket["businessAreaIds"].add("mobile-money")
+        bucket["preferredContact"] = first_non_empty_text(bucket.get("preferredContact"), "WhatsApp")
+        bucket["mobileMoneyServiceCount"] += 1
+        bucket["mobileMoneyFeeEarned"] = round(
+            parse_amount(bucket.get("mobileMoneyFeeEarned")) + parse_amount(payload.get("salesAmount")),
+            2,
+        )
+        if transaction_date and (not bucket["lastMobileMoneyDate"] or transaction_date > bucket["lastMobileMoneyDate"]):
+            bucket["lastMobileMoneyDate"] = transaction_date
+        transaction_consent = normalize_text(payload.get("marketingConsent"))
+        if transaction_consent in {"Opted In", "Opted Out"}:
+            bucket["transactionMarketingConsent"] = transaction_consent
 
     relevant_records = db_session.scalars(
         select(ModuleRecord).where(
@@ -2263,6 +2310,8 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
         segment = "Walk-in"
         if bucket["hasApartmentProfile"]:
             segment = "Apartment Tenant"
+        elif bucket["mobileMoneyServiceCount"] and bucket["paidOrderCount"] == 0:
+            segment = "MoMo Contact"
         elif bucket["paidOrderCount"] == 0:
             segment = "Lead"
         elif bucket["paidOrderCount"] >= 6 or bucket["lifetimeValue"] >= 1500:
@@ -2284,6 +2333,15 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 automation_tag = "pending-order"
                 automation_label = "Complete pending order"
                 follow_up_date = follow_up_date or today
+            elif (
+                bucket["mobileMoneyServiceCount"]
+                and bucket["lastMobileMoneyDate"]
+                and (today - bucket["lastMobileMoneyDate"]).days <= 14
+            ):
+                status = "Follow Up"
+                automation_tag = "momo-welcome"
+                automation_label = "Invite MoMo customer to essentials"
+                follow_up_date = follow_up_date or min(bucket["lastMobileMoneyDate"] + timedelta(days=1), today + timedelta(days=2))
             elif bucket["paidOrderCount"] == 0:
                 status = "Follow Up"
                 automation_tag = "new-lead"
@@ -2334,11 +2392,12 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 "reminderMessage": reminder_message,
                 "sortRank": {
                     "pending-order": 1,
-                    "new-lead": 2,
-                    "win-back": 3,
-                    "cross-sell": 4,
-                    "vip-care": 5,
-                    "check-in": 6,
+                    "momo-welcome": 2,
+                    "new-lead": 3,
+                    "win-back": 4,
+                    "cross-sell": 5,
+                    "vip-care": 6,
+                    "check-in": 7,
                 }.get(automation_tag, 9),
             }
         )
@@ -2417,11 +2476,17 @@ def sync_customer_crm_automation(db_session) -> None:
                 "recommendedOffer": snapshot.get("recommendedOffer"),
                 "automationTag": snapshot.get("automationTag"),
                 "automationLabel": snapshot.get("automationLabel"),
+                "mobileMoneyServiceCount": int(parse_amount(snapshot.get("mobileMoneyServiceCount"))),
+                "mobileMoneyFeeEarned": round(parse_amount(snapshot.get("mobileMoneyFeeEarned")), 2),
+                "lastMobileMoneyDate": snapshot.get("lastMobileMoneyDate").isoformat() if snapshot.get("lastMobileMoneyDate") else "",
                 "daysSinceLastOrder": snapshot.get("daysSinceLastOrder"),
                 "whatsappUrl": snapshot.get("whatsappUrl"),
                 "reminderMessage": snapshot.get("reminderMessage"),
             }
         )
+        transaction_consent = normalize_text(snapshot.get("transactionMarketingConsent"))
+        if transaction_consent in {"Opted In", "Opted Out"}:
+            payload["marketingConsent"] = transaction_consent
         if not record:
             record = ModuleRecord(
                 id=payload["id"],
@@ -2469,7 +2534,7 @@ def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None)
             consent_needed += 1
             continue
         tag = normalize_text(payload.get("automationTag")) or "check-in"
-        if tag in {"new-lead", "pending-order", "win-back", "cross-sell", "vip-care"}:
+        if tag in {"new-lead", "pending-order", "win-back", "cross-sell", "vip-care", "momo-welcome"}:
             eligible_by_tag[tag].append(payload)
 
     campaign_specs = {
@@ -2478,6 +2543,7 @@ def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None)
         "win-back": ("Win Back Dormant Customers", "Repeat Sales", "Reconnect with customers who have not ordered recently using one helpful offer."),
         "cross-sell": ("Cross-Sell OneRoot Services", "Repeat Sales", "Introduce existing customers to a second relevant OneRoot service."),
         "vip-care": ("VIP Care Follow-Up", "Repeat Sales", "Thank high-value customers and offer priority support or a tailored bundle."),
+        "momo-welcome": ("MoMo To Essentials Welcome", "Cross-Sell", "Thank opted-in MoMo customers and offer one convenient OneRoot service for their next visit."),
     }
     existing = {
         normalize_text(record.reference): record
@@ -2498,7 +2564,11 @@ def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None)
                 "businessAreaId": "shared-operations",
                 "campaignName": title,
                 "channelType": "WhatsApp",
-                "audienceSegment": "Repeat" if tag != "new-lead" else "Lead",
+                "audienceSegment": (
+                    "MoMo Contact"
+                    if tag == "momo-welcome"
+                    else ("Repeat" if tag != "new-lead" else "Lead")
+                ),
                 "messageGoal": goal,
                 "sentCount": parse_amount(payload.get("sentCount")),
                 "responseCount": parse_amount(payload.get("responseCount")),
@@ -3971,6 +4041,18 @@ def user_access_keys(user: User | None) -> set[str]:
 
 def user_has_access(user: User | None, key: str) -> bool:
     return key in user_access_keys(user)
+
+
+def user_can_view_dashboard(user: User | None) -> bool:
+    """Keep the management dashboard for accountable leadership roles only."""
+    if not user:
+        return False
+    role_key = normalize_role_key(getattr(user, "role", "viewer"))
+    staff_role = normalize_staff_role(
+        getattr(user, "staff_role", ""),
+        fallback_role=getattr(user, "role", "viewer"),
+    )
+    return role_key in {"owner", "admin", "operations"} or staff_role in {"Manager", "Operations Manager"}
 
 
 def build_chart_rows(
@@ -8128,7 +8210,7 @@ def build_sidebar(user: User | None = None):
         getattr(user, "staff_role", ""),
         fallback_role=getattr(user, "role", "viewer"),
     )
-    workspace_manager = role_key in {"owner", "admin", "operations"} or staff_role in {"Manager", "Operations Manager"}
+    workspace_manager = user_can_view_dashboard(user)
     menu_groups = list(MENU_GROUPS)
     if not workspace_manager:
         # Frontline staff get only the tools they need, without the full management workspace.
@@ -8153,6 +8235,8 @@ def build_sidebar(user: User | None = None):
             links = []
             section_active = False
             for key in keys:
+                if key == "dashboard" and not user_can_view_dashboard(user):
+                    continue
                 access_key = "pos" if key == "food_pos" else key
                 if allowed_keys and access_key not in allowed_keys:
                     continue
@@ -8253,7 +8337,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     if api or request.path.startswith("/app/api/"):
                         return jsonify({"ok": False, "error": "You do not have access to this area."}), 403
                     flash("You do not have access to that area.", "warning")
-                    return redirect(url_for("dashboard"))
+                    return redirect(workspace_entry_path_for_user(g.current_user))
+                if key == "dashboard" and not user_can_view_dashboard(g.current_user):
+                    if api or request.path.startswith("/app/api/"):
+                        return jsonify({"ok": False, "error": "The dashboard is available to leadership accounts only."}), 403
+                    flash("Your work desk is ready. The management dashboard is reserved for leadership accounts.", "info")
+                    return redirect(workspace_entry_path_for_user(g.current_user))
                 attendance_gate = attendance_gate_response_for_request(
                     g.current_user,
                     key,
@@ -8565,8 +8654,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return redirect(attendance_gate_target_path())
 
     def workspace_entry_path_for_user(user: User | None, next_value: Any = "") -> str:
-        fallback = url_for("dashboard")
+        role_key = normalize_role_key(getattr(user, "role", "viewer"))
+        staff_role = normalize_staff_role(
+            getattr(user, "staff_role", ""),
+            fallback_role=getattr(user, "role", "viewer"),
+        )
+        preferred_keys = {
+            "mobile-money-agent": ["mobile_money_transactions", "mobile_money_reconciliations", "workforce_attendance"],
+            "laundry-desk": ["laundry_tickets", "workforce_attendance"],
+            "equipment-desk": ["equipment_rental_bookings", "workforce_attendance"],
+            "delivery-dispatch": ["online_orders", "delivery_dispatch", "workforce_attendance"],
+            "marketing-crm": ["customer_crm", "whatsapp_campaigns", "workforce_attendance"],
+            "sales-stock-operator": ["pos", "inventory", "workforce_attendance"],
+            "cashier": ["pos", "workforce_attendance"],
+        }.get(role_key, [])
+        if staff_role == "Kitchen Staff":
+            preferred_keys = ["kitchen_orders", "pos", "workforce_attendance"]
+        if user_can_view_dashboard(user):
+            fallback = url_for("dashboard")
+        else:
+            fallback = next(
+                (url_for("pos_page") if key == "pos" else url_for("module_list", module_key=key) for key in preferred_keys if user_has_access(user, "pos" if key == "pos" else key)),
+                url_for("module_list", module_key="workforce_attendance") if user_has_access(user, "workforce_attendance") else url_for("login"),
+            )
         next_path = safe_next_path(next_value, fallback)
+        if not user_can_view_dashboard(user) and next_path == url_for("dashboard"):
+            next_path = fallback
         if attendance_check_in_required(user) and not attendance_is_checked_in(user) and not attendance_path_allowed(next_path):
             return attendance_gate_target_path()
         return next_path
@@ -12669,8 +12782,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     g.db.add(record)
                 set_module_record_metadata(record, definition, payload)
                 sync_generated_sales_for_module_record(record)
-                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch"}:
+                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "mobile_money_transactions"}:
                     sync_customer_crm_automation(g.db)
+                    sync_marketing_campaign_automation(g.db)
                 audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
                 g.db.commit()
                 flash(f"{definition.label} saved.", "success")
