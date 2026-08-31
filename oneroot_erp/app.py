@@ -2544,6 +2544,9 @@ def sync_customer_crm_automation(db_session) -> None:
         payload["status"] = normalize_text(payload.get("status")) or "Inactive"
         set_module_record_metadata(record, MODULES["customer_crm"], payload)
 
+    # Loyalty balances follow the consolidated CRM view, including POS, service, and online activity.
+    sync_customer_loyalty_accounts(db_session)
+
 
 def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None) -> None:
     """Create one consent-aware campaign draft per actionable customer segment each day."""
