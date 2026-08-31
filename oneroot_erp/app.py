@@ -6926,7 +6926,7 @@ def apartment_profile(record: ModuleRecord) -> dict[str, Any]:
     }
 
 
-def tenant_portal_balance_lines(record: ModuleRecord) -> dict[str, list[dict[str, Any]]]:
+def tenant_portal_balance_lines(record: ModuleRecord, suite_records: list[ModuleRecord]) -> dict[str, list[dict[str, Any]]]:
     """Allocate recorded payments across the tenant-visible charges in a consistent order."""
     payload = dict(record.payload or {})
 
@@ -6941,9 +6941,13 @@ def tenant_portal_balance_lines(record: ModuleRecord) -> dict[str, list[dict[str
             line["owed"] = round(max(due - paid, 0), 2)
         return lines
 
+    statement_rows = apartment_statement_rows(record, suite_records)
+    previous_row = statement_rows[-2] if len(statement_rows) > 1 else None
+    prior_rent_balance = parse_amount(previous_row.get("rentBalance")) if previous_row else parse_amount(payload.get("arrearsBroughtForward"))
+    prior_bills_balance = parse_amount(previous_row.get("billsBalance")) if previous_row else 0.0
     rent_lines = [
-        {"label": "Previous Rent Arrears", "due": parse_amount(payload.get("arrearsBroughtForward"))},
-        {"label": "Late Fee", "due": parse_amount(payload.get("lateFee"))},
+        {"label": "Previous Rent Arrears", "due": prior_rent_balance},
+        {"label": "This Month's Late Fee", "due": parse_amount(payload.get("lateFee"))},
         {"label": "Suite Rent", "due": parse_amount(payload.get("rentDue"))},
         *[
             {"label": item["label"], "due": item["due"]}
@@ -6959,6 +6963,7 @@ def tenant_portal_balance_lines(record: ModuleRecord) -> dict[str, list[dict[str
     )
 
     bill_lines = [
+        {"label": "Previous Unpaid Bills", "due": prior_bills_balance},
         {"label": "Water Bill", "due": parse_amount(payload.get("waterBill"))},
         {"label": "Toilet Bill", "due": parse_amount(payload.get("toiletBill"))},
         {"label": "Sweeping / Gutter Cleaning", "due": parse_amount(payload.get("sweepingBill"))},
@@ -7279,6 +7284,8 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
     ordered_records = sorted([*relevant_records, reference_record], key=apartment_record_sort_key)
     rows: list[dict[str, Any]] = []
     running_balance = 0.0
+    rent_running_balance = 0.0
+    bills_running_balance = 0.0
 
     for index, record in enumerate(ordered_records):
         payload = apartment_record_payload(record)
@@ -7289,10 +7296,13 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
         bills_due = apartment_bills_due(payload)
         bills_paid = parse_amount(payload.get("billAmountPaid"))
         credit_applied = parse_amount(payload.get("creditBroughtForward"))
-        running_balance = round(
-            max(opening_arrears + late_fee + rent_due + bills_due - rent_paid - bills_paid - credit_applied, 0),
+        opening_rent_balance = opening_arrears if index == 0 else rent_running_balance
+        rent_running_balance = round(
+            max(opening_rent_balance + late_fee + rent_due - rent_paid - credit_applied, 0),
             2,
         )
+        bills_running_balance = round(max(bills_running_balance + bills_due - bills_paid, 0), 2)
+        running_balance = round(rent_running_balance + bills_running_balance, 2)
         rows.append(
             {
                 "record": record,
@@ -7306,6 +7316,8 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
                 "creditApplied": credit_applied,
                 "openingArrears": opening_arrears,
                 "lateFee": late_fee,
+                "rentBalance": rent_running_balance,
+                "billsBalance": bills_running_balance,
                 "runningBalance": running_balance,
             }
         )
@@ -10858,6 +10870,19 @@ def create_app(config: AppConfig | None = None) -> Flask:
         latest_record = suite_records[0] if suite_records else None
         profile = apartment_profile(latest_record) if latest_record else None
         statement_rows = apartment_statement_rows(latest_record, suite_records) if latest_record else []
+        if profile and statement_rows:
+            final_position = statement_rows[-1]
+            profile["rentBalance"] = final_position["rentBalance"]
+            profile["billsBalance"] = final_position["billsBalance"]
+            profile["outstanding"] = final_position["runningBalance"]
+            if final_position["rentBalance"] > 0 and final_position["billsBalance"] > 0:
+                profile["alertLabel"] = "Rent & Bills Outstanding"
+            elif final_position["rentBalance"] > 0:
+                profile["alertLabel"] = "Rent Outstanding"
+            elif final_position["billsBalance"] > 0:
+                profile["alertLabel"] = "Bills Outstanding"
+            else:
+                profile["alertLabel"] = "Account Current"
         requests = g.db.scalars(
             select(ModuleRecord)
             .where(ModuleRecord.module_key == "tenant_portal_requests")
@@ -10874,7 +10899,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             page_title="Tenant Portal",
             account=account,
             profile=profile,
-            balance_lines=tenant_portal_balance_lines(latest_record) if latest_record else {"rent": [], "bills": []},
+            balance_lines=tenant_portal_balance_lines(latest_record, suite_records) if latest_record else {"rent": [], "bills": []},
             statement_rows=statement_rows[:12],
             statement_totals=apartment_statement_totals(statement_rows),
             requests=requests,
