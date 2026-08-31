@@ -5780,6 +5780,7 @@ APARTMENT_FORM_SECTIONS = [
             "rentCoverageEndDate",
             "nextRentDueDate",
             "creditBroughtForward",
+            "rentArrearsBroughtForward",
             "arrearsBroughtForward",
             "lateFee",
         ],
@@ -5802,6 +5803,8 @@ APARTMENT_FORM_SECTIONS = [
             "billPaymentMethod",
             "billPaymentReference",
             "billReceivedBy",
+            "billArrearsBroughtForward",
+            "arrearsBroughtForwardType",
         ],
     ),
     (
@@ -6710,6 +6713,24 @@ def apartment_additional_rent_paid(payload: dict[str, Any]) -> float:
     return round(sum(item["paid"] for item in apartment_additional_rent_rows(payload)), 2)
 
 
+def apartment_legacy_arrears_type(payload: dict[str, Any]) -> str:
+    """Older records had one arrears field; default it to bills to preserve tenant charge history."""
+    value = normalize_text(payload.get("arrearsBroughtForwardType"))
+    return value if value in {"Rent", "Monthly Bills & Charges"} else "Monthly Bills & Charges"
+
+
+def apartment_rent_arrears_brought_forward(payload: dict[str, Any]) -> float:
+    explicit_amount = parse_amount(payload.get("rentArrearsBroughtForward"))
+    legacy_amount = parse_amount(payload.get("arrearsBroughtForward"))
+    return round(explicit_amount + (legacy_amount if apartment_legacy_arrears_type(payload) == "Rent" else 0), 2)
+
+
+def apartment_bill_arrears_brought_forward(payload: dict[str, Any]) -> float:
+    explicit_amount = parse_amount(payload.get("billArrearsBroughtForward"))
+    legacy_amount = parse_amount(payload.get("arrearsBroughtForward"))
+    return round(explicit_amount + (legacy_amount if apartment_legacy_arrears_type(payload) == "Monthly Bills & Charges" else 0), 2)
+
+
 def apartment_total_rent_due(payload: dict[str, Any]) -> float:
     return round(parse_amount(payload.get("rentDue")) + apartment_additional_rent_due(payload), 2)
 
@@ -6751,7 +6772,8 @@ def apartment_total_due_before_payments(payload: dict[str, Any]) -> float:
     return round(
         apartment_total_rent_due(payload)
         + apartment_bills_due(payload)
-        + parse_amount(payload.get("arrearsBroughtForward"))
+        + apartment_rent_arrears_brought_forward(payload)
+        + apartment_bill_arrears_brought_forward(payload)
         + parse_amount(payload.get("lateFee")),
         2,
     )
@@ -6771,7 +6793,7 @@ def apartment_rent_balance(payload: dict[str, Any]) -> float:
     return round(
         max(
             apartment_total_rent_due(payload)
-            + parse_amount(payload.get("arrearsBroughtForward"))
+            + apartment_rent_arrears_brought_forward(payload)
             + parse_amount(payload.get("lateFee"))
             - apartment_total_rent_paid(payload)
             - parse_amount(payload.get("creditBroughtForward")),
@@ -6782,7 +6804,15 @@ def apartment_rent_balance(payload: dict[str, Any]) -> float:
 
 
 def apartment_bills_balance(payload: dict[str, Any]) -> float:
-    return round(max(apartment_bills_due(payload) - parse_amount(payload.get("billAmountPaid")), 0), 2)
+    return round(
+        max(
+            apartment_bill_arrears_brought_forward(payload)
+            + apartment_bills_due(payload)
+            - parse_amount(payload.get("billAmountPaid")),
+            0,
+        ),
+        2,
+    )
 
 
 def apartment_credit_balance(payload: dict[str, Any]) -> float:
@@ -6906,6 +6936,8 @@ def apartment_profile(record: ModuleRecord) -> dict[str, Any]:
         "wasteBill": parse_amount(payload.get("wasteBill")),
         "customCharges": custom_charges,
         "arrearsBroughtForward": parse_amount(payload.get("arrearsBroughtForward")),
+        "rentArrearsBroughtForward": apartment_rent_arrears_brought_forward(payload),
+        "billArrearsBroughtForward": apartment_bill_arrears_brought_forward(payload),
         "lateFee": parse_amount(payload.get("lateFee")),
         "totalDue": apartment_total_due_before_payments(payload),
         "outstanding": apartment_outstanding(payload),
@@ -6943,8 +6975,8 @@ def tenant_portal_balance_lines(record: ModuleRecord, suite_records: list[Module
 
     statement_rows = apartment_statement_rows(record, suite_records)
     previous_row = statement_rows[-2] if len(statement_rows) > 1 else None
-    prior_rent_balance = parse_amount(previous_row.get("rentBalance")) if previous_row else parse_amount(payload.get("arrearsBroughtForward"))
-    prior_bills_balance = parse_amount(previous_row.get("billsBalance")) if previous_row else 0.0
+    prior_rent_balance = parse_amount(previous_row.get("rentBalance")) if previous_row else apartment_rent_arrears_brought_forward(payload)
+    prior_bills_balance = parse_amount(previous_row.get("billsBalance")) if previous_row else apartment_bill_arrears_brought_forward(payload)
     rent_lines = [
         {"label": "Previous Rent Arrears", "due": prior_rent_balance},
         {"label": "This Month's Late Fee", "due": parse_amount(payload.get("lateFee"))},
@@ -7289,19 +7321,20 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
 
     for index, record in enumerate(ordered_records):
         payload = apartment_record_payload(record)
-        opening_arrears = parse_amount(payload.get("arrearsBroughtForward")) if index == 0 else running_balance
+        opening_rent_arrears = apartment_rent_arrears_brought_forward(payload) if index == 0 else rent_running_balance
+        opening_bill_arrears = apartment_bill_arrears_brought_forward(payload) if index == 0 else bills_running_balance
+        opening_arrears = round(opening_rent_arrears + opening_bill_arrears, 2)
         late_fee = parse_amount(payload.get("lateFee"))
         rent_due = apartment_total_rent_due(payload)
         rent_paid = apartment_total_rent_paid(payload)
         bills_due = apartment_bills_due(payload)
         bills_paid = parse_amount(payload.get("billAmountPaid"))
         credit_applied = parse_amount(payload.get("creditBroughtForward"))
-        opening_rent_balance = opening_arrears if index == 0 else rent_running_balance
         rent_running_balance = round(
-            max(opening_rent_balance + late_fee + rent_due - rent_paid - credit_applied, 0),
+            max(opening_rent_arrears + late_fee + rent_due - rent_paid - credit_applied, 0),
             2,
         )
-        bills_running_balance = round(max(bills_running_balance + bills_due - bills_paid, 0), 2)
+        bills_running_balance = round(max(opening_bill_arrears + bills_due - bills_paid, 0), 2)
         running_balance = round(rent_running_balance + bills_running_balance, 2)
         rows.append(
             {
@@ -7315,6 +7348,8 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
                 "billsPaid": bills_paid,
                 "creditApplied": credit_applied,
                 "openingArrears": opening_arrears,
+                "openingRentArrears": opening_rent_arrears,
+                "openingBillsArrears": opening_bill_arrears,
                 "lateFee": late_fee,
                 "rentBalance": rent_running_balance,
                 "billsBalance": bills_running_balance,
@@ -7325,7 +7360,7 @@ def apartment_statement_rows(reference_record: ModuleRecord, suite_records: list
 
 
 def apartment_statement_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
-    return {
+    totals = {
         "rentDue": round(sum(row["rentDue"] for row in rows), 2),
         "rentPaid": round(sum(row["rentPaid"] for row in rows), 2),
         "billsDue": round(sum(row["billsDue"] for row in rows), 2),
@@ -7333,6 +7368,8 @@ def apartment_statement_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
         "creditApplied": round(sum(row["creditApplied"] for row in rows), 2),
         "balance": round(rows[-1]["runningBalance"], 2) if rows else 0.0,
     }
+    totals["totalPaid"] = round(totals["rentPaid"] + totals["billsPaid"] + totals["creditApplied"], 2)
+    return totals
 
 
 def apartment_document_source_payload(reference_record: ModuleRecord, suite_records: list[ModuleRecord]) -> dict[str, Any]:
@@ -14059,7 +14096,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             new_payload["rentReceivedBy"] = ""
             new_payload["rentCoverageStartDate"] = ""
             new_payload["rentCoverageEndDate"] = ""
-            new_payload["arrearsBroughtForward"] = apartment_rent_balance(source_payload)
+            new_payload["rentArrearsBroughtForward"] = apartment_rent_balance(source_payload)
+            new_payload["billArrearsBroughtForward"] = apartment_bills_balance(source_payload)
+            new_payload["arrearsBroughtForward"] = 0.0
+            new_payload["arrearsBroughtForwardType"] = "Monthly Bills & Charges"
             new_payload["creditBroughtForward"] = apartment_credit_balance(source_payload)
             new_payload["lateFee"] = 0.0
             new_payload["billAmountPaid"] = 0.0
