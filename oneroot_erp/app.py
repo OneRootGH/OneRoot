@@ -11020,6 +11020,44 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def public_page(filename: str):
         return send_from_directory(Path(app_config.root_dir) / "website", filename, max_age=0)
 
+    @app.route("/robots.txt")
+    def robots_txt():
+        base_url = f"https://{app_config.public_domain.lower()}"
+        content = "\n".join(
+            [
+                "User-agent: *",
+                "Allow: /",
+                "Disallow: /app/",
+                "Disallow: /operations/",
+                "Disallow: /tenant/",
+                "Disallow: /track-order",
+                f"Sitemap: {base_url}/sitemap.xml",
+                "",
+            ]
+        )
+        return Response(content, mimetype="text/plain")
+
+    @app.route("/sitemap.xml")
+    def sitemap_xml():
+        base_url = f"https://{app_config.public_domain.lower()}"
+        today = date.today().isoformat()
+        pages = [
+            ("/", "weekly", "1.0"),
+            ("/shop", "daily", "0.9"),
+            ("/food", "daily", "0.9"),
+            ("/laundry", "weekly", "0.8"),
+            ("/equipment", "weekly", "0.8"),
+            ("/services", "weekly", "0.7"),
+            ("/contact", "monthly", "0.6"),
+            ("/vacancies", "weekly", "0.6"),
+        ]
+        url_rows = "".join(
+            f"<url><loc>{base_url}{path}</loc><lastmod>{today}</lastmod><changefreq>{frequency}</changefreq><priority>{priority}</priority></url>"
+            for path, frequency, priority in pages
+        )
+        xml = f'<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">{url_rows}</urlset>'
+        return Response(xml, mimetype="application/xml")
+
     def active_tenant_portal_account() -> TenantPortalAccount | None:
         account_id = normalize_text(session.get("tenant_portal_account_id"))
         if not account_id:
