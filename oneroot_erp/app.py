@@ -6893,6 +6893,10 @@ def apartment_profile(record: ModuleRecord) -> dict[str, Any]:
         "guarantorName": normalize_text(payload.get("guarantorName")),
         "guarantorPhone": normalize_text(payload.get("guarantorPhone")),
         "occupantsCount": int(parse_amount(payload.get("occupantsCount"))),
+        "tenantPortalUsername": normalize_text(payload.get("tenantPortalUsername")),
+        "tenantPortalActive": normalize_text(payload.get("tenantPortalActive")) or "Yes",
+        # Existing tenants have confirmed reminder consent for this portfolio.
+        "tenantReminderConsent": normalize_text(payload.get("tenantReminderConsent")) or "Opted In",
         "moveInDate": normalize_text(payload.get("moveInDate")),
         "moveOutDate": normalize_text(payload.get("moveOutDate")),
         "noticeDate": normalize_text(payload.get("noticeDate")),
@@ -7089,13 +7093,20 @@ def apartment_reminder_message(profile: dict[str, Any], *, support_phone: str = 
         if entry["dueDate"]:
             due_parts.append(f"{entry['label']} due {format_display_date(entry['dueDate'], long_month=True)}")
     due_summary = ". ".join(due_parts)
-    contact_line = f" Please contact {support_phone} if you need any clarification." if normalize_text(support_phone) else ""
+    portal_username = normalize_text(profile.get("tenantPortalUsername"))
+    portal_access = normalize_text(profile.get("tenantPortalActive")).lower() != "no"
+    portal_line = (
+        f" Check your statement at https://oneroot.shop/tenant/login using username {portal_username}."
+        if portal_access and portal_username
+        else ""
+    )
+    contact_line = f" Please contact {support_phone} if you need any clarification or a password reset." if normalize_text(support_phone) else ""
     return (
         f"Hello {tenant}, this is a reminder from OneRoot Essentials for {suite}. "
         f"Our records show an outstanding balance of {format_currency(profile.get('outstanding'))}"
         f" ({amount_summary})."
         f"{(' ' + due_summary + '.') if due_summary else ''} "
-        f"Kindly make payment or reach out to confirm your plan.{contact_line}"
+        f"Kindly check your statement and make payment or reach out to confirm your plan.{portal_line}{contact_line}"
     ).strip()
 
 
@@ -7143,6 +7154,9 @@ def decorate_apartment_follow_up(profile: dict[str, Any], *, support_phone: str 
         "reminderMessage": reminder_message,
         "reminderType": reminder_type,
         "whatsappReady": bool(whatsapp_url),
+        "reminderConsent": normalize_text(profile.get("tenantReminderConsent")) or "Opted In",
+        "portalUsername": normalize_text(profile.get("tenantPortalUsername")),
+        "portalUrl": "https://oneroot.shop/tenant/login",
     }
 
 
@@ -7173,6 +7187,7 @@ def build_tenant_reminder_queue(profiles: list[dict[str, Any]]) -> list[dict[str
         if profile.get("occupancyKey") in {"occupied", "reserved"}
         and parse_amount(profile.get("outstanding")) > 0
         and profile.get("whatsappReady")
+        and normalize_text(profile.get("reminderConsent")) != "Opted Out"
         and profile.get("alertKey") not in {"current", "vacant", "maintenance"}
     ]
     return sorted(
@@ -10428,8 +10443,37 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         ).all()
         daily_sales_by_area: dict[str, float] = defaultdict(float)
+        daily_sales_cost_by_area: dict[str, float] = defaultdict(float)
+        daily_sales_transaction_count_by_area: dict[str, int] = defaultdict(int)
         for record in all_sales_rows:
-            daily_sales_by_area[record.business_area_id or "shared-operations"] += parse_amount(record.amount)
+            sales_area_id = record.business_area_id or "shared-operations"
+            sales_payload = dict(record.payload or {})
+            daily_sales_by_area[sales_area_id] += parse_amount(record.amount)
+            daily_sales_cost_by_area[sales_area_id] += parse_amount(sales_payload.get("costAmount"))
+            daily_sales_transaction_count_by_area[sales_area_id] += max(
+                int(parse_amount(sales_payload.get("transactionCount"))),
+                1,
+            )
+
+        # Some historic MoMo records pre-date generated sales entries. Include that recognised
+        # commission once so a closeout reconciles to the actual counter activity.
+        if mobile_money_snapshot["usesReconciliationFallback"] and mobile_money_snapshot["recognizedSalesTotal"] > 0:
+            daily_sales_by_area["mobile-money"] += mobile_money_snapshot["recognizedSalesTotal"]
+
+        all_daily_sales_breakdown = [
+            {
+                "areaId": area_key,
+                "areaLabel": BUSINESS_AREA_SHORT.get(area_key, area_key or "Shared Operations"),
+                "salesAmount": round(amount, 2),
+                "costAmount": round(daily_sales_cost_by_area.get(area_key, 0.0), 2),
+                "profitAmount": round(amount - daily_sales_cost_by_area.get(area_key, 0.0), 2),
+                "transactionCount": daily_sales_transaction_count_by_area.get(area_key, 0),
+            }
+            for area_key, amount in daily_sales_by_area.items()
+            if amount or daily_sales_cost_by_area.get(area_key, 0.0)
+        ]
+        all_daily_sales_breakdown.sort(key=lambda item: (-item["salesAmount"], item["areaLabel"]))
+        all_daily_sales_total = round(sum(item["salesAmount"] for item in all_daily_sales_breakdown), 2)
 
         sales_query = select(ModuleRecord).where(
             ModuleRecord.module_key == "sales",
@@ -10489,6 +10533,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "costAmount": round(total_cost, 2),
             "profitAmount": round(total_amount - total_cost, 2),
             "dailySalesLedgerTotal": daily_sales_total,
+            "allDailySalesTotal": all_daily_sales_total,
+            "allDailySalesBreakdown": all_daily_sales_breakdown,
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
             "cashSalesTotal": cash_sales_total,
             "openingCash": opening_cash,
@@ -10567,6 +10613,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "orderCount": summary["orderCount"],
                 "itemCount": summary["itemCount"],
                 "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
+                "allDailySalesTotal": summary["allDailySalesTotal"],
+                "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
                 "paymentMix": summary["paymentMix"],
                 "cashSalesTotal": cash_sales_total,
                 "openingCash": opening_cash,
@@ -14803,6 +14851,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "orderCount": summary["orderCount"],
             "itemCount": summary["itemCount"],
             "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
+            "allDailySalesTotal": summary["allDailySalesTotal"],
+            "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
             "paymentMix": summary["paymentMix"],
             "cashSalesTotal": cash_sales_total,
             "openingCash": opening_cash_raw,

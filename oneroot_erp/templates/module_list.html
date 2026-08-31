@@ -122,6 +122,7 @@
               <span>{{ item.reminderType }} · {{ item.outstanding|currency }} open</span>
               <span>{% if item.primaryDueLabel %}{{ item.primaryDueLabel }}{% elif item.dueSummary %}{{ item.dueSummary }}{% else %}No due date saved{% endif %}</span>
               <span>{{ item.balanceSummary }}</span>
+              {% if item.portalUsername %}<span>Portal username: {{ item.portalUsername }} · password reset available from OneRoot support</span>{% endif %}
             </div>
             <div class="stack-list-actions">
               <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open Suite</a>

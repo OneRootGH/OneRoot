@@ -1046,6 +1046,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("tenantPortalUsername", "Tenant Portal Username", "text", placeholder="Create a simple username for this tenant"),
             FieldDefinition("tenantPortalPassword", "Tenant Portal Password", "password", placeholder="Set or reset only when needed"),
             FieldDefinition("tenantPortalActive", "Tenant Portal Access", "select", False, [("Yes", "Enabled"), ("No", "Disabled")]),
+            FieldDefinition("tenantReminderConsent", "WhatsApp / SMS Reminder Consent", "select", False, [("Opted In", "Opted In"), ("Opted Out", "Opted Out")]),
             FieldDefinition("moveInDate", "Move-In Date", "date"),
             FieldDefinition("noticeDate", "Notice Date", "date"),
             FieldDefinition("moveOutDate", "Move-Out Date", "date"),

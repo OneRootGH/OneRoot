@@ -208,11 +208,21 @@
           </div>
           <p class="muted pos-closeout-note" id="pos-closeout-meta">
             {% if counter_summary.lastCloseout %}
-              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}. Open {{ counter_summary.openingCash|currency }} · Close {{ counter_summary.closingCashCounted|currency }}.
+              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}. POS {{ counter_summary.lastCloseout.totalAmount|currency }} · All business sales {{ counter_summary.lastCloseout.allDailySalesTotal|default(counter_summary.lastCloseout.dailySalesLedgerTotal, true)|currency }}.
             {% else %}
               No closeout has been saved for this counter day yet.
             {% endif %}
           </p>
+        </details>
+        <details class="pos-closeout-breakdown" id="pos-closeout-breakdown">
+          <summary>All daily business sales: <strong id="pos-all-daily-sales">{{ counter_summary.allDailySalesTotal|currency }}</strong></summary>
+          <ul id="pos-all-daily-sales-lines" class="stack-list compact">
+            {% for item in counter_summary.allDailySalesBreakdown %}
+              <li><span>{{ item.areaLabel }}</span><strong>{{ item.salesAmount|currency }}</strong></li>
+            {% else %}
+              <li><span>No daily sales have been recorded yet.</span></li>
+            {% endfor %}
+          </ul>
         </details>
 
         <div class="cart-box pos-cart-box pos-cart-box-grow">

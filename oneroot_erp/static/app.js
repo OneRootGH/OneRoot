@@ -18,6 +18,8 @@
   const counterTotalNode = document.getElementById("pos-counter-total");
   const counterProfitNode = document.getElementById("pos-counter-profit");
   const ledgerTotalNode = document.getElementById("pos-ledger-total");
+  const allDailySalesNode = document.getElementById("pos-all-daily-sales");
+  const allDailySalesLinesNode = document.getElementById("pos-all-daily-sales-lines");
   const foodSalesNode = document.getElementById("pos-food-sales");
   const laundrySalesNode = document.getElementById("pos-laundry-sales");
   const equipmentSalesNode = document.getElementById("pos-equipment-sales");
@@ -438,6 +440,19 @@
     paymentMixNode.textContent = paymentMixText(paymentMix);
   }
 
+  function renderAllDailySalesBreakdown(summary) {
+    if (allDailySalesNode) {
+      allDailySalesNode.textContent = formatCurrency(summary.allDailySalesTotal ?? summary.dailySalesLedgerTotal);
+    }
+    if (!allDailySalesLinesNode) {
+      return;
+    }
+    const rows = Array.isArray(summary.allDailySalesBreakdown) ? summary.allDailySalesBreakdown : [];
+    allDailySalesLinesNode.innerHTML = rows.length
+      ? rows.map((row) => `<li><span>${escapeHtml(row.areaLabel || "Business area")}</span><strong>${formatCurrency(row.salesAmount)}</strong></li>`).join("")
+      : "<li><span>No daily sales have been recorded yet.</span></li>";
+  }
+
   function buildHistoryRowMarkup(order) {
     return `
       <tr>
@@ -525,13 +540,14 @@
     renderCloseoutPreview(summary);
     if (closeoutMetaNode) {
       closeoutMetaNode.textContent = summary.lastCloseout
-        ? `Last closeout saved ${String(summary.lastCloseout.closedAt || "").slice(0, 16).replace("T", " ")} by ${summary.lastCloseout.closedBy || "staff"}. Open ${formatCurrency(summary.openingCash)} · Close ${formatCurrency(summary.closingCashCounted)} · Variance ${formatCurrency(summary.cashVariance)}.`
+        ? `Last closeout saved ${String(summary.lastCloseout.closedAt || "").slice(0, 16).replace("T", " ")} by ${summary.lastCloseout.closedBy || "staff"}. POS ${formatCurrency(summary.lastCloseout.totalAmount)} · All business sales ${formatCurrency(summary.lastCloseout.allDailySalesTotal ?? summary.lastCloseout.dailySalesLedgerTotal)}.`
         : "No closeout has been saved for this counter day yet.";
     }
     if (closeoutButton) {
       closeoutButton.textContent = summary.lastCloseout ? "Update Close Counter" : "Close Counter";
     }
     renderPaymentMix(summary.paymentMix);
+    renderAllDailySalesBreakdown(summary);
     renderHistory(summary.orders || []);
   }
 
