@@ -350,6 +350,31 @@
     <section class="card">
       <div class="card-header compact">
         <div>
+          <p class="eyebrow">Price Comparison</p>
+          <h3>Best Supplier Price By Item</h3>
+        </div>
+        <p class="muted list-summary">Compare the latest price against the lowest recorded supplier price before buying.</p>
+      </div>
+      <ul class="stack-list compact reminder-stack">
+        {% for item in supplier_price_comparison %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy">
+              <strong>{{ item.productName }}</strong>
+              <span>Latest: {{ item.latestSupplier or 'Supplier' }} · {{ item.latestCost|currency }}</span>
+              <span>Best: {{ item.bestSupplier or 'Supplier' }} · {{ item.bestCost|currency }}{% if item.savingPerUnit > 0 %} · Save {{ item.savingPerUnit|currency }} per unit{% endif %}</span>
+            </div>
+            <div class="stack-list-actions">
+              <a class="button subtle button-small" href="{{ url_for('module_form', module_key='supplier_price_updates', record_id=item.latestRecordId) }}">Review</a>
+            </div>
+          </li>
+        {% else %}
+          <li><span>Add supplier prices for an item to compare suppliers here.</span></li>
+        {% endfor %}
+      </ul>
+    </section>
+    <section class="card">
+      <div class="card-header compact">
+        <div>
           <p class="eyebrow">Reorder Watch</p>
           <h3>Stock Items To Review With Suppliers</h3>
         </div>

@@ -405,21 +405,28 @@ for _role_key in ("owner", "admin"):
             "tenant_portal_requests",
             "catering_quotes",
             "supplier_price_updates",
+            "daily_handovers",
+            "tenant_payment_plans",
+            "business_area_scorecards",
+            "customer_loyalty",
         }
     )
-ROLE_ACCESS_KEYS["finance"].update({"supplier_price_updates", "catering_quotes"})
+ROLE_ACCESS_KEYS["finance"].update({"supplier_price_updates", "catering_quotes", "daily_handovers", "business_area_scorecards"})
 ROLE_ACCESS_KEYS["operations"].update(
-    {"kitchen_recipe_plans", "customer_service_cases", "tenant_portal_requests", "catering_quotes", "supplier_price_updates"}
+    {"kitchen_recipe_plans", "customer_service_cases", "tenant_portal_requests", "catering_quotes", "supplier_price_updates", "daily_handovers", "business_area_scorecards", "customer_loyalty"}
 )
-ROLE_ACCESS_KEYS["frontline-service-lead"].update({"kitchen_recipe_plans", "customer_service_cases", "catering_quotes"})
-ROLE_ACCESS_KEYS["operations-controls-lead"].update({"customer_service_cases", "tenant_portal_requests", "supplier_price_updates"})
-ROLE_ACCESS_KEYS["apartment-manager"].update({"tenant_portal_requests", "customer_service_cases"})
-ROLE_ACCESS_KEYS["sales-stock-operator"].update({"kitchen_recipe_plans", "customer_service_cases", "catering_quotes", "supplier_price_updates"})
+ROLE_ACCESS_KEYS["frontline-service-lead"].update({"kitchen_recipe_plans", "customer_service_cases", "catering_quotes", "daily_handovers", "customer_loyalty"})
+ROLE_ACCESS_KEYS["operations-controls-lead"].update({"customer_service_cases", "tenant_portal_requests", "supplier_price_updates", "daily_handovers", "business_area_scorecards"})
+ROLE_ACCESS_KEYS["apartment-manager"].update({"tenant_portal_requests", "customer_service_cases", "tenant_payment_plans"})
+ROLE_ACCESS_KEYS["sales-stock-operator"].update({"kitchen_recipe_plans", "customer_service_cases", "catering_quotes", "supplier_price_updates", "daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["cashier"].update({"catering_quotes", "customer_service_cases"})
 ROLE_ACCESS_KEYS["laundry-desk"].add("customer_service_cases")
 ROLE_ACCESS_KEYS["equipment-desk"].add("customer_service_cases")
 ROLE_ACCESS_KEYS["delivery-dispatch"].update({"customer_service_cases", "catering_quotes"})
 ROLE_ACCESS_KEYS["marketing-crm"].update({"customer_service_cases", "catering_quotes"})
+ROLE_ACCESS_KEYS["cashier"].update({"daily_handovers", "customer_loyalty"})
+ROLE_ACCESS_KEYS["laundry-desk"].update({"daily_handovers", "customer_loyalty"})
+ROLE_ACCESS_KEYS["equipment-desk"].update({"daily_handovers", "customer_loyalty"})
 
 SUITE_NAMES = [
     "Peace",
@@ -1581,6 +1588,29 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "customer_loyalty": ModuleDefinition(
+        key="customer_loyalty",
+        label="Customer Loyalty & Rewards",
+        legacy_collection="customerLoyalty",
+        menu_group="Growth",
+        amount_field="pointsBalance",
+        date_field="joinDate",
+        title_field="customerName",
+        status_field="rewardStatus",
+        fields=[
+            FieldDefinition("joinDate", "Member Since", "date", True),
+            FieldDefinition("customerName", "Customer Name", "text", True),
+            FieldDefinition("customerPhone", "Customer Phone", "text", True),
+            FieldDefinition("businessAreaId", "Primary Business Area", "select", False, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("pointsEarned", "Points Earned", "number"),
+            FieldDefinition("pointsRedeemed", "Points Redeemed", "number"),
+            FieldDefinition("pointsBalance", "Points Balance", "number"),
+            FieldDefinition("rewardThreshold", "Reward Threshold", "number"),
+            FieldDefinition("rewardStatus", "Reward Status", "select", True, [("Building", "Building Points"), ("Reward Ready", "Reward Ready"), ("Redeemed", "Redeemed")]),
+            FieldDefinition("rewardNote", "Reward / Benefit", "text"),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
     "customer_service_cases": ModuleDefinition(
         key="customer_service_cases",
         label="Customer Service Inbox & Complaints",
@@ -1798,6 +1828,80 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "daily_handovers": ModuleDefinition(
+        key="daily_handovers",
+        label="Daily Handover & Shift Checklist",
+        legacy_collection="dailyHandovers",
+        menu_group="Admin",
+        amount_field="allDailySales",
+        date_field="handoverDate",
+        title_field="handedOverBy",
+        status_field="status",
+        fields=[
+            FieldDefinition("handoverDate", "Handover Date", "date", True),
+            FieldDefinition("shift", "Shift", "select", True, [("Morning", "Morning"), ("Evening", "Evening"), ("Full Day", "Full Day")]),
+            FieldDefinition("handedOverBy", "Handed Over By", "text", True),
+            FieldDefinition("receivedBy", "Received By", "text"),
+            FieldDefinition("allDailySales", "All Daily Sales", "number"),
+            FieldDefinition("cashExpected", "Expected Cash", "number"),
+            FieldDefinition("cashCounted", "Counted Cash", "number"),
+            FieldDefinition("cashVariance", "Cash Variance", "number"),
+            FieldDefinition("openOrders", "Open Orders / Jobs", "number", False, step="1"),
+            FieldDefinition("stockChecked", "Stock Checked", "select", True, [("Yes", "Yes"), ("No", "No")]),
+            FieldDefinition("momoChecked", "MoMo Float Checked", "select", True, [("Yes", "Yes"), ("No", "No")]),
+            FieldDefinition("issues", "Issues / Exceptions", "textarea"),
+            FieldDefinition("status", "Handover Status", "select", True, [("Draft", "Draft"), ("Submitted", "Submitted"), ("Accepted", "Accepted")]),
+        ],
+    ),
+    "tenant_payment_plans": ModuleDefinition(
+        key="tenant_payment_plans",
+        label="Tenant Payment Plans",
+        legacy_collection="tenantPaymentPlans",
+        menu_group="Property",
+        amount_field="balanceDue",
+        date_field="planDate",
+        title_field="tenantName",
+        status_field="status",
+        fields=[
+            FieldDefinition("planDate", "Plan Date", "date", True),
+            FieldDefinition("suite", "Suite", "select", True, [(name, name) for name in SUITE_NAMES]),
+            FieldDefinition("tenantName", "Tenant Name", "text", True),
+            FieldDefinition("tenantPhone", "Tenant Phone", "text"),
+            FieldDefinition("planType", "Plan Covers", "select", True, [("Rent", "Rent"), ("Monthly Bills", "Monthly Bills"), ("Rent & Bills", "Rent & Bills"), ("Other", "Other")]),
+            FieldDefinition("totalAgreed", "Total Agreed", "number", True),
+            FieldDefinition("amountPaid", "Amount Paid So Far", "number"),
+            FieldDefinition("installmentAmount", "Agreed Installment", "number", True),
+            FieldDefinition("nextInstallmentDate", "Next Installment Date", "date", True),
+            FieldDefinition("finalSettlementDate", "Final Settlement Date", "date"),
+            FieldDefinition("balanceDue", "Balance Due", "number"),
+            FieldDefinition("status", "Plan Status", "select", True, [("Active", "Active"), ("Completed", "Completed"), ("Overdue", "Overdue"), ("Cancelled", "Cancelled")]),
+            FieldDefinition("notes", "Agreement Notes", "textarea"),
+        ],
+    ),
+    "business_area_scorecards": ModuleDefinition(
+        key="business_area_scorecards",
+        label="Business Area Scorecards",
+        legacy_collection="businessAreaScorecards",
+        menu_group="Admin",
+        amount_field="netContribution",
+        month_field="month",
+        title_field="businessAreaId",
+        status_field="status",
+        fields=[
+            FieldDefinition("month", "Scorecard Month", "month", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("salesAmount", "Sales", "number"),
+            FieldDefinition("costAmount", "Direct Cost", "number"),
+            FieldDefinition("grossProfit", "Gross Profit", "number"),
+            FieldDefinition("expensesAmount", "Expenses", "number"),
+            FieldDefinition("netContribution", "Net Contribution", "number"),
+            FieldDefinition("marginPercent", "Net Margin %", "number"),
+            FieldDefinition("salesTarget", "Sales Target", "number"),
+            FieldDefinition("targetAchievement", "Target Achievement %", "number"),
+            FieldDefinition("status", "Performance Status", "select", True, [("On Track", "On Track"), ("Below Target", "Below Target"), ("Above Target", "Above Target")]),
+            FieldDefinition("notes", "Manager Notes", "textarea"),
+        ],
+    ),
     "maintenance_records": ModuleDefinition(
         key="maintenance_records",
         label="Maintenance & Work Orders",
@@ -1971,7 +2075,7 @@ MENU_GROUPS = [
     (
         "Operations",
         [
-            ("Property & Work Orders", ["apartments", "tenant_portal_requests", "security_deposit_records", "maintenance_records"]),
+            ("Property & Work Orders", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records", "maintenance_records"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
         ],
     ),
@@ -1986,13 +2090,13 @@ MENU_GROUPS = [
     (
         "Growth",
         [
-            ("Customers & Marketing", ["customer_crm", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
+            ("Customers & Marketing", ["customer_crm", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
         ],
     ),
     (
         "Control",
         [
-            ("Planning & Reporting", ["forecast_plans", "recurring_controls", "pos_closeouts"]),
+            ("Planning & Reporting", ["forecast_plans", "business_area_scorecards", "daily_handovers", "recurring_controls", "pos_closeouts"]),
             ("Assets & Admin", ["asset_records", "audit", "users"]),
         ],
     ),

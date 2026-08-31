@@ -4202,6 +4202,8 @@ def format_module_amount(definition: ModuleDefinition, value: Any) -> str:
         return f"{amount:,.2f} hrs"
     if definition.key == "job_vacancies":
         return f"{amount:.0f}"
+    if definition.key == "customer_loyalty":
+        return f"{amount:,.0f} pts"
     return format_currency(amount)
 
 
@@ -4287,6 +4289,7 @@ MODULE_FILTER_CATEGORY_FIELDS = {
     "tenant_portal_requests": "requestType",
     "catering_quotes": "eventType",
     "supplier_price_updates": "category",
+    "tenant_payment_plans": "planType",
 }
 
 MODULE_FILTER_CATEGORY_LABELS = {
@@ -5382,6 +5385,174 @@ def mobile_money_form_errors(module_key: str, payload: dict[str, Any]) -> list[s
         )
 
     return errors
+
+
+def tenant_payment_plan_rollup(payload: dict[str, Any]) -> None:
+    """Keep payment-plan balances and status consistent with the agreed total."""
+    agreed = round(max(parse_amount(payload.get("totalAgreed")), 0), 2)
+    paid = round(max(parse_amount(payload.get("amountPaid")), 0), 2)
+    balance = round(max(agreed - paid, 0), 2)
+    payload["totalAgreed"] = agreed
+    payload["amountPaid"] = paid
+    payload["balanceDue"] = balance
+    current_status = normalize_text(payload.get("status")) or "Active"
+    next_due = parse_date(payload.get("nextInstallmentDate"))
+    if current_status != "Cancelled":
+        if balance <= 0:
+            payload["status"] = "Completed"
+        elif next_due and next_due < date.today():
+            payload["status"] = "Overdue"
+        elif current_status == "Completed":
+            payload["status"] = "Active"
+
+
+def customer_loyalty_rollup(payload: dict[str, Any]) -> None:
+    earned = round(max(parse_amount(payload.get("pointsEarned")), 0), 2)
+    redeemed = round(max(parse_amount(payload.get("pointsRedeemed")), 0), 2)
+    threshold = round(max(parse_amount(payload.get("rewardThreshold")) or 100, 1), 2)
+    balance = round(max(earned - redeemed, 0), 2)
+    payload["pointsEarned"] = earned
+    payload["pointsRedeemed"] = redeemed
+    payload["rewardThreshold"] = threshold
+    payload["pointsBalance"] = balance
+    if balance >= threshold:
+        payload["rewardStatus"] = "Reward Ready"
+        payload.setdefault("rewardNote", "Eligible for a OneRoot loyalty reward. Confirm the offer before redemption.")
+    elif redeemed > 0 and balance <= 0:
+        payload["rewardStatus"] = "Redeemed"
+    else:
+        payload["rewardStatus"] = "Building"
+
+
+def sync_customer_loyalty_accounts(db_session) -> None:
+    """Create one phone-based loyalty account per live CRM customer, without duplicate cards."""
+    crm_records = latest_customer_crm_records(
+        db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_crm")).all()
+    )
+    existing = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty")).all()
+    by_reference = {normalize_text(record.reference): record for record in existing if normalize_text(record.reference)}
+    for crm_record in crm_records:
+        crm_payload = dict(crm_record.payload or {})
+        customer_name = normalize_text(crm_payload.get("customerName"))
+        customer_phone = normalize_phone(crm_payload.get("customerPhone"))
+        if not customer_name or not customer_phone:
+            continue
+        reference = f"loyalty|{customer_phone}"
+        record = by_reference.get(reference)
+        payload = dict(record.payload or {}) if record else {}
+        earned = int(parse_amount(crm_payload.get("lifetimeValue")) // 5)
+        payload.update(
+            {
+                "id": record.id if record else uuid4().hex,
+                "joinDate": normalize_text(payload.get("joinDate")) or normalize_text(crm_payload.get("captureDate")) or date.today().isoformat(),
+                "customerName": customer_name,
+                "customerPhone": customer_phone,
+                "businessAreaId": normalize_text(crm_payload.get("businessAreaId")),
+                "pointsEarned": earned,
+                "pointsRedeemed": parse_amount(payload.get("pointsRedeemed")),
+                "rewardThreshold": parse_amount(payload.get("rewardThreshold")) or 100,
+                "notes": "Automatically calculated at 1 point for every GH₵5 of recorded customer value.",
+            }
+        )
+        customer_loyalty_rollup(payload)
+        if not record:
+            record = ModuleRecord(id=payload["id"], module_key="customer_loyalty", created_at=datetime.utcnow())
+            db_session.add(record)
+        set_module_record_metadata(record, MODULES["customer_loyalty"], payload)
+
+
+def daily_handover_rollup(db_session, payload: dict[str, Any]) -> None:
+    handover_date = parse_date(payload.get("handoverDate")) or date.today()
+    sales_records = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "sales", ModuleRecord.record_date == handover_date)
+    ).all()
+    payload["handoverDate"] = handover_date.isoformat()
+    payload["allDailySales"] = round(sum(parse_amount(record.amount) for record in sales_records), 2)
+    pos_orders = db_session.scalars(select(PosOrder).where(PosOrder.order_date == handover_date)).all()
+    payload["cashExpected"] = round(
+        sum(parse_amount(order.total_amount) for order in pos_orders if normalize_text(order.payment_method).lower() in POS_CASH_PAYMENT_METHODS),
+        2,
+    )
+    payload["cashCounted"] = round(max(parse_amount(payload.get("cashCounted")), 0), 2)
+    payload["cashVariance"] = round(payload["cashCounted"] - payload["cashExpected"], 2)
+    open_service_records = db_session.scalars(
+        select(ModuleRecord).where(
+            ModuleRecord.module_key.in_(["online_orders", "laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
+            ModuleRecord.record_date == handover_date,
+        )
+    ).all()
+    payload["openOrders"] = sum(
+        1
+        for record in open_service_records
+        if normalize_text(record.status).lower() not in {"completed", "delivered", "cancelled", "returned"}
+    )
+
+
+def business_area_scorecard_rollup(db_session, payload: dict[str, Any]) -> None:
+    month = parse_month(payload.get("month")) or date.today().strftime("%Y-%m")
+    area_id = normalize_text(payload.get("businessAreaId"))
+    sales_records = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "sales", ModuleRecord.business_area_id == area_id)
+    ).all()
+    expense_records = db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "expenses", ModuleRecord.business_area_id == area_id)
+    ).all()
+    month_sales = [record for record in sales_records if module_record_month_value(MODULES["sales"], record) == month]
+    month_expenses = [record for record in expense_records if module_record_month_value(MODULES["expenses"], record) == month]
+    sales_amount = round(sum(parse_amount(record.amount) for record in month_sales), 2)
+    cost_amount = round(sum(module_record_cost_amount(record) for record in month_sales), 2)
+    gross_profit = round(sales_amount - cost_amount, 2)
+    expenses_amount = round(sum(parse_amount(record.amount) for record in month_expenses), 2)
+    net_contribution = round(gross_profit - expenses_amount, 2)
+    sales_target = round(max(parse_amount(payload.get("salesTarget")), 0), 2)
+    payload.update(
+        {
+            "month": month,
+            "salesAmount": sales_amount,
+            "costAmount": cost_amount,
+            "grossProfit": gross_profit,
+            "expensesAmount": expenses_amount,
+            "netContribution": net_contribution,
+            "marginPercent": round((net_contribution / sales_amount) * 100, 2) if sales_amount else 0.0,
+            "targetAchievement": round((sales_amount / sales_target) * 100, 2) if sales_target else 0.0,
+        }
+    )
+    if sales_target:
+        payload["status"] = "Above Target" if sales_amount > sales_target else ("On Track" if sales_amount == sales_target else "Below Target")
+    else:
+        payload["status"] = "On Track" if net_contribution >= 0 else "Below Target"
+
+
+def build_supplier_price_comparison(records: list[ModuleRecord]) -> list[dict[str, Any]]:
+    groups: dict[str, list[tuple[ModuleRecord, dict[str, Any]]]] = defaultdict(list)
+    for record in records:
+        payload = dict(record.payload or {})
+        product_name = normalize_text(payload.get("productName"))
+        if product_name:
+            groups[product_name.lower()].append((record, payload))
+    rows: list[dict[str, Any]] = []
+    for entries in groups.values():
+        entries.sort(key=lambda item: (normalize_text(item[1].get("purchaseDate")), item[0].updated_at.isoformat()), reverse=True)
+        latest_record, latest = entries[0]
+        _, best = min(entries, key=lambda item: parse_amount(item[1].get("newUnitCost")))
+        latest_cost = parse_amount(latest.get("newUnitCost"))
+        best_cost = parse_amount(best.get("newUnitCost"))
+        rows.append(
+            {
+                "productName": normalize_text(latest.get("productName")),
+                "businessAreaId": normalize_text(latest.get("businessAreaId")),
+                "category": normalize_text(latest.get("category")),
+                "latestSupplier": normalize_text(latest.get("supplierName")),
+                "latestCost": latest_cost,
+                "bestSupplier": normalize_text(best.get("supplierName")),
+                "bestCost": best_cost,
+                "savingPerUnit": round(max(latest_cost - best_cost, 0), 2),
+                "priceChecks": len(entries),
+                "latestDate": normalize_text(latest.get("purchaseDate")),
+                "latestRecordId": latest_record.id,
+            }
+        )
+    return sorted(rows, key=lambda row: (-row["savingPerUnit"], row["productName"]))
 
 
 def build_module_overview(definition: ModuleDefinition, records: list[ModuleRecord]) -> dict[str, Any]:
@@ -13073,7 +13244,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 }
             )
         supplier_reorder_items: list[dict[str, Any]] = []
+        supplier_price_comparison: list[dict[str, Any]] = []
         if module_key == "supplier_price_updates":
+            supplier_price_comparison = build_supplier_price_comparison(all_records)[:12]
             supplier_reorder_items = [
                 item
                 for item in build_inventory_risk_rows(g.db.scalars(select(Product).where(Product.active.is_(True))).all())
@@ -13112,6 +13285,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             mobile_money_reconciliation_summary=mobile_money_reconciliation_summary,
             mobile_money_live_snapshot=mobile_money_live_snapshot,
             supplier_reorder_items=supplier_reorder_items,
+            supplier_price_comparison=supplier_price_comparison,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")
@@ -13270,6 +13444,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["businessAreaId"] = "rentals-apartments"
             elif module_key == "supplier_price_updates":
                 supplier_price_update_product(g.db, payload, record_payload)
+            elif module_key == "tenant_payment_plans":
+                tenant_payment_plan_rollup(payload)
+            elif module_key == "customer_loyalty":
+                customer_loyalty_rollup(payload)
+            elif module_key == "daily_handovers":
+                daily_handover_rollup(g.db, payload)
+            elif module_key == "business_area_scorecards":
+                business_area_scorecard_rollup(g.db, payload)
             elif module_key == "mobile_money_reconciliations":
                 payload["businessAreaId"] = "mobile-money"
                 provider_value = normalize_text(payload.get("provider")) or "MTN Mobile Money"
@@ -13345,6 +13527,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 sync_generated_sales_for_module_record(record)
                 if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "mobile_money_transactions", "catering_quotes", "customer_service_cases"}:
                     sync_customer_crm_automation(g.db)
+                    sync_customer_loyalty_accounts(g.db)
                     sync_marketing_campaign_automation(g.db)
                 audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
                 g.db.commit()
@@ -13387,6 +13570,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
         elif module_key == "supplier_price_updates":
             record_payload.setdefault("purchaseDate", date.today().isoformat())
             record_payload.setdefault("receiptStatus", "Price Check")
+        elif module_key == "tenant_payment_plans":
+            record_payload.setdefault("planDate", date.today().isoformat())
+            record_payload.setdefault("status", "Active")
+            tenant_payment_plan_rollup(record_payload)
+        elif module_key == "customer_loyalty":
+            record_payload.setdefault("joinDate", date.today().isoformat())
+            record_payload.setdefault("rewardThreshold", 100)
+            customer_loyalty_rollup(record_payload)
+        elif module_key == "daily_handovers":
+            record_payload.setdefault("handoverDate", date.today().isoformat())
+            record_payload.setdefault("shift", "Full Day")
+            record_payload.setdefault("status", "Draft")
+            daily_handover_rollup(g.db, record_payload)
+        elif module_key == "business_area_scorecards":
+            record_payload.setdefault("month", date.today().strftime("%Y-%m"))
+            record_payload.setdefault("businessAreaId", "cold-store-groceries")
+            business_area_scorecard_rollup(g.db, record_payload)
         elif module_key == "mobile_money_reconciliations":
             record_payload.setdefault("businessAreaId", "mobile-money")
             record_payload.setdefault("date", date.today().isoformat())
