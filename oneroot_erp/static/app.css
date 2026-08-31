@@ -2244,6 +2244,11 @@ thead th {
 .tenant-portal-hero p { margin: 0; color: rgba(255,255,255,.8); }
 .tenant-status { padding: 9px 13px; border-radius: 999px; background: rgba(255,255,255,.16); font-weight: 700; }
 .tenant-portal-grid { align-items: start; }
+.tenant-line-note { margin: -4px 0 16px; font-size: 0.86rem; line-height: 1.55; }
+.tenant-balance-section + .tenant-balance-section { margin-top: 20px; }
+.tenant-balance-section > strong { display: block; margin-bottom: 9px; color: var(--ink); }
+.tenant-balance-table th:last-child, .tenant-balance-table td:last-child { text-align: right; }
+.tenant-owed-cell { color: var(--danger, #a43e2e); font-weight: 800; }
 
 @media (max-width: 680px) {
   .tenant-login-shell, .tenant-portal-shell { width: min(100% - 20px, 1180px); padding-top: 12px; }

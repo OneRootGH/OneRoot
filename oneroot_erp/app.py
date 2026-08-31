@@ -6926,6 +6926,50 @@ def apartment_profile(record: ModuleRecord) -> dict[str, Any]:
     }
 
 
+def tenant_portal_balance_lines(record: ModuleRecord) -> dict[str, list[dict[str, Any]]]:
+    """Allocate recorded payments across the tenant-visible charges in a consistent order."""
+    payload = dict(record.payload or {})
+
+    def allocate(lines: list[dict[str, Any]], payment_total: float) -> list[dict[str, Any]]:
+        remaining_payment = max(payment_total, 0)
+        for line in lines:
+            due = round(max(parse_amount(line.get("due")), 0), 2)
+            paid = round(min(due, remaining_payment), 2)
+            remaining_payment = round(max(remaining_payment - paid, 0), 2)
+            line["due"] = due
+            line["paid"] = paid
+            line["owed"] = round(max(due - paid, 0), 2)
+        return lines
+
+    rent_lines = [
+        {"label": "Previous Rent Arrears", "due": parse_amount(payload.get("arrearsBroughtForward"))},
+        {"label": "Late Fee", "due": parse_amount(payload.get("lateFee"))},
+        {"label": "Suite Rent", "due": parse_amount(payload.get("rentDue"))},
+        *[
+            {"label": item["label"], "due": item["due"]}
+            for item in apartment_additional_rent_rows(payload)
+        ],
+    ]
+    rent_lines = [line for line in rent_lines if parse_amount(line["due"]) > 0]
+    allocate(
+        rent_lines,
+        parse_amount(payload.get("rentPaid"))
+        + apartment_additional_rent_paid(payload)
+        + parse_amount(payload.get("creditBroughtForward")),
+    )
+
+    bill_lines = [
+        {"label": "Water Bill", "due": parse_amount(payload.get("waterBill"))},
+        {"label": "Toilet Bill", "due": parse_amount(payload.get("toiletBill"))},
+        {"label": "Sweeping / Gutter Cleaning", "due": parse_amount(payload.get("sweepingBill"))},
+        {"label": "Waste Management", "due": parse_amount(payload.get("wasteBill"))},
+        *[{"label": item["label"], "due": item["amount"]} for item in apartment_custom_charge_rows(payload)],
+    ]
+    bill_lines = [line for line in bill_lines if parse_amount(line["due"]) > 0]
+    allocate(bill_lines, parse_amount(payload.get("billAmountPaid")))
+    return {"rent": rent_lines, "bills": bill_lines}
+
+
 def apartment_record_sort_key(record: ModuleRecord) -> tuple[str, str, str, str]:
     return (
         record.month or "",
@@ -10830,6 +10874,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             page_title="Tenant Portal",
             account=account,
             profile=profile,
+            balance_lines=tenant_portal_balance_lines(latest_record) if latest_record else {"rent": [], "bills": []},
             statement_rows=statement_rows[:12],
             statement_totals=apartment_statement_totals(statement_rows),
             requests=requests,
