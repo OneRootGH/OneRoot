@@ -177,6 +177,7 @@
     ].forEach((id) => {
       elements[id] = document.getElementById(id);
     });
+    elements.siteFooter = document.querySelector(".site-footer");
   }
 
   function bindEvents() {
@@ -422,15 +423,56 @@
       elements.heroContactLine.innerHTML = heroParts.join("");
     }
 
-    if (elements.footerContactLine) {
-      const footerParts = contactParts.map((part) => `<span>${escapeHtml(part)}</span>`);
-      if (facebookUrl) {
-        footerParts.push(
-          `<a class="footer-contact-link" href="${escapeHtml(facebookUrl)}" target="_blank" rel="noopener">Facebook Page</a>`
-        );
-      }
-      elements.footerContactLine.innerHTML = footerParts.join(" • ");
+    renderProfessionalFooter({ whatsappNumbers, facebookUrl });
+  }
+
+  function renderProfessionalFooter({ whatsappNumbers, facebookUrl }) {
+    if (!elements.siteFooter) {
+      return;
     }
+    const location = normalizeText(state.config?.location) || "Amasaman, Medie, Ghana";
+    const phone = normalizeText(state.config?.supportPhone) || "0544995005";
+    const email = normalizeText(state.config?.supportEmail) || "orders@oneroot.shop";
+    const pickupNote = normalizeText(state.config?.pickupNote) || "Pickup and delivery confirmation are handled by OneRoot after the order is received.";
+    const cleanPhone = phone.replace(/\D/g, "");
+    const primaryWhatsapp = normalizeWhatsappNumber(whatsappNumbers[0]);
+    const whatsappLink = primaryWhatsapp
+      ? `https://wa.me/${primaryWhatsapp}?text=${encodeURIComponent("Hello OneRoot, I need help with an order or service.")}`
+      : "#";
+    const facebookLink = facebookUrl || "https://web.facebook.com/profile.php?id=61577723615704";
+
+    elements.siteFooter.innerHTML = `
+      <div class="footer-main">
+        <section class="footer-brand-block">
+          <a class="footer-brand" href="/" aria-label="OneRoot Essentials home">
+            <img src="/assets/oneroot-icon-transparent.png" alt="OneRoot Essentials" />
+            <span><strong>OneRoot Essentials</strong><small>Your one-stop essentials hub</small></span>
+          </a>
+          <p>Everyday shopping, good food, laundry, equipment, and trusted local service from one community hub.</p>
+          <p class="footer-delivery-note"><strong>Order support</strong>${escapeHtml(pickupNote)}</p>
+        </section>
+        <section class="footer-contact-block" aria-label="Contact OneRoot Essentials">
+          <p class="footer-heading">Reach OneRoot</p>
+          <a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(location)}" target="_blank" rel="noopener"><span>Location</span><strong>${escapeHtml(location)}</strong></a>
+          <a href="tel:${escapeHtml(cleanPhone)}"><span>Phone</span><strong>${escapeHtml(phone)}</strong></a>
+          <a href="${escapeHtml(whatsappLink)}" target="_blank" rel="noopener"><span>WhatsApp</span><strong>${escapeHtml(whatsappNumbers.join(" / ") || "Message OneRoot")}</strong></a>
+          <a href="mailto:${escapeHtml(email)}"><span>Email</span><strong>${escapeHtml(email)}</strong></a>
+        </section>
+        <nav class="footer-navigation" aria-label="Footer navigation">
+          <p class="footer-heading">Explore</p>
+          <div class="footer-links">
+            <a href="/shop#shop">Shop</a>
+            <a href="/food#shop">Food</a>
+            <a href="/laundry#book">Laundry</a>
+            <a href="/equipment#book">Equipment</a>
+            <a href="/track-order">Track Order</a>
+            <a href="/contact">Contact</a>
+          </div>
+          <a class="footer-facebook-link" href="${escapeHtml(facebookLink)}" target="_blank" rel="noopener">Follow us on Facebook</a>
+        </nav>
+      </div>
+      <div class="footer-bottom"><span>© ${new Date().getFullYear()} OneRoot Essentials</span><span>Serving Amasaman, Medie, and nearby communities</span></div>
+    `;
   }
 
   function renderContactPage() {
