@@ -55,6 +55,7 @@ from .registry import (
 )
 
 TENANCY_TEMPLATE_PATH = Path(__file__).resolve().parent.parent / "Tenancy_Agreement_Template.docx"
+STAFF_DOCUMENT_PACK_PATH = Path(__file__).resolve().parent.parent / "staff_document_templates" / "OneRoot_Staff_Document_Pack.docx"
 TENANCY_PROPERTY_LOCATION = "Medie New City (Parks and Gardens), Accra, Ghana"
 TENANCY_PLACEHOLDER_LINE = "_______________________________"
 APARTMENT_ACTIVE_STATUSES = {"Occupied", "Reserved"}
@@ -13476,6 +13477,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "note": "See one-day totals by business area so cashiers can account quickly.",
                 }
             )
+        if module_key == "staff_documents":
+            module_quick_actions.append(
+                {
+                    "label": "Download Staff Document Pack",
+                    "href": url_for("staff_document_template_pack"),
+                    "note": "Download the editable OneRoot onboarding, contract, conduct, payroll, review, leave, and exit templates.",
+                }
+            )
         if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
             growth_context = build_growth_automation_context(g.db, area_filter=area_filter)
             if user_has_access(g.current_user, "customer_crm"):
@@ -14501,6 +14510,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 download_name=safe_filename_segment(payload.get("documentAttachmentName"), "staff-document"),
             )
         return redirect(attachment_url)
+
+    @app.route("/app/staff-documents/template-pack/download")
+    @login_required
+    def staff_document_template_pack():
+        if not user_has_access(g.current_user, "staff_documents"):
+            flash("You do not have access to the staff document templates.", "warning")
+            return redirect(url_for("dashboard"))
+        if not STAFF_DOCUMENT_PACK_PATH.exists():
+            flash("The staff document pack is temporarily unavailable. Please contact the workspace owner.", "error")
+            return redirect(url_for("module_list", module_key="staff_documents"))
+        return send_file(
+            STAFF_DOCUMENT_PACK_PATH,
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name="OneRoot_Staff_Document_Pack.docx",
+        )
 
     @app.route("/app/salaries/<record_id>/payslip")
     @login_required
