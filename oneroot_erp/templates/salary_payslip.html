@@ -37,6 +37,11 @@
       <strong>{{ payload.get('paymentMethod') or 'Not saved' }}</strong>
       <small>{{ payload.get('paymentDate')|pretty_date or 'No payment date saved' }}{% if payload.get('paymentReference') %} · {{ payload.get('paymentReference') }}{% endif %}</small>
     </article>
+    <article class="mini-card">
+      <span>Hours & Rate</span>
+      <strong>{{ payload.get('attendanceHours', 0) }} hrs worked</strong>
+      <small>{{ payload.get('regularHours', 0) }} regular hrs · {{ payload.get('overtimeHours', 0) }} overtime hrs · {{ payload.get('hourlyRate', 0)|currency }}/hr</small>
+    </article>
   </section>
 
   <div class="table-wrap">
@@ -51,7 +56,7 @@
       </thead>
       <tbody>
         <tr>
-          <td>Base Salary</td>
+          <td>{% if payload.get('payBasis', 'Hourly') == 'Hourly' %}Regular Hours Pay{% else %}Base Pay{% endif %}</td>
           <td>{{ payload.get('baseSalary', 0)|currency }}</td>
           <td>Tax / PAYE</td>
           <td>{{ payload.get('taxAmount', 0)|currency }}</td>

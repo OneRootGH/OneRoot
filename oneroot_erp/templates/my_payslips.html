@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="page-intro">
+    <div>
+      <p class="eyebrow">My Pay</p>
+      <h3>My Payslips</h3>
+      <p class="muted">Your saved payroll records, calculated from completed attendance for each pay period.</p>
+    </div>
+  </section>
+  {% if payslips %}
+    <section class="table-wrap">
+      <table>
+        <thead><tr><th>Period</th><th>Hours Worked</th><th>Net Pay</th><th>Paid</th><th>Balance</th><th>Status</th><th></th></tr></thead>
+        <tbody>
+          {% for item in payslips %}
+            <tr>
+              <td><strong>{{ item.period }}</strong><br><span class="table-secondary">{{ item.role }}</span></td>
+              <td>{{ item.hours }} hrs</td>
+              <td>{{ item.net_pay|currency }}</td>
+              <td>{{ item.amount_paid|currency }}</td>
+              <td>{{ item.balance_due|currency }}</td>
+              <td>{{ item.status }}</td>
+              <td><a class="table-link" href="{{ url_for('salary_payslip', record_id=item.id) }}">Open Payslip</a></td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </section>
+  {% else %}
+    <section class="empty-state"><h3>No payslips yet</h3><p>Your completed payroll records will appear here when payroll is prepared using your staff name.</p></section>
+  {% endif %}
+{% endblock %}

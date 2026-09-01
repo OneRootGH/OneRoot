@@ -139,7 +139,7 @@
               placeholder="Calculated automatically from all budget lines"
               readonly
             >
-          {% elif definition.key == 'salary_records' and field.name in ['overtimePay', 'grossPay', 'totalDeductions', 'netPay', 'balanceDue'] %}
+          {% elif definition.key == 'salary_records' and field.name in ['attendanceHours', 'regularHours', 'overtimeHours', 'overtimePay', 'grossPay', 'totalDeductions', 'netPay', 'balanceDue'] %}
             <input
               type="number"
               name="{{ field.name }}"
@@ -539,6 +539,10 @@
     <script>
       (function () {
         const baseSalaryField = document.querySelector('input[name="baseSalary"]');
+        const payBasisField = document.querySelector('select[name="payBasis"]');
+        const hourlyRateField = document.querySelector('input[name="hourlyRate"]');
+        const attendanceHoursField = document.querySelector('input[name="attendanceHours"]');
+        const regularHoursField = document.querySelector('input[name="regularHours"]');
         const allowanceField = document.querySelector('input[name="allowance"]');
         const overtimeHoursField = document.querySelector('input[name="overtimeHours"]');
         const overtimeRateField = document.querySelector('input[name="overtimeRate"]');
@@ -564,7 +568,19 @@
         }
 
         function updatePayroll() {
-          const overtimePay = parseNumber(overtimeHoursField && overtimeHoursField.value) * parseNumber(overtimeRateField && overtimeRateField.value);
+          const hourlyPay = payBasisField && payBasisField.value === "Hourly";
+          const attendanceHours = parseNumber(attendanceHoursField && attendanceHoursField.value);
+          const overtimeHours = parseNumber(overtimeHoursField && overtimeHoursField.value);
+          const regularHours = regularHoursField
+            ? parseNumber(regularHoursField.value)
+            : Math.max(attendanceHours - overtimeHours, 0);
+          if (hourlyPay && baseSalaryField) {
+            baseSalaryField.value = (regularHours * parseNumber(hourlyRateField && hourlyRateField.value)).toFixed(2);
+            baseSalaryField.readOnly = true;
+          } else if (baseSalaryField) {
+            baseSalaryField.readOnly = false;
+          }
+          const overtimePay = overtimeHours * parseNumber(overtimeRateField && overtimeRateField.value);
           if (overtimePayField) {
             overtimePayField.value = overtimePay.toFixed(2);
           }
@@ -594,6 +610,10 @@
 
         [
           baseSalaryField,
+          payBasisField,
+          hourlyRateField,
+          attendanceHoursField,
+          regularHoursField,
           allowanceField,
           overtimeHoursField,
           overtimeRateField,

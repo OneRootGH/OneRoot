@@ -676,6 +676,10 @@ SALARY_FREQUENCIES = [
     ("Weekly", "Weekly"),
     ("One-Off", "One-Off"),
 ]
+SALARY_PAY_BASES = [
+    ("Hourly", "Hourly - use approved hours worked"),
+    ("Fixed Monthly", "Fixed Monthly - use agreed monthly base pay"),
+]
 STAFF_WORK_ROLES = [
     ("Manager", "Manager"),
     ("Operations Manager", "Operations Manager"),
@@ -1152,9 +1156,13 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("staffRole", "Staff Role", "select", False, STAFF_WORK_ROLES),
             FieldDefinition("businessAreaId", "Business Area", "select", False, BUSINESS_AREA_OPTIONS),
             FieldDefinition("payFrequency", "Pay Frequency", "select", False, SALARY_FREQUENCIES),
+            FieldDefinition("payBasis", "Pay Basis", "select", False, SALARY_PAY_BASES),
             FieldDefinition("payPeriodStart", "Pay Period Start", "date"),
             FieldDefinition("payPeriodEnd", "Pay Period End", "date"),
-            FieldDefinition("baseSalary", "Base Salary", "number"),
+            FieldDefinition("hourlyRate", "Hourly Rate", "number"),
+            FieldDefinition("attendanceHours", "Approved Hours Worked", "number"),
+            FieldDefinition("regularHours", "Regular Paid Hours", "number"),
+            FieldDefinition("baseSalary", "Base Pay", "number"),
             FieldDefinition("allowance", "Allowance", "number"),
             FieldDefinition("overtimeHours", "Overtime Hours", "number"),
             FieldDefinition("overtimeRate", "Overtime Hourly Rate", "number"),

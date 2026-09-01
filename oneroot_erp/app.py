@@ -3756,6 +3756,83 @@ def salary_rollup(payload: dict[str, Any]) -> None:
     payload["status"] = salary_payment_status(payload)
 
 
+def salary_pay_basis(payload: dict[str, Any]) -> str:
+    return "Fixed Monthly" if normalize_text(payload.get("payBasis")) == "Fixed Monthly" else "Hourly"
+
+
+def salary_period_bounds(payload: dict[str, Any]) -> tuple[date | None, date | None]:
+    start_date = parse_date(payload.get("payPeriodStart"))
+    end_date = parse_date(payload.get("payPeriodEnd"))
+    if start_date and end_date:
+        return (start_date, end_date) if start_date <= end_date else (end_date, start_date)
+    month_key = parse_month(payload.get("month"))
+    if month_key:
+        year, month_number = (int(value) for value in month_key.split("-", 1))
+        return date(year, month_number, 1), date(year, month_number, calendar.monthrange(year, month_number)[1])
+    return start_date, end_date or start_date
+
+
+def salary_attendance_summary(db_session, payload: dict[str, Any]) -> dict[str, float]:
+    """Use completed, non-rejected attendance rows as the payroll source of truth."""
+    staff_name = normalize_text(payload.get("staffName")).casefold()
+    start_date, end_date = salary_period_bounds(payload)
+    if not staff_name or not start_date or not end_date:
+        return {"attendanceHours": 0.0, "overtimeHours": 0.0, "regularHours": 0.0}
+
+    attendance_records = db_session.scalars(
+        select(ModuleRecord).where(
+            ModuleRecord.module_key == "workforce_attendance",
+            ModuleRecord.record_date >= start_date,
+            ModuleRecord.record_date <= end_date,
+        )
+    ).all()
+    attendance_hours = 0.0
+    overtime_hours = 0.0
+    for record in attendance_records:
+        attendance_payload = dict(record.payload or {})
+        if normalize_text(attendance_payload.get("staffName")).casefold() != staff_name:
+            continue
+        if normalize_text(attendance_payload.get("approvalStatus")) == "Rejected":
+            continue
+        workforce_rollup(attendance_payload)
+        if normalize_text(attendance_payload.get("attendanceStatus")) != "Checked Out":
+            continue
+        attendance_hours += parse_amount(attendance_payload.get("workedHours"))
+        overtime_hours += parse_amount(attendance_payload.get("overtimeHours"))
+    attendance_hours = round(max(attendance_hours, 0), 2)
+    overtime_hours = round(min(max(overtime_hours, 0), attendance_hours), 2)
+    return {
+        "attendanceHours": attendance_hours,
+        "overtimeHours": overtime_hours,
+        "regularHours": round(max(attendance_hours - overtime_hours, 0), 2),
+    }
+
+
+def hydrate_salary_from_attendance(db_session, payload: dict[str, Any]) -> None:
+    summary = salary_attendance_summary(db_session, payload)
+    payload.update(summary)
+    if salary_pay_basis(payload) != "Hourly":
+        return
+    hourly_rate = max(parse_amount(payload.get("hourlyRate")), 0)
+    overtime_rate = max(parse_amount(payload.get("overtimeRate")), 0)
+    if overtime_rate <= 0 and hourly_rate > 0:
+        overtime_rate = round(hourly_rate * 1.5, 2)
+        payload["overtimeRate"] = overtime_rate
+    payload["baseSalary"] = round(summary["regularHours"] * hourly_rate, 2)
+
+
+def salary_record_belongs_to_user(record: ModuleRecord, user: User | None) -> bool:
+    if not record or not user or record.module_key != "salary_records":
+        return False
+    staff_name = normalize_text((record.payload or {}).get("staffName")).casefold()
+    identities = {
+        normalize_text(getattr(user, "username", "")).casefold(),
+        normalize_text(getattr(user, "full_name", "")).casefold(),
+    }
+    identities.discard("")
+    return bool(staff_name and staff_name in identities)
+
+
 def salary_payment_status(payload: dict[str, Any]) -> str:
     net_pay = round(parse_amount(payload.get("netPay")), 2)
     amount_paid = round(parse_amount(payload.get("amountPaid")), 2)
@@ -13462,6 +13539,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             elif module_key == "forecast_plans":
                 planning_rollup(payload)
             elif module_key == "salary_records":
+                payload["payBasis"] = normalize_text(payload.get("payBasis")) or ("Fixed Monthly" if record else "Hourly")
+                hydrate_salary_from_attendance(g.db, payload)
                 salary_rollup(payload)
             elif module_key == "asset_records":
                 asset_rollup(payload)
@@ -13576,6 +13655,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 return redirect(url_for("module_list", module_key=module_key))
 
         if module_key == "salary_records":
+            record_payload.setdefault("month", date.today().strftime("%Y-%m"))
+            record_payload.setdefault("payBasis", "Hourly" if not record else "Fixed Monthly")
+            if record_payload.get("payBasis") == "Hourly":
+                hydrate_salary_from_attendance(g.db, record_payload)
             salary_rollup(record_payload)
         elif module_key == "asset_records":
             asset_rollup(record_payload)
@@ -14129,13 +14212,44 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         )
 
+    @app.route("/app/my-payslips")
+    @login_required
+    def my_payslips():
+        records = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "salary_records")
+            .order_by(desc(ModuleRecord.month), desc(ModuleRecord.updated_at))
+        ).all()
+        payslips = []
+        for record in records:
+            if not salary_record_belongs_to_user(record, g.current_user):
+                continue
+            payload = dict(record.payload or {})
+            salary_rollup(payload)
+            payslips.append(
+                {
+                    "id": record.id,
+                    "period": record.month or normalize_text(payload.get("month")) or "Payroll period",
+                    "role": normalize_text(payload.get("staffRole")) or "Staff member",
+                    "hours": round(parse_amount(payload.get("attendanceHours")), 2),
+                    "net_pay": parse_amount(payload.get("netPay")),
+                    "amount_paid": parse_amount(payload.get("amountPaid")),
+                    "balance_due": parse_amount(payload.get("balanceDue")),
+                    "status": normalize_text(payload.get("status")) or "Pending",
+                }
+            )
+        return render_template("my_payslips.html", page_title="My Payslips", payslips=payslips)
+
     @app.route("/app/salaries/<record_id>/payslip")
-    @access_required("salary_records")
+    @login_required
     def salary_payslip(record_id: str):
         record = g.db.get(ModuleRecord, record_id)
         if not record or record.module_key != "salary_records":
             flash("That payroll record could not be found.", "error")
             return redirect(url_for("module_list", module_key="salary_records"))
+        if not user_has_access(g.current_user, "salary_records") and not salary_record_belongs_to_user(record, g.current_user):
+            flash("You can only view payslips issued to your own staff account.", "warning")
+            return redirect(url_for("my_payslips"))
         payload = dict(record.payload or {})
         salary_rollup(payload)
         return render_template(
@@ -14890,6 +15004,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         }
         if len(products) != len(set(product_ids)):
             return jsonify({"ok": False, "error": "One or more items could not be found."}), 400
+        if any(not is_pos_eligible_product(product) for product in products.values()):
+            return jsonify({"ok": False, "error": "One or more items are not available for POS checkout."}), 400
         if food_pos_mode and any(normalize_text(product.business_area_id) != "kitchen" for product in products.values()):
             return jsonify({"ok": False, "error": "Food POS accepts OneRoot Kitchen items only."}), 400
 
