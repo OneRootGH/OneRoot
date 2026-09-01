@@ -2,9 +2,9 @@
 {% block content %}
   <section class="page-intro">
     <div>
-      <p class="eyebrow">My Pay</p>
-      <h3>My Payslips</h3>
-      <p class="muted">Your saved payroll records, calculated from completed attendance for each pay period.</p>
+      <p class="eyebrow">My Staff Portal</p>
+      <h3>Pay, Documents & Attendance</h3>
+      <p class="muted">View your personal payslips, employment documents, and recent recorded hours in one private staff space.</p>
     </div>
   </section>
   {% if payslips %}
@@ -29,4 +29,12 @@
   {% else %}
     <section class="empty-state"><h3>No payslips yet</h3><p>Your completed payroll records will appear here when payroll is prepared using your staff name.</p></section>
   {% endif %}
+  <section class="card staff-portal-section">
+    <div class="card-header compact"><div><p class="eyebrow">My Employment Documents</p><h3>Contracts & Letters</h3></div><span>{{ staff_documents|length }} saved</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Document</th><th>Type</th><th>Issued</th><th>Review / Expiry</th><th>Status</th><th></th></tr></thead><tbody>{% for document in staff_documents %}<tr><td><strong>{{ document.payload.get('documentTitle') }}</strong><br><span class="table-secondary">{{ document.payload.get('notes') or 'Personal staff document' }}</span></td><td>{{ document.payload.get('documentType') }}</td><td>{{ document.payload.get('issueDate') }}</td><td>{{ document.payload.get('expiryDate') or '—' }}</td><td>{{ document.payload.get('documentStatus') }}</td><td>{% if document.payload.get('documentAttachmentUrl') %}<a class="table-link" href="{{ url_for('staff_document_download', record_id=document.id) }}" target="_blank" rel="noopener">Open Document</a>{% else %}<span class="table-secondary">Awaiting upload</span>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No employment documents have been assigned to your staff account yet.</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+  <section class="card staff-portal-section">
+    <div class="card-header compact"><div><p class="eyebrow">My Attendance</p><h3>Recent Completed Shifts</h3></div><span>Last 31 records</span></div>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Check In</th><th>Check Out</th><th>Worked</th><th>Overtime</th><th>Status</th></tr></thead><tbody>{% for attendance in attendance_records %}<tr><td>{{ attendance.payload.get('shiftDate') or attendance.record_date }}</td><td>{{ attendance.payload.get('checkInTime') or '—' }}</td><td>{{ attendance.payload.get('checkOutTime') or '—' }}</td><td>{{ attendance.payload.get('workedHours', 0) }} hrs</td><td>{{ attendance.payload.get('overtimeHours', 0) }} hrs</td><td>{{ attendance.payload.get('attendanceStatus') }}</td></tr>{% else %}<tr><td colspan="6">No attendance records have been found for this staff account yet.</td></tr>{% endfor %}</tbody></table></div>
+  </section>
 {% endblock %}

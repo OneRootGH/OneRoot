@@ -3821,16 +3821,24 @@ def hydrate_salary_from_attendance(db_session, payload: dict[str, Any]) -> None:
     payload["baseSalary"] = round(summary["regularHours"] * hourly_rate, 2)
 
 
-def salary_record_belongs_to_user(record: ModuleRecord, user: User | None) -> bool:
-    if not record or not user or record.module_key != "salary_records":
+def staff_name_matches_user(staff_name: Any, user: User | None) -> bool:
+    if not user:
         return False
-    staff_name = normalize_text((record.payload or {}).get("staffName")).casefold()
+    staff_name = normalize_text(staff_name).casefold()
     identities = {
         normalize_text(getattr(user, "username", "")).casefold(),
         normalize_text(getattr(user, "full_name", "")).casefold(),
     }
     identities.discard("")
     return bool(staff_name and staff_name in identities)
+
+
+def salary_record_belongs_to_user(record: ModuleRecord, user: User | None) -> bool:
+    return bool(record and record.module_key == "salary_records" and staff_name_matches_user((record.payload or {}).get("staffName"), user))
+
+
+def staff_document_belongs_to_user(record: ModuleRecord, user: User | None) -> bool:
+    return bool(record and record.module_key == "staff_documents" and staff_name_matches_user((record.payload or {}).get("staffName"), user))
 
 
 def salary_payment_status(payload: dict[str, Any]) -> str:
@@ -11227,11 +11235,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         flash("You have signed out of the tenant portal.", "success")
         return redirect(url_for("tenant_portal_login"))
 
-    @app.route("/tenant")
-    @tenant_portal_login_required
-    def tenant_portal_dashboard():
-        account = g.tenant_portal_account
-        suite_records = [
+    def tenant_portal_apartment_records(account: TenantPortalAccount) -> list[ModuleRecord]:
+        return [
             record
             for record in g.db.scalars(
                 select(ModuleRecord)
@@ -11239,8 +11244,48 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
             ).all()
             if normalize_text((record.payload or {}).get("suite")) == account.suite
-            and normalize_text((record.payload or {}).get("tenantName")).lower() == account.tenant_name.lower()
+            and normalize_text((record.payload or {}).get("tenantName")).casefold() == account.tenant_name.casefold()
         ]
+
+    def tenant_portal_document_bundle(record_id: str) -> dict[str, Any] | None:
+        account = g.tenant_portal_account
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != "apartments":
+            return None
+        if (
+            normalize_text((record.payload or {}).get("suite")) != account.suite
+            or normalize_text((record.payload or {}).get("tenantName")).casefold() != account.tenant_name.casefold()
+        ):
+            return None
+        return apartment_document_bundle(record_id)
+
+    def tenant_portal_receipt_rows(records: list[ModuleRecord]) -> list[dict[str, Any]]:
+        rows = []
+        for record in records:
+            profile = apartment_profile(record)
+            rent_paid = parse_amount(profile.get("rentPaid"))
+            bills_paid = parse_amount(profile.get("billsPaid"))
+            total_paid = round(rent_paid + bills_paid, 2)
+            if total_paid <= 0:
+                continue
+            rows.append(
+                {
+                    "id": record.id,
+                    "month": profile.get("month") or "Payment record",
+                    "rentPaid": rent_paid,
+                    "billsPaid": bills_paid,
+                    "totalPaid": total_paid,
+                    "paymentDate": profile.get("rentPaymentDate") or profile.get("billPaymentDate") or "",
+                    "reference": profile.get("rentPaymentReference") or profile.get("billPaymentReference") or "",
+                }
+            )
+        return rows
+
+    @app.route("/tenant")
+    @tenant_portal_login_required
+    def tenant_portal_dashboard():
+        account = g.tenant_portal_account
+        suite_records = tenant_portal_apartment_records(account)
         latest_record = suite_records[0] if suite_records else None
         profile = apartment_profile(latest_record) if latest_record else None
         statement_rows = apartment_statement_rows(latest_record, suite_records) if latest_record else []
@@ -11268,6 +11313,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if normalize_text((record.payload or {}).get("suite")) == account.suite
             and normalize_text((record.payload or {}).get("tenantName")).lower() == account.tenant_name.lower()
         ][:12]
+        payment_plans = [
+            record
+            for record in g.db.scalars(
+                select(ModuleRecord)
+                .where(ModuleRecord.module_key == "tenant_payment_plans")
+                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+            ).all()
+            if normalize_text((record.payload or {}).get("suite")) == account.suite
+            and normalize_text((record.payload or {}).get("tenantName")).casefold() == account.tenant_name.casefold()
+        ]
+        for plan in payment_plans:
+            tenant_payment_plan_rollup(plan.payload)
         return render_template(
             "tenant_portal.html",
             page_title="Tenant Portal",
@@ -11277,6 +11334,134 @@ def create_app(config: AppConfig | None = None) -> Flask:
             statement_rows=statement_rows[:12],
             statement_totals=apartment_statement_totals(statement_rows),
             requests=requests,
+            payment_plans=payment_plans,
+            payment_receipts=tenant_portal_receipt_rows(suite_records),
+            tenant_contact_number="0244620860",
+        )
+
+    @app.route("/tenant/documents/receipt/<record_id>")
+    @tenant_portal_login_required
+    def tenant_portal_receipt(record_id: str):
+        bundle = tenant_portal_document_bundle(record_id)
+        if not bundle:
+            flash("That receipt is not available for this tenant account.", "warning")
+            return redirect(url_for("tenant_portal_dashboard"))
+        profile = bundle["profile"]
+        bill_items = [
+            {"label": "Water Bill", "amount": profile["waterBill"]},
+            {"label": "Toilet Bill", "amount": profile["toiletBill"]},
+            {"label": "Sweeping & Gutter Cleaning", "amount": profile["sweepingBill"]},
+            {"label": "Waste Management", "amount": profile["wasteBill"]},
+            *profile["customCharges"],
+        ]
+        return render_template(
+            "apartment_receipt.html",
+            page_title=f"Payment Receipt - {profile['suite']}",
+            back_url=url_for("tenant_portal_dashboard"),
+            profile=profile,
+            source=bundle["sourcePayload"],
+            bill_items=bill_items,
+            receipt_total=round(profile["rentPaid"] + profile["billsPaid"], 2),
+            generated_on=date.today().isoformat(),
+        )
+
+    @app.route("/tenant/documents/statement/<record_id>")
+    @tenant_portal_login_required
+    def tenant_portal_statement(record_id: str):
+        bundle = tenant_portal_document_bundle(record_id)
+        if not bundle:
+            flash("That statement is not available for this tenant account.", "warning")
+            return redirect(url_for("tenant_portal_dashboard"))
+        return render_template(
+            "apartment_statement.html",
+            page_title=f"Tenant Statement - {bundle['profile']['suite']}",
+            back_url=url_for("tenant_portal_dashboard"),
+            profile=bundle["profile"],
+            source=bundle["sourcePayload"],
+            statement_rows=bundle["statementRows"],
+            totals=bundle["statementTotals"],
+            generated_on=date.today().isoformat(),
+        )
+
+    @app.route("/tenant/documents/agreement/<record_id>")
+    @tenant_portal_login_required
+    def tenant_portal_agreement(record_id: str):
+        bundle = tenant_portal_document_bundle(record_id)
+        if not bundle:
+            flash("That agreement is not available for this tenant account.", "warning")
+            return redirect(url_for("tenant_portal_dashboard"))
+        source_payload = bundle["sourcePayload"]
+        agreement_ready = bool(
+            normalize_text(source_payload.get("tenantName"))
+            and normalize_text(source_payload.get("occupancyStatus")) in APARTMENT_ACTIVE_STATUSES
+            and apartment_payment_confirmed(source_payload)
+        )
+        return render_template(
+            "apartment_agreement.html",
+            page_title=f"Tenancy Agreement - {bundle['profile']['suite']}",
+            back_url=url_for("tenant_portal_dashboard"),
+            profile=bundle["profile"],
+            source=source_payload,
+            owner_name=workspace_owner_name(),
+            agreement_ready=agreement_ready,
+            template_ready=TENANCY_TEMPLATE_PATH.exists(),
+            docx_url=url_for("tenant_portal_agreement_docx", record_id=record_id),
+            payment_channel="Contact OneRoot on 0244620860",
+            property_location=TENANCY_PROPERTY_LOCATION,
+            commencement_date=apartment_agreement_commencement_date(source_payload),
+            expiry_date=apartment_agreement_expiry_date(source_payload),
+            cycle_months=apartment_cycle_months(source_payload),
+            generated_on=date.today().isoformat(),
+        )
+
+    @app.route("/tenant/documents/agreement/<record_id>.docx")
+    @tenant_portal_login_required
+    def tenant_portal_agreement_docx(record_id: str):
+        bundle = tenant_portal_document_bundle(record_id)
+        if not bundle or not TENANCY_TEMPLATE_PATH.exists():
+            flash("That agreement download is not available.", "warning")
+            return redirect(url_for("tenant_portal_dashboard"))
+        source_payload = bundle["sourcePayload"]
+        if not (
+            normalize_text(source_payload.get("tenantName"))
+            and normalize_text(source_payload.get("occupancyStatus")) in APARTMENT_ACTIVE_STATUSES
+            and apartment_payment_confirmed(source_payload)
+        ):
+            flash("The tenancy agreement will be available after rent payment is confirmed.", "warning")
+            return redirect(url_for("tenant_portal_agreement", record_id=record_id))
+        document_bytes = build_tenancy_agreement_docx(apartment_agreement_placeholders(source_payload, app_config))
+        filename = f"{safe_filename_segment(source_payload.get('suite'), 'Suite')}_{safe_filename_segment(source_payload.get('tenantName'), 'Tenant')}_Tenancy_Agreement.docx"
+        return send_file(
+            BytesIO(document_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name=filename,
+        )
+
+    @app.route("/tenant/documents/bill-notice/<record_id>")
+    @tenant_portal_login_required
+    def tenant_portal_bill_notice(record_id: str):
+        bundle = tenant_portal_document_bundle(record_id)
+        if not bundle:
+            flash("That bill notice is not available for this tenant account.", "warning")
+            return redirect(url_for("tenant_portal_dashboard"))
+        profile = bundle["profile"]
+        bill_items = [
+            {"label": "Water Bill", "amount": profile["waterBill"]},
+            {"label": "Toilet Bill", "amount": profile["toiletBill"]},
+            {"label": "Sweeping & Gutter Cleaning", "amount": profile["sweepingBill"]},
+            {"label": "Waste Management", "amount": profile["wasteBill"]},
+            *profile["customCharges"],
+        ]
+        return render_template(
+            "apartment_bill_notice.html",
+            page_title=f"Monthly Bill Notice - {profile['suite']}",
+            back_url=url_for("tenant_portal_dashboard"),
+            profile=profile,
+            source=bundle["sourcePayload"],
+            bill_items=bill_items,
+            payment_channel="Contact OneRoot on 0244620860",
+            generated_on=date.today().isoformat(),
         )
 
     @app.route("/tenant/requests", methods=["POST"])
@@ -13521,6 +13706,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     continue
                 payload[field.name] = parse_field_input(field, request.form)
             payload.pop("receiptUpload", None)
+            payload.pop("documentUpload", None)
             if module_key == "apartments":
                 payload["businessAreaId"] = "rentals-apartments"
             elif module_key in SERVICE_MODULE_AREA_IDS:
@@ -13621,6 +13807,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     if receipt_attachment_url
                     else (normalize_text(payload.get("receiptStatus")) or "Pending")
                 )
+            elif module_key == "staff_documents":
+                document_attachment_url = normalize_text(payload.get("documentAttachmentUrl"))
+                document_attachment_name = normalize_text(payload.get("documentAttachmentName"))
+                document_attachment_type = normalize_text(payload.get("documentAttachmentType"))
+                if request.form.get("clearDocumentAttachment") == "on":
+                    document_attachment_url = ""
+                    document_attachment_name = ""
+                    document_attachment_type = ""
+                uploaded_attachment_url, uploaded_attachment_name, uploaded_attachment_type = encode_uploaded_receipt_attachment(
+                    request.files.get("documentUpload")
+                )
+                if uploaded_attachment_url:
+                    document_attachment_url = uploaded_attachment_url
+                    document_attachment_name = uploaded_attachment_name
+                    document_attachment_type = uploaded_attachment_type
+                payload["documentAttachmentUrl"] = document_attachment_url
+                payload["documentAttachmentName"] = document_attachment_name
+                payload["documentAttachmentType"] = document_attachment_type
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
             if module_key == "apartments":
@@ -14238,7 +14442,65 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "status": normalize_text(payload.get("status")) or "Pending",
                 }
             )
-        return render_template("my_payslips.html", page_title="My Payslips", payslips=payslips)
+        staff_documents = [
+            record
+            for record in g.db.scalars(
+                select(ModuleRecord)
+                .where(ModuleRecord.module_key == "staff_documents")
+                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+            ).all()
+            if staff_document_belongs_to_user(record, g.current_user)
+        ]
+        attendance_records = [
+            record
+            for record in g.db.scalars(
+                select(ModuleRecord)
+                .where(ModuleRecord.module_key == "workforce_attendance")
+                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+                .limit(31)
+            ).all()
+            if staff_name_matches_user((record.payload or {}).get("staffName"), g.current_user)
+        ]
+        for attendance in attendance_records:
+            workforce_rollup(attendance.payload)
+        return render_template(
+            "my_payslips.html",
+            page_title="My Staff Portal",
+            payslips=payslips,
+            staff_documents=staff_documents,
+            attendance_records=attendance_records,
+        )
+
+    @app.route("/app/staff-documents/<record_id>/download")
+    @login_required
+    def staff_document_download(record_id: str):
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != "staff_documents":
+            flash("That staff document could not be found.", "error")
+            return redirect(url_for("my_payslips"))
+        if not user_has_access(g.current_user, "staff_documents") and not staff_document_belongs_to_user(record, g.current_user):
+            flash("You can only open documents assigned to your own staff account.", "warning")
+            return redirect(url_for("my_payslips"))
+        payload = dict(record.payload or {})
+        attachment_url = normalize_text(payload.get("documentAttachmentUrl"))
+        if not attachment_url:
+            flash("No file has been uploaded for that document yet.", "warning")
+            return redirect(url_for("my_payslips"))
+        if attachment_url.startswith("data:") and ";base64," in attachment_url:
+            header, encoded_data = attachment_url.split(",", 1)
+            mime_type = normalize_text(payload.get("documentAttachmentType")) or header[5:].split(";", 1)[0]
+            try:
+                document_bytes = base64.b64decode(encoded_data)
+            except ValueError:
+                flash("That document file could not be opened.", "error")
+                return redirect(url_for("my_payslips"))
+            return send_file(
+                BytesIO(document_bytes),
+                mimetype=mime_type or "application/octet-stream",
+                as_attachment=False,
+                download_name=safe_filename_segment(payload.get("documentAttachmentName"), "staff-document"),
+            )
+        return redirect(attachment_url)
 
     @app.route("/app/salaries/<record_id>/payslip")
     @login_required
@@ -14255,7 +14517,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return render_template(
             "salary_payslip.html",
             page_title=f"Payslip - {normalize_text(payload.get('staffName')) or record.title}",
-            back_url=url_for("module_form", module_key="salary_records", record_id=record.id),
+            back_url=(
+                url_for("module_form", module_key="salary_records", record_id=record.id)
+                if user_has_access(g.current_user, "salary_records")
+                else url_for("my_payslips")
+            ),
             record=record,
             payload=payload,
             generated_on=date.today().isoformat(),

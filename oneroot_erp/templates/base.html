@@ -130,7 +130,7 @@
                   <small>{{ user_role_labels.get(normalize_role_key(current_user.role), normalize_role_key(current_user.role)) }}</small>
                   <small>{{ staff_role_label(current_user.staff_role, fallback_role=current_user.role) }}</small>
                   <small>{{ current_user.username }}</small>
-                  <a class="button subtle utility-link" href="{{ url_for('my_payslips') }}">My Payslips</a>
+                  <a class="button subtle utility-link" href="{{ url_for('my_payslips') }}">My Staff Portal</a>
                   <form method="post" action="{{ url_for('logout') }}">
                     <button class="button dark" type="submit">Sign Out</button>
                   </form>

@@ -427,6 +427,10 @@ ROLE_ACCESS_KEYS["marketing-crm"].update({"customer_service_cases", "catering_qu
 ROLE_ACCESS_KEYS["cashier"].update({"daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["laundry-desk"].update({"daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["equipment-desk"].update({"daily_handovers", "customer_loyalty"})
+ROLE_ACCESS_KEYS["owner"].add("staff_documents")
+ROLE_ACCESS_KEYS["admin"].add("staff_documents")
+ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
+ROLE_ACCESS_KEYS["finance"].add("staff_documents")
 
 SUITE_NAMES = [
     "Peace",
@@ -1182,6 +1186,26 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("paymentReference", "Payment Reference", "text"),
             FieldDefinition("status", "Status", "select", False, SALARY_PAYMENT_STATUSES),
             FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
+    "staff_documents": ModuleDefinition(
+        key="staff_documents",
+        label="Staff Documents",
+        legacy_collection="staffDocuments",
+        menu_group="People",
+        date_field="issueDate",
+        title_field="staffName",
+        status_field="documentStatus",
+        fields=[
+            FieldDefinition("staffName", "Staff Name", "text", True),
+            FieldDefinition("staffRole", "Staff Role", "select", False, STAFF_WORK_ROLES),
+            FieldDefinition("documentTitle", "Document Title", "text", True),
+            FieldDefinition("documentType", "Document Type", "select", True, [("Employment Contract", "Employment Contract"), ("Appointment Letter", "Appointment Letter"), ("Staff Policy", "Staff Policy"), ("Training Certificate", "Training Certificate"), ("Performance Review", "Performance Review"), ("Other", "Other")]),
+            FieldDefinition("issueDate", "Issue Date", "date", True),
+            FieldDefinition("expiryDate", "Expiry / Review Date", "date"),
+            FieldDefinition("documentStatus", "Document Status", "select", True, [("Active", "Active"), ("Superseded", "Superseded"), ("Expired", "Expired")]),
+            FieldDefinition("documentUpload", "Upload Document", "file"),
+            FieldDefinition("notes", "Notes For Staff", "textarea"),
         ],
     ),
     "cashbook_entries": ModuleDefinition(
@@ -2090,7 +2114,7 @@ MENU_GROUPS = [
     (
         "People",
         [
-            ("Payroll, Schedules & Training", ["salary_records", "workforce_attendance", "knowledge_base"]),
+            ("Payroll, Schedules & Training", ["salary_records", "staff_documents", "workforce_attendance", "knowledge_base"]),
             ("Recruitment", ["job_vacancies"]),
             ("Suppliers", ["suppliers", "supplier_price_updates"]),
         ],

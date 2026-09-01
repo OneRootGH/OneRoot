@@ -23,6 +23,10 @@
         <div><p class="eyebrow">My Apartment Account</p><h1>{{ account.suite }} Suite</h1><p>{{ account.tenant_name }} · OneRoot Rentals & Apartments</p></div>
         {% if profile %}<span class="tenant-status">{{ profile.alertLabel }}</span>{% endif %}
       </section>
+      <section class="tenant-support-bar">
+        <div><strong>Need account, payment, or maintenance help?</strong><span>Contact OneRoot directly on {{ tenant_contact_number }} for all tenant support.</span></div>
+        <div class="tenant-support-actions"><a class="button primary button-small" href="tel:{{ tenant_contact_number }}">Call OneRoot</a><a class="button subtle button-small" href="https://wa.me/233244620860?text=Hello%20OneRoot%2C%20I%20need%20help%20with%20my%20suite%20account." target="_blank" rel="noopener">WhatsApp OneRoot</a></div>
+      </section>
       {% if profile %}
         <section class="card-grid four tenant-summary-grid">
           <article class="metric-card"><span>Rent Balance</span><strong>{{ profile.rentBalance|currency }}</strong><small>Next due {{ profile.nextRentDueDate or 'Not set' }}</small></article>
@@ -31,6 +35,20 @@
           <article class="metric-card"><span>Credit Held</span><strong>{{ profile.creditBalance|currency }}</strong><small>Advance payment on account</small></article>
           <article class="metric-card"><span>Paid So Far</span><strong>{{ statement_totals.totalPaid|currency }}</strong><small>Rent {{ statement_totals.rentPaid|currency }} · Bills {{ statement_totals.billsPaid|currency }}</small></article>
         </section>
+        <section class="split-grid tenant-portal-grid">
+          <article class="card"><div class="card-header compact"><div><p class="eyebrow">My Payment Plan</p><h3>Agreed Installments</h3></div><span>{{ payment_plans|length }} saved</span></div>
+            <div class="table-wrap"><table><thead><tr><th>Covers</th><th>Agreed</th><th>Paid</th><th>Balance</th><th>Next Payment</th><th>Status</th></tr></thead><tbody>{% for plan in payment_plans %}<tr><td>{{ plan.payload.get('planType') }}</td><td>{{ plan.payload.get('totalAgreed', 0)|currency }}</td><td>{{ plan.payload.get('amountPaid', 0)|currency }}</td><td class="tenant-owed-cell">{{ plan.payload.get('balanceDue', 0)|currency }}</td><td>{{ plan.payload.get('nextInstallmentDate') or 'Not set' }}<br><span class="table-secondary">{{ plan.payload.get('installmentAmount', 0)|currency }} each</span></td><td>{{ plan.payload.get('status') }}</td></tr>{% else %}<tr><td colspan="6">No payment plan has been agreed yet. Contact OneRoot on {{ tenant_contact_number }} if you need one.</td></tr>{% endfor %}</tbody></table></div>
+          </article>
+          <article class="card"><div class="card-header compact"><div><p class="eyebrow">My Documents</p><h3>Account Documents</h3></div></div>
+            <div class="tenant-document-actions">
+              <a class="button subtle button-small" href="{{ url_for('tenant_portal_statement', record_id=profile.record.id) }}">Open Statement</a>
+              <a class="button subtle button-small" href="{{ url_for('tenant_portal_bill_notice', record_id=profile.record.id) }}">Current Bill Notice</a>
+              {% if profile.agreementReady %}<a class="button subtle button-small" href="{{ url_for('tenant_portal_agreement', record_id=profile.record.id) }}">Tenancy Agreement</a>{% endif %}
+            </div>
+            <p class="muted tenant-line-note">Your statement, current bill notice, payment receipts, and confirmed tenancy agreement are kept here for easy reference.</p>
+          </article>
+        </section>
+        <section class="card"><div class="card-header compact"><div><p class="eyebrow">Payment Receipts</p><h3>All Payments Recorded So Far</h3></div><span>{{ payment_receipts|length }} receipt{{ '' if payment_receipts|length == 1 else 's' }}</span></div><div class="table-wrap"><table><thead><tr><th>Month / Record</th><th>Rent Paid</th><th>Bills Paid</th><th>Total Paid</th><th>Payment Date</th><th>Reference</th><th></th></tr></thead><tbody>{% for receipt in payment_receipts %}<tr><td>{{ receipt.month }}</td><td>{{ receipt.rentPaid|currency }}</td><td>{{ receipt.billsPaid|currency }}</td><td>{{ receipt.totalPaid|currency }}</td><td>{{ receipt.paymentDate or 'Not recorded' }}</td><td>{{ receipt.reference or '—' }}</td><td><a class="table-link" href="{{ url_for('tenant_portal_receipt', record_id=receipt.id) }}">Open Receipt</a></td></tr>{% else %}<tr><td colspan="7">No payment has been recorded yet. Contact OneRoot on {{ tenant_contact_number }} if a payment is missing.</td></tr>{% endfor %}</tbody></table></div></section>
         <section class="split-grid tenant-portal-grid">
           <article class="card"><div class="card-header compact"><div><p class="eyebrow">Current Month</p><h3>What I Owe, Item By Item</h3></div><span>{{ profile.month or 'Latest record' }}</span></div>
             <p class="muted tenant-line-note">Each payment is allocated against the listed lines in order, so the balance beside every item is clear.</p>

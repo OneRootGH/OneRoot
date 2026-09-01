@@ -106,6 +106,18 @@
                 Remove current receipt
               </span>
             {% endif %}
+            {% if definition.key == 'staff_documents' and payload.get('documentAttachmentUrl') %}
+              <span class="table-secondary">
+                Current document:
+                <a class="table-link" href="{{ payload.get('documentAttachmentUrl') }}" target="_blank" rel="noopener">
+                  {{ payload.get('documentAttachmentName') or 'Open document' }}
+                </a>
+              </span>
+              <span class="checkbox-inline">
+                <input type="checkbox" name="clearDocumentAttachment">
+                Remove current document
+              </span>
+            {% endif %}
           {% elif dynamic_category_field and field.name == dynamic_category_field %}
             <select
               name="{{ field.name }}"

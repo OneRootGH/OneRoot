@@ -2243,17 +2243,25 @@ thead th {
 .tenant-portal-hero h1 { margin: 4px 0; color: #fff; }
 .tenant-portal-hero p { margin: 0; color: rgba(255,255,255,.8); }
 .tenant-status { padding: 9px 13px; border-radius: 999px; background: rgba(255,255,255,.16); font-weight: 700; }
+.tenant-support-bar { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin: 0 0 20px; padding: 16px 18px; border: 1px solid rgba(28, 93, 61, .16); border-radius: 18px; background: rgba(255,255,255,.78); box-shadow: 0 12px 28px rgba(25, 63, 44, .06); }
+.tenant-support-bar > div:first-child { display: grid; gap: 4px; }
+.tenant-support-bar strong { color: var(--ink); }
+.tenant-support-bar span { color: var(--muted); font-size: .9rem; }
+.tenant-support-actions, .tenant-document-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.tenant-document-actions { margin: 6px 0 14px; }
 .tenant-portal-grid { align-items: start; }
 .tenant-line-note { margin: -4px 0 16px; font-size: 0.86rem; line-height: 1.55; }
 .tenant-balance-section + .tenant-balance-section { margin-top: 20px; }
 .tenant-balance-section > strong { display: block; margin-bottom: 9px; color: var(--ink); }
 .tenant-balance-table th:last-child, .tenant-balance-table td:last-child { text-align: right; }
 .tenant-owed-cell { color: var(--danger, #a43e2e); font-weight: 800; }
+.staff-portal-section { margin-top: 20px; }
 
 @media (max-width: 680px) {
   .tenant-login-shell, .tenant-portal-shell { width: min(100% - 20px, 1180px); padding-top: 12px; }
   .tenant-login-card { padding: 24px; border-radius: 20px; }
   .tenant-portal-header, .tenant-portal-hero { align-items: flex-start; flex-direction: column; }
+  .tenant-support-bar { align-items: flex-start; flex-direction: column; }
   .tenant-account-bar { justify-content: flex-start; }
   .tenant-summary-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
