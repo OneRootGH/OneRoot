@@ -429,6 +429,7 @@ ROLE_ACCESS_KEYS["laundry-desk"].update({"daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["equipment-desk"].update({"daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["owner"].add("staff_documents")
 ROLE_ACCESS_KEYS["admin"].add("staff_documents")
+ROLE_ACCESS_KEYS["operations"].add("staff_documents")
 ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
 ROLE_ACCESS_KEYS["finance"].add("staff_documents")
 
