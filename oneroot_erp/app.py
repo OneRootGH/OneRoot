@@ -8872,7 +8872,7 @@ def build_sidebar(user: User | None = None):
     if not workspace_manager:
         # Frontline staff get only the tools they need, without the full management workspace.
         daily_work_sections = [
-            ("Counter & Orders", ["pos", "food_pos", "online_orders", "delivery_dispatch"]),
+            ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
             ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance"]),
         ]

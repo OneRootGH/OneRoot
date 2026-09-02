@@ -10,6 +10,9 @@
       </div>
       <div class="toolbar pos-workbench-tools">
         <a class="button subtle" href="{{ url_for('inventory') }}">Inventory</a>
+        {% if 'mobile_money_transactions' in current_access_keys %}
+          <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">MoMo Counter</a>
+        {% endif %}
         {% if 'sales_summary' in current_access_keys %}
           <a class="button subtle" href="{{ url_for('sales_summary_page', date=today_iso, area=initial_area) }}">Summary</a>
         {% endif %}

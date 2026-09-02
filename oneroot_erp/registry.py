@@ -2131,7 +2131,7 @@ MENU_GROUPS = [
         "Workspace",
         [
             ("Overview", ["dashboard", "profits", "category_performance", "reports", "search"]),
-            ("Counter & Orders", ["pos", "food_pos", "online_orders", "delivery_dispatch", "workbook"]),
+            ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch", "workbook"]),
             ("Stock", ["inventory", "inventory_barcode"]),
         ],
     ),
@@ -2139,7 +2139,7 @@ MENU_GROUPS = [
         "Finance",
         [
             ("Sales & Spend", ["sales_summary", "sales", "expenses", "petty_cash", "petty_cash_budgets"]),
-            ("Cash & Reconciliation", ["cashbook_entries", "mobile_money_transactions", "mobile_money_reconciliations"]),
+            ("Cash & Reconciliation", ["cashbook_entries", "mobile_money_reconciliations"]),
         ],
     ),
     (
