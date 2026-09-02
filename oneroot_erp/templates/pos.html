@@ -45,6 +45,18 @@
         <span class="pos-counter-label">Equipment Sales</span>
         <strong id="pos-equipment-sales">{{ counter_summary.equipmentSalesTotal|currency }}</strong>
       </article>
+      <article class="pos-counter-pill pos-counter-pill-highlight">
+        <span class="pos-counter-label">MoMo Commission</span>
+        <strong id="pos-momo-sales">{{ counter_summary.mobileMoneySalesTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">MoMo Handled</span>
+        <strong id="pos-momo-handled">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">MoMo Counter</span>
+        <strong id="pos-momo-status">{{ counter_summary.mobileMoneyStatusLabel }}</strong>
+      </article>
     </section>
     <p class="muted pos-counter-note" id="pos-counter-note">
       Area:
@@ -59,7 +71,7 @@
           No payment mix recorded yet.
         {% endif %}
       </span>
-      · Bread is counted separately and included in counter cash closeout. Mobile Money is managed only from its dedicated counter.
+      · Bread is counted separately and included in counter cash closeout. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
     </p>
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">

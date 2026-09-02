@@ -26,6 +26,9 @@
   const equipmentSalesNode = document.getElementById("pos-equipment-sales");
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
+  const momoSalesNode = document.getElementById("pos-momo-sales");
+  const momoHandledNode = document.getElementById("pos-momo-handled");
+  const momoStatusNode = document.getElementById("pos-momo-status");
   const paymentLabelNode = document.getElementById("pos-payment-label");
   const summaryDateNode = document.getElementById("pos-summary-date");
   const summaryTotalNode = document.getElementById("pos-summary-total");
@@ -509,6 +512,17 @@
     }
     if (equipmentSalesNode) {
       equipmentSalesNode.textContent = formatCurrency(summary.equipmentSalesTotal);
+    }
+    // MoMo is visible for handover awareness, but is intentionally excluded
+    // from the retail POS and Daily Sales totals.
+    if (momoSalesNode) {
+      momoSalesNode.textContent = formatCurrency(summary.mobileMoneySalesTotal);
+    }
+    if (momoHandledNode) {
+      momoHandledNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
+    }
+    if (momoStatusNode) {
+      momoStatusNode.textContent = summary.mobileMoneyStatusLabel || "Separate MoMo Counter";
     }
     if (areaLabelNode) {
       areaLabelNode.textContent = summary.areaLabel || "All POS Areas";
