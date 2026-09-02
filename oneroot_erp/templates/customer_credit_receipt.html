@@ -1,0 +1,72 @@
+{% extends "document_base.html" %}
+{% set document_label = "Customer Credit Receipt" %}
+{% set document_title = "OneRoot Customer Credit Receipt" %}
+{% set document_subtitle = credit.receiptNumber ~ " · " ~ (credit.entryDate|pretty_date) %}
+{% block document_body %}
+  <section class="summary-grid document-summary-grid">
+    <article class="mini-card">
+      <span>Customer</span>
+      <strong>{{ credit.customerName }}</strong>
+      <small>{{ credit.customerPhone or 'Phone not recorded' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Transaction</span>
+      <strong>{{ credit.transactionType }}</strong>
+      <small>{{ credit.businessArea }}</small>
+    </article>
+    <article class="mini-card">
+      <span>{% if credit.transactionType == 'Credit Sale' %}Amount Owed{% else %}Amount{% endif %}</span>
+      <strong>{{ credit.amount|currency }}</strong>
+      <small>{{ credit.paymentMethod or 'Payment method not recorded' }}</small>
+    </article>
+    <article class="mini-card">
+      <span>Balance After Entry</span>
+      <strong>{{ credit.balance|currency }}</strong>
+      <small>{% if credit.dueDate %}Due {{ credit.dueDate|pretty_date }}{% else %}Due date not set{% endif %}</small>
+    </article>
+  </section>
+
+  {% if line_items %}
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Item / Service</th>
+            <th>Area</th>
+            <th>Qty</th>
+            <th>Unit</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for item in line_items %}
+            <tr>
+              <td>{{ item.name }}{% if item.category %}<span class="table-secondary">{{ item.category }}</span>{% endif %}</td>
+              <td>{{ item.businessAreaLabel }}</td>
+              <td>{{ item.quantity }}</td>
+              <td>{{ item.unitPrice|currency }}</td>
+              <td>{{ item.totalAmount|currency }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th colspan="4">{{ 'Total Credit Supplied' if credit.transactionType == 'Credit Sale' else 'Transaction Amount' }}</th>
+            <th>{{ credit.amount|currency }}</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  {% endif %}
+
+  <section class="document-note">
+    <strong>Reference</strong>
+    <p>{{ credit.reference or credit.receiptNumber }}</p>
+    {% if credit.notes %}<p>{{ credit.notes }}</p>{% endif %}
+    {% if credit.transactionType == 'Credit Sale' %}
+      <p>This receipt confirms that the listed goods or services were supplied on credit. The balance shown is the amount remaining on the customer account after this entry.</p>
+    {% elif credit.transactionType == 'Payment Received' %}
+      <p>This receipt confirms payment received against the customer's OneRoot credit account. The balance shown is what remains after this payment.</p>
+    {% endif %}
+  </section>
+{% endblock %}

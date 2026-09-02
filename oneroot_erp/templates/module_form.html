@@ -293,6 +293,8 @@
             <small class="muted form-helper">Use the receipt number, MoMo reference, bank alert, or invoice number if you have one.</small>
           {% elif definition.key == 'customer_credit_accounts' and field.name == 'transactionType' %}
             <small class="muted form-helper">Use Credit Sale when the customer takes goods or receives a service without paying. Use Payment Received later to reduce the balance.</small>
+          {% elif definition.key == 'customer_credit_accounts' and field.name == 'itemSummary' %}
+            <small class="muted form-helper">Describe the items or service supplied on credit. POS credit sales fill this automatically with the exact cart items.</small>
           {% elif definition.key == 'customer_credit_accounts' and field.name == 'outstandingBalance' %}
             <small class="muted form-helper">Calculated from every saved credit sale, payment, credit note, and approved write-off for this customer.</small>
           {% elif definition.key == 'customer_crm' and field.name == 'leadSource' %}

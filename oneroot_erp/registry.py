@@ -2137,6 +2137,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
             FieldDefinition("customerName", "Customer Name", "text", True),
             FieldDefinition("customerPhone", "Customer Phone", "text"),
+            FieldDefinition("itemSummary", "Items / Service Supplied", "textarea"),
             FieldDefinition("transactionType", "Transaction", "select", True, [
                 ("Credit Sale", "Credit Sale / Amount Owed"),
                 ("Payment Received", "Payment Received"),

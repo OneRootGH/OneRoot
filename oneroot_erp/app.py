@@ -10414,6 +10414,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "id": existing.id if existing else uuid4().hex,
             "entryDate": order.order_date.isoformat(), "businessAreaId": order.primary_business_area_id or "shared-operations",
             "customerName": normalize_text(order.customer_name), "customerPhone": normalize_text(order.customer_phone),
+            "itemSummary": pos_order_item_summary(order.lines),
+            "creditItems": [
+                {
+                    "name": line.name,
+                    "category": line.category,
+                    "quantity": parse_amount(line.quantity),
+                    "unitPrice": parse_amount(line.unit_price),
+                    "totalAmount": parse_amount(line.total_amount),
+                    "businessAreaLabel": BUSINESS_AREA_SHORT.get(line.business_area_id, line.business_area_id),
+                }
+                for line in order.lines
+            ],
             "transactionType": "Credit Sale", "amount": round(parse_amount(order.total_amount), 2), "paymentMethod": "Credit",
             "reference": f"pos-credit|{order.id}", "dueDate": "", "outstandingBalance": 0.0, "status": "Open",
             "notes": f"Automatically created from POS order {order.order_number}.",
@@ -15400,6 +15412,76 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "totalAmount": parse_amount(order.total_amount),
                 "createdAt": order.created_at.isoformat(),
                 "updatedAt": order.updated_at.isoformat(),
+            },
+            line_items=line_items,
+            generated_on=date.today().isoformat(),
+        )
+
+    @app.route("/app/customer-credit/<record_id>/receipt")
+    @access_required("customer_credit_accounts")
+    def customer_credit_receipt(record_id: str):
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != "customer_credit_accounts":
+            flash("That customer credit record could not be found.", "error")
+            return redirect(url_for("module_list", module_key="customer_credit_accounts"))
+
+        payload = dict(record.payload or {})
+        transaction_type = normalize_text(payload.get("transactionType")) or "Credit Activity"
+        line_items = payload.get("creditItems") if isinstance(payload.get("creditItems"), list) else []
+        reference = normalize_text(payload.get("reference"))
+        if not line_items and reference.startswith("pos-credit|"):
+            order = g.db.scalar(
+                select(PosOrder)
+                .options(selectinload(PosOrder.lines))
+                .where(PosOrder.id == reference.removeprefix("pos-credit|"))
+            )
+            if order:
+                line_items = [
+                    {
+                        "name": line.name,
+                        "category": line.category,
+                        "quantity": parse_amount(line.quantity),
+                        "unitPrice": parse_amount(line.unit_price),
+                        "totalAmount": parse_amount(line.total_amount),
+                        "businessAreaLabel": BUSINESS_AREA_SHORT.get(line.business_area_id, line.business_area_id),
+                    }
+                    for line in order.lines
+                ]
+        if not line_items and normalize_text(payload.get("itemSummary")):
+            amount = abs(parse_amount(payload.get("amount")))
+            line_items = [
+                {
+                    "name": normalize_text(payload.get("itemSummary")),
+                    "category": "Service / manual credit",
+                    "quantity": 1,
+                    "unitPrice": amount,
+                    "totalAmount": amount,
+                    "businessAreaLabel": BUSINESS_AREA_SHORT.get(
+                        normalize_text(payload.get("businessAreaId")),
+                        normalize_text(payload.get("businessAreaId")),
+                    ),
+                }
+            ]
+        return render_template(
+            "customer_credit_receipt.html",
+            page_title=f"Credit Receipt - {normalize_text(payload.get('customerName')) or 'Customer'}",
+            back_url=url_for("module_list", module_key="customer_credit_accounts"),
+            credit={
+                "receiptNumber": f"CR-{record.id[:8].upper()}",
+                "entryDate": normalize_text(payload.get("entryDate")) or (record.record_date.isoformat() if record.record_date else date.today().isoformat()),
+                "customerName": normalize_text(payload.get("customerName")) or "Customer",
+                "customerPhone": normalize_text(payload.get("customerPhone")),
+                "businessArea": BUSINESS_AREA_LABELS.get(
+                    normalize_text(payload.get("businessAreaId")),
+                    normalize_text(payload.get("businessAreaId")) or "OneRoot Essentials",
+                ),
+                "transactionType": transaction_type,
+                "amount": abs(parse_amount(payload.get("amount"))),
+                "balance": max(parse_amount(payload.get("outstandingBalance")), 0),
+                "dueDate": normalize_text(payload.get("dueDate")),
+                "paymentMethod": normalize_text(payload.get("paymentMethod")),
+                "reference": reference,
+                "notes": normalize_text(payload.get("notes")),
             },
             line_items=line_items,
             generated_on=date.today().isoformat(),

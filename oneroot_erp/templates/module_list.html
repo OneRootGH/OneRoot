@@ -749,6 +749,9 @@
                     {% if definition.key == 'salary_records' %}
                       <a class="table-link" href="{{ url_for('salary_payslip', record_id=record.id) }}">Payslip</a>
                     {% endif %}
+                    {% if definition.key == 'customer_credit_accounts' %}
+                      <a class="table-link" href="{{ url_for('customer_credit_receipt', record_id=record.id) }}">Receipt</a>
+                    {% endif %}
                     {% if definition.key == 'customer_crm' and record.payload.get('whatsappUrl') %}
                       <a class="table-link" href="{{ record.payload.get('whatsappUrl') }}" target="_blank" rel="noopener">WhatsApp</a>
                     {% endif %}
