@@ -11114,6 +11114,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 db.add(record)
             set_module_record_metadata(record, MODULES["sales"], payload)
 
+    def refresh_pos_generated_sales_for_date(order_date: date, db_session=None) -> None:
+        """Rebuild a day's POS summaries from saved orders before reporting figures."""
+        db = db_session or g.db
+        orders = db.scalars(
+            select(PosOrder).where(PosOrder.order_date == order_date)
+        ).all()
+        area_ids = sorted(
+            {
+                normalize_text(area_id)
+                for order in orders
+                for area_id in (order.business_area_ids or [])
+                if normalize_text(area_id)
+            }
+        )
+        if area_ids:
+            sync_generated_sales_for_pos(order_date, area_ids, db_session=db)
+
     def reconcile_generated_sales(db_session) -> None:
         pos_area_map: dict[date, set[str]] = defaultdict(set)
         pos_orders = db_session.scalars(select(PosOrder)).all()
@@ -12296,6 +12313,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def sales_summary_page():
         sale_date = parse_date(request.args.get("date")) or date.today()
         area_filter = normalize_text(request.args.get("area"))
+        refresh_pos_generated_sales_for_date(sale_date)
+        g.db.commit()
         summary_context = daily_sales_summary_context(g.db, sale_date, area_filter)
         return render_template(
             "sales_summary.html",
@@ -12311,6 +12330,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def sales_summary_export():
         sale_date = parse_date(request.args.get("date")) or date.today()
         area_filter = normalize_text(request.args.get("area"))
+        refresh_pos_generated_sales_for_date(sale_date)
+        g.db.commit()
         summary_context = daily_sales_summary_context(g.db, sale_date, area_filter)
         headers = [
             "salesDate",
@@ -13407,6 +13428,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         month_filter = parse_month(request.args.get("month")) if definition.month_field else ""
         date_from = parse_date(request.args.get("date_from"))
         date_to = parse_date(request.args.get("date_to"))
+        if module_key == "sales" and (not date_from or not date_to or date_from == date_to):
+            refresh_pos_generated_sales_for_date(date_from or date_to or date.today())
+            g.db.commit()
         all_records = g.db.scalars(
             select(ModuleRecord)
             .where(ModuleRecord.module_key == module_key)
@@ -15338,6 +15362,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         initial_area = "kitchen" if food_pos_mode else normalize_text(request.args.get("area"))
         initial_category = normalize_text(request.args.get("category"))
         initial_search = normalize_text(request.args.get("q"))
+        refresh_pos_generated_sales_for_date(order_date)
+        g.db.commit()
         summary = build_pos_counter_summary(order_date, initial_area)
         recent_orders_raw = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(20)
@@ -15542,6 +15568,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_summary_api():
         order_date = parse_date(request.args.get("orderDate")) or date.today()
         area_id = "kitchen" if normalize_text(request.args.get("desk")) == "food" else normalize_text(request.args.get("area"))
+        refresh_pos_generated_sales_for_date(order_date)
+        g.db.commit()
         return jsonify({"ok": True, "summary": build_pos_counter_summary(order_date, area_id)})
 
     @app.route("/app/api/pos/orders", methods=["POST"])
