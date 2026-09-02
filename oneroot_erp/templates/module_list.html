@@ -139,6 +139,13 @@
     </section>
   {% endif %}
 
+  {% if definition.key == 'customer_credit_accounts' %}
+    <section class="card compact-note">
+      <strong>How credit accounts work</strong>
+      <p>POS sales saved with the <em>Credit</em> payment method appear here automatically. Use <strong>New Record</strong> to capture a payment received, credit note, or approved write-off for a customer. Payments reduce the customer balance and are not counted as a second sale.</p>
+    </section>
+  {% endif %}
+
   {% if growth_context %}
     <section class="card-grid four">
       <article class="metric-card">
@@ -721,6 +728,13 @@
                     {% if record.payload.get('reference') %}
                       · Ref {{ record.payload.get('reference') }}
                     {% endif %}
+                  </span>
+                {% elif definition.key == 'customer_credit_accounts' %}
+                  <span class="table-secondary">
+                    {{ record.payload.get('transactionType', 'Credit Activity') }} ·
+                    Balance {{ (record.payload.get('outstandingBalance', 0))|currency }}
+                    {% if record.payload.get('dueDate') %} · Due {{ record.payload.get('dueDate') }}{% endif %}
+                    {% if record.payload.get('reference') %} · Ref {{ record.payload.get('reference') }}{% endif %}
                   </span>
                 {% endif %}
               </td>

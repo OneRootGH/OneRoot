@@ -142,6 +142,15 @@
               placeholder="Calculated automatically from amount minus cost"
               readonly
             >
+          {% elif definition.key == 'customer_credit_accounts' and field.name == 'outstandingBalance' %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated automatically from this customer's credit activity"
+              readonly
+            >
           {% elif definition.key == 'forecast_plans' and field.name == 'totalBudget' %}
             <input
               type="number"
@@ -282,6 +291,10 @@
             <small class="muted form-helper">Upload a receipt image or PDF now. The receipt status will switch to Uploaded automatically.</small>
           {% elif definition.key == 'expenses' and field.name == 'receiptReference' %}
             <small class="muted form-helper">Use the receipt number, MoMo reference, bank alert, or invoice number if you have one.</small>
+          {% elif definition.key == 'customer_credit_accounts' and field.name == 'transactionType' %}
+            <small class="muted form-helper">Use Credit Sale when the customer takes goods or receives a service without paying. Use Payment Received later to reduce the balance.</small>
+          {% elif definition.key == 'customer_credit_accounts' and field.name == 'outstandingBalance' %}
+            <small class="muted form-helper">Calculated from every saved credit sale, payment, credit note, and approved write-off for this customer.</small>
           {% elif definition.key == 'customer_crm' and field.name == 'leadSource' %}
             <small class="muted form-helper">Use Facebook Page, WhatsApp, Website, Walk-in, or the real source so marketing reports stay accurate.</small>
           {% elif definition.key == 'customer_crm' and field.name == 'followUpDate' %}

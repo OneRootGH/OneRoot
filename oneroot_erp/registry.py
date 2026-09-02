@@ -434,6 +434,8 @@ ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
 ROLE_ACCESS_KEYS["finance"].add("staff_documents")
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
     ROLE_ACCESS_KEYS[_role_key].add("loss_prevention_controls")
+for _role_key in ("owner", "admin", "operations", "finance", "frontline-service-lead", "sales-stock-operator", "cashier"):
+    ROLE_ACCESS_KEYS[_role_key].add("customer_credit_accounts")
 
 SUITE_NAMES = [
     "Peace",
@@ -2121,6 +2123,35 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "customer_credit_accounts": ModuleDefinition(
+        key="customer_credit_accounts",
+        label="Customer Credit Accounts",
+        legacy_collection="customerCreditAccounts",
+        menu_group="Finance",
+        amount_field="amount",
+        date_field="entryDate",
+        title_field="customerName",
+        status_field="status",
+        fields=[
+            FieldDefinition("entryDate", "Entry Date", "date", True),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("customerName", "Customer Name", "text", True),
+            FieldDefinition("customerPhone", "Customer Phone", "text"),
+            FieldDefinition("transactionType", "Transaction", "select", True, [
+                ("Credit Sale", "Credit Sale / Amount Owed"),
+                ("Payment Received", "Payment Received"),
+                ("Credit Note", "Credit Note / Reduction"),
+                ("Write-Off", "Write-Off"),
+            ]),
+            FieldDefinition("amount", "Amount", "number", True),
+            FieldDefinition("paymentMethod", "Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
+            FieldDefinition("reference", "Sale / Receipt Reference", "text"),
+            FieldDefinition("dueDate", "Due Date", "date"),
+            FieldDefinition("outstandingBalance", "Customer Balance After Entry", "number"),
+            FieldDefinition("status", "Status", "select", True, [("Open", "Open"), ("Part Paid", "Part Paid"), ("Settled", "Settled"), ("Overdue", "Overdue"), ("Written Off", "Written Off")]),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
 }
 
 LEGACY_TO_MODULE = {definition.legacy_collection: definition.key for definition in MODULES.values()}
@@ -2138,7 +2169,7 @@ MENU_GROUPS = [
     (
         "Finance",
         [
-            ("Sales & Spend", ["sales_summary", "sales", "expenses", "petty_cash", "petty_cash_budgets"]),
+            ("Sales & Spend", ["sales_summary", "sales", "customer_credit_accounts", "expenses", "petty_cash", "petty_cash_budgets"]),
             ("Cash & Reconciliation", ["cashbook_entries", "mobile_money_reconciliations"]),
         ],
     ),
