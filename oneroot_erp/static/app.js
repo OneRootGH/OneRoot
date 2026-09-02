@@ -28,7 +28,6 @@
   const paymentMixNode = document.getElementById("pos-payment-mix");
   const momoSalesNode = document.getElementById("pos-momo-sales");
   const momoHandledNode = document.getElementById("pos-momo-handled");
-  const momoStatusNode = document.getElementById("pos-momo-status");
   const paymentLabelNode = document.getElementById("pos-payment-label");
   const summaryDateNode = document.getElementById("pos-summary-date");
   const summaryTotalNode = document.getElementById("pos-summary-total");
@@ -520,9 +519,6 @@
     }
     if (momoHandledNode) {
       momoHandledNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
-    }
-    if (momoStatusNode) {
-      momoStatusNode.textContent = summary.mobileMoneyStatusLabel || "Separate MoMo Counter";
     }
     if (areaLabelNode) {
       areaLabelNode.textContent = summary.areaLabel || "All POS Areas";
