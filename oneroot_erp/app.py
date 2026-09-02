@@ -10776,6 +10776,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         business_areas: set[str] = set()
 
         for order in all_orders:
+            # Credit sales are managed through Customer Credit Accounts, not the cash counter.
+            if normalize_text(order.payment_method).lower() == "credit":
+                continue
             order_total = 0.0
             order_items = 0.0
             bread_order_total = 0.0
@@ -11044,6 +11047,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         }
 
         for order in orders:
+            # Do not recognize a customer debt as collected POS or Daily Sales revenue.
+            if normalize_text(order.payment_method).lower() == "credit":
+                continue
             order_area_totals: dict[str, dict[str, float]] = defaultdict(lambda: {"amount": 0.0, "cost": 0.0})
             for line in order.lines:
                 area_id = normalize_text(line.business_area_id)
@@ -15342,6 +15348,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "item_names": pos_order_line_names(order.lines),
             }
             for order in recent_orders_raw
+            if normalize_text(order.payment_method).lower() != "credit"
         ]
         active_products = load_pos_products(
             g.db,

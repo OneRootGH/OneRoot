@@ -10,6 +10,9 @@
       </div>
       <div class="toolbar pos-workbench-tools">
         <a class="button subtle" href="{{ url_for('inventory') }}">Inventory</a>
+        {% if 'customer_credit_accounts' in current_access_keys %}
+          <a class="button subtle" href="{{ url_for('module_list', module_key='customer_credit_accounts') }}">Credit Accounts</a>
+        {% endif %}
         {% if 'mobile_money_transactions' in current_access_keys %}
           <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">MoMo Counter</a>
         {% endif %}
@@ -67,7 +70,7 @@
           No payment mix recorded yet.
         {% endif %}
       </span>
-      · Bread is counted separately and included in counter cash closeout. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
+      · Bread is counted separately and included in counter cash closeout. Credit sales are managed in Customer Credit Accounts and excluded from POS Sales and All Daily Sales. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
     </p>
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
