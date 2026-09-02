@@ -10236,6 +10236,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_summary = service_payment_summary(record.module_key, payload)
             kept_references = set()
             for index, payment in enumerate(payment_summary["payments"], start=1):
+                if normalize_text(payment.get("paymentMethod")).lower() == "credit":
+                    continue
                 reference = f"{prefix}|{payment['id']}"
                 kept_references.add(reference)
                 payment_date = parse_date(payment.get("paymentDate")) or get_laundry_payment_date(payload)
@@ -10274,6 +10276,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_summary = service_payment_summary(record.module_key, payload)
             kept_references = set()
             for index, payment in enumerate(payment_summary["payments"], start=1):
+                if normalize_text(payment.get("paymentMethod")).lower() == "credit":
+                    continue
                 reference = f"{prefix}|{payment['id']}"
                 kept_references.add(reference)
                 payment_date = parse_date(payment.get("paymentDate")) or parse_date(payload.get("orderDate")) or record.record_date
@@ -10312,6 +10316,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_summary = service_payment_summary(record.module_key, payload)
             kept_references = set()
             for index, payment in enumerate(payment_summary["payments"], start=1):
+                if normalize_text(payment.get("paymentMethod")).lower() == "credit":
+                    continue
                 reference = f"{prefix}|{payment['id']}"
                 kept_references.add(reference)
                 payment_date = parse_date(payment.get("paymentDate")) or get_equipment_payment_date(payload)
@@ -10441,6 +10447,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = dict(order_record.payload or {})
         order_number = normalize_text(payload.get("orderNumber"))
         payment_status = normalize_text(payload.get("paymentStatus")).lower()
+        payment_method = normalize_text(payload.get("paymentMethod")).lower()
         paid_amount = parse_amount(payload.get("paidAmount"))
         all_items = payload.get("items") if isinstance(payload.get("items"), list) else []
         sales_items = online_order_sales_items(payload)
@@ -10456,7 +10463,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         ).all()
 
-        if payment_status != "paid" or paid_amount <= 0 or not area_totals:
+        if payment_status != "paid" or payment_method == "credit" or paid_amount <= 0 or not area_totals:
             for existing in existing_records:
                 db.delete(existing)
             return
