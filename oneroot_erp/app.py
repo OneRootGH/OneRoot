@@ -69,6 +69,7 @@ SERVICE_LINE_ITEMS_KEY = "lineItems"
 POS_FOOD_SALES_AREA_IDS = {"kitchen"}
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
+BREAD_SALES_CATEGORY_LABELS = {"bread", "breads", "bakery", "bakery & bread"}
 CASHBOOK_MONEY_IN_TYPES = {"Cash In", "Bank Withdrawal"}
 CASHBOOK_MONEY_OUT_TYPES = {"Cash Out", "Bank Deposit", "Bank Charge"}
 SERVICE_ITEM_FIELD_MAP = {
@@ -4227,6 +4228,48 @@ def user_has_access(user: User | None, key: str) -> bool:
     return key in user_access_keys(user)
 
 
+def user_can_void_pos_orders(user: User | None) -> bool:
+    """Only accountable leadership roles can reverse a completed counter sale."""
+    return normalize_role_key(getattr(user, "role", "viewer")) in {
+        "owner",
+        "admin",
+        "operations",
+        "finance",
+        "operations-controls-lead",
+    }
+
+
+def user_can_override_pos_price(user: User | None) -> bool:
+    return normalize_role_key(getattr(user, "role", "viewer")) in {"owner", "admin", "operations"}
+
+
+def user_can_adjust_stock_downward(user: User | None) -> bool:
+    return normalize_role_key(getattr(user, "role", "viewer")) in {
+        "owner",
+        "admin",
+        "operations",
+        "finance",
+        "operations-controls-lead",
+    }
+
+
+def pos_line_is_bread(line: PosOrderLine | Product | dict[str, Any]) -> bool:
+    if isinstance(line, dict):
+        category = normalize_text(line.get("category")).lower()
+        name = normalize_text(line.get("name")).lower()
+    else:
+        category = normalize_text(getattr(line, "category", "")).lower()
+        name = normalize_text(getattr(line, "name", "")).lower()
+    return category in BREAD_SALES_CATEGORY_LABELS or "bread" in name
+
+
+def is_mobile_money_daily_sales_record(record: ModuleRecord) -> bool:
+    payload = dict(record.payload or {})
+    source_type = normalize_text(payload.get("sourceType")).lower()
+    area_id = normalize_text(record.business_area_id or payload.get("businessAreaId"))
+    return area_id == "mobile-money" or source_type.startswith("mobile-money")
+
+
 def user_can_view_dashboard(user: User | None) -> bool:
     """Keep the management dashboard for accountable leadership roles only."""
     if not user:
@@ -8215,6 +8258,8 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
     ).all()
 
     for record in sales_records:
+        if is_mobile_money_daily_sales_record(record):
+            continue
         payload = record.payload or {}
         business_area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
         if selected_area and business_area_id != selected_area:
@@ -8241,23 +8286,6 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
             profit_total=profit_total,
             transaction_count=transaction_count,
             notes=normalize_text(payload.get("notes")),
-        )
-
-    if mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"] and mobile_money_snapshot["recognizedSalesTotal"] > 0:
-        append_sale_entry(
-            entry_id=f"mobile-money-reconciliation-{sale_date.isoformat()}",
-            title="Mobile Money Reconciliation",
-            reference=mobile_money_snapshot["reference"] or f"mobile-money-reconciliation|{sale_date.isoformat()}",
-            record_date_value=sale_date.isoformat(),
-            updated_at_value=mobile_money_snapshot["latestUpdatedAtLabel"],
-            business_area_id="mobile-money",
-            source_type=mobile_money_snapshot["recognizedSourceType"],
-            source_label=mobile_money_snapshot["recognizedSourceLabel"],
-            amount=mobile_money_snapshot["recognizedSalesTotal"],
-            cost_total=mobile_money_snapshot["recognizedCostTotal"],
-            profit_total=mobile_money_snapshot["recognizedProfitTotal"],
-            transaction_count=mobile_money_snapshot["recognizedTransactionCount"],
-            notes=mobile_money_snapshot["summaryNote"],
         )
 
     total_sales = round(sum(row["salesTotal"] for row in area_map.values()), 2)
@@ -10133,23 +10161,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = dict(record.payload or {})
 
         if record.module_key == "mobile_money_transactions":
-            provider = normalize_text(payload.get("provider")) or "MTN Mobile Money"
-            service_type = normalize_text(payload.get("serviceType")) or "Mobile Money Service"
-            customer = normalize_text(payload.get("customerName")) or "Walk-in Customer"
-            is_completed = mobile_money_transaction_is_completed(payload)
-            sale_amount = parse_amount(payload.get("salesAmount")) if is_completed else 0.0
+            # MoMo is a float-and-commission counter, not retail revenue. Remove any
+            # prior generated Daily Sales entry while preserving the MoMo desk record.
             upsert_generated_sale(
                 db,
                 reference=f"mobile-money-transaction|{record.id}",
-                sale_date=parse_date(payload.get("date")),
-                business_area_id="mobile-money",
-                amount=sale_amount,
-                cost_amount=parse_amount(payload.get("costAmount")) if sale_amount > 0 else 0.0,
-                profit_amount=mobile_money_transaction_profit(payload) if sale_amount > 0 else 0.0,
+                sale_date=None,
+                business_area_id="",
+                amount=0.0,
                 source_type="mobile-money-transaction",
                 source_label="Mobile Money Transaction",
-                category=service_type,
-                note=f"[MoMo Sync] {service_type} for {customer} via {provider}.",
+                note="",
             )
             return
 
@@ -10639,7 +10661,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     def build_pos_counter_summary(order_date: date, area_id: str = "") -> dict[str, Any]:
         selected_area = normalize_text(area_id)
-        mobile_money_in_scope = not selected_area or selected_area == "mobile-money"
         kitchen_in_scope = not selected_area or selected_area in POS_FOOD_SALES_AREA_IDS
         mobile_money_snapshot = mobile_money_day_snapshot(g.db, order_date)
         all_orders = g.db.scalars(
@@ -10651,33 +10672,46 @@ def create_app(config: AppConfig | None = None) -> Flask:
         total_amount = 0.0
         total_cost = 0.0
         item_count = 0.0
+        bread_sales_total = 0.0
+        bread_sales_cost = 0.0
+        bread_item_count = 0.0
+        counter_payment_mix: dict[str, float] = defaultdict(float)
         business_areas: set[str] = set()
 
         for order in all_orders:
             order_total = 0.0
             order_items = 0.0
+            bread_order_total = 0.0
+            bread_order_items = 0.0
+            bread_order_cost = 0.0
             order_area_ids: set[str] = set()
             for line in order.lines:
                 if selected_area and line.business_area_id != selected_area:
                     continue
-                order_total += parse_amount(line.total_amount)
-                total_cost += parse_amount(line.cost_amount)
-                order_items += parse_amount(line.quantity)
+                if pos_line_is_bread(line):
+                    bread_order_total += parse_amount(line.total_amount)
+                    bread_order_cost += parse_amount(line.cost_amount)
+                    bread_order_items += parse_amount(line.quantity)
+                else:
+                    order_total += parse_amount(line.total_amount)
+                    total_cost += parse_amount(line.cost_amount)
+                    order_items += parse_amount(line.quantity)
                 if line.business_area_id:
                     order_area_ids.add(line.business_area_id)
 
-            if selected_area:
-                if order_total <= 0:
-                    continue
-            else:
-                order_total = parse_amount(order.total_amount)
-                order_items = parse_amount(order.item_count)
-                order_area_ids = set(order.business_area_ids or [])
+            gross_order_total = round(order_total + bread_order_total, 2)
+            gross_order_items = round(order_items + bread_order_items, 2)
+            if gross_order_total <= 0:
+                continue
 
             payment_method = normalize_text(order.payment_method) or "Unspecified"
             total_amount += order_total
             item_count += order_items
+            bread_sales_total += bread_order_total
+            bread_sales_cost += bread_order_cost
+            bread_item_count += bread_order_items
             payment_mix[payment_method] += order_total
+            counter_payment_mix[payment_method] += gross_order_total
             business_areas.update(order_area_ids)
             item_names = pos_order_line_names(order.lines, area_id=selected_area)
             order_rows.append(
@@ -10687,8 +10721,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "orderDate": order.order_date.isoformat(),
                     "paymentMethod": payment_method,
                     "customerName": order.customer_name,
-                    "itemCount": round(order_items, 2),
-                    "totalAmount": round(order_total, 2),
+                    "itemCount": gross_order_items,
+                    "totalAmount": gross_order_total,
                     "itemNames": item_names,
                     "itemSummary": pos_order_item_summary(order.lines, area_id=selected_area),
                     "businessAreaIds": sorted(order_area_ids),
@@ -10706,6 +10740,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         daily_sales_cost_by_area: dict[str, float] = defaultdict(float)
         daily_sales_transaction_count_by_area: dict[str, int] = defaultdict(int)
         for record in all_sales_rows:
+            if is_mobile_money_daily_sales_record(record):
+                continue
             sales_area_id = record.business_area_id or "shared-operations"
             sales_payload = dict(record.payload or {})
             daily_sales_by_area[sales_area_id] += parse_amount(record.amount)
@@ -10714,11 +10750,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 int(parse_amount(sales_payload.get("transactionCount"))),
                 1,
             )
-
-        # Some historic MoMo records pre-date generated sales entries. Include that recognised
-        # commission once so a closeout reconciles to the actual counter activity.
-        if mobile_money_snapshot["usesReconciliationFallback"] and mobile_money_snapshot["recognizedSalesTotal"] > 0:
-            daily_sales_by_area["mobile-money"] += mobile_money_snapshot["recognizedSalesTotal"]
 
         all_daily_sales_breakdown = [
             {
@@ -10742,9 +10773,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if selected_area:
             sales_query = sales_query.where(ModuleRecord.business_area_id == selected_area)
         sales_rows = g.db.scalars(sales_query).all()
-        daily_sales_total = round(sum(parse_amount(record.amount) for record in sales_rows), 2)
-        if mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"] and mobile_money_snapshot["recognizedSalesTotal"] > 0:
-            daily_sales_total = round(daily_sales_total + mobile_money_snapshot["recognizedSalesTotal"], 2)
+        daily_sales_total = round(
+            sum(parse_amount(record.amount) for record in sales_rows if not is_mobile_money_daily_sales_record(record)),
+            2,
+        )
 
         kitchen_open_balance = 0.0
         if kitchen_in_scope:
@@ -10771,7 +10803,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         )
         closeout_payload = serialize_module_record(closeout_record) if closeout_record else None
-        cash_sales_total = pos_cash_sales_total(payment_mix)
+        cash_sales_total = pos_cash_sales_total(counter_payment_mix)
         opening_cash = parse_amount(closeout_payload.get("openingCash")) if closeout_payload else 0.0
         closing_cash_counted = parse_amount(closeout_payload.get("closingCashCounted")) if closeout_payload else 0.0
         expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_sales_total)
@@ -10792,10 +10824,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "totalAmount": round(total_amount, 2),
             "costAmount": round(total_cost, 2),
             "profitAmount": round(total_amount - total_cost, 2),
+            "breadSalesTotal": round(bread_sales_total, 2),
+            "breadSalesCost": round(bread_sales_cost, 2),
+            "breadSalesProfit": round(bread_sales_total - bread_sales_cost, 2),
+            "breadItemCount": round(bread_item_count, 2),
+            "counterCollectionsTotal": round(total_amount + bread_sales_total, 2),
             "dailySalesLedgerTotal": daily_sales_total,
             "allDailySalesTotal": all_daily_sales_total,
             "allDailySalesBreakdown": all_daily_sales_breakdown,
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
+            "counterPaymentMix": {key: round(value, 2) for key, value in sorted(counter_payment_mix.items())},
             "cashSalesTotal": cash_sales_total,
             "openingCash": opening_cash,
             "closingCashCounted": closing_cash_counted,
@@ -10814,21 +10852,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 sum(amount for area_key, amount in daily_sales_by_area.items() if area_key in POS_EQUIPMENT_SALES_AREA_IDS),
                 2,
             ),
-            "mobileMoneyInScope": mobile_money_in_scope,
-            "mobileMoneySalesTotal": mobile_money_snapshot["recognizedSalesTotal"] if mobile_money_in_scope else 0.0,
-            "mobileMoneyProfitTotal": mobile_money_snapshot["recognizedProfitTotal"] if mobile_money_in_scope else 0.0,
-            "mobileMoneyHandledValue": mobile_money_snapshot["handledValueTotal"] if mobile_money_in_scope else 0.0,
-            "mobileMoneyCompletedTransactions": mobile_money_snapshot["completedTransactionCount"] if mobile_money_in_scope else 0,
-            "mobileMoneyReconciliationTotal": mobile_money_snapshot["reconciliationFeeTotal"] if mobile_money_in_scope else 0.0,
-            "mobileMoneyReconciliationCount": mobile_money_snapshot["reconciliationCount"] if mobile_money_in_scope else 0,
-            "mobileMoneyVariance": mobile_money_snapshot["varianceTotal"] if mobile_money_in_scope else 0.0,
-            "mobileMoneyExpectedClosing": mobile_money_snapshot["expectedClosingTotal"] if mobile_money_in_scope else 0.0,
-            "mobileMoneyClosingCounted": mobile_money_snapshot["closingCountedTotal"] if mobile_money_in_scope else 0.0,
-            "mobileMoneyBalancedCount": mobile_money_snapshot["balancedCount"] if mobile_money_in_scope else 0,
-            "mobileMoneyStatusLabel": mobile_money_snapshot["statusLabel"] if mobile_money_in_scope else "Outside Filter",
-            "mobileMoneyUsesReconciliationFallback": mobile_money_in_scope and mobile_money_snapshot["usesReconciliationFallback"],
-            "mobileMoneySourceLabel": mobile_money_snapshot["recognizedSourceLabel"] if mobile_money_in_scope else "Mobile Money",
-            "mobileMoneySummaryNote": mobile_money_snapshot["summaryNote"] if mobile_money_in_scope else "Mobile money is outside the current area filter.",
+            "mobileMoneyInScope": False,
+            "mobileMoneySalesTotal": 0.0,
+            "mobileMoneyProfitTotal": 0.0,
+            "mobileMoneyHandledValue": mobile_money_snapshot["handledValueTotal"],
+            "mobileMoneyCompletedTransactions": mobile_money_snapshot["completedTransactionCount"],
+            "mobileMoneyReconciliationTotal": mobile_money_snapshot["reconciliationFeeTotal"],
+            "mobileMoneyReconciliationCount": mobile_money_snapshot["reconciliationCount"],
+            "mobileMoneyVariance": mobile_money_snapshot["varianceTotal"],
+            "mobileMoneyExpectedClosing": mobile_money_snapshot["expectedClosingTotal"],
+            "mobileMoneyClosingCounted": mobile_money_snapshot["closingCountedTotal"],
+            "mobileMoneyBalancedCount": mobile_money_snapshot["balancedCount"],
+            "mobileMoneyStatusLabel": "Separate MoMo Counter",
+            "mobileMoneyUsesReconciliationFallback": False,
+            "mobileMoneySourceLabel": "Mobile Money",
+            "mobileMoneySummaryNote": "Mobile Money is accounted for only in the dedicated MoMo counter and reconciliation.",
             "orders": order_rows[:20],
             "businessAreaIds": sorted(business_areas),
             "lastCloseout": closeout_payload,
@@ -10858,7 +10896,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             existing_payload = dict(record.payload or {})
             opening_cash = parse_amount(existing_payload.get("openingCash"))
             closing_cash_counted = parse_amount(existing_payload.get("closingCashCounted"))
-            cash_sales_total = pos_cash_sales_total(summary["paymentMix"])
+            cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
             expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_sales_total)
             closeout_payload = {
                 "id": record.id,
@@ -10870,12 +10908,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "totalAmount": summary["totalAmount"],
                 "costAmount": summary["costAmount"],
                 "profitAmount": summary["profitAmount"],
+                "breadSalesTotal": summary["breadSalesTotal"],
+                "breadSalesProfit": summary["breadSalesProfit"],
+                "counterCollectionsTotal": summary["counterCollectionsTotal"],
                 "orderCount": summary["orderCount"],
                 "itemCount": summary["itemCount"],
                 "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
                 "allDailySalesTotal": summary["allDailySalesTotal"],
                 "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
-                "paymentMix": summary["paymentMix"],
+                "paymentMix": summary["counterPaymentMix"],
                 "cashSalesTotal": cash_sales_total,
                 "openingCash": opening_cash,
                 "closingCashCounted": closing_cash_counted,
@@ -10909,7 +10950,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             order_area_totals: dict[str, dict[str, float]] = defaultdict(lambda: {"amount": 0.0, "cost": 0.0})
             for line in order.lines:
                 area_id = normalize_text(line.business_area_id)
-                if area_id not in area_totals:
+                if area_id not in area_totals or pos_line_is_bread(line):
                     continue
                 order_area_totals[area_id]["amount"] += parse_amount(line.total_amount)
                 order_area_totals[area_id]["cost"] += parse_amount(line.cost_amount)
@@ -13261,6 +13302,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == module_key)
             .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
+        if module_key == "sales":
+            all_records = [record for record in all_records if not is_mobile_money_daily_sales_record(record)]
         if module_key == "customer_crm":
             all_records = latest_customer_crm_records(all_records)
         records = filter_module_records(
@@ -13648,6 +13691,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == module_key)
             .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
+        if module_key == "sales":
+            all_records = [record for record in all_records if not is_mobile_money_daily_sales_record(record)]
         if module_key == "customer_crm":
             all_records = latest_customer_crm_records(all_records)
         records = filter_module_records(
@@ -13767,6 +13812,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 daily_handover_rollup(g.db, payload)
             elif module_key == "business_area_scorecards":
                 business_area_scorecard_rollup(g.db, payload)
+            elif module_key == "loss_prevention_controls":
+                expected_amount = parse_amount(payload.get("expectedAmount"))
+                counted_amount = parse_amount(payload.get("countedAmount"))
+                payload["variance"] = round(counted_amount - expected_amount, 2)
+                if not normalize_text(payload.get("reviewedBy")):
+                    payload["reviewedBy"] = g.current_user.full_name or g.current_user.username
+                if abs(payload["variance"]) < 0.01 and normalize_text(payload.get("status")) == "Open Review":
+                    payload["status"] = "Balanced"
             elif module_key == "mobile_money_reconciliations":
                 payload["businessAreaId"] = "mobile-money"
                 provider_value = normalize_text(payload.get("provider")) or "MTN Mobile Money"
@@ -13918,6 +13971,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         elif module_key == "daily_handovers":
             record_payload.setdefault("handoverDate", date.today().isoformat())
             record_payload.setdefault("shift", "Full Day")
+        elif module_key == "loss_prevention_controls":
+            record_payload.setdefault("controlDate", date.today().isoformat())
+            record_payload.setdefault("status", "Open Review")
+            record_payload.setdefault("reviewedBy", g.current_user.full_name or g.current_user.username)
             record_payload.setdefault("status", "Draft")
             daily_handover_rollup(g.db, record_payload)
         elif module_key == "business_area_scorecards":
@@ -14871,6 +14928,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         ]
 
         if request.method == "POST":
+            if not user_can_adjust_stock_downward(g.current_user):
+                flash("Only a manager or controls role can create, edit, price, or retire inventory items. Use barcode stock update for approved receiving.", "warning")
+                return redirect(url_for("inventory"))
             product_id = normalize_text(request.form.get("id")) or uuid4().hex
             product = find_inventory_product(g.db, product_id)
             is_new = product is None
@@ -15026,6 +15086,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 flash("No stock item matched that barcode or SKU.", "error")
             elif not product_tracks_inventory(matching_product):
                 flash("That item is saved as a service item and does not use stock quantity.", "warning")
+            elif action_type in {"remove", "set"} and not user_can_adjust_stock_downward(g.current_user):
+                flash("Only a manager or controls role can reduce or set stock by barcode. Use sales for normal stock deductions.", "warning")
+            elif action_type in {"remove", "set"} and not note_value:
+                flash("Enter a reason for a stock reduction or stock count adjustment.", "warning")
             else:
                 previous_quantity = round(parse_amount(matching_product.quantity_on_hand), 2)
                 quantity_value = max(quantity_value, 0)
@@ -15077,6 +15141,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/inventory/<product_id>/delete", methods=["POST"])
     @access_required("inventory")
     def inventory_delete(product_id: str):
+        if not user_can_adjust_stock_downward(g.current_user):
+            flash("Only a manager or controls role can delete an inventory item.", "warning")
+            return redirect(url_for("inventory"))
         product = find_inventory_product(g.db, product_id)
         if not product:
             flash("That inventory item could not be found.", "error")
@@ -15189,6 +15256,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             initial_category=initial_category,
             initial_search=initial_search,
             food_pos_mode=food_pos_mode,
+            can_void_pos_orders=user_can_void_pos_orders(g.current_user),
         )
 
     @app.route("/app/pos/<order_id>/receipt")
@@ -15319,10 +15387,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
         subtotal = 0.0
         item_count = 0.0
         area_ids = []
+        price_overrides: list[str] = []
         for position, item in enumerate(items, start=1):
             product = products[normalize_text(item.get("productId"))]
             quantity = max(parse_amount(item.get("quantity")), 1.0)
-            unit_price = parse_amount(item.get("unitPrice")) or product.sales_price
+            requested_unit_price = parse_amount(item.get("unitPrice"))
+            unit_price = parse_amount(product.sales_price)
+            if requested_unit_price > 0 and abs(requested_unit_price - unit_price) >= 0.01:
+                if user_can_override_pos_price(g.current_user):
+                    unit_price = requested_unit_price
+                    price_overrides.append(f"{product.name}: {format_currency(product.sales_price)} -> {format_currency(unit_price)}")
             unit_cost = parse_amount(product.cost_price)
             cost_amount = round(quantity * unit_cost, 2)
             line_total = round(quantity * unit_price, 2)
@@ -15365,6 +15439,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if normalize_text(order.customer_name) or normalize_text(order.customer_phone):
             sync_customer_crm_automation(g.db)
         audit("pos", "POS", "create", f"{order.order_number} saved", order.id, f"{order.item_count:g} items · {format_currency(order.total_amount)}")
+        if price_overrides:
+            audit(
+                "pos",
+                "POS",
+                "price-override",
+                f"{order.order_number} price override",
+                order.id,
+                "; ".join(price_overrides),
+            )
         g.db.commit()
         saved_order = {
             "id": order.id,
@@ -15391,6 +15474,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/api/pos/orders/<order_id>", methods=["DELETE"])
     @access_required("pos", api=True)
     def pos_delete_order(order_id: str):
+        if not user_can_void_pos_orders(g.current_user):
+            return jsonify({"ok": False, "error": "Only a manager or controls role can void a saved POS order."}), 403
+        payload = request.get_json(silent=True) or {}
+        void_reason = normalize_text(payload.get("reason"))
+        if not void_reason:
+            return jsonify({"ok": False, "error": "Enter a reason before voiding a saved POS order."}), 400
         order = g.db.scalar(
             select(PosOrder)
             .options(selectinload(PosOrder.lines))
@@ -15433,7 +15522,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "delete",
             order_number or "POS Order",
             order_id,
-            f"{customer_name} · {item_count:g} items removed · {format_currency(total_amount)}",
+            f"VOID: {customer_name} · {item_count:g} items removed · {format_currency(total_amount)} · Reason: {void_reason}",
         )
         g.db.commit()
         selected_area = request.args.get("area") or request.headers.get("X-OneRoot-Area", "")
@@ -15484,7 +15573,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         is_existing = record is not None
         existing_payload = dict(record.payload or {}) if record else {}
-        cash_sales_total = pos_cash_sales_total(summary["paymentMix"])
+        cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
         expected_closing_cash = pos_expected_closing_cash(opening_cash_raw, cash_sales_total)
         closeout_payload = {
             "id": record.id if record else uuid4().hex,
@@ -15496,12 +15585,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "totalAmount": summary["totalAmount"],
             "costAmount": summary["costAmount"],
             "profitAmount": summary["profitAmount"],
+            "breadSalesTotal": summary["breadSalesTotal"],
+            "breadSalesProfit": summary["breadSalesProfit"],
+            "counterCollectionsTotal": summary["counterCollectionsTotal"],
             "orderCount": summary["orderCount"],
             "itemCount": summary["itemCount"],
             "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
             "allDailySalesTotal": summary["allDailySalesTotal"],
             "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
-            "paymentMix": summary["paymentMix"],
+            "paymentMix": summary["counterPaymentMix"],
             "cashSalesTotal": cash_sales_total,
             "openingCash": opening_cash_raw,
             "closingCashCounted": closing_cash_counted_raw,

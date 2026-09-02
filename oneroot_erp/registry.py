@@ -432,6 +432,8 @@ ROLE_ACCESS_KEYS["admin"].add("staff_documents")
 ROLE_ACCESS_KEYS["operations"].add("staff_documents")
 ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
 ROLE_ACCESS_KEYS["finance"].add("staff_documents")
+for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
+    ROLE_ACCESS_KEYS[_role_key].add("loss_prevention_controls")
 
 SUITE_NAMES = [
     "Peace",
@@ -2084,6 +2086,41 @@ MODULES: dict[str, ModuleDefinition] = {
         title_field="areaLabel",
         editable=False,
     ),
+    "loss_prevention_controls": ModuleDefinition(
+        key="loss_prevention_controls",
+        label="Loss Prevention Controls",
+        legacy_collection="lossPreventionControls",
+        menu_group="Control",
+        amount_field="variance",
+        date_field="controlDate",
+        title_field="controlType",
+        status_field="status",
+        fields=[
+            FieldDefinition("controlDate", "Control Date", "date", True),
+            FieldDefinition("controlType", "Control Type", "select", True, [
+                ("Cash Count", "Cash Count"),
+                ("Stock Count", "Stock Count"),
+                ("POS Void Review", "POS Void Review"),
+                ("Price Override Review", "Price Override Review"),
+                ("MoMo Float Count", "MoMo Float Count"),
+                ("Other", "Other"),
+            ]),
+            FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("expectedAmount", "System / Expected Amount", "number"),
+            FieldDefinition("countedAmount", "Physical Count / Actual Amount", "number"),
+            FieldDefinition("variance", "Variance", "number"),
+            FieldDefinition("reason", "Reason / Explanation", "textarea"),
+            FieldDefinition("resolution", "Resolution / Corrective Action", "textarea"),
+            FieldDefinition("reviewedBy", "Reviewed By", "text"),
+            FieldDefinition("status", "Status", "select", True, [
+                ("Open Review", "Open Review"),
+                ("Balanced", "Balanced"),
+                ("Resolved", "Resolved"),
+                ("Escalated", "Escalated"),
+            ]),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
 }
 
 LEGACY_TO_MODULE = {definition.legacy_collection: definition.key for definition in MODULES.values()}
@@ -2129,7 +2166,7 @@ MENU_GROUPS = [
     (
         "Control",
         [
-            ("Planning & Reporting", ["forecast_plans", "business_area_scorecards", "daily_handovers", "recurring_controls", "pos_closeouts"]),
+            ("Planning & Reporting", ["forecast_plans", "business_area_scorecards", "daily_handovers", "recurring_controls", "pos_closeouts", "loss_prevention_controls"]),
             ("Assets & Admin", ["asset_records", "audit", "users"]),
         ],
     ),

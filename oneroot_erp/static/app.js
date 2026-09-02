@@ -21,14 +21,11 @@
   const allDailySalesNode = document.getElementById("pos-all-daily-sales");
   const allDailySalesLinesNode = document.getElementById("pos-all-daily-sales-lines");
   const foodSalesNode = document.getElementById("pos-food-sales");
+  const breadSalesNode = document.getElementById("pos-bread-sales");
   const laundrySalesNode = document.getElementById("pos-laundry-sales");
   const equipmentSalesNode = document.getElementById("pos-equipment-sales");
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
-  const momoSalesNode = document.getElementById("pos-momo-sales");
-  const momoHandledNode = document.getElementById("pos-momo-handled");
-  const momoStatusNode = document.getElementById("pos-momo-status");
-  const momoNoteNode = document.getElementById("pos-momo-note");
   const paymentLabelNode = document.getElementById("pos-payment-label");
   const summaryDateNode = document.getElementById("pos-summary-date");
   const summaryTotalNode = document.getElementById("pos-summary-total");
@@ -52,6 +49,7 @@
   const lastOrderNode = document.getElementById("pos-last-order-number");
   const lastReceiptLink = document.getElementById("pos-last-receipt");
   const posDesk = document.querySelector("[data-pos-desk]")?.dataset.posDesk || "general";
+  const canVoidOrders = document.querySelector("[data-can-void-orders]")?.dataset.canVoidOrders === "yes";
 
   if (!searchInput || !resultsContainer || !cartContainer || !saveButton) {
     return;
@@ -468,7 +466,7 @@
         <td>
           <div class="row-actions pos-history-actions">
             ${order.receiptUrl ? `<a class="table-link" href="${escapeHtml(order.receiptUrl)}" target="_blank" rel="noopener">Receipt</a>` : ""}
-            ${order.id ? `<button class="text-button danger-text" type="button" data-action="delete-order" data-order-id="${escapeHtml(order.id)}" data-order-number="${escapeHtml(order.orderNumber)}">Delete</button>` : ""}
+            ${order.id && canVoidOrders ? `<button class="text-button danger-text" type="button" data-action="delete-order" data-order-id="${escapeHtml(order.id)}" data-order-number="${escapeHtml(order.orderNumber)}">Void</button>` : ""}
           </div>
         </td>
       </tr>
@@ -503,25 +501,14 @@
     if (foodSalesNode) {
       foodSalesNode.textContent = formatCurrency(summary.foodSalesTotal);
     }
+    if (breadSalesNode) {
+      breadSalesNode.textContent = formatCurrency(summary.breadSalesTotal);
+    }
     if (laundrySalesNode) {
       laundrySalesNode.textContent = formatCurrency(summary.laundrySalesTotal);
     }
     if (equipmentSalesNode) {
       equipmentSalesNode.textContent = formatCurrency(summary.equipmentSalesTotal);
-    }
-    if (momoSalesNode) {
-      momoSalesNode.textContent = formatCurrency(summary.mobileMoneySalesTotal);
-    }
-    if (momoHandledNode) {
-      momoHandledNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
-    }
-    if (momoStatusNode) {
-      momoStatusNode.textContent = summary.mobileMoneyInScope
-        ? `${summary.mobileMoneyStatusLabel || "No Reconciliation"}${summary.mobileMoneyReconciliationCount ? ` · ${summary.mobileMoneyReconciliationCount} closeout${summary.mobileMoneyReconciliationCount === 1 ? "" : "s"}` : ""}`
-        : "Outside Filter";
-    }
-    if (momoNoteNode) {
-      momoNoteNode.textContent = summary.mobileMoneySummaryNote || "";
     }
     if (areaLabelNode) {
       areaLabelNode.textContent = summary.areaLabel || "All POS Areas";
@@ -608,14 +595,16 @@
     }, 80);
   }
 
-  async function deleteSavedOrder(orderId, orderNumber) {
+  async function deleteSavedOrder(orderId, orderNumber, reason) {
     const response = await fetch(`/app/api/pos/orders/${encodeURIComponent(orderId)}`, {
       method: "DELETE",
       credentials: "same-origin",
       headers: {
         Accept: "application/json",
+        "Content-Type": "application/json",
         "X-OneRoot-Area": getSelectedArea()
-      }
+      },
+      body: JSON.stringify({ reason })
     });
     const result = await response.json();
     if (!response.ok || !result.ok) {
@@ -630,7 +619,7 @@
     } else {
       await refreshSummary();
     }
-    setStatus(`${result.deleted.orderNumber} deleted and added to the audit trail.`);
+    setStatus(`${result.deleted.orderNumber} voided and added to the audit trail.`);
   }
 
   searchInput.addEventListener("input", queueProductSearch);
@@ -776,13 +765,14 @@
     if (!orderId) {
       return;
     }
-    if (!window.confirm(`Delete ${orderNumber}? This will remove it from POS and re-sync daily sales.`)) {
+    const reason = window.prompt(`Enter the reason for voiding ${orderNumber}. This will be saved in the audit trail.`);
+    if (!reason || !reason.trim()) {
       return;
     }
     button.disabled = true;
     setStatus(`Deleting ${orderNumber}...`);
     try {
-      await deleteSavedOrder(orderId, orderNumber);
+      await deleteSavedOrder(orderId, orderNumber, reason.trim());
     } finally {
       button.disabled = false;
     }

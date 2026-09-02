@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card pos-workbench" data-pos-desk="{{ 'food' if food_pos_mode else 'general' }}">
+  <section class="card pos-workbench" data-pos-desk="{{ 'food' if food_pos_mode else 'general' }}" data-can-void-orders="{{ 'yes' if can_void_pos_orders else 'no' }}">
     <div class="pos-workbench-bar">
       <div class="pos-workbench-title">
         <h3>{% if food_pos_mode %}Kitchen Checkout{% else %}Checkout{% endif %}</h3>
@@ -22,6 +22,10 @@
         <span class="pos-counter-label">POS Sales</span>
         <strong id="pos-counter-total">{{ counter_summary.totalAmount|currency }}</strong>
       </article>
+      <article class="pos-counter-pill pos-counter-pill-highlight">
+        <span class="pos-counter-label">Bread Sales</span>
+        <strong id="pos-bread-sales">{{ counter_summary.breadSalesTotal|currency }}</strong>
+      </article>
       <article class="pos-counter-pill">
         <span class="pos-counter-label">All Daily Sales</span>
         <strong id="pos-ledger-total">{{ counter_summary.dailySalesLedgerTotal|currency }}</strong>
@@ -38,23 +42,6 @@
         <span class="pos-counter-label">Equipment Sales</span>
         <strong id="pos-equipment-sales">{{ counter_summary.equipmentSalesTotal|currency }}</strong>
       </article>
-      <article class="pos-counter-pill pos-counter-pill-highlight">
-        <span class="pos-counter-label">MoMo Sales</span>
-        <strong id="pos-momo-sales">{{ counter_summary.mobileMoneySalesTotal|currency }}</strong>
-      </article>
-      <article class="pos-counter-pill">
-        <span class="pos-counter-label">Handled Value</span>
-        <strong id="pos-momo-handled">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong>
-      </article>
-      <article class="pos-counter-pill">
-        <span class="pos-counter-label">MoMo Status</span>
-        <strong id="pos-momo-status">
-          {{ counter_summary.mobileMoneyStatusLabel }}
-          {% if counter_summary.mobileMoneyReconciliationCount %}
-            · {{ counter_summary.mobileMoneyReconciliationCount }} closeout{% if counter_summary.mobileMoneyReconciliationCount != 1 %}s{% endif %}
-          {% endif %}
-        </strong>
-      </article>
     </section>
     <p class="muted pos-counter-note" id="pos-counter-note">
       Area:
@@ -69,7 +56,7 @@
           No payment mix recorded yet.
         {% endif %}
       </span>
-      · <span id="pos-momo-note">{{ counter_summary.mobileMoneySummaryNote }}</span>
+      · Bread is counted separately and included in counter cash closeout. Mobile Money is managed only from its dedicated counter.
     </p>
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
@@ -279,7 +266,7 @@
               <td>
                 <div class="row-actions pos-history-actions">
                   <a class="table-link" href="{{ url_for('pos_receipt', order_id=order.id) }}" target="_blank" rel="noopener">Receipt</a>
-                  <button class="text-button danger-text" type="button" data-action="delete-order" data-order-id="{{ order.id }}" data-order-number="{{ order.order_number }}">Delete</button>
+                  {% if can_void_pos_orders %}<button class="text-button danger-text" type="button" data-action="delete-order" data-order-id="{{ order.id }}" data-order-number="{{ order.order_number }}">Void</button>{% endif %}
                 </div>
               </td>
             </tr>
