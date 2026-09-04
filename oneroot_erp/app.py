@@ -10570,6 +10570,36 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return f"phone:{phone}"
         return f"name:{normalize_text(payload.get('customerName')).lower()}"
 
+    def customer_credit_rollup_key(db_session, payload: dict[str, Any]) -> str:
+        """Use a direct source link where available, then safely repair name-only repayments."""
+        linked_credit_id = normalize_text(payload.get("linkedCreditAccountId"))
+        if linked_credit_id:
+            linked_credit = db_session.get(ModuleRecord, linked_credit_id)
+            if linked_credit and linked_credit.module_key == "customer_credit_accounts":
+                return customer_credit_key(linked_credit.payload or {})
+
+        direct_key = customer_credit_key(payload)
+        customer_name = normalize_text(payload.get("customerName")).lower()
+        if not customer_name:
+            return direct_key
+        records = db_session.scalars(
+            select(ModuleRecord).where(ModuleRecord.module_key == "customer_credit_accounts")
+        ).all()
+        direct_credit_sale_exists = any(
+            normalize_text((record.payload or {}).get("transactionType")) == "Credit Sale"
+            and customer_credit_key(record.payload or {}) == direct_key
+            for record in records
+        )
+        if direct_credit_sale_exists:
+            return direct_key
+        name_keys = {
+            customer_credit_key(record.payload or {})
+            for record in records
+            if normalize_text((record.payload or {}).get("transactionType")) == "Credit Sale"
+            and normalize_text((record.payload or {}).get("customerName")).lower() == customer_name
+        }
+        return next(iter(name_keys)) if len(name_keys) == 1 else direct_key
+
     def customer_credit_entry_effect(payload: dict[str, Any]) -> float:
         amount = abs(parse_amount(payload.get("amount")))
         return amount if normalize_text(payload.get("transactionType")) == "Credit Sale" else -amount
@@ -10581,9 +10611,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
         records = db_session.scalars(
             select(ModuleRecord).where(ModuleRecord.module_key == "customer_credit_accounts").order_by(ModuleRecord.record_date.asc(), ModuleRecord.created_at.asc(), ModuleRecord.id.asc())
         ).all()
-        for account_record in records:
+        resolved_records = [
+            (account_record, customer_credit_rollup_key(db_session, dict(account_record.payload or {})))
+            for account_record in records
+        ]
+        for account_record, resolved_key in resolved_records:
             account_payload = dict(account_record.payload or {})
-            if customer_credit_key(account_payload) != customer_key:
+            if resolved_key != customer_key:
                 continue
             running_balance = round(running_balance + customer_credit_entry_effect(account_payload), 2)
             account_payload["outstandingBalance"] = max(running_balance, 0.0)
@@ -10596,6 +10630,89 @@ def create_app(config: AppConfig | None = None) -> Flask:
             else:
                 account_payload["status"] = "Open"
             set_module_record_metadata(account_record, MODULES["customer_credit_accounts"], account_payload)
+
+    def repair_customer_credit_balances(db_session) -> None:
+        records = db_session.scalars(
+            select(ModuleRecord).where(ModuleRecord.module_key == "customer_credit_accounts")
+        ).all()
+        sales_by_customer_name: dict[str, list[ModuleRecord]] = defaultdict(list)
+        for record in records:
+            payload = dict(record.payload or {})
+            if normalize_text(payload.get("transactionType")) != "Credit Sale":
+                continue
+            customer_name = normalize_text(payload.get("customerName")).lower()
+            if customer_name:
+                sales_by_customer_name[customer_name].append(record)
+
+        # Historical repayments sometimes saved a name but no phone. Link only when
+        # exactly one credit sale shares that name; ambiguous records are left intact.
+        for record in records:
+            payload = dict(record.payload or {})
+            if normalize_text(payload.get("transactionType")) == "Credit Sale":
+                continue
+            if normalize_text(payload.get("linkedCreditAccountId")):
+                continue
+            customer_name = normalize_text(payload.get("customerName")).lower()
+            matching_sales = sales_by_customer_name.get(customer_name, [])
+            if len(matching_sales) != 1:
+                continue
+            linked_sale = matching_sales[0]
+            linked_payload = dict(linked_sale.payload or {})
+            payload["linkedCreditAccountId"] = linked_sale.id
+            if not normalize_text(payload.get("customerPhone")):
+                payload["customerPhone"] = normalize_text(linked_payload.get("customerPhone"))
+            set_module_record_metadata(record, MODULES["customer_credit_accounts"], payload)
+
+        grouped_records: dict[str, list[ModuleRecord]] = defaultdict(list)
+        for record in records:
+            grouped_records[customer_credit_rollup_key(db_session, record.payload or {})].append(record)
+
+        for account_records in grouped_records.values():
+            running_balance = 0.0
+            for account_record in sorted(
+                account_records,
+                key=lambda item: (item.record_date or date.min, item.created_at, item.id),
+            ):
+                account_payload = dict(account_record.payload or {})
+                running_balance = round(running_balance + customer_credit_entry_effect(account_payload), 2)
+                account_payload["outstandingBalance"] = max(running_balance, 0.0)
+                if normalize_text(account_payload.get("transactionType")) == "Write-Off":
+                    account_payload["status"] = "Written Off"
+                elif running_balance <= 0:
+                    account_payload["status"] = "Settled"
+                elif parse_date(account_payload.get("dueDate")) and parse_date(account_payload.get("dueDate")) < date.today():
+                    account_payload["status"] = "Overdue"
+                else:
+                    account_payload["status"] = "Open"
+                set_module_record_metadata(account_record, MODULES["customer_credit_accounts"], account_payload)
+
+        # Keep the originating credit sale and every explicitly linked payment on
+        # the same final balance, even where a historical record used a different key.
+        linked_activity: dict[str, list[ModuleRecord]] = defaultdict(list)
+        for record in records:
+            payload = dict(record.payload or {})
+            if normalize_text(payload.get("transactionType")) == "Credit Sale":
+                linked_activity[record.id].append(record)
+            linked_sale_id = normalize_text(payload.get("linkedCreditAccountId"))
+            if linked_sale_id:
+                linked_activity[linked_sale_id].append(record)
+        for sale_id, activity_records in linked_activity.items():
+            sale_record = next((item for item in activity_records if item.id == sale_id), None)
+            if not sale_record:
+                continue
+            balance = round(
+                sum(customer_credit_entry_effect(dict(item.payload or {})) for item in activity_records),
+                2,
+            )
+            for activity_record in activity_records:
+                activity_payload = dict(activity_record.payload or {})
+                activity_payload["outstandingBalance"] = max(balance, 0.0)
+                activity_payload["status"] = "Settled" if balance <= 0 else (
+                    "Overdue"
+                    if parse_date(activity_payload.get("dueDate")) and parse_date(activity_payload.get("dueDate")) < date.today()
+                    else "Open"
+                )
+                set_module_record_metadata(activity_record, MODULES["customer_credit_accounts"], activity_payload)
 
     def sync_customer_credit_from_pos_order(order: PosOrder, db_session=None) -> None:
         db = db_session or g.db
@@ -10631,7 +10748,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             existing = ModuleRecord(id=payload["id"], module_key="customer_credit_accounts", created_at=datetime.utcnow())
             db.add(existing)
         set_module_record_metadata(existing, MODULES["customer_credit_accounts"], payload)
-        rollup_customer_credit_account(db, customer_credit_key(payload))
+        rollup_customer_credit_account(db, customer_credit_rollup_key(db, payload))
 
     def customer_credit_cashbook_account(payment_method: Any) -> str:
         method = normalize_text(payment_method).lower()
@@ -13560,7 +13677,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return access_response
         growth_context: dict[str, Any] | None = None
         if module_key in {"customer_credit_accounts", "cashbook_entries"}:
-            # Backfill linked cashbook movements for earlier credit repayments.
+            # Repair historical repayments and backfill their linked cashbook movements.
+            repair_customer_credit_balances(g.db)
             sync_all_customer_credit_payments_to_cashbook(g.db)
             g.db.commit()
         if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
@@ -14225,7 +14343,31 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("module_list", module_key=module_key))
 
         record_payload = dict(record.payload if record else {})
-        prior_credit_key = customer_credit_key(record_payload) if module_key == "customer_credit_accounts" and record else ""
+        prior_credit_key = customer_credit_rollup_key(g.db, record_payload) if module_key == "customer_credit_accounts" and record else ""
+        if not record and module_key == "customer_credit_accounts":
+            linked_credit_id = normalize_text(request.args.get("creditAccountId"))
+            linked_credit = g.db.get(ModuleRecord, linked_credit_id) if linked_credit_id else None
+            if linked_credit and linked_credit.module_key == "customer_credit_accounts":
+                linked_payload = dict(linked_credit.payload or {})
+                record_payload.update(
+                    {
+                        "linkedCreditAccountId": linked_credit.id,
+                        "entryDate": normalize_text(request.args.get("entryDate")) or date.today().isoformat(),
+                        "businessAreaId": normalize_text(linked_payload.get("businessAreaId")),
+                        "customerName": normalize_text(linked_payload.get("customerName")),
+                        "customerPhone": normalize_text(linked_payload.get("customerPhone")),
+                        "itemSummary": f"Payment towards: {normalize_text(linked_payload.get('itemSummary')) or 'customer credit account'}",
+                        "transactionType": "Payment Received",
+                        "paymentMethod": normalize_text(request.args.get("paymentMethod")) or "Cash",
+                        "dueDate": normalize_text(linked_payload.get("dueDate")),
+                        "status": "Open",
+                    }
+                )
+            else:
+                for field_name in ("entryDate", "businessAreaId", "customerName", "customerPhone", "transactionType", "paymentMethod"):
+                    value = normalize_text(request.args.get(field_name))
+                    if value:
+                        record_payload[field_name] = value
         if not record and module_key in {"mobile_money_transactions", "mobile_money_reconciliations"}:
             query_date = parse_date(request.args.get("date"))
             query_provider = normalize_text(request.args.get("provider"))
@@ -14245,6 +14387,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 ):
                     continue
                 payload[field.name] = parse_field_input(field, request.form)
+            if module_key == "customer_credit_accounts":
+                payload["linkedCreditAccountId"] = normalize_text(request.form.get("linkedCreditAccountId")) or normalize_text(
+                    record_payload.get("linkedCreditAccountId")
+                )
             payload.pop("receiptUpload", None)
             payload.pop("documentUpload", None)
             if module_key == "apartments":
@@ -14400,8 +14546,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     sync_tenant_portal_account(g.db, payload)
                 set_module_record_metadata(record, definition, payload)
                 if module_key == "customer_credit_accounts":
-                    rollup_customer_credit_account(g.db, customer_credit_key(payload))
-                    if prior_credit_key and prior_credit_key != customer_credit_key(payload):
+                    current_credit_key = customer_credit_rollup_key(g.db, payload)
+                    rollup_customer_credit_account(g.db, current_credit_key)
+                    if prior_credit_key and prior_credit_key != current_credit_key:
                         rollup_customer_credit_account(g.db, prior_credit_key)
                     sync_customer_credit_payment_to_cashbook(record, g.db)
                 if module_key == "tenant_portal_requests":
@@ -14916,7 +15063,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             flash("That record could not be found.", "error")
             return redirect(url_for("module_list", module_key=module_key))
 
-        deleted_credit_key = customer_credit_key(record.payload or {}) if module_key == "customer_credit_accounts" else ""
+        deleted_credit_key = customer_credit_rollup_key(g.db, record.payload or {}) if module_key == "customer_credit_accounts" else ""
 
         if module_key == "sales" and (
             normalize_text((record.payload or {}).get("linkedGeneratedSalesKey"))

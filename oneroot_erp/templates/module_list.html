@@ -751,6 +751,9 @@
                     {% endif %}
                     {% if definition.key == 'customer_credit_accounts' %}
                       <a class="table-link" href="{{ url_for('customer_credit_receipt', record_id=record.id) }}">Receipt</a>
+                      {% if record.payload.get('transactionType') == 'Credit Sale' and (record.payload.get('outstandingBalance', 0)|float) > 0 %}
+                        <a class="table-link" href="{{ url_for('module_form', module_key='customer_credit_accounts', creditAccountId=record.id) }}">Receive Payment</a>
+                      {% endif %}
                     {% endif %}
                     {% if definition.key == 'customer_crm' and record.payload.get('whatsappUrl') %}
                       <a class="table-link" href="{{ record.payload.get('whatsappUrl') }}" target="_blank" rel="noopener">WhatsApp</a>
