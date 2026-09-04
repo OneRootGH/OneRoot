@@ -44,7 +44,7 @@
     <article class="mini-card">
       <span>Rent Plan</span>
       <strong>{{ source.get('rentCycleAmount')|currency }}</strong>
-      <small>Paid {{ profile.rentPaid|currency }} via {{ source.get('rentPaymentMethod') or 'Not saved' }}</small>
+      <small>Received {{ source.get('rentPaid')|currency }} via {{ source.get('rentPaymentMethod') or 'Not saved' }}</small>
     </article>
   </section>
 
@@ -69,7 +69,7 @@
     <h3>3. Rent, Advance Payment, And Receipts</h3>
     <p>
       The rent agreed for the current tenancy cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>,
-      of which <strong>{{ profile.rentPaid|currency }}</strong> has been received. The monthly equivalent is
+      of which <strong>{{ source.get('rentPaid')|currency }}</strong> has been received. The monthly equivalent is
       <strong>{{ (source.get('rentCycleAmount') / cycle_months if cycle_months else source.get('rentCycleAmount'))|currency }}</strong>.
       Rent shall be paid only in instalments permitted by Ghanaian law. For a tenancy exceeding six months, no more than six months'
       rent may be demanded or received in advance. Any amount recorded beyond the lawful advance period shall be applied to the next rent period

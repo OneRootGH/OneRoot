@@ -7723,7 +7723,11 @@ def apartment_document_source_payload(reference_record: ModuleRecord, suite_reco
     scoped_history = list(reversed(apartment_relevant_history(reference_record, suite_records)))
     payload_history = [apartment_record_payload(item) for item in scoped_history]
     source_payloads = [current_payload, *payload_history]
-    payment_payload = next((payload for payload in source_payloads if apartment_payment_confirmed(payload)), None)
+    # Prefer a record containing an actual rent amount; a later monthly-bill row can
+    # carry payment details while its rent amount is correctly zero.
+    payment_payload = next((payload for payload in source_payloads if apartment_total_rent_paid(payload) > 0), None)
+    if not payment_payload:
+        payment_payload = next((payload for payload in source_payloads if apartment_payment_confirmed(payload)), None)
     bill_payload = next((payload for payload in source_payloads if apartment_bills_due(payload) > 0), None)
     payment_sources = ([payment_payload] if payment_payload else []) + source_payloads
     bill_sources = ([bill_payload] if bill_payload else []) + source_payloads
@@ -7740,7 +7744,34 @@ def apartment_document_source_payload(reference_record: ModuleRecord, suite_reco
         or pick_latest_amount(source_payloads, "rentPaid")
     )
     suite_rent_due = parse_amount((payment_payload or {}).get("rentDue")) or rent_cycle_amount or pick_latest_amount(source_payloads, "rentDue")
-    suite_rent_paid = parse_amount((payment_payload or {}).get("rentPaid")) or pick_latest_amount(source_payloads, "rentPaid")
+    statement_rows = apartment_statement_rows(reference_record, suite_records)
+    agreement_start = parse_date(
+        pick_latest_date(source_payloads, "leaseStartDate")
+        or pick_latest_date(source_payloads, "moveInDate")
+        or pick_latest_date(source_payloads, "rentCoverageStartDate")
+    )
+    agreement_end = parse_date(
+        pick_latest_date(source_payloads, "leaseEndDate")
+        or pick_latest_date(source_payloads, "moveOutDate")
+    )
+    cycle_rent_paid = round(
+        sum(
+            parse_amount(row.get("rentPaid"))
+            for row in statement_rows
+            if (
+                not agreement_start
+                or not row["record"].record_date
+                or row["record"].record_date >= agreement_start
+            )
+            and (
+                not agreement_end
+                or not row["record"].record_date
+                or row["record"].record_date <= agreement_end
+            )
+        ),
+        2,
+    )
+    suite_rent_paid = cycle_rent_paid or parse_amount((payment_payload or {}).get("rentPaid")) or pick_latest_amount(source_payloads, "rentPaid")
     bed_rent_due = parse_amount((payment_payload or {}).get("bedRentDue")) or pick_latest_amount(source_payloads, "bedRentDue")
     bed_rent_paid = parse_amount((payment_payload or {}).get("bedRentPaid")) or pick_latest_amount(source_payloads, "bedRentPaid")
     mattress_rent_due = parse_amount((payment_payload or {}).get("mattressRentDue")) or pick_latest_amount(source_payloads, "mattressRentDue")
@@ -7881,7 +7912,7 @@ def apartment_agreement_placeholders(payload: dict[str, Any], app_config: AppCon
     monthly_rent = round(cycle_rent_due / cycle_months, 2) if cycle_months > 0 and cycle_rent_due > 0 else cycle_rent_due
     lawful_advance_months = min(cycle_months, 6) if cycle_months > 0 else 0
     advance_rent_due = round(monthly_rent * lawful_advance_months, 2) if lawful_advance_months else cycle_rent_due
-    amount_received = parse_amount(payload.get("rentPaid")) or advance_rent_due
+    amount_received = parse_amount(payload.get("rentPaid"))
     commencement_date = apartment_agreement_commencement_date(payload)
     expiry_date = apartment_agreement_expiry_date(payload)
     payment_date = normalize_text(payload.get("rentPaymentDate"))
