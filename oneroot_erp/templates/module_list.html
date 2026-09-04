@@ -690,6 +690,8 @@
                   <span class="table-secondary">Deposit {{ (record.payload.get('depositPaid', 0))|currency }} · Balance {{ (record.payload.get('balanceDue', 0))|currency }} · Event {{ record.payload.get('eventDate') or 'To confirm' }}</span>
                 {% elif definition.key == 'supplier_price_updates' %}
                   <span class="table-secondary">{{ record.payload.get('supplierName', 'Supplier') }} · Prev {{ (record.payload.get('oldUnitCost', 0))|currency }} · Qty {{ record.payload.get('quantityReceived', 0) }}</span>
+                {% elif definition.key == 'supplier_directory' %}
+                  <span class="table-secondary">{{ record.payload.get('supplierStatus', 'Potential') }} · {{ record.payload.get('contactPerson') or record.payload.get('phone') or 'Contact to be confirmed' }} · {{ record.payload.get('supplyCategories') or 'Supply categories to be confirmed' }}</span>
                 {% elif definition.key == 'knowledge_base' %}
                   <span class="table-secondary">{{ record.payload.get('entryType', 'Entry') }} · {{ record.payload.get('audienceRole', 'All Staff') }}</span>
                 {% elif definition.key == 'workforce_attendance' %}

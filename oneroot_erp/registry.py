@@ -449,6 +449,8 @@ ROLE_ACCESS_KEYS["growth-apartments-dispatch"] = set(ROLE_ACCESS_KEYS["marketing
 ROLE_ACCESS_KEYS["dispatch-maintenance-service"] = set(ROLE_ACCESS_KEYS["delivery-dispatch"]) | set(ROLE_ACCESS_KEYS["equipment-desk"]) | set(ROLE_ACCESS_KEYS["laundry-desk"]) | {"inventory", "inventory_barcode", "maintenance_records", "online_orders", "daily_handovers"}
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
     ROLE_ACCESS_KEYS[_role_key].add("loss_prevention_controls")
+for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead", "finance-hr-controls"):
+    ROLE_ACCESS_KEYS[_role_key].add("supplier_directory")
 for _role_key in ("owner", "admin", "operations", "finance", "frontline-service-lead", "sales-stock-operator", "cashier"):
     ROLE_ACCESS_KEYS[_role_key].add("customer_credit_accounts")
 
@@ -1520,7 +1522,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "suppliers": ModuleDefinition(
         key="suppliers",
-        label="Suppliers",
+        label="Supplier Bills & Payables",
         legacy_collection="suppliers",
         menu_group="Procurement",
         amount_field="amountDue",
@@ -1539,6 +1541,33 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("paymentDate", "Payment Date", "date"),
             FieldDefinition("paymentMethod", "Payment Method", "select", False, [(m, m) for m in PAYMENT_METHODS]),
             FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
+    "supplier_directory": ModuleDefinition(
+        key="supplier_directory",
+        label="Supplier Directory",
+        legacy_collection="supplierDirectory",
+        menu_group="Procurement",
+        date_field="onboardedDate",
+        title_field="supplierName",
+        status_field="supplierStatus",
+        fields=[
+            FieldDefinition("onboardedDate", "Added / Reviewed Date", "date", True),
+            FieldDefinition("supplierName", "Business / Supplier Name", "text", True),
+            FieldDefinition("supplierStatus", "Supplier Status", "select", True, [("Potential", "Potential Supplier"), ("Approved", "Approved Supplier"), ("Active", "Active Supplier"), ("On Hold", "On Hold"), ("Do Not Use", "Do Not Use")]),
+            FieldDefinition("businessAreaId", "Primary Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+            FieldDefinition("supplyCategories", "Items / Categories They Can Supply", "textarea", placeholder="Example: frozen foods, drinks, cleaning materials, construction tools"),
+            FieldDefinition("contactPerson", "Contact Person", "text"),
+            FieldDefinition("phone", "Phone / WhatsApp", "text"),
+            FieldDefinition("email", "Email", "text"),
+            FieldDefinition("location", "Location / Shop Address", "text"),
+            FieldDefinition("paymentTerms", "Payment Terms", "select", False, [("Cash", "Cash"), ("Mobile Money", "Mobile Money"), ("Bank Transfer", "Bank Transfer"), ("Credit", "Credit Terms"), ("To Confirm", "To Confirm")]),
+            FieldDefinition("minimumOrder", "Minimum Order / Delivery Requirement", "text"),
+            FieldDefinition("qualityRating", "Quality Rating", "select", False, [("Not Rated", "Not Rated"), ("Excellent", "Excellent"), ("Good", "Good"), ("Needs Review", "Needs Review")]),
+            FieldDefinition("priceRating", "Price Rating", "select", False, [("Not Rated", "Not Rated"), ("Best Price", "Best Price"), ("Competitive", "Competitive"), ("High", "High / Review")]),
+            FieldDefinition("reliabilityRating", "Reliability", "select", False, [("Not Rated", "Not Rated"), ("Reliable", "Reliable"), ("Promising", "Promising"), ("Needs Review", "Needs Review")]),
+            FieldDefinition("nextFollowUpDate", "Next Follow-Up Date", "date"),
+            FieldDefinition("notes", "Notes", "textarea", placeholder="Pricing, delivery days, trial order result, strengths, or concerns"),
         ],
     ),
     "supplier_price_updates": ModuleDefinition(
@@ -2215,7 +2244,7 @@ MENU_GROUPS = [
         [
             ("Payroll, Schedules & Training", ["salary_records", "staff_documents", "workforce_attendance", "knowledge_base"]),
             ("Recruitment", ["job_vacancies"]),
-            ("Suppliers", ["suppliers", "supplier_price_updates"]),
+            ("Suppliers", ["supplier_directory", "suppliers", "supplier_price_updates"]),
         ],
     ),
     (
