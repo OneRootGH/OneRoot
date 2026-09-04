@@ -4160,6 +4160,17 @@ def normalize_role_key(value: Any) -> str:
         "crm & marketing": "marketing-crm",
         "hr-payroll": "hr-payroll",
         "hr & payroll": "hr-payroll",
+        "finance-hr-controls": "finance-hr-controls",
+        "finance hr & controls officer": "finance-hr-controls",
+        "retail-stock-service": "retail-stock-service",
+        "retail stock & service desk officer": "retail-stock-service",
+        "kitchen-food-counter": "kitchen-food-counter",
+        "kitchen & food counter officer": "kitchen-food-counter",
+        "growth-apartments-dispatch": "growth-apartments-dispatch",
+        "customer growth & service booking officer": "growth-apartments-dispatch",
+        "customer growth & dispatch officer": "growth-apartments-dispatch",
+        "dispatch-maintenance-service": "dispatch-maintenance-service",
+        "inventory dispatch maintenance & service officer": "dispatch-maintenance-service",
         "viewer": "viewer",
     }
     return role_aliases.get(raw, "viewer")
@@ -4187,6 +4198,11 @@ def default_staff_role_for_access_role(value: Any) -> str:
         "delivery-dispatch": "Dispatch Coordinator",
         "marketing-crm": "CRM & Marketing Officer",
         "hr-payroll": "HR & Payroll Officer",
+        "finance-hr-controls": "Finance HR & Controls Officer",
+        "retail-stock-service": "Retail Stock & Service Desk Officer",
+        "kitchen-food-counter": "Kitchen & Food Counter Officer",
+        "growth-apartments-dispatch": "Customer Growth & Service Booking Officer",
+        "dispatch-maintenance-service": "Inventory Dispatch Maintenance & Service Officer",
         "viewer": "Support Staff",
     }
     return role_map.get(role_key, "Support Staff")
@@ -13202,6 +13218,28 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/users", methods=["GET", "POST"])
     @access_required("users")
     def users_page():
+        # Repair accounts saved while the new five-person role values were not yet
+        # recognized. Only known new staff assignments are restored; real Viewers stay Viewers.
+        staff_role_repairs = {
+            "Owner & Business Manager": "owner",
+            "Finance HR & Controls Officer": "owner",
+            "Retail Stock & Service Desk Officer": "retail-stock-service",
+            "Kitchen & Food Counter Officer": "kitchen-food-counter",
+            "Customer Growth & Dispatch Officer": "growth-apartments-dispatch",
+            "Customer Growth & Service Booking Officer": "growth-apartments-dispatch",
+            "Inventory Dispatch Maintenance & Service Officer": "dispatch-maintenance-service",
+        }
+        repaired_accounts = 0
+        for account in g.db.scalars(select(User).where(User.role == "viewer")).all():
+            restored_role = staff_role_repairs.get(normalize_text(account.staff_role))
+            if restored_role:
+                account.role = restored_role
+                account.updated_at = datetime.utcnow()
+                repaired_accounts += 1
+        if repaired_accounts:
+            audit("users", "User Accounts", "update", "Role repair", detail=f"Restored {repaired_accounts} account role(s) from their saved staff assignment.")
+            g.db.commit()
+            flash(f"Restored {repaired_accounts} account role(s) that had incorrectly changed to Viewer.", "success")
         editing_id = normalize_text(request.args.get("edit"))
         search_text = normalize_text(request.args.get("q"))
         preset_role = normalize_role_key(request.args.get("preset"))
