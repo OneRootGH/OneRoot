@@ -4381,7 +4381,7 @@ SIDEBAR_LINK_LABELS = {
     "profits": ("Profit Center", "profits_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
-    "sales_summary": ("Daily Sales Summary", "sales_summary_page", None),
+    "sales_summary": ("Daily Sales Review", "sales_summary_page", None),
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
     "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
@@ -8456,6 +8456,191 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
     }
 
 
+def daily_sales_accountability_context(db_session, sale_date: date, area_id: str = "") -> dict[str, Any]:
+    """Build a day-end review without counting a credit sale or repayment twice."""
+    selected_area = normalize_text(area_id)
+    rows: list[dict[str, Any]] = []
+
+    def append_row(
+        *,
+        entry_id: str,
+        occurred_at: str,
+        business_area_id: str,
+        activity: str,
+        customer: str,
+        details: str,
+        payment_method: str,
+        amount: float,
+        cost_amount: float = 0.0,
+        reference: str = "",
+        receipt_url: str = "",
+        kind: str = "sale",
+        included_in_sales: bool = True,
+    ) -> None:
+        if selected_area and business_area_id != selected_area:
+            return
+        clean_amount = round(abs(parse_amount(amount)), 2)
+        clean_cost = round(abs(parse_amount(cost_amount)), 2)
+        rows.append(
+            {
+                "id": entry_id,
+                "occurredAt": occurred_at,
+                "areaId": business_area_id,
+                "areaLabel": BUSINESS_AREA_SHORT.get(
+                    business_area_id,
+                    BUSINESS_AREA_LABELS.get(business_area_id, business_area_id or "Shared Operations"),
+                ),
+                "activity": activity,
+                "customer": customer or "Walk-in / Not recorded",
+                "details": details or "—",
+                "paymentMethod": payment_method or "Recorded",
+                "amount": clean_amount,
+                "costAmount": clean_cost,
+                "profitAmount": round(clean_amount - clean_cost, 2) if included_in_sales else 0.0,
+                "reference": reference,
+                "receiptUrl": receipt_url,
+                "kind": kind,
+                "includedInSales": included_in_sales,
+            }
+        )
+
+    # POS has one Daily Sales ledger row per area, but this review needs one line
+    # per order so staff can check actual products, payments, and receipts.
+    pos_credit_order_ids: set[str] = set()
+    pos_orders = db_session.scalars(
+        select(PosOrder)
+        .options(selectinload(PosOrder.lines))
+        .where(PosOrder.order_date == sale_date)
+        .order_by(desc(PosOrder.updated_at), desc(PosOrder.created_at))
+    ).all()
+    for order in pos_orders:
+        is_credit = normalize_text(order.payment_method).lower() == "credit"
+        grouped_lines: dict[str, list[PosOrderLine]] = defaultdict(list)
+        for line in order.lines:
+            grouped_lines[normalize_text(line.business_area_id) or "shared-operations"].append(line)
+        for business_area_id, lines in grouped_lines.items():
+            line_total = round(sum(parse_amount(line.total_amount) for line in lines), 2)
+            line_cost = round(sum(parse_amount(line.cost_amount) for line in lines), 2)
+            if line_total <= 0:
+                continue
+            if is_credit:
+                pos_credit_order_ids.add(order.id)
+            append_row(
+                entry_id=f"pos|{order.id}|{business_area_id}",
+                occurred_at=order.updated_at.strftime("%Y-%m-%d %H:%M") if order.updated_at else sale_date.isoformat(),
+                business_area_id=business_area_id,
+                activity="Credit Sale" if is_credit else "POS Sale",
+                customer=normalize_text(order.customer_name),
+                details=pos_order_item_summary(lines, area_id=business_area_id, limit=8),
+                payment_method=normalize_text(order.payment_method) or "Cash",
+                amount=line_total,
+                cost_amount=line_cost,
+                reference=normalize_text(order.order_number),
+                receipt_url=url_for("pos_receipt", order_id=order.id),
+                kind="credit-sale" if is_credit else "sale",
+                included_in_sales=not is_credit,
+            )
+
+    # Manual and service-generated Daily Sales entries are already individual
+    # payment records. Exclude POS summary rows because their order-level lines
+    # were added above.
+    sales_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "sales", ModuleRecord.record_date == sale_date)
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.amount))
+    ).all()
+    for record in sales_records:
+        if is_mobile_money_daily_sales_record(record):
+            continue
+        payload = dict(record.payload or {})
+        source_type = normalize_text(payload.get("sourceType")).lower()
+        if source_type == "pos-summary":
+            continue
+        business_area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        append_row(
+            entry_id=f"sales|{record.id}",
+            occurred_at=record.updated_at.strftime("%Y-%m-%d %H:%M") if record.updated_at else sale_date.isoformat(),
+            business_area_id=business_area_id,
+            activity=normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type),
+            customer="",
+            details=normalize_text(payload.get("notes")) or normalize_text(record.title),
+            payment_method=normalize_text(payload.get("paymentMethod")) or "Recorded",
+            amount=parse_amount(record.amount),
+            cost_amount=module_record_cost_amount(record),
+            reference=normalize_text(record.reference),
+            kind="sale",
+            included_in_sales=True,
+        )
+
+    # Credit records show the debt supplied and later settlement. A POS credit
+    # already appears as its order above, so skip its linked account row.
+    credit_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "customer_credit_accounts",
+            ModuleRecord.record_date == sale_date,
+        )
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+    ).all()
+    for record in credit_records:
+        payload = dict(record.payload or {})
+        reference = normalize_text(record.reference) or normalize_text(payload.get("reference"))
+        linked_pos_id = reference.removeprefix("pos-credit|") if reference.startswith("pos-credit|") else ""
+        if linked_pos_id and linked_pos_id in pos_credit_order_ids:
+            continue
+        transaction_type = normalize_text(payload.get("transactionType")) or "Credit Activity"
+        if transaction_type == "Credit Sale":
+            activity, kind = "Credit Sale", "credit-sale"
+        elif transaction_type == "Payment Received":
+            activity, kind = "Credit Collection", "credit-collection"
+        else:
+            activity, kind = f"Credit {transaction_type}", "credit-adjustment"
+        append_row(
+            entry_id=f"credit|{record.id}",
+            occurred_at=record.updated_at.strftime("%Y-%m-%d %H:%M") if record.updated_at else sale_date.isoformat(),
+            business_area_id=normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations",
+            activity=activity,
+            customer=normalize_text(payload.get("customerName")),
+            details=normalize_text(payload.get("itemSummary")) or "Customer credit account activity",
+            payment_method=normalize_text(payload.get("paymentMethod")) or "Account adjustment",
+            amount=parse_amount(payload.get("amount")),
+            reference=reference,
+            receipt_url=url_for("customer_credit_receipt", record_id=record.id),
+            kind=kind,
+            included_in_sales=False,
+        )
+
+    rows.sort(key=lambda row: (row["occurredAt"], row["reference"], row["id"]), reverse=True)
+    sale_rows = [row for row in rows if row["kind"] == "sale"]
+    credit_sale_rows = [row for row in rows if row["kind"] == "credit-sale"]
+    credit_collection_rows = [row for row in rows if row["kind"] == "credit-collection"]
+    adjustment_rows = [row for row in rows if row["kind"] == "credit-adjustment"]
+    return {
+        "rows": rows[:250],
+        "rowCount": len(rows),
+        "salesTotal": round(sum(row["amount"] for row in sale_rows), 2),
+        "salesCostTotal": round(sum(row["costAmount"] for row in sale_rows), 2),
+        "salesProfitTotal": round(sum(row["profitAmount"] for row in sale_rows), 2),
+        "creditSuppliedTotal": round(sum(row["amount"] for row in credit_sale_rows), 2),
+        "creditCollectionTotal": round(sum(row["amount"] for row in credit_collection_rows), 2),
+        "creditAdjustmentTotal": round(sum(row["amount"] for row in adjustment_rows), 2),
+        "creditOutstandingMovement": round(
+            sum(row["amount"] for row in credit_sale_rows)
+            - sum(row["amount"] for row in credit_collection_rows)
+            - sum(row["amount"] for row in adjustment_rows),
+            2,
+        ),
+        "customerMoneyReceivedTotal": round(
+            sum(row["amount"] for row in sale_rows) + sum(row["amount"] for row in credit_collection_rows),
+            2,
+        ),
+        "saleCount": len(sale_rows),
+        "creditSaleCount": len(credit_sale_rows),
+        "creditCollectionCount": len(credit_collection_rows),
+        "creditAdjustmentCount": len(adjustment_rows),
+    }
+
+
 def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: str = "") -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for record in records:
@@ -12440,12 +12625,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         refresh_pos_generated_sales_for_date(sale_date)
         g.db.commit()
         summary_context = daily_sales_summary_context(g.db, sale_date, area_filter)
+        accountability_context = daily_sales_accountability_context(g.db, sale_date, area_filter)
         return render_template(
             "sales_summary.html",
-            page_title="Daily Sales Summary",
+            page_title="Daily Sales Review & Closeout",
             sale_date=sale_date.isoformat(),
             area_filter=area_filter,
             business_area_options=BUSINESS_AREA_OPTIONS,
+            accountability=accountability_context,
             **summary_context,
         )
 
@@ -12477,6 +12664,42 @@ def create_app(config: AppConfig | None = None) -> Flask:
         suffix = f"-{area_filter}" if area_filter else ""
         return csv_download(
             f"oneroot-daily-sales-summary-{sale_date.isoformat()}{suffix}.csv",
+            headers,
+            rows,
+        )
+
+    @app.route("/app/sales-summary/review-export.csv")
+    @access_required("sales_summary")
+    def sales_review_export():
+        sale_date = parse_date(request.args.get("date")) or date.today()
+        area_filter = normalize_text(request.args.get("area"))
+        refresh_pos_generated_sales_for_date(sale_date)
+        g.db.commit()
+        accountability = daily_sales_accountability_context(g.db, sale_date, area_filter)
+        headers = [
+            "salesDate", "occurredAt", "area", "activity", "customer", "details", "paymentMethod",
+            "amount", "costAmount", "profitAmount", "includedInSales", "reference",
+        ]
+        rows = [
+            {
+                "salesDate": sale_date.isoformat(),
+                "occurredAt": row["occurredAt"],
+                "area": row["areaLabel"],
+                "activity": row["activity"],
+                "customer": row["customer"],
+                "details": row["details"],
+                "paymentMethod": row["paymentMethod"],
+                "amount": row["amount"],
+                "costAmount": row["costAmount"],
+                "profitAmount": row["profitAmount"],
+                "includedInSales": "Yes" if row["includedInSales"] else "No",
+                "reference": row["reference"],
+            }
+            for row in accountability["rows"]
+        ]
+        suffix = f"-{area_filter}" if area_filter else ""
+        return csv_download(
+            f"oneroot-daily-sales-review-{sale_date.isoformat()}{suffix}.csv",
             headers,
             rows,
         )

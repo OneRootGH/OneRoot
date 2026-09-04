@@ -4,10 +4,13 @@
     <div class="card-header">
       <div>
         <p class="eyebrow">Cashier Accountability</p>
-        <h3>Daily Sales Summary</h3>
-        <p class="muted">Use one day at a time to confirm how much each OneRoot business area sold. POS, online orders, laundry, equipment rentals, apartments, and mobile money payments are summarized from the Daily Sales ledger here.</p>
+        <h3>Daily Sales Review &amp; Closeout</h3>
+        <p class="muted">Review each completed sale, service payment, credit supplied, and credit repayment before closing the day. Credit activity is displayed separately so it never inflates sales revenue.</p>
       </div>
-      <a class="button subtle" href="{{ url_for('sales_summary_export', date=sale_date, area=area_filter) }}">Export Summary CSV</a>
+      <div class="button-row">
+        <a class="button subtle" href="{{ url_for('sales_review_export', date=sale_date, area=area_filter) }}">Export Review CSV</a>
+        <a class="button subtle" href="{{ url_for('sales_summary_export', date=sale_date, area=area_filter) }}">Export Area Summary</a>
+      </div>
     </div>
     <form class="form-grid">
       <label>
@@ -28,6 +31,90 @@
         <a class="button subtle" href="{{ url_for('sales_summary_page') }}">Reset</a>
       </div>
     </form>
+  </section>
+
+  <section class="card">
+    <div class="card-header">
+      <div>
+        <p class="eyebrow">Day-End Accountability</p>
+        <h3>Every Sale And Credit Movement</h3>
+        <p class="muted">Sales revenue is money earned today. Credit supplied is money still owed. Credit collection is repayment of an earlier debt and is not a new sale.</p>
+      </div>
+      <p class="muted list-summary">{{ accountability.rowCount }} activit{% if accountability.rowCount == 1 %}y{% else %}ies{% endif %} for review.</p>
+    </div>
+    <section class="card-grid four compact-metrics">
+      <article class="metric-card">
+        <span>Completed Sales</span>
+        <strong>{{ accountability.salesTotal|currency }}</strong>
+        <small>{{ accountability.saleCount }} recorded sale{% if accountability.saleCount != 1 %}s{% endif %} · included in daily sales</small>
+      </article>
+      <article class="metric-card">
+        <span>Credit Supplied</span>
+        <strong>{{ accountability.creditSuppliedTotal|currency }}</strong>
+        <small>{{ accountability.creditSaleCount }} sale{% if accountability.creditSaleCount != 1 %}s{% endif %} on account · excluded from daily sales</small>
+      </article>
+      <article class="metric-card">
+        <span>Credit Collected</span>
+        <strong>{{ accountability.creditCollectionTotal|currency }}</strong>
+        <small>{{ accountability.creditCollectionCount }} repayment{% if accountability.creditCollectionCount != 1 %}s{% endif %} · not a second sale</small>
+      </article>
+      <article class="metric-card">
+        <span>Credit Balance Movement</span>
+        <strong>{{ accountability.creditOutstandingMovement|currency }}</strong>
+        <small>New credit less repayments and approved adjustments</small>
+      </article>
+    </section>
+    <section class="card-grid two compact-metrics">
+      <article class="metric-card">
+        <span>Sales Profit</span>
+        <strong>{{ accountability.salesProfitTotal|currency }}</strong>
+        <small>Completed-sale amount less direct cost recorded for the day</small>
+      </article>
+      <article class="metric-card">
+        <span>Customer Money Received</span>
+        <strong>{{ accountability.customerMoneyReceivedTotal|currency }}</strong>
+        <small>Completed sales plus repayments received. Review payment methods before counting cash.</small>
+      </article>
+    </section>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Time</th>
+            <th>Area</th>
+            <th>Activity</th>
+            <th>Customer</th>
+            <th>Items / Details</th>
+            <th>Payment</th>
+            <th>Amount</th>
+            <th>Sales Treatment</th>
+            <th>Receipt</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in accountability.rows %}
+            <tr>
+              <td>{{ row.occurredAt }}</td>
+              <td>{{ row.areaLabel }}</td>
+              <td>
+                <strong>{{ row.activity }}</strong>
+                {% if row.kind == 'credit-sale' %}<span class="status-chip warning">Owed</span>{% endif %}
+                {% if row.kind == 'credit-collection' %}<span class="status-chip success">Collected</span>{% endif %}
+                {% if row.kind == 'credit-adjustment' %}<span class="status-chip muted">Adjustment</span>{% endif %}
+              </td>
+              <td>{{ row.customer }}</td>
+              <td>{{ row.details }}</td>
+              <td>{{ row.paymentMethod }}</td>
+              <td>{{ row.amount|currency }}</td>
+              <td>{% if row.includedInSales %}Daily Sales{% else %}Separate Credit Record{% endif %}</td>
+              <td>{% if row.receiptUrl %}<a class="table-link" href="{{ row.receiptUrl }}" target="_blank" rel="noopener">Receipt</a>{% else %}—{% endif %}</td>
+            </tr>
+          {% else %}
+            <tr><td colspan="9">No sales or customer credit activity has been recorded for this date and business area.</td></tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
   </section>
 
   <section class="card-grid four">
