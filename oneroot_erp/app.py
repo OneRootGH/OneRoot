@@ -13376,10 +13376,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             staff_role_options=STAFF_WORK_ROLES,
             staff_role_descriptions=STAFF_ROLE_DESCRIPTIONS,
             five_person_plan=[
-                ("1. Owner Business Manager Finance HR Controls & Apartments", "owner", "Owner & Business Manager", "You: approvals, expenses, cashbook, suppliers, payroll, staff documents, attendance controls, financial closeout, apartments, tenant rent and bills, agreements, deposits, maintenance oversight, and performance."),
+                ("1. Owner Business Manager Finance HR Controls & Apartments", "owner", "Owner & Business Manager", "You: approvals, expenses, cashbook, suppliers, payroll, staff documents, attendance controls, financial closeout, and every apartment and tenant function: profiles, rent and bills, agreements, deposits, payment plans, portal requests, notices, statements, and maintenance oversight."),
                 ("2. Retail Sales & MoMo Desk", "retail-stock-service", "Retail Stock Service & MoMo Desk Officer", "Retail POS, Cold Store and Groceries, counter sales, customer credit, and all MoMo float and transactions."),
                 ("3. Kitchen & Food Counter", "kitchen-food-counter", "Kitchen & Food Counter Officer", "Food preparation, OneRoot Kitchen orders, direct food sales, drinks, and food-counter stock."),
-                ("4. Customer Growth Apartments & Service Booking", "growth-apartments-dispatch", "Customer Growth Apartments & Service Booking Officer", "CRM, promotions, Facebook, WhatsApp, online-order follow-up, tenant communication, and customer booking for laundry, water, and equipment services. Apartment approvals remain with you."),
+                ("4. Customer Growth & Service Booking", "growth-apartments-dispatch", "Customer Growth & Service Booking Officer", "CRM, promotions, Facebook, WhatsApp, online-order follow-up, and customer booking for laundry, water, and equipment services. It has no apartment or tenant access."),
                 ("5. Inventory Dispatch Maintenance & Service", "dispatch-maintenance-service", "Inventory Dispatch Maintenance & Service Officer", "Inventory and barcode stock updates, water and equipment rentals, laundry fulfilment, dispatch, delivery handover, and maintenance work."),
             ],
         )

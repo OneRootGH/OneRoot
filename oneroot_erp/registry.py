@@ -96,7 +96,7 @@ USER_ROLE_OPTIONS = [
     ("finance-hr-controls", "Finance HR & Controls Officer"),
     ("retail-stock-service", "Retail Stock & Service Desk Officer"),
     ("kitchen-food-counter", "Kitchen & Food Counter Officer"),
-    ("growth-apartments-dispatch", "Customer Growth Apartments & Dispatch Officer"),
+    ("growth-apartments-dispatch", "Customer Growth & Service Booking Officer"),
     ("dispatch-maintenance-service", "Inventory Dispatch Maintenance & Service Officer"),
     ("viewer", "Viewer"),
 ]
@@ -120,7 +120,7 @@ ROLE_DESCRIPTIONS = {
     "finance-hr-controls": "Controls expenses, cashbook, payroll, staff documents, supplier records, and financial closeout.",
     "retail-stock-service": "Runs retail POS, stock, barcode updates, laundry, equipment rentals, and the MTN MoMo counter with float controls.",
     "kitchen-food-counter": "Runs food preparation, food orders, and the OneRoot Kitchen counter.",
-    "growth-apartments-dispatch": "Runs customer growth, online-order follow-up, service booking for laundry and equipment, promotions, and WhatsApp activity. Apartment approvals and tenant management remain with the Owner.",
+    "growth-apartments-dispatch": "Runs customer growth, online-order follow-up, service booking for laundry and equipment, promotions, and WhatsApp activity. All apartment and tenant work remains with the Owner.",
     "dispatch-maintenance-service": "Controls inventory and barcode updates, fulfils water, equipment and laundry services, coordinates dispatch, and handles maintenance support.",
     "viewer": "Read-only visibility across the dashboard, reports, search, and workbook tools.",
 }
@@ -445,7 +445,7 @@ ROLE_ACCESS_KEYS["finance"].add("staff_documents")
 ROLE_ACCESS_KEYS["finance-hr-controls"] = set(ROLE_ACCESS_KEYS["finance"]) | set(ROLE_ACCESS_KEYS["hr-payroll"]) | {"staff_documents", "loss_prevention_controls"}
 ROLE_ACCESS_KEYS["retail-stock-service"] = set(ROLE_ACCESS_KEYS["frontline-service-lead"]) | set(ROLE_ACCESS_KEYS["sales-stock-operator"]) | set(ROLE_ACCESS_KEYS["mobile-money-agent"]) | {"customer_credit_accounts", "daily_handovers", "customer_loyalty"}
 ROLE_ACCESS_KEYS["kitchen-food-counter"] = set(ROLE_ACCESS_KEYS["cashier"]) | {"kitchen_orders", "kitchen_recipe_plans", "daily_handovers", "customer_loyalty", "inventory", "sales_summary"}
-ROLE_ACCESS_KEYS["growth-apartments-dispatch"] = set(ROLE_ACCESS_KEYS["apartment-manager"]) | set(ROLE_ACCESS_KEYS["marketing-crm"]) | set(ROLE_ACCESS_KEYS["delivery-dispatch"]) | {"tenant_payment_plans", "tenant_portal_requests"}
+ROLE_ACCESS_KEYS["growth-apartments-dispatch"] = set(ROLE_ACCESS_KEYS["marketing-crm"]) | set(ROLE_ACCESS_KEYS["delivery-dispatch"])
 ROLE_ACCESS_KEYS["dispatch-maintenance-service"] = set(ROLE_ACCESS_KEYS["delivery-dispatch"]) | set(ROLE_ACCESS_KEYS["equipment-desk"]) | set(ROLE_ACCESS_KEYS["laundry-desk"]) | {"inventory", "inventory_barcode", "maintenance_records", "online_orders", "daily_handovers"}
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
     ROLE_ACCESS_KEYS[_role_key].add("loss_prevention_controls")
@@ -729,9 +729,8 @@ STAFF_WORK_ROLES = [
     ("Finance HR & Controls Officer", "Finance HR & Controls Officer"),
     ("Retail Stock & Service Desk Officer", "Retail Stock & Service Desk Officer"),
     ("Kitchen & Food Counter Officer", "Kitchen & Food Counter Officer"),
-    ("Customer Growth Apartments & Dispatch Officer", "Customer Growth Apartments & Dispatch Officer"),
     ("Customer Growth & Dispatch Officer", "Customer Growth & Dispatch Officer"),
-    ("Customer Growth Apartments & Service Booking Officer", "Customer Growth Apartments & Service Booking Officer"),
+    ("Customer Growth & Service Booking Officer", "Customer Growth & Service Booking Officer"),
     ("Inventory Dispatch Maintenance & Service Officer", "Inventory Dispatch Maintenance & Service Officer"),
 ]
 STAFF_WORK_ROLE_LABELS = dict(STAFF_WORK_ROLES)
@@ -760,9 +759,8 @@ STAFF_ROLE_DESCRIPTIONS = {
     "Finance HR & Controls Officer": "Handles finance, payroll, HR documents, expenses, supplier records, and controls.",
     "Retail Stock & Service Desk Officer": "Serves retail customers, controls stock, manages laundry and equipment rentals, and operates the MoMo counter.",
     "Kitchen & Food Counter Officer": "Prepares and serves food, manages food orders, and keeps OneRoot Kitchen ready for fast service.",
-    "Customer Growth Apartments & Dispatch Officer": "Handles tenants, online orders, dispatch, customer follow-up, campaigns, and WhatsApp communication.",
     "Customer Growth & Dispatch Officer": "Handles online-order follow-up, dispatch, customer CRM, campaigns, Facebook, and WhatsApp communication while the Owner manages apartments.",
-    "Customer Growth Apartments & Service Booking Officer": "Manages CRM, promotions, online-order follow-up, tenant communication, and customer booking for laundry, water, and equipment services while the Owner retains apartment approvals.",
+    "Customer Growth & Service Booking Officer": "Manages CRM, promotions, online-order follow-up, and customer booking for laundry, water, and equipment services. All apartment and tenant work remains with the Owner.",
     "Inventory Dispatch Maintenance & Service Officer": "Maintains inventory and barcodes, fulfils water, equipment and laundry services, coordinates dispatch, and supports maintenance work.",
 }
 JOB_EMPLOYMENT_TYPES = [
