@@ -50,6 +50,10 @@ def set_cell_text(cell, text: str) -> None:
     set_paragraph_runs(paragraph, [(0, text)])
 
 
+def remove_paragraph(paragraph) -> None:
+    paragraph._element.getparent().remove(paragraph._element)
+
+
 def main() -> None:
     document = Document(SOURCE_PATH)
 
@@ -171,6 +175,9 @@ def main() -> None:
 
     signature_table = document.tables[3]
     set_cell_text(signature_table.rows[2].cells[1], "[[TENANT_NAME]]")
+
+    # The final tenant copy is complete and should not carry an internal drafting disclaimer.
+    remove_paragraph(document.paragraphs[36])
 
     document.save(OUTPUT_PATH)
     print(f"Template saved to {OUTPUT_PATH}")
