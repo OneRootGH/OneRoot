@@ -13378,8 +13378,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             five_person_plan=[
                 ("1. Owner & Business Manager", "owner", "Owner & Business Manager", "You: approval, controls, performance, and business direction."),
                 ("2. Finance HR & Controls", "finance-hr-controls", "Finance HR & Controls Officer", "Expenses, cashbook, payroll, staff records, suppliers, and daily controls."),
-                ("3. Retail Stock & Service Desk", "retail-stock-service", "Retail Stock & Service Desk Officer", "POS, inventory, laundry, equipment rentals, and counter service."),
-                ("4. Kitchen & MoMo Counter", "kitchen-momo-counter", "Kitchen & MoMo Counter Officer", "Food preparation and sales plus mobile money float and transactions."),
+                ("3. Retail Stock Service & MoMo Desk", "retail-stock-service", "Retail Stock Service & MoMo Desk Officer", "Retail POS, groceries, stock, water and equipment rentals, laundry, and all MoMo float and transactions."),
+                ("4. Kitchen & Food Counter", "kitchen-food-counter", "Kitchen & Food Counter Officer", "Food preparation, OneRoot Kitchen orders, direct food sales, drinks, and food-counter stock."),
                 ("5. Customer Growth Apartments & Dispatch", "growth-apartments-dispatch", "Customer Growth Apartments & Dispatch Officer", "Tenants, online orders, delivery, CRM, promotions, and WhatsApp follow-up."),
             ],
         )

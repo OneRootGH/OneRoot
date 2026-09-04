@@ -94,8 +94,8 @@ USER_ROLE_OPTIONS = [
     ("marketing-crm", "CRM & Marketing"),
     ("hr-payroll", "HR & Payroll"),
     ("finance-hr-controls", "Finance HR & Controls Officer"),
-    ("retail-stock-service", "Retail Stock & Service Desk Officer"),
-    ("kitchen-momo-counter", "Kitchen & MoMo Counter Officer"),
+    ("retail-stock-service", "Retail Stock Service & MoMo Desk Officer"),
+    ("kitchen-food-counter", "Kitchen & Food Counter Officer"),
     ("growth-apartments-dispatch", "Customer Growth Apartments & Dispatch Officer"),
     ("viewer", "Viewer"),
 ]
@@ -117,8 +117,8 @@ ROLE_DESCRIPTIONS = {
     "marketing-crm": "Customer CRM, promotions, WhatsApp campaigns, campaign ROI, and repeat-customer growth.",
     "hr-payroll": "Payroll, attendance, vacancies, staff records, and internal knowledge/training controls.",
     "finance-hr-controls": "Controls expenses, cashbook, payroll, staff documents, supplier records, and financial closeout.",
-    "retail-stock-service": "Runs retail POS, inventory, barcode updates, laundry, equipment rentals, and service payments.",
-    "kitchen-momo-counter": "Runs food orders and food POS alongside the separate MTN MoMo counter and float controls.",
+    "retail-stock-service": "Runs retail POS, stock, barcode updates, laundry, equipment rentals, and the MTN MoMo counter with float controls.",
+    "kitchen-food-counter": "Runs food preparation, food orders, and the OneRoot Kitchen counter.",
     "growth-apartments-dispatch": "Manages tenants, online orders, dispatch, customer follow-up, promotions, and WhatsApp growth.",
     "viewer": "Read-only visibility across the dashboard, reports, search, and workbook tools.",
 }
@@ -441,8 +441,8 @@ ROLE_ACCESS_KEYS["operations"].add("staff_documents")
 ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
 ROLE_ACCESS_KEYS["finance"].add("staff_documents")
 ROLE_ACCESS_KEYS["finance-hr-controls"] = set(ROLE_ACCESS_KEYS["finance"]) | set(ROLE_ACCESS_KEYS["hr-payroll"]) | {"staff_documents", "loss_prevention_controls"}
-ROLE_ACCESS_KEYS["retail-stock-service"] = set(ROLE_ACCESS_KEYS["frontline-service-lead"]) | set(ROLE_ACCESS_KEYS["sales-stock-operator"]) | {"customer_credit_accounts"}
-ROLE_ACCESS_KEYS["kitchen-momo-counter"] = set(ROLE_ACCESS_KEYS["cashier"]) | set(ROLE_ACCESS_KEYS["mobile-money-agent"]) | {"kitchen_orders", "kitchen_recipe_plans", "daily_handovers", "customer_loyalty"}
+ROLE_ACCESS_KEYS["retail-stock-service"] = set(ROLE_ACCESS_KEYS["frontline-service-lead"]) | set(ROLE_ACCESS_KEYS["sales-stock-operator"]) | set(ROLE_ACCESS_KEYS["mobile-money-agent"]) | {"customer_credit_accounts", "daily_handovers", "customer_loyalty"}
+ROLE_ACCESS_KEYS["kitchen-food-counter"] = set(ROLE_ACCESS_KEYS["cashier"]) | {"kitchen_orders", "kitchen_recipe_plans", "daily_handovers", "customer_loyalty", "inventory", "sales_summary"}
 ROLE_ACCESS_KEYS["growth-apartments-dispatch"] = set(ROLE_ACCESS_KEYS["apartment-manager"]) | set(ROLE_ACCESS_KEYS["marketing-crm"]) | set(ROLE_ACCESS_KEYS["delivery-dispatch"]) | {"tenant_payment_plans", "tenant_portal_requests"}
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
     ROLE_ACCESS_KEYS[_role_key].add("loss_prevention_controls")
@@ -724,8 +724,8 @@ STAFF_WORK_ROLES = [
     ("Support Staff", "Support Staff"),
     ("Owner & Business Manager", "Owner & Business Manager"),
     ("Finance HR & Controls Officer", "Finance HR & Controls Officer"),
-    ("Retail Stock & Service Desk Officer", "Retail Stock & Service Desk Officer"),
-    ("Kitchen & MoMo Counter Officer", "Kitchen & MoMo Counter Officer"),
+    ("Retail Stock Service & MoMo Desk Officer", "Retail Stock Service & MoMo Desk Officer"),
+    ("Kitchen & Food Counter Officer", "Kitchen & Food Counter Officer"),
     ("Customer Growth Apartments & Dispatch Officer", "Customer Growth Apartments & Dispatch Officer"),
 ]
 STAFF_WORK_ROLE_LABELS = dict(STAFF_WORK_ROLES)
@@ -752,8 +752,8 @@ STAFF_ROLE_DESCRIPTIONS = {
     "Support Staff": "General support role for shared tasks across the workspace.",
     "Owner & Business Manager": "Owns the business, approves key controls, manages performance, and leads the five-person team.",
     "Finance HR & Controls Officer": "Handles finance, payroll, HR documents, expenses, supplier records, and controls.",
-    "Retail Stock & Service Desk Officer": "Serves counter customers, manages stock, laundry, equipment rentals, and service payments.",
-    "Kitchen & MoMo Counter Officer": "Prepares and serves food, manages kitchen orders, and operates the MoMo counter separately.",
+    "Retail Stock Service & MoMo Desk Officer": "Serves retail customers, controls stock, manages laundry and equipment rentals, and operates the MoMo counter.",
+    "Kitchen & Food Counter Officer": "Prepares and serves food, manages food orders, and keeps OneRoot Kitchen ready for fast service.",
     "Customer Growth Apartments & Dispatch Officer": "Handles tenants, online orders, dispatch, customer follow-up, campaigns, and WhatsApp communication.",
 }
 JOB_EMPLOYMENT_TYPES = [
