@@ -13376,11 +13376,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             staff_role_options=STAFF_WORK_ROLES,
             staff_role_descriptions=STAFF_ROLE_DESCRIPTIONS,
             five_person_plan=[
-                ("1. Owner & Business Manager & Apartments Officer", "owner", "Owner & Business Manager", "You: approval, controls, finance, HR, apartments, tenant rent and bills, agreements, deposits, maintenance oversight, performance, and business direction."),
-                ("2. Finance HR & Controls", "finance-hr-controls", "Finance HR & Controls Officer", "Expenses, cashbook, payroll, staff records, suppliers, and daily controls."),
-                ("3. Retail Stock & Service Desk", "retail-stock-service", "Retail Stock & Service Desk Officer", "Retail POS, groceries, stock, water and equipment rentals, laundry, and all MoMo float and transactions."),
-                ("4. Kitchen & Food Counter", "kitchen-food-counter", "Kitchen & Food Counter Officer", "Food preparation, OneRoot Kitchen orders, direct food sales, drinks, and food-counter stock."),
-                ("5. Customer Growth & Dispatch", "growth-apartments-dispatch", "Customer Growth & Dispatch Officer", "Online-order follow-up, delivery coordination, CRM, promotions, Facebook, and WhatsApp follow-up. Apartment approvals remain with the Owner."),
+                ("1. Owner Business Manager Finance HR Controls & Apartments", "owner", "Owner & Business Manager", "You: approvals, expenses, cashbook, suppliers, payroll, staff documents, attendance controls, financial closeout, apartments, tenant rent and bills, agreements, deposits, maintenance oversight, and performance."),
+                ("2. Retail Sales & MoMo Desk", "retail-stock-service", "Retail Stock Service & MoMo Desk Officer", "Retail POS, Cold Store and Groceries, counter sales, customer credit, and all MoMo float and transactions."),
+                ("3. Kitchen & Food Counter", "kitchen-food-counter", "Kitchen & Food Counter Officer", "Food preparation, OneRoot Kitchen orders, direct food sales, drinks, and food-counter stock."),
+                ("4. Customer Growth Apartments & Service Booking", "growth-apartments-dispatch", "Customer Growth Apartments & Service Booking Officer", "CRM, promotions, Facebook, WhatsApp, online-order follow-up, tenant communication, and customer booking for laundry, water, and equipment services. Apartment approvals remain with you."),
+                ("5. Inventory Dispatch Maintenance & Service", "dispatch-maintenance-service", "Inventory Dispatch Maintenance & Service Officer", "Inventory and barcode stock updates, water and equipment rentals, laundry fulfilment, dispatch, delivery handover, and maintenance work."),
             ],
         )
 
