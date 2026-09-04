@@ -101,7 +101,7 @@ USER_ROLE_OPTIONS = [
 ]
 USER_ROLE_LABELS = dict(USER_ROLE_OPTIONS)
 ROLE_DESCRIPTIONS = {
-    "owner": "Full access to every module, reports, exports, and user accounts.",
+    "owner": "Owner and Business Manager with full access, including apartment rentals, tenants, rent and bills approvals, agreements, deposits, maintenance oversight, reporting, exports, and user accounts.",
     "admin": "Full day-to-day operating access including user account management, growth, dispatch, and controls.",
     "finance": "Finance controls, profits, salaries, suppliers, petty cash, cashbook, and reconciliations.",
     "operations": "Cross-area operations leadership for POS, inventory, services, online orders, mobile money, and dispatch.",
@@ -119,7 +119,7 @@ ROLE_DESCRIPTIONS = {
     "finance-hr-controls": "Controls expenses, cashbook, payroll, staff documents, supplier records, and financial closeout.",
     "retail-stock-service": "Runs retail POS, stock, barcode updates, laundry, equipment rentals, and the MTN MoMo counter with float controls.",
     "kitchen-food-counter": "Runs food preparation, food orders, and the OneRoot Kitchen counter.",
-    "growth-apartments-dispatch": "Manages tenants, online orders, dispatch, customer follow-up, promotions, and WhatsApp growth.",
+    "growth-apartments-dispatch": "Runs customer growth, online-order follow-up, dispatch coordination, promotions, and WhatsApp activity. Apartment approvals and tenant management remain with the Owner.",
     "viewer": "Read-only visibility across the dashboard, reports, search, and workbook tools.",
 }
 ROLE_ACCESS_KEYS = {
@@ -727,6 +727,7 @@ STAFF_WORK_ROLES = [
     ("Retail Stock & Service Desk Officer", "Retail Stock & Service Desk Officer"),
     ("Kitchen & Food Counter Officer", "Kitchen & Food Counter Officer"),
     ("Customer Growth Apartments & Dispatch Officer", "Customer Growth Apartments & Dispatch Officer"),
+    ("Customer Growth & Dispatch Officer", "Customer Growth & Dispatch Officer"),
 ]
 STAFF_WORK_ROLE_LABELS = dict(STAFF_WORK_ROLES)
 STAFF_ROLE_DESCRIPTIONS = {
@@ -755,6 +756,7 @@ STAFF_ROLE_DESCRIPTIONS = {
     "Retail Stock & Service Desk Officer": "Serves retail customers, controls stock, manages laundry and equipment rentals, and operates the MoMo counter.",
     "Kitchen & Food Counter Officer": "Prepares and serves food, manages food orders, and keeps OneRoot Kitchen ready for fast service.",
     "Customer Growth Apartments & Dispatch Officer": "Handles tenants, online orders, dispatch, customer follow-up, campaigns, and WhatsApp communication.",
+    "Customer Growth & Dispatch Officer": "Handles online-order follow-up, dispatch, customer CRM, campaigns, Facebook, and WhatsApp communication while the Owner manages apartments.",
 }
 JOB_EMPLOYMENT_TYPES = [
     ("Full-Time", "Full-Time"),

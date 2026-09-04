@@ -13376,11 +13376,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             staff_role_options=STAFF_WORK_ROLES,
             staff_role_descriptions=STAFF_ROLE_DESCRIPTIONS,
             five_person_plan=[
-                ("1. Owner & Business Manager", "owner", "Owner & Business Manager", "You: approval, controls, performance, and business direction."),
+                ("1. Owner & Business Manager & Apartments Officer", "owner", "Owner & Business Manager", "You: approval, controls, finance, HR, apartments, tenant rent and bills, agreements, deposits, maintenance oversight, performance, and business direction."),
                 ("2. Finance HR & Controls", "finance-hr-controls", "Finance HR & Controls Officer", "Expenses, cashbook, payroll, staff records, suppliers, and daily controls."),
                 ("3. Retail Stock & Service Desk", "retail-stock-service", "Retail Stock & Service Desk Officer", "Retail POS, groceries, stock, water and equipment rentals, laundry, and all MoMo float and transactions."),
                 ("4. Kitchen & Food Counter", "kitchen-food-counter", "Kitchen & Food Counter Officer", "Food preparation, OneRoot Kitchen orders, direct food sales, drinks, and food-counter stock."),
-                ("5. Customer Growth Apartments & Dispatch", "growth-apartments-dispatch", "Customer Growth Apartments & Dispatch Officer", "Tenants, online orders, delivery, CRM, promotions, and WhatsApp follow-up."),
+                ("5. Customer Growth & Dispatch", "growth-apartments-dispatch", "Customer Growth & Dispatch Officer", "Online-order follow-up, delivery coordination, CRM, promotions, Facebook, and WhatsApp follow-up. Apartment approvals remain with the Owner."),
             ],
         )
 
