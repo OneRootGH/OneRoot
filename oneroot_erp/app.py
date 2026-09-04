@@ -7850,13 +7850,16 @@ def agreement_interval_label(months: int) -> str:
 
 
 def agreement_advance_label(months: int) -> str:
-    if months == 12:
-        return "one year in advance"
+    # Rent Act 1963 (Act 220), as amended, caps advance rent for a tenancy
+    # exceeding six months at six months. A longer lease may still run for its
+    # agreed term, but rent must be scheduled in lawful instalments.
+    if months > 6:
+        return "six months in advance, then in lawful instalments"
     if months == 6:
         return "six months in advance"
     if months == 1:
         return "monthly in advance"
-    return f"{months} months in advance" if months > 0 else "in advance"
+    return "in advance as permitted by law" if months > 0 else "in advance"
 
 
 def apartment_custom_charge_note(payload: dict[str, Any]) -> str:
@@ -7870,13 +7873,15 @@ def apartment_custom_charge_note(payload: dict[str, Any]) -> str:
 
 def apartment_agreement_placeholders(payload: dict[str, Any], app_config: AppConfig) -> dict[str, str]:
     cycle_months = apartment_cycle_months(payload)
-    advance_rent_due = (
+    cycle_rent_due = (
         parse_amount(payload.get("rentCycleAmount"))
         or apartment_total_rent_due(payload)
         or apartment_total_rent_paid(payload)
     )
+    monthly_rent = round(cycle_rent_due / cycle_months, 2) if cycle_months > 0 and cycle_rent_due > 0 else cycle_rent_due
+    lawful_advance_months = min(cycle_months, 6) if cycle_months > 0 else 0
+    advance_rent_due = round(monthly_rent * lawful_advance_months, 2) if lawful_advance_months else cycle_rent_due
     amount_received = parse_amount(payload.get("rentPaid")) or advance_rent_due
-    monthly_rent = round(advance_rent_due / cycle_months, 2) if cycle_months > 0 and advance_rent_due > 0 else advance_rent_due
     commencement_date = apartment_agreement_commencement_date(payload)
     expiry_date = apartment_agreement_expiry_date(payload)
     payment_date = normalize_text(payload.get("rentPaymentDate"))
@@ -7899,6 +7904,7 @@ def apartment_agreement_placeholders(payload: dict[str, Any], app_config: AppCon
         "[[LEASE_TERM_LABEL]]": f"{lease_term_label} from the agreed commencement date to the matching expiry date.",
         "[[LEASE_TERM_TEXT]]": lease_term_label,
         "[[RENT_PLAN_SUMMARY]]": rent_plan_summary,
+        "[[CYCLE_RENT_TOTAL]]": format_agreement_currency(cycle_rent_due) if cycle_rent_due > 0 else TENANCY_PLACEHOLDER_LINE,
         "[[ADVANCE_RENT_DUE]]": format_agreement_currency(advance_rent_due) if advance_rent_due > 0 else TENANCY_PLACEHOLDER_LINE,
         "[[AMOUNT_RECEIVED]]": format_agreement_currency(amount_received) if amount_received > 0 else TENANCY_PLACEHOLDER_LINE,
         "[[MONTHLY_SERVICE_TOTAL]]": format_agreement_currency(service_total),

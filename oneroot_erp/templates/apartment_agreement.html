@@ -65,10 +65,14 @@
       <strong>{{ source.get('renewalDate')|pretty_date(True) or 'not yet saved' }}</strong>.
     </p>
 
-    <h3>3. Rent And Payment</h3>
+    <h3>3. Rent, Advance Payment, And Receipts</h3>
     <p>
       The agreed rent for the current cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>,
-      with <strong>{{ profile.rentPaid|currency }}</strong> recorded as paid.
+      with <strong>{{ profile.rentPaid|currency }}</strong> recorded as paid. The monthly equivalent is
+      <strong>{{ (source.get('rentCycleAmount') / cycle_months if cycle_months else source.get('rentCycleAmount'))|currency }}</strong>.
+      Rent is payable only in the instalments permitted by Ghanaian law. For a tenancy exceeding six months, no more than six months'
+      rent may be demanded or collected in advance. Any amount recorded beyond the lawful advance period is applied to the next rent periods
+      or refunded as required by law.
       Payment method: <strong>{{ source.get('rentPaymentMethod') or '_______________________________' }}</strong>.
       Payment reference: <strong>{{ source.get('rentPaymentReference') or '_______________________________' }}</strong>.
       Received by: <strong>{{ source.get('rentReceivedBy') or '_______________________________' }}</strong>.
@@ -80,16 +84,24 @@
       {% endif %}
     </p>
 
-    <h3>4. Monthly Bills And Service Charges</h3>
+    <h3>4. Rent Review And Payment Evidence</h3>
+    <p>
+      Any rent review or increase must be communicated in writing and must follow the applicable Ghanaian law and Rent Control process.
+      The landlord / manager will issue a written receipt for each rent payment, showing the premises, amount, payment period, and tenant name.
+      The tenant should keep the receipt and payment reference. Rent and monthly charges are separate and must not be combined without a clear itemised record.
+    </p>
+
+    <h3>5. Monthly Bills And Service Charges</h3>
     <p>
       Monthly bills currently on record total <strong>{{ profile.billsDue|currency }}</strong> and include water
       ({{ profile.waterBill|currency }}), toilet ({{ profile.toiletBill|currency }}),
       sweeping / gutter cleaning ({{ profile.sweepingBill|currency }}), waste management ({{ profile.wasteBill|currency }}),
       and any custom charges saved in the apartment profile.
-      Payment channel currently used: <strong>{{ payment_channel }}</strong>.
+      Payment channel currently used: <strong>{{ payment_channel }}</strong>. Bills and service charges must be issued with an itemised notice,
+      due date, payment receipt, and reasonable prior notice of any change that is not already agreed in this agreement.
     </p>
 
-    <h3>5. Tenant Identification And Contacts</h3>
+    <h3>6. Tenant Identification, Occupants, And Contacts</h3>
     <p>
       Tenant address: <strong>{{ source.get('tenantAddress') or '_______________________________' }}</strong>.
       Ghana Card / ID: <strong>{{ source.get('tenantIdNumber') or '_______________________________' }}</strong>.
@@ -99,18 +111,59 @@
       {% if source.get('guarantorPhone') %}({{ source.get('guarantorPhone') }}){% endif %}.
     </p>
 
-    <h3>6. Deposit, Condition, And Housekeeping</h3>
+    <h3>7. Deposit, Inventory, Condition, And Housekeeping</h3>
     <p>
       Security deposit currently held: <strong>{{ profile.securityDepositHeld|currency }}</strong>.
       The tenant is expected to keep the premises in good condition and comply with agreed housekeeping, sanitation,
-      and waste-management arrangements for the property.
+      and waste-management arrangements for the property. The parties should sign a move-in condition and inventory schedule,
+      including keys, meter readings, bed and mattress items where provided. A deposit may be used only for documented unpaid lawful charges,
+      damage beyond fair wear and tear, or missing listed items, and the tenant must receive an itemised statement of any deduction.
     </p>
 
-    <h3>7. Sign-Off</h3>
+    <h3>8. Use, Safety, Conduct, And Property Care</h3>
+    <p>
+      The premises are for residential use only. No commercial activity, subletting, assignment, structural change, drilling, painting,
+      or alteration is permitted without the landlord's prior written consent. Gas cylinders must be kept in the designated external compartment,
+      not in a bedroom or kitchen. Pets, indoor smoking, excessive noise, nuisance, dangerous or disorderly conduct, and actions that disturb
+      neighbours are prohibited. Guests are welcome for reasonable stays; any extended occupancy must be disclosed to the landlord / manager.
+      The tenant must keep the suite and immediate surroundings clean, cooperate with the property's sanitation arrangements, and keep the main gate locked.
+    </p>
+
+    <h3>9. Repairs, Maintenance, And Access</h3>
+    <p>
+      The landlord is responsible for structural safety and repairs not caused by the tenant's misuse or neglect. The tenant is responsible for
+      promptly reporting faults and for the reasonable cost of damage caused by the tenant, occupants, or guests beyond fair wear and tear.
+      Non-urgent reports may be sent by WhatsApp or text. Urgent leaks, electrical faults, fire, or safety risks must be reported immediately.
+      Except in an emergency, for agreed repairs, or where entry is authorised by law, the landlord will give reasonable advance notice before entering.
+      The tenant will allow access at a reasonable time for inspection or necessary repair.
+    </p>
+
+    <h3>10. Termination, Renewal, And Possession</h3>
+    <p>
+      This fixed term ends on the stated expiry date unless renewed in writing or otherwise continued under applicable law. Either party may give
+      written notice of a proposed non-renewal or early termination, but no notice in this agreement reduces any longer notice period required by Ghanaian law.
+      The landlord may not lock out, remove the tenant's belongings, disconnect essential services, or recover possession except through the lawful process.
+      Any recovery of possession, dispute about arrears, or claim for breach must follow the applicable Rent Act, Rent Control procedures, and court process.
+    </p>
+
+    <h3>11. Dispute Resolution And Governing Law</h3>
+    <p>
+      The parties will first try to resolve concerns respectfully in writing. If unresolved, either party may refer the matter to the Rent Control Department,
+      use a lawful alternative dispute-resolution process, or seek the appropriate court remedy. This agreement is governed by the laws of the Republic of Ghana.
+      Any term inconsistent with mandatory Ghanaian law is read down or replaced only to the extent necessary, without affecting the rest of the agreement.
+    </p>
+
+    <h3>12. Sign-Off</h3>
     <p>
       This agreement becomes fully effective from <strong>{{ commencement_date|pretty_date(True) or 'the agreed commencement date' }}</strong>
-      once payment is confirmed and the landlord / manager and tenant sign the final copy.
+      once lawful payment is confirmed and the landlord / manager and tenant sign the final copy. Each party should retain a signed copy,
+      the payment schedule, and the move-in condition / inventory schedule.
     </p>
+
+    <section class="document-note">
+      <strong>Legal Review Note</strong>
+      <p>This practical template is designed for OneRoot Rentals and Apartments. It should be reviewed for the particular property and transaction by the Ghana Rent Control Department or a qualified Ghanaian legal practitioner before execution.</p>
+    </section>
   </section>
 
   {% if source.get('notes') %}
