@@ -94,7 +94,7 @@ USER_ROLE_OPTIONS = [
     ("marketing-crm", "CRM & Marketing"),
     ("hr-payroll", "HR & Payroll"),
     ("finance-hr-controls", "Finance HR & Controls Officer"),
-    ("retail-stock-service", "Retail Stock Service & MoMo Desk Officer"),
+    ("retail-stock-service", "Retail Stock & Service Desk Officer"),
     ("kitchen-food-counter", "Kitchen & Food Counter Officer"),
     ("growth-apartments-dispatch", "Customer Growth Apartments & Dispatch Officer"),
     ("viewer", "Viewer"),
@@ -724,7 +724,7 @@ STAFF_WORK_ROLES = [
     ("Support Staff", "Support Staff"),
     ("Owner & Business Manager", "Owner & Business Manager"),
     ("Finance HR & Controls Officer", "Finance HR & Controls Officer"),
-    ("Retail Stock Service & MoMo Desk Officer", "Retail Stock Service & MoMo Desk Officer"),
+    ("Retail Stock & Service Desk Officer", "Retail Stock & Service Desk Officer"),
     ("Kitchen & Food Counter Officer", "Kitchen & Food Counter Officer"),
     ("Customer Growth Apartments & Dispatch Officer", "Customer Growth Apartments & Dispatch Officer"),
 ]
@@ -752,7 +752,7 @@ STAFF_ROLE_DESCRIPTIONS = {
     "Support Staff": "General support role for shared tasks across the workspace.",
     "Owner & Business Manager": "Owns the business, approves key controls, manages performance, and leads the five-person team.",
     "Finance HR & Controls Officer": "Handles finance, payroll, HR documents, expenses, supplier records, and controls.",
-    "Retail Stock Service & MoMo Desk Officer": "Serves retail customers, controls stock, manages laundry and equipment rentals, and operates the MoMo counter.",
+    "Retail Stock & Service Desk Officer": "Serves retail customers, controls stock, manages laundry and equipment rentals, and operates the MoMo counter.",
     "Kitchen & Food Counter Officer": "Prepares and serves food, manages food orders, and keeps OneRoot Kitchen ready for fast service.",
     "Customer Growth Apartments & Dispatch Officer": "Handles tenants, online orders, dispatch, customer follow-up, campaigns, and WhatsApp communication.",
 }
