@@ -7754,28 +7754,28 @@ def apartment_document_source_payload(reference_record: ModuleRecord, suite_reco
         pick_latest_date(source_payloads, "leaseEndDate")
         or pick_latest_date(source_payloads, "moveOutDate")
     )
-    cycle_rent_paid = round(
-        sum(
-            parse_amount(row.get("rentPaid"))
-            for row in statement_rows
-            if (
-                not agreement_start
-                or not row["record"].record_date
-                or row["record"].record_date >= agreement_start
-            )
-            and (
-                not agreement_end
-                or not row["record"].record_date
-                or row["record"].record_date <= agreement_end
-            )
-        ),
-        2,
-    )
-    suite_rent_paid = cycle_rent_paid or parse_amount((payment_payload or {}).get("rentPaid")) or pick_latest_amount(source_payloads, "rentPaid")
+    cycle_payment_payloads = [
+        apartment_record_payload(row["record"])
+        for row in statement_rows
+        if (
+            not agreement_start
+            or not row["record"].record_date
+            or row["record"].record_date >= agreement_start
+        )
+        and (
+            not agreement_end
+            or not row["record"].record_date
+            or row["record"].record_date <= agreement_end
+        )
+    ]
+    cycle_suite_rent_paid = round(sum(parse_amount(item.get("rentPaid")) for item in cycle_payment_payloads), 2)
+    cycle_bed_rent_paid = round(sum(parse_amount(item.get("bedRentPaid")) for item in cycle_payment_payloads), 2)
+    cycle_mattress_rent_paid = round(sum(parse_amount(item.get("mattressRentPaid")) for item in cycle_payment_payloads), 2)
+    suite_rent_paid = cycle_suite_rent_paid or parse_amount((payment_payload or {}).get("rentPaid")) or pick_latest_amount(source_payloads, "rentPaid")
     bed_rent_due = parse_amount((payment_payload or {}).get("bedRentDue")) or pick_latest_amount(source_payloads, "bedRentDue")
-    bed_rent_paid = parse_amount((payment_payload or {}).get("bedRentPaid")) or pick_latest_amount(source_payloads, "bedRentPaid")
+    bed_rent_paid = cycle_bed_rent_paid or parse_amount((payment_payload or {}).get("bedRentPaid")) or pick_latest_amount(source_payloads, "bedRentPaid")
     mattress_rent_due = parse_amount((payment_payload or {}).get("mattressRentDue")) or pick_latest_amount(source_payloads, "mattressRentDue")
-    mattress_rent_paid = parse_amount((payment_payload or {}).get("mattressRentPaid")) or pick_latest_amount(source_payloads, "mattressRentPaid")
+    mattress_rent_paid = cycle_mattress_rent_paid or parse_amount((payment_payload or {}).get("mattressRentPaid")) or pick_latest_amount(source_payloads, "mattressRentPaid")
     total_rent_due = round(suite_rent_due + bed_rent_due + mattress_rent_due, 2)
     total_rent_paid = round(suite_rent_paid + bed_rent_paid + mattress_rent_paid, 2)
 
@@ -7815,6 +7815,7 @@ def apartment_document_source_payload(reference_record: ModuleRecord, suite_reco
         ),
         "rentDue": total_rent_due,
         "rentPaid": total_rent_paid,
+        "rentPaymentCredit": round(max(total_rent_paid - total_rent_due, 0.0), 2),
         "rentCoverageStartDate": pick_latest_date(payment_sources, "rentCoverageStartDate"),
         "rentCoverageEndDate": pick_latest_date(payment_sources, "rentCoverageEndDate"),
         "nextRentDueDate": pick_latest_date(source_payloads, "nextRentDueDate"),

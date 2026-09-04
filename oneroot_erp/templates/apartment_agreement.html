@@ -68,9 +68,13 @@
 
     <h3>3. Rent, Advance Payment, And Receipts</h3>
     <p>
-      The rent agreed for the current tenancy cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>,
-      of which <strong>{{ source.get('rentPaid')|currency }}</strong> has been received. The monthly equivalent is
+      The rent agreed for the current tenancy cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>.
+      Rent received towards the suite is <strong>{{ source.get('suiteRentPaid')|currency }}</strong>.
+      {% if source.get('bedRentDue', 0) or source.get('bedRentPaid', 0) %}Bed rent: due <strong>{{ source.get('bedRentDue')|currency }}</strong>, received <strong>{{ source.get('bedRentPaid')|currency }}</strong>.{% endif %}
+      {% if source.get('mattressRentDue', 0) or source.get('mattressRentPaid', 0) %}Mattress rent: due <strong>{{ source.get('mattressRentDue')|currency }}</strong>, received <strong>{{ source.get('mattressRentPaid')|currency }}</strong>.{% endif %}
+      Total rent and approved add-ons received is <strong>{{ source.get('rentPaid')|currency }}</strong>. The monthly equivalent for suite rent is
       <strong>{{ (source.get('rentCycleAmount') / cycle_months if cycle_months else source.get('rentCycleAmount'))|currency }}</strong>.
+      {% if source.get('rentPaymentCredit', 0) > 0 %}The excess <strong>{{ source.get('rentPaymentCredit')|currency }}</strong> is held as credit for the next rent period unless the parties agree otherwise in writing.{% endif %}
       Rent shall be paid only in instalments permitted by Ghanaian law. For a tenancy exceeding six months, no more than six months'
       rent may be demanded or received in advance. Any amount recorded beyond the lawful advance period shall be applied to the next rent period
       or refunded where required by law.
