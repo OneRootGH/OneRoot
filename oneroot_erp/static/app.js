@@ -16,6 +16,7 @@
   const totalNodes = document.querySelectorAll("[data-pos-total]");
   const cartItemCountDuplicateNode = document.getElementById("pos-cart-item-count-duplicate");
   const counterTotalNode = document.getElementById("pos-counter-total");
+  const creditCollectedNode = document.getElementById("pos-credit-collected");
   const counterProfitNode = document.getElementById("pos-counter-profit");
   const ledgerTotalNode = document.getElementById("pos-ledger-total");
   const allDailySalesNode = document.getElementById("pos-all-daily-sales");
@@ -36,6 +37,7 @@
   const openingCashInput = document.getElementById("pos-opening-cash");
   const closingCashInput = document.getElementById("pos-closing-cash");
   const cashSalesNode = document.getElementById("pos-cash-sales");
+  const creditCashNode = document.getElementById("pos-credit-cash");
   const expectedCashNode = document.getElementById("pos-expected-cash");
   const cashVarianceNode = document.getElementById("pos-cash-variance");
   const orderDateInput = document.getElementById("pos-order-date");
@@ -494,6 +496,9 @@
     if (counterTotalNode) {
       counterTotalNode.textContent = formatCurrency(summary.totalAmount);
     }
+    if (creditCollectedNode) {
+      creditCollectedNode.textContent = formatCurrency(summary.creditCollectionsTotal);
+    }
     if (counterProfitNode) {
       counterProfitNode.textContent = formatCurrency(summary.profitAmount);
     }
@@ -532,12 +537,15 @@
     if (cashSalesNode) {
       cashSalesNode.textContent = formatCurrency(summary.cashSalesTotal);
     }
+    if (creditCashNode) {
+      creditCashNode.textContent = formatCurrency(summary.creditCashCollectionsTotal);
+    }
     syncMoneyInput(openingCashInput, summary.openingCash);
     syncMoneyInput(closingCashInput, summary.closingCashCounted);
     renderCloseoutPreview(summary);
     if (closeoutMetaNode) {
       closeoutMetaNode.textContent = summary.lastCloseout
-        ? `Last closeout saved ${String(summary.lastCloseout.closedAt || "").slice(0, 16).replace("T", " ")} by ${summary.lastCloseout.closedBy || "staff"}. POS ${formatCurrency(summary.lastCloseout.totalAmount)} · All business sales ${formatCurrency(summary.lastCloseout.allDailySalesTotal ?? summary.lastCloseout.dailySalesLedgerTotal)}.`
+        ? `Last closeout saved ${String(summary.lastCloseout.closedAt || "").slice(0, 16).replace("T", " ")} by ${summary.lastCloseout.closedBy || "staff"}. POS ${formatCurrency(summary.lastCloseout.totalAmount)} · Credit collected ${formatCurrency(summary.lastCloseout.creditCollectionsTotal)} · All business sales ${formatCurrency(summary.lastCloseout.allDailySalesTotal ?? summary.lastCloseout.dailySalesLedgerTotal)}.`
         : "No closeout has been saved for this counter day yet.";
     }
     if (closeoutButton) {
@@ -554,8 +562,8 @@
     }
     const openingCash = parseMoneyInput(openingCashInput);
     const countedClose = parseMoneyInput(closingCashInput);
-    const cashSales = Number(summary.cashSalesTotal || 0);
-    const expectedClose = openingCash + cashSales;
+    const cashCollections = Number(summary.cashCollectionsTotal ?? summary.cashSalesTotal ?? 0);
+    const expectedClose = openingCash + cashCollections;
     const variance = countedClose - expectedClose;
     if (expectedCashNode) {
       expectedCashNode.textContent = formatCurrency(expectedClose);

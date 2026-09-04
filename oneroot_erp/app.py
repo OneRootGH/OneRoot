@@ -10448,6 +10448,108 @@ def create_app(config: AppConfig | None = None) -> Flask:
         set_module_record_metadata(existing, MODULES["customer_credit_accounts"], payload)
         rollup_customer_credit_account(db, customer_credit_key(payload))
 
+    def customer_credit_cashbook_account(payment_method: Any) -> str:
+        method = normalize_text(payment_method).lower()
+        if method == "cash":
+            return "Main Cash Drawer"
+        if method in {"mobile money", "momo"}:
+            return "OneRoot MoMo Collection Wallet"
+        if method in {"bank transfer", "card"}:
+            return "Business Bank Account"
+        return "Customer Collections Account"
+
+    def sync_customer_credit_payment_to_cashbook(record: ModuleRecord, db_session=None) -> None:
+        """Keep a collection visible in Cashbook without treating it as a new sale."""
+        db = db_session or g.db
+        payload = dict(record.payload or {})
+        reference = f"customer-credit-payment|{record.id}"
+        linked_entry = db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "cashbook_entries",
+                ModuleRecord.reference == reference,
+            )
+        )
+        is_payment = normalize_text(payload.get("transactionType")) == "Payment Received"
+        amount = round(abs(parse_amount(payload.get("amount"))), 2)
+        if not is_payment or amount <= 0:
+            if linked_entry:
+                db.delete(linked_entry)
+            return
+
+        payment_method = normalize_text(payload.get("paymentMethod")) or "Cash"
+        cashbook_payload = {
+            "id": linked_entry.id if linked_entry else uuid4().hex,
+            "date": normalize_text(payload.get("entryDate")) or date.today().isoformat(),
+            "businessAreaId": normalize_text(payload.get("businessAreaId")) or "shared-operations",
+            "accountName": customer_credit_cashbook_account(payment_method),
+            "entryType": "Cash In",
+            "amount": amount,
+            "paymentMethod": payment_method,
+            "reference": reference,
+            "sourceType": "customer-credit-collection",
+            "notes": (
+                f"[Credit Collection Sync] {normalize_text(payload.get('customerName')) or 'Customer'} "
+                f"paid {format_currency(amount)} against a OneRoot credit account. "
+                "This is a debt collection, not a new sale."
+            ),
+        }
+        if not linked_entry:
+            linked_entry = ModuleRecord(
+                id=cashbook_payload["id"],
+                module_key="cashbook_entries",
+                created_at=datetime.utcnow(),
+            )
+            db.add(linked_entry)
+        set_module_record_metadata(linked_entry, MODULES["cashbook_entries"], cashbook_payload)
+
+    def sync_all_customer_credit_payments_to_cashbook(db_session) -> None:
+        for credit_record in db_session.scalars(
+            select(ModuleRecord).where(ModuleRecord.module_key == "customer_credit_accounts")
+        ).all():
+            sync_customer_credit_payment_to_cashbook(credit_record, db_session)
+
+    def customer_credit_collection_summary(db_session, entry_date: date, area_id: str = "") -> dict[str, Any]:
+        selected_area = normalize_text(area_id)
+        total = 0.0
+        cash_total = 0.0
+        payment_mix: dict[str, float] = defaultdict(float)
+        rows: list[dict[str, Any]] = []
+        for credit_record in db_session.scalars(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "customer_credit_accounts",
+                ModuleRecord.record_date == entry_date,
+            ).order_by(desc(ModuleRecord.updated_at))
+        ).all():
+            payload = dict(credit_record.payload or {})
+            if normalize_text(payload.get("transactionType")) != "Payment Received":
+                continue
+            if selected_area and normalize_text(payload.get("businessAreaId")) != selected_area:
+                continue
+            amount = round(abs(parse_amount(payload.get("amount"))), 2)
+            if amount <= 0:
+                continue
+            payment_method = normalize_text(payload.get("paymentMethod")) or "Cash"
+            total += amount
+            payment_mix[payment_method] += amount
+            if payment_method.lower() in POS_CASH_PAYMENT_METHODS:
+                cash_total += amount
+            rows.append(
+                {
+                    "id": credit_record.id,
+                    "customerName": normalize_text(payload.get("customerName")) or "Customer",
+                    "amount": amount,
+                    "paymentMethod": payment_method,
+                    "receiptUrl": url_for("customer_credit_receipt", record_id=credit_record.id),
+                }
+            )
+        return {
+            "total": round(total, 2),
+            "cashTotal": round(cash_total, 2),
+            "count": len(rows),
+            "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
+            "rows": rows[:12],
+        }
+
     def sync_online_order_sales(order_record: ModuleRecord, db_session=None) -> None:
         db = db_session or g.db
         payload = dict(order_record.payload or {})
@@ -10773,6 +10875,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         selected_area = normalize_text(area_id)
         kitchen_in_scope = not selected_area or selected_area in POS_FOOD_SALES_AREA_IDS
         mobile_money_snapshot = mobile_money_day_snapshot(g.db, order_date)
+        credit_collections = customer_credit_collection_summary(g.db, order_date, selected_area)
         all_orders = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == order_date).order_by(desc(PosOrder.updated_at))
         ).all()
@@ -10917,12 +11020,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         closeout_payload = serialize_module_record(closeout_record) if closeout_record else None
         cash_sales_total = pos_cash_sales_total(counter_payment_mix)
+        cash_collections_total = round(cash_sales_total + credit_collections["cashTotal"], 2)
         opening_cash = parse_amount(closeout_payload.get("openingCash")) if closeout_payload else 0.0
         closing_cash_counted = parse_amount(closeout_payload.get("closingCashCounted")) if closeout_payload else 0.0
-        expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_sales_total)
-        cash_variance = pos_cash_variance(opening_cash, closing_cash_counted, cash_sales_total)
+        expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_collections_total)
+        cash_variance = pos_cash_variance(opening_cash, closing_cash_counted, cash_collections_total)
         if closeout_payload is not None:
             closeout_payload["cashSalesTotal"] = cash_sales_total
+            closeout_payload["creditCollectionsTotal"] = credit_collections["total"]
+            closeout_payload["creditCashCollectionsTotal"] = credit_collections["cashTotal"]
+            closeout_payload["cashCollectionsTotal"] = cash_collections_total
             closeout_payload["openingCash"] = opening_cash
             closeout_payload["closingCashCounted"] = closing_cash_counted
             closeout_payload["expectedClosingCash"] = expected_closing_cash
@@ -10942,12 +11049,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "breadSalesProfit": round(bread_sales_total - bread_sales_cost, 2),
             "breadItemCount": round(bread_item_count, 2),
             "counterCollectionsTotal": round(total_amount + bread_sales_total, 2),
+            "creditCollectionsTotal": credit_collections["total"],
+            "creditCashCollectionsTotal": credit_collections["cashTotal"],
+            "creditCollectionCount": credit_collections["count"],
+            "creditCollectionPaymentMix": credit_collections["paymentMix"],
+            "creditCollections": credit_collections["rows"],
             "dailySalesLedgerTotal": daily_sales_total,
             "allDailySalesTotal": all_daily_sales_total,
             "allDailySalesBreakdown": all_daily_sales_breakdown,
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
             "counterPaymentMix": {key: round(value, 2) for key, value in sorted(counter_payment_mix.items())},
             "cashSalesTotal": cash_sales_total,
+            "cashCollectionsTotal": cash_collections_total,
             "openingCash": opening_cash,
             "closingCashCounted": closing_cash_counted,
             "expectedClosingCash": expected_closing_cash,
@@ -11002,7 +11115,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 continue
 
             summary = build_pos_counter_summary(order_date, area_id)
-            if summary["orderCount"] <= 0:
+            if summary["orderCount"] <= 0 and summary["creditCollectionCount"] <= 0:
                 g.db.delete(record)
                 continue
 
@@ -11010,7 +11123,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             opening_cash = parse_amount(existing_payload.get("openingCash"))
             closing_cash_counted = parse_amount(existing_payload.get("closingCashCounted"))
             cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
-            expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_sales_total)
+            cash_collections_total = round(cash_sales_total + summary["creditCashCollectionsTotal"], 2)
+            expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_collections_total)
             closeout_payload = {
                 "id": record.id,
                 "orderDate": summary["orderDate"],
@@ -11024,6 +11138,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "breadSalesTotal": summary["breadSalesTotal"],
                 "breadSalesProfit": summary["breadSalesProfit"],
                 "counterCollectionsTotal": summary["counterCollectionsTotal"],
+                "creditCollectionsTotal": summary["creditCollectionsTotal"],
+                "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
+                "creditCollectionCount": summary["creditCollectionCount"],
                 "orderCount": summary["orderCount"],
                 "itemCount": summary["itemCount"],
                 "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
@@ -11031,10 +11148,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
                 "paymentMix": summary["counterPaymentMix"],
                 "cashSalesTotal": cash_sales_total,
+                "cashCollectionsTotal": cash_collections_total,
                 "openingCash": opening_cash,
                 "closingCashCounted": closing_cash_counted,
                 "expectedClosingCash": expected_closing_cash,
-                "cashVariance": pos_cash_variance(opening_cash, closing_cash_counted, cash_sales_total),
+                "cashVariance": pos_cash_variance(opening_cash, closing_cash_counted, cash_collections_total),
                 "orderNumbers": [order["orderNumber"] for order in summary["orders"]],
                 "closedAt": existing_payload.get("closedAt") or datetime.utcnow().isoformat(),
                 "closedBy": existing_payload.get("closedBy") or actor_name,
@@ -13218,6 +13336,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if access_response:
             return access_response
         growth_context: dict[str, Any] | None = None
+        if module_key in {"customer_credit_accounts", "cashbook_entries"}:
+            # Backfill linked cashbook movements for earlier credit repayments.
+            sync_all_customer_credit_payments_to_cashbook(g.db)
+            g.db.commit()
         if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
             sync_customer_crm_automation(g.db)
             sync_marketing_campaign_automation(g.db)
@@ -14058,6 +14180,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     rollup_customer_credit_account(g.db, customer_credit_key(payload))
                     if prior_credit_key and prior_credit_key != customer_credit_key(payload):
                         rollup_customer_credit_account(g.db, prior_credit_key)
+                    sync_customer_credit_payment_to_cashbook(record, g.db)
                 if module_key == "tenant_portal_requests":
                     sync_tenant_request_work_order(record, g.db)
                 if module_key == "catering_quotes":
@@ -14570,6 +14693,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             flash("That record could not be found.", "error")
             return redirect(url_for("module_list", module_key=module_key))
 
+        deleted_credit_key = customer_credit_key(record.payload or {}) if module_key == "customer_credit_accounts" else ""
+
         if module_key == "sales" and (
             normalize_text((record.payload or {}).get("linkedGeneratedSalesKey"))
             or normalize_text((record.payload or {}).get("sourceType"))
@@ -14610,8 +14735,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for linked_record in linked_sales:
                 g.db.delete(linked_record)
 
+        if module_key == "customer_credit_accounts":
+            linked_cashbook = g.db.scalar(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "cashbook_entries",
+                    ModuleRecord.reference == f"customer-credit-payment|{record.id}",
+                )
+            )
+            if linked_cashbook:
+                g.db.delete(linked_cashbook)
+
         title = record.title
         g.db.delete(record)
+        if deleted_credit_key:
+            g.db.flush()
+            rollup_customer_credit_account(g.db, deleted_credit_key)
         audit(module_key, definition.label, "delete", title, record_id)
         g.db.commit()
         flash(f"{definition.label} record deleted.", "success")
@@ -15798,8 +15936,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order_date = parse_date(payload.get("orderDate")) or date.today()
         area_id = "kitchen" if normalize_text(payload.get("desk")) == "food" else normalize_text(payload.get("areaId"))
         summary = build_pos_counter_summary(order_date, area_id)
-        if summary["orderCount"] <= 0:
-            return jsonify({"ok": False, "error": "No POS orders are available for this date and area."}), 400
+        if summary["orderCount"] <= 0 and summary["creditCollectionCount"] <= 0:
+            return jsonify({"ok": False, "error": "No POS sales or customer credit collections are available for this date and area."}), 400
         opening_cash_raw = parse_amount(payload.get("openingCash"))
         closing_cash_counted_raw = parse_amount(payload.get("closingCashCounted"))
         if opening_cash_raw < 0 or closing_cash_counted_raw < 0:
@@ -15825,7 +15963,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         is_existing = record is not None
         existing_payload = dict(record.payload or {}) if record else {}
         cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
-        expected_closing_cash = pos_expected_closing_cash(opening_cash_raw, cash_sales_total)
+        cash_collections_total = round(cash_sales_total + summary["creditCashCollectionsTotal"], 2)
+        expected_closing_cash = pos_expected_closing_cash(opening_cash_raw, cash_collections_total)
         closeout_payload = {
             "id": record.id if record else uuid4().hex,
             "orderDate": summary["orderDate"],
@@ -15839,6 +15978,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "breadSalesTotal": summary["breadSalesTotal"],
             "breadSalesProfit": summary["breadSalesProfit"],
             "counterCollectionsTotal": summary["counterCollectionsTotal"],
+            "creditCollectionsTotal": summary["creditCollectionsTotal"],
+            "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
+            "creditCollectionCount": summary["creditCollectionCount"],
             "orderCount": summary["orderCount"],
             "itemCount": summary["itemCount"],
             "dailySalesLedgerTotal": summary["dailySalesLedgerTotal"],
@@ -15846,10 +15988,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
             "paymentMix": summary["counterPaymentMix"],
             "cashSalesTotal": cash_sales_total,
+            "cashCollectionsTotal": cash_collections_total,
             "openingCash": opening_cash_raw,
             "closingCashCounted": closing_cash_counted_raw,
             "expectedClosingCash": expected_closing_cash,
-            "cashVariance": pos_cash_variance(opening_cash_raw, closing_cash_counted_raw, cash_sales_total),
+            "cashVariance": pos_cash_variance(opening_cash_raw, closing_cash_counted_raw, cash_collections_total),
             "orderNumbers": [order["orderNumber"] for order in summary["orders"]],
             "closedAt": datetime.utcnow().isoformat(),
             "closedBy": g.current_user.full_name or g.current_user.username,

@@ -12,6 +12,7 @@
         <a class="button subtle" href="{{ url_for('inventory') }}">Inventory</a>
         {% if 'customer_credit_accounts' in current_access_keys %}
           <a class="button subtle" href="{{ url_for('module_list', module_key='customer_credit_accounts') }}">Credit Accounts</a>
+          <a class="button subtle" href="{{ url_for('module_form', module_key='customer_credit_accounts', transactionType='Payment Received', entryDate=today_iso, paymentMethod='Cash') }}">Receive Credit</a>
         {% endif %}
         {% if 'mobile_money_transactions' in current_access_keys %}
           <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">MoMo Counter</a>
@@ -27,6 +28,10 @@
       <article class="pos-counter-pill">
         <span class="pos-counter-label">POS Sales</span>
         <strong id="pos-counter-total">{{ counter_summary.totalAmount|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill pos-counter-pill-highlight">
+        <span class="pos-counter-label">Credit Collected</span>
+        <strong id="pos-credit-collected">{{ counter_summary.creditCollectionsTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill pos-counter-pill-highlight">
         <span class="pos-counter-label">Bread Sales</span>
@@ -70,7 +75,7 @@
           No payment mix recorded yet.
         {% endif %}
       </span>
-      · Bread is counted separately and included in counter cash closeout. Credit sales are managed in Customer Credit Accounts and excluded from POS Sales and All Daily Sales. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
+      · Credit repayment is a collection, not a new sale: it is excluded from POS Sales and All Daily Sales, but cash repayments are included in expected close cash. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
     </p>
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
@@ -195,6 +200,7 @@
           </div>
           <div class="pos-ticket-inline pos-ticket-inline-tight">
             <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
+            <span>Credit Cash <strong id="pos-credit-cash">{{ counter_summary.creditCashCollectionsTotal|currency }}</strong></span>
             <span>Expected <strong id="pos-expected-cash">{{ counter_summary.expectedClosingCash|currency }}</strong></span>
             <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
           </div>

@@ -51,28 +51,29 @@
   <section class="document-copy">
     <h3>1. Parties</h3>
     <p>
-      This tenancy agreement is prepared for <strong>{{ owner_name }}</strong> operating under OneRoot Essentials as landlord / manager,
-      and <strong>{{ source.get('tenantName') or '_______________________________' }}</strong> as tenant for the use of
-      <strong>{{ source.get('suite') }}</strong> located at <strong>{{ property_location }}</strong>.
+      This Tenancy Agreement is made between <strong>{{ owner_name }}</strong>, trading as OneRoot Essentials
+      (the <strong>Landlord / Manager</strong>), and <strong>{{ source.get('tenantName') or '_______________________________' }}</strong>
+      (the <strong>Tenant</strong>), in respect of <strong>{{ source.get('suite') }}</strong> at
+      <strong>{{ property_location }}</strong> (the <strong>Premises</strong>).
     </p>
 
     <h3>2. Premises And Term</h3>
     <p>
-      The tenancy covers {{ source.get('suite') }} and runs from
+      The Landlord lets the Premises to the Tenant for residential use only for a fixed term beginning on
       <strong>{{ commencement_date|pretty_date(True) or '_______________________________' }}</strong>
       to <strong>{{ expiry_date|pretty_date(True) or '_______________________________' }}</strong>.
-      Where the term is renewed, the next renewal review date is
+      Any renewal shall be agreed in writing or take effect only as provided by applicable Ghanaian law. The next renewal review date is
       <strong>{{ source.get('renewalDate')|pretty_date(True) or 'not yet saved' }}</strong>.
     </p>
 
     <h3>3. Rent, Advance Payment, And Receipts</h3>
     <p>
-      The agreed rent for the current cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>,
-      with <strong>{{ profile.rentPaid|currency }}</strong> recorded as paid. The monthly equivalent is
+      The rent agreed for the current tenancy cycle is <strong>{{ source.get('rentCycleAmount')|currency }}</strong>,
+      of which <strong>{{ profile.rentPaid|currency }}</strong> has been received. The monthly equivalent is
       <strong>{{ (source.get('rentCycleAmount') / cycle_months if cycle_months else source.get('rentCycleAmount'))|currency }}</strong>.
-      Rent is payable only in the instalments permitted by Ghanaian law. For a tenancy exceeding six months, no more than six months'
-      rent may be demanded or collected in advance. Any amount recorded beyond the lawful advance period is applied to the next rent periods
-      or refunded as required by law.
+      Rent shall be paid only in instalments permitted by Ghanaian law. For a tenancy exceeding six months, no more than six months'
+      rent may be demanded or received in advance. Any amount recorded beyond the lawful advance period shall be applied to the next rent period
+      or refunded where required by law.
       Payment method: <strong>{{ source.get('rentPaymentMethod') or '_______________________________' }}</strong>.
       Payment reference: <strong>{{ source.get('rentPaymentReference') or '_______________________________' }}</strong>.
       Received by: <strong>{{ source.get('rentReceivedBy') or '_______________________________' }}</strong>.
@@ -86,19 +87,19 @@
 
     <h3>4. Rent Review And Payment Evidence</h3>
     <p>
-      Any rent review or increase must be communicated in writing and must follow the applicable Ghanaian law and Rent Control process.
-      The landlord / manager will issue a written receipt for each rent payment, showing the premises, amount, payment period, and tenant name.
-      The tenant should keep the receipt and payment reference. Rent and monthly charges are separate and must not be combined without a clear itemised record.
+      Any proposed rent review or increase shall be given in writing and shall comply with applicable Ghanaian law and Rent Control procedures.
+      The Landlord / Manager shall issue a written receipt for each rent payment, identifying the Premises, amount, payment period, and Tenant.
+      The Tenant should retain the receipt and payment reference. Rent and monthly charges are separate obligations and shall not be combined without a clear itemised record.
     </p>
 
     <h3>5. Monthly Bills And Service Charges</h3>
     <p>
-      Monthly bills currently on record total <strong>{{ profile.billsDue|currency }}</strong> and include water
+      In addition to rent, the recurring monthly service charges currently recorded total <strong>{{ profile.billsDue|currency }}</strong> and include water
       ({{ profile.waterBill|currency }}), toilet ({{ profile.toiletBill|currency }}),
       sweeping / gutter cleaning ({{ profile.sweepingBill|currency }}), waste management ({{ profile.wasteBill|currency }}),
       and any custom charges saved in the apartment profile.
-      Payment channel currently used: <strong>{{ payment_channel }}</strong>. Bills and service charges must be issued with an itemised notice,
-      due date, payment receipt, and reasonable prior notice of any change that is not already agreed in this agreement.
+      Payment channel currently used: <strong>{{ payment_channel }}</strong>. Bills and service charges shall be issued with an itemised notice,
+      due date, and payment receipt. The Tenant shall receive reasonable prior notice of any change not already agreed in this Agreement.
     </p>
 
     <h3>6. Tenant Identification, Occupants, And Contacts</h3>
@@ -114,7 +115,7 @@
     <h3>7. Deposit, Inventory, Condition, And Housekeeping</h3>
     <p>
       Security deposit currently held: <strong>{{ profile.securityDepositHeld|currency }}</strong>.
-      The tenant is expected to keep the premises in good condition and comply with agreed housekeeping, sanitation,
+      The Tenant shall keep the Premises in good condition and comply with agreed housekeeping, sanitation,
       and waste-management arrangements for the property. The parties should sign a move-in condition and inventory schedule,
       including keys, meter readings, bed and mattress items where provided. A deposit may be used only for documented unpaid lawful charges,
       damage beyond fair wear and tear, or missing listed items, and the tenant must receive an itemised statement of any deduction.
@@ -155,8 +156,8 @@
 
     <h3>12. Sign-Off</h3>
     <p>
-      This agreement becomes fully effective from <strong>{{ commencement_date|pretty_date(True) or 'the agreed commencement date' }}</strong>
-      once lawful payment is confirmed and the landlord / manager and tenant sign the final copy. Each party should retain a signed copy,
+      This Agreement takes effect from <strong>{{ commencement_date|pretty_date(True) or 'the agreed commencement date' }}</strong>
+      once lawful payment is confirmed and the Landlord / Manager and Tenant sign the final copy. Each party should retain a signed copy,
       the payment schedule, and the move-in condition / inventory schedule.
     </p>
 
@@ -168,7 +169,7 @@
 
   {% if source.get('notes') %}
     <section class="document-note">
-      <strong>Saved Notes</strong>
+      <strong>Additional Recorded Terms</strong>
       <p>{{ source.get('notes') }}</p>
     </section>
   {% endif %}
