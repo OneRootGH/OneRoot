@@ -14157,6 +14157,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if module_key == "staff_documents":
             module_quick_actions.append(
                 {
+                    "label": "Create Staff Onboarding Pack",
+                    "href": url_for("staff_onboarding_form"),
+                    "note": "Capture staff details once and prepare their appointment, contract, conduct, confidentiality, and payroll documents.",
+                }
+            )
+            module_quick_actions.append(
+                {
                     "label": "Download Staff Document Pack",
                     "href": url_for("staff_document_template_pack"),
                     "note": "Download the editable OneRoot onboarding, contract, conduct, payroll, review, leave, and exit templates.",
@@ -15281,6 +15288,66 @@ def create_app(config: AppConfig | None = None) -> Flask:
             as_attachment=True,
             download_name="OneRoot_Staff_Document_Pack.docx",
         )
+
+    @app.route("/app/staff-onboarding/new", methods=["GET", "POST"])
+    @access_required("staff_documents")
+    def staff_onboarding_form():
+        if request.method == "POST":
+            payload = {
+                "id": uuid4().hex,
+                "staffName": normalize_text(request.form.get("staffName")),
+                "staffRole": normalize_text(request.form.get("staffRole")),
+                "phone": normalize_text(request.form.get("phone")),
+                "email": normalize_text(request.form.get("email")),
+                "ghanaCard": normalize_text(request.form.get("ghanaCard")),
+                "address": normalize_text(request.form.get("address")),
+                "emergencyContact": normalize_text(request.form.get("emergencyContact")),
+                "emergencyPhone": normalize_text(request.form.get("emergencyPhone")),
+                "startDate": normalize_text(request.form.get("startDate")) or date.today().isoformat(),
+                "employmentType": normalize_text(request.form.get("employmentType")) or "Full-Time",
+                "monthlySalary": parse_amount(request.form.get("monthlySalary")),
+                "supervisor": normalize_text(request.form.get("supervisor")) or workspace_owner_name(),
+                "createdAt": datetime.utcnow().isoformat(),
+            }
+            if not payload["staffName"] or not payload["staffRole"]:
+                flash("Staff name and staff role are required.", "error")
+                return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload=payload, staff_role_options=STAFF_WORK_ROLES)
+            profile = ModuleRecord(id=payload["id"], module_key="staff_onboarding_profiles", created_at=datetime.utcnow())
+            profile.title = payload["staffName"]
+            profile.reference = f"staff-onboarding|{profile.id}"
+            profile.status = "Completed"
+            profile.business_area_id = "shared-operations"
+            profile.record_date = parse_date(payload["startDate"]) or date.today()
+            profile.payload = payload
+            g.db.add(profile)
+            for document_type, title in [
+                ("Appointment Letter", "Appointment Letter"),
+                ("Employment Contract", "Employment Contract"),
+                ("Staff Policy", "Code of Conduct Acknowledgement"),
+                ("Staff Policy", "Confidentiality Acknowledgement"),
+                ("Other", "Payroll and Bank Details Form"),
+            ]:
+                document_payload = {
+                    "id": uuid4().hex, "staffName": payload["staffName"], "staffRole": payload["staffRole"],
+                    "documentTitle": title, "documentType": document_type, "issueDate": payload["startDate"],
+                    "documentStatus": "Active", "notes": f"Generated from staff onboarding profile {profile.id}.",
+                }
+                document = ModuleRecord(id=document_payload["id"], module_key="staff_documents", created_at=datetime.utcnow())
+                set_module_record_metadata(document, MODULES["staff_documents"], document_payload)
+                g.db.add(document)
+            audit("staff_onboarding_profiles", "Staff Onboarding", "create", payload["staffName"], profile.id, "Staff details captured and core document register created.")
+            g.db.commit()
+            return redirect(url_for("staff_onboarding_pack", profile_id=profile.id))
+        return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload={"startDate": date.today().isoformat(), "employmentType": "Full-Time", "supervisor": workspace_owner_name()}, staff_role_options=STAFF_WORK_ROLES)
+
+    @app.route("/app/staff-onboarding/<profile_id>/pack")
+    @access_required("staff_documents")
+    def staff_onboarding_pack(profile_id: str):
+        profile = g.db.get(ModuleRecord, profile_id)
+        if not profile or profile.module_key != "staff_onboarding_profiles":
+            flash("That staff onboarding profile could not be found.", "error")
+            return redirect(url_for("module_list", module_key="staff_documents"))
+        return render_template("staff_onboarding_pack.html", page_title=f"Staff Document Pack - {profile.title}", profile=profile.payload or {}, back_url=url_for("module_list", module_key="staff_documents"))
 
     @app.route("/app/salaries/<record_id>/payslip")
     @login_required
