@@ -13375,6 +13375,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             role_descriptions=ROLE_DESCRIPTIONS,
             staff_role_options=STAFF_WORK_ROLES,
             staff_role_descriptions=STAFF_ROLE_DESCRIPTIONS,
+            five_person_plan=[
+                ("1. Owner & Business Manager", "owner", "Owner & Business Manager", "You: approval, controls, performance, and business direction."),
+                ("2. Finance HR & Controls", "finance-hr-controls", "Finance HR & Controls Officer", "Expenses, cashbook, payroll, staff records, suppliers, and daily controls."),
+                ("3. Retail Stock & Service Desk", "retail-stock-service", "Retail Stock & Service Desk Officer", "POS, inventory, laundry, equipment rentals, and counter service."),
+                ("4. Kitchen & MoMo Counter", "kitchen-momo-counter", "Kitchen & MoMo Counter Officer", "Food preparation and sales plus mobile money float and transactions."),
+                ("5. Customer Growth Apartments & Dispatch", "growth-apartments-dispatch", "Customer Growth Apartments & Dispatch Officer", "Tenants, online orders, delivery, CRM, promotions, and WhatsApp follow-up."),
+            ],
         )
 
     @app.route("/app/users/<user_id>/delete", methods=["POST"])
