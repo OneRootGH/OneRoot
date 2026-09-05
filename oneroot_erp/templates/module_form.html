@@ -95,8 +95,18 @@
       {% if definition.key == 'customer_credit_accounts' and payload.get('linkedCreditAccountId') %}
         <input type="hidden" name="linkedCreditAccountId" value="{{ payload.get('linkedCreditAccountId') }}">
       {% endif %}
+      {% set kitchen_auto_fields = ['businessAreaId', 'kitchenCategory', 'ingredientCost', 'totalRecipeCost', 'costPerServing', 'projectedSales', 'projectedProfit', 'marginPercent'] %}
       {% for field in definition.fields %}
-        <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
+        {% if definition.key == 'kitchen_recipe_plans' and field.name == 'actualProduced' %}
+          <section class="span-2 kitchen-end-of-batch-heading" id="kitchen-end-of-batch-heading">
+            <div>
+              <p class="eyebrow">Finish Later</p>
+              <h3>Actual Output</h3>
+            </div>
+            <p>Only complete these figures after production or at the end of the day. A Ready or Completed batch starts with the planned yield automatically.</p>
+          </section>
+        {% endif %}
+        <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in kitchen_auto_fields %} kitchen-auto-field{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in ['actualProduced', 'actualSold', 'wasteQuantity'] %} kitchen-end-of-batch-field{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in ['recipeSummary', 'notes'] %} kitchen-optional-field{% endif %}">
           <span>{{ field.label }}</span>
           {% if field.field_type == 'textarea' %}
             <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
@@ -143,8 +153,8 @@
             </datalist>
             <small class="muted form-helper">Choose a saved supplier to reuse their name and business area, or type a new name and add them to Supplier Directory later.</small>
           {% elif definition.key == 'kitchen_recipe_plans' and field.name == 'recipeName' %}
-            <input type="text" name="{{ field.name }}" list="kitchen-menu-options" value="{{ payload.get(field.name, '') }}" placeholder="Choose the food item this batch will produce" {% if field.required %}required{% endif %}>
-            <small class="muted form-helper">Choose the matching food menu item so the real batch cost updates future Food POS and Kitchen Order profit.</small>
+            <input id="kitchen-recipe-name" type="search" name="{{ field.name }}" list="kitchen-menu-options" value="{{ payload.get(field.name, '') }}" placeholder="Search a kitchen menu item" autocomplete="off" {% if field.required %}required{% endif %}>
+            <small class="muted form-helper">Start typing the food name. The saved menu price and category fill automatically when the item matches.</small>
           {% elif field.field_type == 'select' %}
             <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
               <option value="">Select {{ field.label }}</option>
@@ -348,20 +358,37 @@
             <option value="{{ item.name }}">{{ item.category }} · {{ item.salesPrice|currency }}</option>
           {% endfor %}
         </datalist>
+        <section class="span-2 kitchen-production-summary" aria-live="polite">
+          <div class="service-line-builder-head">
+            <div>
+              <p class="eyebrow">Automatic Costing</p>
+              <h3>Batch Cost & Profit</h3>
+            </div>
+            <p class="muted">These figures update from the ingredients issued, portions, and menu price. Staff do not need to type them.</p>
+          </div>
+          <div class="kitchen-production-metrics">
+            <div><span>Ingredient Cost</span><strong id="kitchen-summary-ingredient-cost">GH₵0.00</strong></div>
+            <div><span>Total Batch Cost</span><strong id="kitchen-summary-total-cost">GH₵0.00</strong></div>
+            <div><span>Cost / Serving</span><strong id="kitchen-summary-cost-per-serving">GH₵0.00</strong></div>
+            <div><span>Projected Sales</span><strong id="kitchen-summary-projected-sales">GH₵0.00</strong></div>
+            <div><span>Projected Profit</span><strong id="kitchen-summary-projected-profit">GH₵0.00</strong></div>
+            <div><span>Margin</span><strong id="kitchen-summary-margin">0.00%</strong></div>
+          </div>
+        </section>
         <section class="span-2 kitchen-ingredient-builder">
           <div class="service-line-builder-head">
             <div>
               <p class="eyebrow">Shared Stock Issue</p>
               <h3>Ingredients Taken From POS Stock</h3>
             </div>
-            <p class="muted">This is not a customer sale. It reduces the same stock available to POS and records the ingredient cost for this food batch.</p>
+            <p class="muted">This is not a customer sale. Search by item name, SKU, or barcode, then add the quantity taken from shared stock.</p>
           </div>
           <div class="form-grid kitchen-ingredient-controls">
             <label class="span-2">
               <span>Ingredient From Inventory</span>
-              <select id="kitchen-ingredient-product">
-                <option value="">Select ingredient from POS stock</option>
-              </select>
+              <input id="kitchen-ingredient-product" type="search" list="kitchen-ingredient-options" placeholder="Search item name, SKU, or barcode" autocomplete="off">
+              <datalist id="kitchen-ingredient-options"></datalist>
+              <small class="muted form-helper">Select a matching inventory item, scan its barcode, or type its SKU.</small>
             </label>
             <label>
               <span>Quantity Taken</span>
@@ -1075,6 +1102,7 @@
         const menuCatalog = {{ kitchen_menu_options|tojson }};
         const lineItems = {{ kitchen_ingredient_items|tojson }}.map((item) => ({ ...item }));
         const productField = document.getElementById("kitchen-ingredient-product");
+        const ingredientOptions = document.getElementById("kitchen-ingredient-options");
         const quantityField = document.getElementById("kitchen-ingredient-quantity");
         const addButton = document.getElementById("kitchen-add-ingredient");
         const preview = document.getElementById("kitchen-ingredient-preview");
@@ -1091,7 +1119,18 @@
         const projectedSalesField = document.querySelector('input[name="projectedSales"]');
         const projectedProfitField = document.querySelector('input[name="projectedProfit"]');
         const marginField = document.querySelector('input[name="marginPercent"]');
-        if (!productField || !quantityField || !addButton || !preview || !lines || !dataField) return;
+        const categoryField = document.querySelector('[name="kitchenCategory"]');
+        const ingredientCostSummary = document.getElementById("kitchen-summary-ingredient-cost");
+        const totalCostSummary = document.getElementById("kitchen-summary-total-cost");
+        const costPerServingSummary = document.getElementById("kitchen-summary-cost-per-serving");
+        const projectedSalesSummary = document.getElementById("kitchen-summary-projected-sales");
+        const projectedProfitSummary = document.getElementById("kitchen-summary-projected-profit");
+        const marginSummary = document.getElementById("kitchen-summary-margin");
+        const productionStatusField = document.querySelector('[name="productionStatus"]');
+        const actualProducedField = document.querySelector('input[name="actualProduced"]');
+        const endOfBatchHeading = document.getElementById("kitchen-end-of-batch-heading");
+        const endOfBatchFields = Array.from(document.querySelectorAll(".kitchen-end-of-batch-field"));
+        if (!productField || !ingredientOptions || !quantityField || !addButton || !preview || !lines || !dataField) return;
 
         const money = new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", minimumFractionDigits: 2 });
         const parseNumber = (value) => {
@@ -1100,12 +1139,29 @@
         };
         const escape = (value) => String(value || "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
         const productById = new Map(catalog.map((product) => [product.id, product]));
+        const findProduct = (value) => {
+          const needle = String(value || "").trim().toLowerCase();
+          if (!needle) return null;
+          return productById.get(String(value || "").trim()) || catalog.find((product) => (
+            [product.name, product.sku, product.barcode]
+              .filter(Boolean)
+              .some((candidate) => String(candidate).trim().toLowerCase() === needle)
+          )) || null;
+        };
+
+        function addSearchOption(value, label) {
+          if (!value) return;
+          const option = document.createElement("option");
+          option.value = value;
+          option.label = label;
+          ingredientOptions.appendChild(option);
+        }
 
         catalog.forEach((product) => {
-          const option = document.createElement("option");
-          option.value = product.id;
-          option.textContent = `${product.name} · Stock ${product.quantityOnHand} · Cost ${money.format(product.costPrice)}`;
-          productField.appendChild(option);
+          const detail = `${product.name} · Stock ${product.quantityOnHand} · Cost ${money.format(product.costPrice)}`;
+          addSearchOption(product.name, detail);
+          if (product.sku) addSearchOption(product.sku, `${product.name} · SKU · Stock ${product.quantityOnHand}`);
+          if (product.barcode && product.barcode !== product.sku) addSearchOption(product.barcode, `${product.name} · Barcode · Stock ${product.quantityOnHand}`);
         });
 
         function updateFigures() {
@@ -1123,11 +1179,17 @@
           if (projectedSalesField) projectedSalesField.value = projectedSales.toFixed(2);
           if (projectedProfitField) projectedProfitField.value = projectedProfit.toFixed(2);
           if (marginField) marginField.value = (projectedSales > 0 ? (projectedProfit / projectedSales) * 100 : 0).toFixed(2);
+          if (ingredientCostSummary) ingredientCostSummary.textContent = money.format(ingredientCost);
+          if (totalCostSummary) totalCostSummary.textContent = money.format(totalCost);
+          if (costPerServingSummary) costPerServingSummary.textContent = money.format(servings > 0 ? totalCost / servings : 0);
+          if (projectedSalesSummary) projectedSalesSummary.textContent = money.format(projectedSales);
+          if (projectedProfitSummary) projectedProfitSummary.textContent = money.format(projectedProfit);
+          if (marginSummary) marginSummary.textContent = `${(projectedSales > 0 ? (projectedProfit / projectedSales) * 100 : 0).toFixed(2)}%`;
           dataField.value = JSON.stringify(lineItems);
         }
 
         function renderPreview() {
-          const product = productById.get(productField.value);
+          const product = findProduct(productField.value);
           if (!product) {
             preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>No ingredient selected yet.</strong><p>Select an item from shared POS stock to see its current quantity and cost.</p></article>';
             return;
@@ -1146,9 +1208,13 @@
         }
 
         function addIngredient() {
-          const product = productById.get(productField.value);
+          const product = findProduct(productField.value);
           const quantity = Math.max(parseNumber(quantityField.value), 0);
-          if (!product || quantity <= 0) return;
+          if (!product || quantity <= 0) {
+            preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Choose a matching inventory item first.</strong><p>Search by product name, SKU, or barcode, then enter a quantity greater than zero.</p></article>';
+            productField.focus();
+            return;
+          }
           const existing = lineItems.find((item) => item.productId === product.id);
           if (existing) {
             existing.quantity = parseNumber(existing.quantity) + quantity;
@@ -1161,6 +1227,7 @@
           productField.value = "";
           renderPreview();
           renderLines();
+          productField.focus();
         }
 
         function applyMenuPrice() {
@@ -1168,13 +1235,33 @@
           const menuItem = menuCatalog.find((item) => String(item.name || "").trim().toLowerCase() === recipeName);
           if (menuItem && sellingPriceField && parseNumber(sellingPriceField.value) <= 0) {
             sellingPriceField.value = parseNumber(menuItem.salesPrice).toFixed(2);
-            updateFigures();
+          }
+          if (menuItem && categoryField) categoryField.value = menuItem.category || "";
+          updateFigures();
+        }
+
+        function syncEndOfBatchFields() {
+          const status = String(productionStatusField?.value || "").trim();
+          const showActuals = ["Ready", "Completed"].includes(status);
+          endOfBatchHeading?.classList.toggle("is-hidden", !showActuals);
+          endOfBatchFields.forEach((field) => field.classList.toggle("is-hidden", !showActuals));
+          if (showActuals && actualProducedField && parseNumber(actualProducedField.value) <= 0) {
+            const planned = Math.max(parseNumber(servingsField?.value), 0);
+            if (planned > 0) actualProducedField.value = planned.toFixed(0);
           }
         }
 
+        productField.addEventListener("input", renderPreview);
         productField.addEventListener("change", renderPreview);
+        productField.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          addIngredient();
+        });
         addButton.addEventListener("click", addIngredient);
+        recipeNameField?.addEventListener("input", applyMenuPrice);
         recipeNameField?.addEventListener("change", applyMenuPrice);
+        productionStatusField?.addEventListener("change", syncEndOfBatchFields);
         lines.addEventListener("click", (event) => {
           const button = event.target.closest("[data-kitchen-ingredient-remove]");
           if (!button) return;
@@ -1192,6 +1279,7 @@
         renderPreview();
         renderLines();
         applyMenuPrice();
+        syncEndOfBatchFields();
       })();
     </script>
   {% endif %}

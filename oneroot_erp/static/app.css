@@ -638,8 +638,81 @@ a { color: inherit; text-decoration: none; }
   border-radius: 1rem;
   background: linear-gradient(135deg, #fffaf2, #f3f8f1);
 }
+.kitchen-auto-field {
+  display: none;
+}
+.kitchen-end-of-batch-heading.is-hidden,
+.kitchen-end-of-batch-field.is-hidden {
+  display: none;
+}
+.kitchen-optional-field {
+  opacity: 0.86;
+}
+.kitchen-end-of-batch-heading,
+.kitchen-production-summary {
+  display: grid;
+  gap: 0.8rem;
+  padding: 1rem;
+  border-radius: 1rem;
+}
+.kitchen-end-of-batch-heading {
+  grid-template-columns: minmax(180px, 0.75fr) minmax(0, 1.25fr);
+  align-items: center;
+  border: 1px solid #dbe5d7;
+  background: #f6faf4;
+}
+.kitchen-end-of-batch-heading h3,
+.kitchen-production-summary h3 {
+  margin: 0.1rem 0 0;
+}
+.kitchen-end-of-batch-heading p,
+.kitchen-production-summary p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.kitchen-production-summary {
+  border: 1px solid #d9e5d5;
+  background: linear-gradient(135deg, #f5fbf3, #fffaf1);
+}
+.kitchen-production-metrics {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 0.55rem;
+}
+.kitchen-production-metrics > div {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 0;
+  padding: 0.62rem 0.68rem;
+  border: 1px solid rgba(58, 92, 62, 0.14);
+  border-radius: 0.75rem;
+  background: rgba(255, 255, 255, 0.78);
+}
+.kitchen-production-metrics span {
+  color: var(--muted);
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+.kitchen-production-metrics strong {
+  font-size: 0.9rem;
+  white-space: nowrap;
+}
 .kitchen-ingredient-controls {
   align-items: end;
+}
+@media (max-width: 980px) {
+  .kitchen-production-metrics {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+@media (max-width: 620px) {
+  .kitchen-production-metrics,
+  .kitchen-end-of-batch-heading {
+    grid-template-columns: 1fr;
+  }
 }
 .social-post-card {
   align-content: start;

@@ -6707,14 +6707,33 @@ def hydrate_kitchen_ingredient_items(db_session, payload: dict[str, Any]) -> Non
     payload[KITCHEN_INGREDIENT_ITEMS_KEY] = hydrated_items
 
 
+def hydrate_kitchen_recipe_menu_defaults(db_session, payload: dict[str, Any]) -> None:
+    """Fill menu price and category from the saved Kitchen menu when the batch is linked to one."""
+    recipe_name = normalize_text(payload.get("recipeName"))
+    if not recipe_name:
+        return
+    menu_item = db_session.scalar(
+        select(Product).where(
+            Product.business_area_id == "kitchen",
+            Product.active.is_(True),
+            Product.name.ilike(recipe_name),
+        )
+    )
+    if not menu_item:
+        return
+    if parse_amount(payload.get("sellingPricePerServing")) <= 0:
+        payload["sellingPricePerServing"] = round(max(parse_amount(menu_item.sales_price), 0), 2)
+    payload["kitchenCategory"] = normalize_text(menu_item.category)
+
+
 def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
     """Calculate a production batch from shared-stock ingredient issues, without posting a sale."""
     servings = max(parse_amount(payload.get("servingCount")), 0)
     selling_price = max(parse_amount(payload.get("sellingPricePerServing")), 0)
     ingredient_items = kitchen_ingredient_items(payload)
     issued_ingredient_cost = round(sum(parse_amount(item.get("lineCost")) for item in ingredient_items), 2)
-    if ingredient_items:
-        payload["ingredientCost"] = issued_ingredient_cost
+    # Ingredient cost is always derived from the current saved stock issues.
+    payload["ingredientCost"] = issued_ingredient_cost
     total_cost = round(
         max(parse_amount(payload.get("ingredientCost")), 0)
         + max(parse_amount(payload.get("packagingCost")), 0)
@@ -6729,6 +6748,13 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
     payload["projectedSales"] = projected_sales
     payload["projectedProfit"] = projected_profit
     payload["marginPercent"] = round((projected_profit / projected_sales) * 100, 2) if projected_sales else 0.0
+    if (
+        normalize_text(payload.get("productionStatus")) in {"Ready", "Completed"}
+        and parse_amount(payload.get("actualProduced")) <= 0
+        and servings > 0
+    ):
+        # A ready batch normally yields its planned count unless staff records a different figure.
+        payload["actualProduced"] = round(servings, 2)
 
 
 def kitchen_recipe_issue_quantities(payload: dict[str, Any]) -> dict[str, float]:
@@ -14646,6 +14672,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     parsed_ingredients = []
                 payload[KITCHEN_INGREDIENT_ITEMS_KEY] = parsed_ingredients if isinstance(parsed_ingredients, list) else []
                 hydrate_kitchen_ingredient_items(g.db, payload)
+                hydrate_kitchen_recipe_menu_defaults(g.db, payload)
             if module_key == "customer_credit_accounts":
                 payload["linkedCreditAccountId"] = normalize_text(request.form.get("linkedCreditAccountId")) or normalize_text(
                     record_payload.get("linkedCreditAccountId")
@@ -15184,6 +15211,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "id": product.id,
                     "name": product.name,
                     "sku": normalize_text(product.sku) or normalize_text(product.barcode),
+                    "barcode": normalize_text(product.barcode),
                     "category": normalize_text(product.category),
                     "quantityOnHand": round(parse_amount(product.quantity_on_hand), 2),
                     "costPrice": round(parse_amount(product.cost_price), 2),
