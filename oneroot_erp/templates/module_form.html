@@ -129,6 +129,14 @@
             >
               <option value="">Select {{ field.label }}</option>
             </select>
+          {% elif definition.key in ['suppliers', 'supplier_price_updates'] and field.name == 'supplierName' %}
+            <input type="text" name="{{ field.name }}" list="supplier-directory-options" value="{{ payload.get(field.name, '') }}" placeholder="Choose or type a supplier" {% if field.required %}required{% endif %}>
+            <datalist id="supplier-directory-options">
+              {% for supplier in supplier_directory_options %}
+                <option value="{{ supplier.name }}" data-area="{{ supplier.area }}">{{ supplier.status }}{% if supplier.categories %} · {{ supplier.categories }}{% endif %}{% if supplier.phone %} · {{ supplier.phone }}{% endif %}</option>
+              {% endfor %}
+            </datalist>
+            <small class="muted form-helper">Choose a saved supplier to reuse their name and business area, or type a new name and add them to Supplier Directory later.</small>
           {% elif field.field_type == 'select' %}
             <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
               <option value="">Select {{ field.label }}</option>
@@ -1007,6 +1015,22 @@
           field.addEventListener("change", updateDispatchFigures);
         });
         updateDispatchFigures();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key in ['suppliers', 'supplier_price_updates'] and supplier_directory_options %}
+    <script>
+      (function () {
+        const supplierField = document.querySelector('input[name="supplierName"]');
+        const areaField = document.querySelector('select[name="businessAreaId"]');
+        const suppliers = {{ supplier_directory_options|tojson }};
+        if (!supplierField || !areaField) return;
+        function applySupplierArea() {
+          const match = suppliers.find((supplier) => supplier.name.toLowerCase() === supplierField.value.trim().toLowerCase());
+          if (match && match.area) areaField.value = match.area;
+        }
+        supplierField.addEventListener('change', applySupplierArea);
+        supplierField.addEventListener('blur', applySupplierArea);
       })();
     </script>
   {% endif %}

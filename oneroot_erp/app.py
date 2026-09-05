@@ -14459,6 +14459,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 record_payload["date"] = query_date.isoformat()
             if query_provider:
                 record_payload["provider"] = query_provider
+        if not record and module_key in {"suppliers", "supplier_price_updates"}:
+            for field_name in ("supplierName", "businessAreaId", "category"):
+                value = normalize_text(request.args.get(field_name))
+                if value:
+                    record_payload[field_name] = value
         if request.method == "POST":
             payload = dict(record_payload)
             payload.setdefault("id", record.id if record else uuid4().hex)
@@ -14970,6 +14975,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 cashbook_account_suggestions=CASHBOOK_ACCOUNT_SUGGESTIONS,
                 today_iso=date.today().isoformat(),
             )
+        supplier_directory_options = []
+        if module_key in {"suppliers", "supplier_price_updates"}:
+            supplier_directory_options = [
+                {
+                    "name": normalize_text((item.payload or {}).get("supplierName")),
+                    "area": normalize_text((item.payload or {}).get("businessAreaId")),
+                    "status": normalize_text((item.payload or {}).get("supplierStatus")),
+                    "categories": normalize_text((item.payload or {}).get("supplyCategories")),
+                    "phone": normalize_text((item.payload or {}).get("phone")),
+                }
+                for item in g.db.scalars(
+                    select(ModuleRecord)
+                    .where(ModuleRecord.module_key == "supplier_directory")
+                    .order_by(ModuleRecord.title.asc())
+                ).all()
+                if normalize_text((item.payload or {}).get("supplierName"))
+                and normalize_text((item.payload or {}).get("supplierStatus")) != "Do Not Use"
+            ]
         return render_template(
             "module_form.html",
             page_title=f"{definition.label} Form",
@@ -14981,6 +15004,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             module_quick_actions=module_quick_actions,
             mobile_money_day_helper=mobile_money_day_helper,
             mobile_money_live_snapshot=mobile_money_live_snapshot,
+            supplier_directory_options=supplier_directory_options,
             today_iso=date.today().isoformat(),
         )
 

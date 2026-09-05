@@ -757,6 +757,10 @@
                         <a class="table-link" href="{{ url_for('module_form', module_key='customer_credit_accounts', creditAccountId=record.id) }}">Receive Payment</a>
                       {% endif %}
                     {% endif %}
+                    {% if definition.key == 'supplier_directory' %}
+                      <a class="table-link" href="{{ url_for('module_form', module_key='suppliers', supplierName=record.payload.get('supplierName'), businessAreaId=record.payload.get('businessAreaId')) }}">Record Bill</a>
+                      <a class="table-link" href="{{ url_for('module_form', module_key='supplier_price_updates', supplierName=record.payload.get('supplierName'), businessAreaId=record.payload.get('businessAreaId')) }}">Record Price</a>
+                    {% endif %}
                     {% if definition.key == 'customer_crm' and record.payload.get('whatsappUrl') %}
                       <a class="table-link" href="{{ record.payload.get('whatsappUrl') }}" target="_blank" rel="noopener">WhatsApp</a>
                     {% endif %}
