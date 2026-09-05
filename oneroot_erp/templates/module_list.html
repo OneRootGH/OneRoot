@@ -15,8 +15,11 @@
       </div>
       <div class="toolbar compact-toolbar">
         <a class="button subtle" href="{{ url_for('module_export', module_key=definition.key, q=search, area=area_filter, status=status_filter, category=category_filter, month=month_filter, date_from=date_from, date_to=date_to) }}">Export CSV</a>
+        {% if definition.key == 'staff_documents' %}
+          <a class="button subtle" href="{{ url_for('staff_onboarding_form') }}">Staff Onboarding</a>
+        {% endif %}
         {% if definition.editable %}
-          <a class="button primary" href="{{ url_for('module_form', module_key=definition.key) }}">New Record</a>
+          <a class="button primary" href="{{ url_for('module_form', module_key=definition.key) }}">{% if definition.key == 'staff_documents' %}Add Document{% else %}New Record{% endif %}</a>
         {% endif %}
       </div>
     </div>
@@ -635,7 +638,7 @@
       <table>
         <thead>
           <tr>
-            <th>Title</th>
+            <th>{% if definition.key == 'staff_documents' %}Document / Staff{% else %}Title{% endif %}</th>
             <th>Area</th>
             <th>Status</th>
             <th>Month / Date</th>
@@ -647,7 +650,17 @@
         <tbody>
           {% for record in records %}
             <tr>
-              <td>{{ record.title }}</td>
+              <td>
+                {% if definition.key == 'staff_documents' %}
+                  <strong>{{ record.payload.get('documentTitle') or 'Staff Document' }}</strong>
+                  <span class="table-secondary">
+                    {{ record.payload.get('staffName') or record.title }}
+                    {% if record.payload.get('staffRole') %} · {{ record.payload.get('staffRole') }}{% endif %}
+                  </span>
+                {% else %}
+                  {{ record.title }}
+                {% endif %}
+              </td>
               <td>{{ business_area_short.get(record.business_area_id, business_area_labels.get(record.business_area_id, record.business_area_id or '—')) }}</td>
               <td>{{ record.status or '—' }}</td>
               <td>{{ record.month or record.record_date or '—' }}</td>
@@ -745,6 +758,15 @@
                 {% if definition.editable %}
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit</a>
+                    {% if definition.key == 'staff_documents' %}
+                      {% set onboarding_profile_id = record.payload.get('onboardingProfileId') %}
+                      {% if onboarding_profile_id %}
+                        <a class="table-link" href="{{ url_for('staff_onboarding_pack', profile_id=onboarding_profile_id) }}">View Pack</a>
+                        <a class="table-link" href="{{ url_for('staff_onboarding_pack_docx', profile_id=onboarding_profile_id) }}">Download Pack</a>
+                      {% elif record.payload.get('documentAttachmentUrl') %}
+                        <a class="table-link" href="{{ url_for('staff_document_download', record_id=record.id) }}">Open File</a>
+                      {% endif %}
+                    {% endif %}
                     {% if definition.key == 'expenses' and record.payload.get('receiptAttachmentUrl') %}
                       <a class="table-link" href="{{ record.payload.get('receiptAttachmentUrl') }}" target="_blank" rel="noopener">Receipt</a>
                     {% endif %}

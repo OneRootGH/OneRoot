@@ -8349,6 +8349,69 @@ def build_tenancy_agreement_docx(placeholder_map: dict[str, str]) -> bytes:
     return stream.getvalue()
 
 
+def staff_document_pack_placeholders(profile: dict[str, Any]) -> dict[str, str]:
+    """Fill the staff-pack template with the onboarding details we have on record."""
+    staff_name = normalize_text(profile.get("staffName")) or "Staff Member"
+    first_name = staff_name.split(" ", 1)[0]
+    staff_role = normalize_text(profile.get("staffRole")) or "Staff Member"
+    supervisor = normalize_text(profile.get("supervisor")) or "OneRoot Essentials"
+    start_date = format_display_date(profile.get("startDate"), long_month=True) or "To be confirmed"
+    monthly_salary = parse_amount(profile.get("monthlySalary"))
+    salary_label = f"{format_currency(monthly_salary)} per month" if monthly_salary > 0 else "To be agreed"
+    emergency_parts = [
+        normalize_text(profile.get("emergencyContact")),
+        normalize_text(profile.get("emergencyPhone")),
+    ]
+    emergency_contact = " · ".join(part for part in emergency_parts if part) or "To be completed"
+    return {
+        "[Employee Full Name]": staff_name,
+        "[Employee First Name]": first_name,
+        "[Name]": staff_name,
+        "[Job Title]": staff_role,
+        "[JOB TITLE]": staff_role,
+        "[Role / Business Area]": staff_role,
+        "[Select from OneRoot staff roles]": staff_role,
+        "[Manager / Operations Manager]": supervisor,
+        "[Manager Name]": supervisor,
+        "[Reporting Manager]": supervisor,
+        "[Start Date]": start_date,
+        "[Date]": start_date,
+        "[DD Month YYYY]": start_date,
+        "[Hourly / Monthly / Hybrid]": "Monthly",
+        "[Hourly / Monthly Pay Amount]": salary_label,
+        "[Pay Amount and basis]": salary_label,
+        "[Phone Number]": normalize_text(profile.get("phone")) or "To be completed",
+        "[Email Address]": normalize_text(profile.get("email")) or "To be completed",
+        "[Address]": normalize_text(profile.get("address")) or "To be completed",
+        "[Name, relationship, and phone number]": emergency_contact,
+        "[System Username]": "To be assigned",
+        "[Notice Period]": "As stated in the employment contract",
+        "[Schedule]": normalize_text(profile.get("employmentType")) or "Full-Time",
+        "[Payment Method]": "To be confirmed",
+        "[Authorized Signatory]": supervisor,
+        "[Notes]": f"Generated from OneRoot Staff Onboarding for {staff_name}.",
+    }
+
+
+def build_staff_document_pack_docx(profile: dict[str, Any]) -> bytes:
+    """Return the completed staff document template as a downloadable Word file."""
+    if not STAFF_DOCUMENT_PACK_PATH.exists():
+        raise FileNotFoundError("The staff document pack template is missing.")
+    placeholder_map = staff_document_pack_placeholders(profile)
+    stream = BytesIO()
+    with ZipFile(STAFF_DOCUMENT_PACK_PATH, "r") as source_zip, ZipFile(stream, "w", compression=ZIP_DEFLATED) as output_zip:
+        for info in source_zip.infolist():
+            data = source_zip.read(info.filename)
+            if info.filename.startswith("word/") and info.filename.endswith(".xml"):
+                document_xml = data.decode("utf-8")
+                for placeholder, value in placeholder_map.items():
+                    document_xml = document_xml.replace(placeholder, html.escape(str(value or "")))
+                data = document_xml.encode("utf-8")
+            output_zip.writestr(info, data)
+    stream.seek(0)
+    return stream.getvalue()
+
+
 def format_currency(value: Any) -> str:
     return f"GH₵{parse_amount(value):,.2f}"
 
@@ -14589,9 +14652,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
             module_quick_actions.append(
                 {
-                    "label": "Download Staff Document Pack",
+                    "label": "Download Blank Staff Templates",
                     "href": url_for("staff_document_template_pack"),
-                    "note": "Download the editable OneRoot onboarding, contract, conduct, payroll, review, leave, and exit templates.",
+                    "note": "Download editable blank onboarding, contract, conduct, payroll, review, leave, and exit templates.",
                 }
             )
         if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
@@ -15798,6 +15861,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             flash("You can only open documents assigned to your own staff account.", "warning")
             return redirect(url_for("my_payslips"))
         payload = dict(record.payload or {})
+        onboarding_profile_id = normalize_text(payload.get("onboardingProfileId"))
+        if onboarding_profile_id:
+            profile = g.db.get(ModuleRecord, onboarding_profile_id)
+            if profile and profile.module_key == "staff_onboarding_profiles":
+                return redirect(url_for("staff_onboarding_pack_docx", profile_id=profile.id))
         attachment_url = normalize_text(payload.get("documentAttachmentUrl"))
         if not attachment_url:
             flash("No file has been uploaded for that document yet.", "warning")
@@ -15900,7 +15968,43 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if not profile or profile.module_key != "staff_onboarding_profiles":
             flash("That staff onboarding profile could not be found.", "error")
             return redirect(url_for("module_list", module_key="staff_documents"))
-        return render_template("staff_onboarding_pack.html", page_title=f"Staff Document Pack - {profile.title}", profile=profile.payload or {}, back_url=url_for("module_list", module_key="staff_documents"))
+        documents = g.db.scalars(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "staff_documents")
+            .order_by(ModuleRecord.record_date.asc(), ModuleRecord.created_at.asc())
+        ).all()
+        document_records = [
+            document
+            for document in documents
+            if normalize_text((document.payload or {}).get("onboardingProfileId")) == profile.id
+        ]
+        return render_template(
+            "staff_onboarding_pack.html",
+            page_title=f"Staff Document Pack - {profile.title}",
+            profile=profile.payload or {},
+            document_records=document_records,
+            download_url=url_for("staff_onboarding_pack_docx", profile_id=profile.id),
+            back_url=url_for("module_list", module_key="staff_documents"),
+        )
+
+    @app.route("/app/staff-onboarding/<profile_id>/pack.docx")
+    @access_required("staff_documents")
+    def staff_onboarding_pack_docx(profile_id: str):
+        profile = g.db.get(ModuleRecord, profile_id)
+        if not profile or profile.module_key != "staff_onboarding_profiles":
+            flash("That staff onboarding profile could not be found.", "error")
+            return redirect(url_for("module_list", module_key="staff_documents"))
+        if not STAFF_DOCUMENT_PACK_PATH.exists():
+            flash("The staff document pack template is temporarily unavailable. Please contact the workspace owner.", "error")
+            return redirect(url_for("staff_onboarding_pack", profile_id=profile.id))
+        document_bytes = build_staff_document_pack_docx(dict(profile.payload or {}))
+        filename = f"{safe_filename_segment(profile.title, 'Staff')}_OneRoot_Staff_Document_Pack.docx"
+        return send_file(
+            BytesIO(document_bytes),
+            mimetype="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            as_attachment=True,
+            download_name=filename,
+        )
 
     @app.route("/app/salaries/<record_id>/payslip")
     @login_required
