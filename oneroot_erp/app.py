@@ -3417,6 +3417,30 @@ def service_line_items_brief(module_key: str, payload: dict[str, Any], *, max_it
     return ", ".join(parts)
 
 
+def kitchen_order_categories(payload: dict[str, Any]) -> list[str]:
+    """Return every food category represented in one kitchen order, in display order."""
+    categories: list[str] = []
+
+    def add_category(value: Any) -> None:
+        category = normalize_text(value)
+        if category and category != "Mixed Kitchen Items" and category not in categories:
+            categories.append(category)
+
+    for item in service_line_items("kitchen_orders", payload):
+        add_category(item.get("category"))
+    saved_categories = payload.get("kitchenCategories")
+    if isinstance(saved_categories, list):
+        for category in saved_categories:
+            add_category(category)
+    if not categories:
+        add_category(payload.get("kitchenCategory"))
+    return categories
+
+
+def kitchen_order_category_summary(payload: dict[str, Any]) -> str:
+    return " · ".join(kitchen_order_categories(payload)) or "Prepared Meals"
+
+
 def sync_service_line_item_rollup(module_key: str, payload: dict[str, Any]) -> None:
     items = service_line_items(module_key, payload)
     if not items:
@@ -3447,7 +3471,13 @@ def sync_service_line_item_rollup(module_key: str, payload: dict[str, Any]) -> N
             if len(items) == 1
             else f"{items[0]['name']} (+{len(items) - 1} more)"
         )
-        payload["kitchenCategory"] = categories[0] if len(set(categories)) == 1 and categories else "Mixed Kitchen Items"
+        unique_categories: list[str] = []
+        for category in categories:
+            if category not in unique_categories:
+                unique_categories.append(category)
+        payload["kitchenCategories"] = unique_categories
+        # Retain the legacy value while keeping every category for reporting.
+        payload["kitchenCategory"] = unique_categories[0] if len(unique_categories) == 1 else "Mixed Kitchen Items"
         return
 
     if module_key == "equipment_rental_bookings":
@@ -4832,7 +4862,8 @@ def build_kitchen_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "customerPhone": normalize_phone(payload.get("customerPhone")),
                 "orderType": normalize_text(payload.get("orderType")) or "Walk-in",
                 "deliveryMode": normalize_text(payload.get("deliveryMode")) or "Takeaway",
-                "kitchenCategory": normalize_text(payload.get("kitchenCategory")) or "Prepared Meals",
+                "kitchenCategory": kitchen_order_category_summary(payload),
+                "kitchenCategories": kitchen_order_categories(payload),
                 "kitchenItem": normalize_text(payload.get("kitchenItem")),
                 "itemSummary": item_summary,
                 "itemDetail": normalize_text(payload.get("itemSummary")),
@@ -6904,11 +6935,16 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
     total_cost = round(sum(parse_amount(item.get("totalRecipeCost")) for item in rolled_meals), 2)
     projected_sales = round(sum(parse_amount(item.get("projectedSales")) for item in rolled_meals), 2)
     projected_profit = round(projected_sales - total_cost, 2)
-    categories = {normalize_text(item.get("category")) for item in rolled_meals if normalize_text(item.get("category"))}
+    categories: list[str] = []
+    for meal in rolled_meals:
+        category = normalize_text(meal.get("category"))
+        if category and category not in categories:
+            categories.append(category)
     payload[KITCHEN_MEAL_ITEMS_KEY] = rolled_meals
     payload["businessAreaId"] = "kitchen"
     payload["recipeName"] = kitchen_meal_title(rolled_meals)
-    payload["kitchenCategory"] = next(iter(categories)) if len(categories) == 1 else "Multiple Meals"
+    payload["kitchenCategories"] = categories
+    payload["kitchenCategory"] = categories[0] if len(categories) == 1 else "Multiple Meals"
     payload["servingCount"] = total_servings
     payload["sellingPricePerServing"] = round(projected_sales / total_servings, 2) if total_servings else 0.0
     payload["ingredientCost"] = total_ingredient_cost
@@ -9156,6 +9192,7 @@ def category_performance_rows(db_session, month_value: str, area_id: str = "") -
         "pos-summary",
         "online-order-payments",
         "laundry-payment",
+        "kitchen-order-payment",
         "equipment-rental-payment",
         "apartment-rent-payment",
         "apartment-bill-payment",
@@ -9282,6 +9319,70 @@ def category_performance_rows(db_session, month_value: str, area_id: str = "") -
                     cost_amount=payment.get("costAmount"),
                     transaction_count=1,
                     source_label=source_label,
+                )
+
+    kitchen_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "kitchen_orders")
+        .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+    ).all()
+    for record in kitchen_records:
+        payload = record.payload or {}
+        area_key = normalize_text(payload.get("businessAreaId")) or "kitchen"
+        category_totals: dict[str, dict[str, float]] = {}
+        for item in service_line_items("kitchen_orders", payload):
+            category = normalize_text(item.get("category")) or "Prepared Meals"
+            totals = category_totals.setdefault(category, {"sales": 0.0, "cost": 0.0})
+            totals["sales"] = round(totals["sales"] + parse_amount(item.get("lineTotal")), 2)
+            totals["cost"] = round(totals["cost"] + parse_amount(item.get("lineCost")), 2)
+
+        for payment in service_payment_summary("kitchen_orders", payload)["payments"]:
+            payment_date = parse_date(payment.get("paymentDate")) or parse_date(payload.get("orderDate")) or record.record_date
+            if not in_month_scope(payment_date):
+                continue
+            paid_amount = round(parse_amount(payment.get("amountPaid")), 2)
+            paid_cost = round(parse_amount(payment.get("costAmount")), 2)
+            if not category_totals:
+                add_category_row(
+                    area_id_value=area_key,
+                    category_label=kitchen_order_category_summary(payload),
+                    sales_amount=paid_amount,
+                    cost_amount=paid_cost,
+                    transaction_count=1,
+                    source_label="Kitchen Orders",
+                )
+                continue
+
+            total_sales = round(sum(value["sales"] for value in category_totals.values()), 2)
+            total_cost = round(sum(value["cost"] for value in category_totals.values()), 2)
+            remaining_sales = paid_amount
+            remaining_cost = paid_cost
+            category_rows = list(category_totals.items())
+            for index, (category, totals) in enumerate(category_rows):
+                is_last_category = index == len(category_rows) - 1
+                sales_share = (
+                    remaining_sales
+                    if is_last_category
+                    else round(paid_amount * totals["sales"] / total_sales, 2)
+                    if total_sales > 0
+                    else 0.0
+                )
+                cost_share = (
+                    remaining_cost
+                    if is_last_category
+                    else round(paid_cost * totals["cost"] / total_cost, 2)
+                    if total_cost > 0
+                    else 0.0
+                )
+                remaining_sales = round(remaining_sales - sales_share, 2)
+                remaining_cost = round(remaining_cost - cost_share, 2)
+                add_category_row(
+                    area_id_value=area_key,
+                    category_label=category,
+                    sales_amount=sales_share,
+                    cost_amount=cost_share,
+                    transaction_count=1,
+                    source_label="Kitchen Orders",
                 )
 
     apartment_records = db_session.scalars(
@@ -10956,6 +11057,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     source_type="kitchen-order-payment",
                     source_label="Kitchen Payment",
                     note=f"[Kitchen Sync] Payment {index} for {item_summary} from {customer}.",
+                    category=kitchen_order_category_summary(payload),
                 )
             stale_records = db.scalars(
                 select(ModuleRecord).where(
@@ -12050,6 +12152,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "online_orders",
                         "apartments",
                         "laundry_tickets",
+                        "kitchen_orders",
                         "equipment_rental_bookings",
                         "security_deposit_records",
                         "mobile_money_transactions",
@@ -14332,10 +14435,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 search=search,
                 area_filter=service_area,
                 status_filter=status_filter,
-                category_filter=category_filter,
+                # A kitchen order can contain several categories. Filter it
+                # below against every saved line instead of the legacy field.
+                category_filter="" if module_key == "kitchen_orders" else category_filter,
                 date_from=date_from,
                 date_to=date_to,
             )
+            if module_key == "kitchen_orders" and category_filter:
+                records = [
+                    record
+                    for record in records
+                    if category_filter in kitchen_order_categories(record.payload or {})
+                ]
             if module_key == "laundry_tickets":
                 service_rows = build_laundry_service_rows(records)
             elif module_key == "kitchen_orders":
@@ -14405,7 +14516,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 service_rows=service_rows,
                 service_context=service_context,
                 status_options=module_status_options(definition, all_records),
-                category_options=module_category_options(definition, all_records, service_area),
+                category_options=(
+                    sorted(
+                        {
+                            category
+                            for record in all_records
+                            for category in kitchen_order_categories(record.payload or {})
+                        }
+                    )
+                    if module_key == "kitchen_orders"
+                    else module_category_options(definition, all_records, service_area)
+                ),
                 category_filter_label=module_filter_category_label(definition),
                 module_quick_actions=module_quick_actions,
             )

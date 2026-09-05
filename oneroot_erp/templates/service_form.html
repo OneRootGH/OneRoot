@@ -70,6 +70,8 @@
             {% for field in section.fields %}
               {% if definition.key == 'equipment_rental_bookings' and field.name == 'equipmentCategory' %}
                 <input type="hidden" name="{{ field.name }}" value="{{ payload.get(field.name, 'Rent') or 'Rent' }}">
+              {% elif definition.key == 'kitchen_orders' and field.name == 'kitchenCategory' %}
+                <input type="hidden" name="{{ field.name }}" id="kitchen-category" value="{{ payload.get(field.name, '') }}">
               {% else %}
                 <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}">
                   <span>{{ field.label }}</span>
@@ -132,6 +134,20 @@
               {% endif %}
             {% endfor %}
           </div>
+          {% if definition.key == 'kitchen_orders' and loop.index == 1 %}
+            <section class="kitchen-category-selector" aria-label="Kitchen order categories">
+              <div class="service-line-builder-head">
+                <div>
+                  <p class="eyebrow">Food Groups</p>
+                  <h3>Select All Categories For This Order</h3>
+                </div>
+                <p class="muted">Choose every food group the customer needs. Each item remains in its own category for sales and profit reporting.</p>
+              </div>
+              <div id="kitchen-category-picker" class="kitchen-category-picker"></div>
+              <p id="kitchen-category-selection" class="kitchen-category-selection"></p>
+              <div id="kitchen-category-products" class="kitchen-category-products"></div>
+            </section>
+          {% endif %}
           {% if definition.key in ['laundry_tickets', 'kitchen_orders', 'equipment_rental_bookings'] and loop.index == 2 %}
             <div class="service-line-builder">
               <div class="service-line-builder-head">
@@ -219,6 +235,9 @@
           lineItemsJson: document.getElementById("service-line-items-json"),
           lineItemsContainer: document.getElementById("service-line-items"),
           previewContainer: document.getElementById("service-item-preview"),
+          kitchenCategoryPicker: document.getElementById("kitchen-category-picker"),
+          kitchenCategorySelection: document.getElementById("kitchen-category-selection"),
+          kitchenCategoryProducts: document.getElementById("kitchen-category-products"),
           form: document.querySelector(".service-form-stack"),
         };
         if (!fields.item || !fields.costAmount || !fields.lineItemsJson || !fields.lineItemsContainer || !fields.form) {
@@ -280,8 +299,66 @@
           ]),
         );
         const lineItems = Array.isArray(existingLineItems) ? existingLineItems.map((item) => ({ ...item })) : [];
+        const selectedKitchenCategories = new Set(
+          lineItems.map((item) => String(item.category || "").trim()).filter(Boolean),
+        );
         if (lineItems.length) {
           fields.item.value = "";
+        }
+
+        function setDraftCategory(value) {
+          const category = String(value || "").trim();
+          if (!fields.category) {
+            return;
+          }
+          if (isKitchen) {
+            fields.category.value = category;
+            if (category) {
+              selectedKitchenCategories.add(category);
+            }
+            return;
+          }
+          ensureSelectValue(fields.category, category);
+        }
+
+        function kitchenCategoryOptions() {
+          return [...new Set(
+            (Array.isArray(catalog) ? catalog : [])
+              .map((item) => String(item.category || "").trim())
+              .filter(Boolean),
+          )];
+        }
+
+        function selectKitchenProduct(product) {
+          fields.item.value = product.name || "";
+          setDraftCategory(product.category || "");
+          applyCatalogPricing();
+          fields.item.focus();
+        }
+
+        function renderKitchenCategoryPicker() {
+          if (!isKitchen || !fields.kitchenCategoryPicker || !fields.kitchenCategoryProducts) {
+            return;
+          }
+          const categories = kitchenCategoryOptions();
+          fields.kitchenCategoryPicker.innerHTML = categories.map((category) => `
+            <button class="kitchen-category-chip${selectedKitchenCategories.has(category) ? " is-selected" : ""}" type="button" data-kitchen-category="${category.replace(/"/g, "&quot;")}">
+              ${category}
+            </button>
+          `).join("");
+          const selected = [...selectedKitchenCategories];
+          fields.kitchenCategorySelection.textContent = selected.length
+            ? `Selected: ${selected.join(" · ")}`
+            : "Select one or more groups to show their food items.";
+          const products = (Array.isArray(catalog) ? catalog : []).filter((product) => selected.includes(String(product.category || "").trim()));
+          fields.kitchenCategoryProducts.innerHTML = products.length
+            ? products.map((product) => `
+                <button class="kitchen-category-product" type="button" data-kitchen-product="${String(product.name || "").replace(/"/g, "&quot;")}">
+                  <span>${product.name}</span>
+                  <small>${product.category} · ${formatCurrency(parseNumber(product.salesPrice))}</small>
+                </button>
+              `).join("")
+            : "";
         }
 
         function currentCatalogMatch() {
@@ -373,7 +450,7 @@
           const quantity = isEquipment
             ? Math.max(Math.round(parseNumber(fields.equipmentQuantity ? fields.equipmentQuantity.value : "1")), 1)
             : 1;
-          ensureSelectValue(fields.category, match.category);
+          setDraftCategory(match.category);
           fields.costAmount.value = formatAmount(match.costPrice * units * quantity);
           if ((isLaundry || isKitchen) && fields.amountDue) {
             fields.amountDue.value = formatAmount(match.salesPrice * units);
@@ -410,9 +487,13 @@
             const quantity = Math.max(Math.round(parseNumber(fields.kitchenQuantity ? fields.kitchenQuantity.value : "1")), 1);
             const amountDue = parseNumber(fields.amountDue ? fields.amountDue.value : "0");
             const costAmount = parseNumber(fields.costAmount ? fields.costAmount.value : "0");
+            const category = String(match?.category || fields.category?.value || "").trim();
+            if (!category) {
+              return null;
+            }
             return {
               name: itemName,
-              category: String(fields.category ? fields.category.value : "").trim(),
+              category,
               quantity,
               unitPrice: quantity > 0 ? amountDue / quantity : amountDue,
               costPrice: quantity > 0 ? costAmount / quantity : costAmount,
@@ -495,8 +576,10 @@
               fields.kitchenQuantity.value = String(totalQuantity);
             }
             if (fields.category) {
-              ensureSelectValue(fields.category, categories.length === 1 ? categories[0] : "Mixed Kitchen Items");
+              fields.category.value = categories.length === 1 ? categories[0] : "Mixed Kitchen Items";
             }
+            categories.forEach((category) => selectedKitchenCategories.add(category));
+            renderKitchenCategoryPicker();
           } else {
             const totalRentalFee = lineItems.reduce((sum, item) => sum + parseNumber(item.lineTotal), 0);
             if (fields.rentalFee) {
@@ -573,6 +656,29 @@
         }
 
         fields.addItemButton?.addEventListener("click", addDraftItem);
+        fields.kitchenCategoryPicker?.addEventListener("click", (event) => {
+          const categoryButton = event.target.closest("[data-kitchen-category]");
+          if (!categoryButton) {
+            return;
+          }
+          const category = String(categoryButton.dataset.kitchenCategory || "").trim();
+          if (selectedKitchenCategories.has(category)) {
+            selectedKitchenCategories.delete(category);
+          } else {
+            selectedKitchenCategories.add(category);
+          }
+          renderKitchenCategoryPicker();
+        });
+        fields.kitchenCategoryProducts?.addEventListener("click", (event) => {
+          const productButton = event.target.closest("[data-kitchen-product]");
+          if (!productButton) {
+            return;
+          }
+          const product = catalogMap.get(normalize(productButton.dataset.kitchenProduct));
+          if (product) {
+            selectKitchenProduct(product);
+          }
+        });
         fields.lineItemsContainer.addEventListener("click", (event) => {
           const removeButton = event.target.closest("[data-line-remove]");
           if (!removeButton) {
@@ -608,6 +714,7 @@
         });
 
         applyCatalogPricing();
+        renderKitchenCategoryPicker();
         renderLineItems();
         renderPreview();
         syncRequiredState();

@@ -2118,6 +2118,75 @@ textarea { resize: vertical; }
 .service-line-builder-grid {
   align-items: end;
 }
+.kitchen-category-selector {
+  margin-top: 0.9rem;
+  padding: 0.9rem;
+  border: 1px solid #dce6db;
+  border-radius: 1rem;
+  background: #f7fbf6;
+  display: grid;
+  gap: 0.7rem;
+}
+.kitchen-category-picker {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+.kitchen-category-chip,
+.kitchen-category-product {
+  appearance: none;
+  border: 1px solid #cddccd;
+  color: var(--ink);
+  background: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+.kitchen-category-chip {
+  padding: 0.42rem 0.72rem;
+  border-radius: 999px;
+  font-size: 0.83rem;
+  font-weight: 700;
+}
+.kitchen-category-chip.is-selected {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.kitchen-category-selection {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+.kitchen-category-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+  gap: 0.5rem;
+}
+.kitchen-category-product {
+  min-width: 0;
+  padding: 0.65rem 0.7rem;
+  border-radius: 0.72rem;
+  text-align: left;
+  display: grid;
+  gap: 0.15rem;
+}
+.kitchen-category-product:hover,
+.kitchen-category-product:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(35, 91, 56, 0.12);
+}
+.kitchen-category-product span {
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kitchen-category-product small {
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .service-item-preview {
   display: grid;
 }
