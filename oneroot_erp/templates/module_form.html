@@ -8,6 +8,8 @@
         <p class="muted">
           {% if definition.key in ['customer_crm', 'promotions', 'whatsapp_campaigns', 'campaign_roi'] %}
             Use this growth form to keep follow-up, promotions, WhatsApp, and Facebook-driven activity clean and easy to work with later.
+          {% elif definition.key == 'kitchen_recipe_plans' %}
+            Select the ingredients taken from shared POS stock. Saving the batch deducts stock once, records the real production cost, and updates the matching food item's future cost per serving.
           {% else %}
             Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.
           {% endif %}
@@ -87,6 +89,9 @@
     {% endif %}
 
     <form method="post" enctype="multipart/form-data" class="form-grid module-form-grid" id="generic-module-form">
+      {% if definition.key == 'kitchen_recipe_plans' %}
+        <input type="hidden" name="ingredientItemsJson" id="kitchen-ingredient-items-json">
+      {% endif %}
       {% if definition.key == 'customer_credit_accounts' and payload.get('linkedCreditAccountId') %}
         <input type="hidden" name="linkedCreditAccountId" value="{{ payload.get('linkedCreditAccountId') }}">
       {% endif %}
@@ -137,6 +142,9 @@
               {% endfor %}
             </datalist>
             <small class="muted form-helper">Choose a saved supplier to reuse their name and business area, or type a new name and add them to Supplier Directory later.</small>
+          {% elif definition.key == 'kitchen_recipe_plans' and field.name == 'recipeName' %}
+            <input type="text" name="{{ field.name }}" list="kitchen-menu-options" value="{{ payload.get(field.name, '') }}" placeholder="Choose the food item this batch will produce" {% if field.required %}required{% endif %}>
+            <small class="muted form-helper">Choose the matching food menu item so the real batch cost updates future Food POS and Kitchen Order profit.</small>
           {% elif field.field_type == 'select' %}
             <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
               <option value="">Select {{ field.label }}</option>
@@ -252,6 +260,15 @@
               placeholder="Calculated automatically from servings, prices, and production costs"
               readonly
             >
+          {% elif definition.key == 'kitchen_recipe_plans' and field.name == 'ingredientCost' %}
+            <input
+              type="number"
+              name="{{ field.name }}"
+              step="{{ field.step if field.field_type == 'number' else '' }}"
+              value="{{ payload.get(field.name, '') }}"
+              placeholder="Calculated from ingredients issued below"
+              readonly
+            >
           {% elif definition.key == 'catering_quotes' and field.name in ['depositRequired', 'balanceDue'] %}
             <input
               type="number"
@@ -325,6 +342,39 @@
           {% endif %}
         </label>
       {% endfor %}
+      {% if definition.key == 'kitchen_recipe_plans' %}
+        <datalist id="kitchen-menu-options">
+          {% for item in kitchen_menu_options %}
+            <option value="{{ item.name }}">{{ item.category }} · {{ item.salesPrice|currency }}</option>
+          {% endfor %}
+        </datalist>
+        <section class="span-2 kitchen-ingredient-builder">
+          <div class="service-line-builder-head">
+            <div>
+              <p class="eyebrow">Shared Stock Issue</p>
+              <h3>Ingredients Taken From POS Stock</h3>
+            </div>
+            <p class="muted">This is not a customer sale. It reduces the same stock available to POS and records the ingredient cost for this food batch.</p>
+          </div>
+          <div class="form-grid kitchen-ingredient-controls">
+            <label class="span-2">
+              <span>Ingredient From Inventory</span>
+              <select id="kitchen-ingredient-product">
+                <option value="">Select ingredient from POS stock</option>
+              </select>
+            </label>
+            <label>
+              <span>Quantity Taken</span>
+              <input id="kitchen-ingredient-quantity" type="number" min="0.01" step="0.01" value="1">
+            </label>
+            <div class="form-actions">
+              <button class="button primary" id="kitchen-add-ingredient" type="button">Add Ingredient</button>
+            </div>
+          </div>
+          <div id="kitchen-ingredient-preview" class="service-item-preview"></div>
+          <div id="kitchen-ingredient-lines" class="service-line-items"></div>
+        </section>
+      {% endif %}
       <div class="form-actions span-2">
         <button class="button primary" type="submit">Save Record</button>
       </div>
@@ -1015,6 +1065,133 @@
           field.addEventListener("change", updateDispatchFigures);
         });
         updateDispatchFigures();
+      })();
+    </script>
+  {% endif %}
+  {% if definition.key == 'kitchen_recipe_plans' %}
+    <script>
+      (function () {
+        const catalog = {{ kitchen_ingredient_catalog|tojson }};
+        const menuCatalog = {{ kitchen_menu_options|tojson }};
+        const lineItems = {{ kitchen_ingredient_items|tojson }}.map((item) => ({ ...item }));
+        const productField = document.getElementById("kitchen-ingredient-product");
+        const quantityField = document.getElementById("kitchen-ingredient-quantity");
+        const addButton = document.getElementById("kitchen-add-ingredient");
+        const preview = document.getElementById("kitchen-ingredient-preview");
+        const lines = document.getElementById("kitchen-ingredient-lines");
+        const dataField = document.getElementById("kitchen-ingredient-items-json");
+        const ingredientCostField = document.querySelector('input[name="ingredientCost"]');
+        const packagingCostField = document.querySelector('input[name="packagingCost"]');
+        const overheadCostField = document.querySelector('input[name="overheadCost"]');
+        const servingsField = document.querySelector('input[name="servingCount"]');
+        const sellingPriceField = document.querySelector('input[name="sellingPricePerServing"]');
+        const recipeNameField = document.querySelector('input[name="recipeName"]');
+        const totalCostField = document.querySelector('input[name="totalRecipeCost"]');
+        const costPerServingField = document.querySelector('input[name="costPerServing"]');
+        const projectedSalesField = document.querySelector('input[name="projectedSales"]');
+        const projectedProfitField = document.querySelector('input[name="projectedProfit"]');
+        const marginField = document.querySelector('input[name="marginPercent"]');
+        if (!productField || !quantityField || !addButton || !preview || !lines || !dataField) return;
+
+        const money = new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", minimumFractionDigits: 2 });
+        const parseNumber = (value) => {
+          const parsed = Number.parseFloat(value || "0");
+          return Number.isFinite(parsed) ? parsed : 0;
+        };
+        const escape = (value) => String(value || "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
+        const productById = new Map(catalog.map((product) => [product.id, product]));
+
+        catalog.forEach((product) => {
+          const option = document.createElement("option");
+          option.value = product.id;
+          option.textContent = `${product.name} · Stock ${product.quantityOnHand} · Cost ${money.format(product.costPrice)}`;
+          productField.appendChild(option);
+        });
+
+        function updateFigures() {
+          const ingredientCost = lineItems.reduce((sum, item) => sum + parseNumber(item.lineCost), 0);
+          const packagingCost = parseNumber(packagingCostField?.value);
+          const overheadCost = parseNumber(overheadCostField?.value);
+          const servings = Math.max(parseNumber(servingsField?.value), 0);
+          const sellingPrice = Math.max(parseNumber(sellingPriceField?.value), 0);
+          const totalCost = ingredientCost + packagingCost + overheadCost;
+          const projectedSales = servings * sellingPrice;
+          const projectedProfit = projectedSales - totalCost;
+          if (ingredientCostField) ingredientCostField.value = ingredientCost.toFixed(2);
+          if (totalCostField) totalCostField.value = totalCost.toFixed(2);
+          if (costPerServingField) costPerServingField.value = (servings > 0 ? totalCost / servings : 0).toFixed(2);
+          if (projectedSalesField) projectedSalesField.value = projectedSales.toFixed(2);
+          if (projectedProfitField) projectedProfitField.value = projectedProfit.toFixed(2);
+          if (marginField) marginField.value = (projectedSales > 0 ? (projectedProfit / projectedSales) * 100 : 0).toFixed(2);
+          dataField.value = JSON.stringify(lineItems);
+        }
+
+        function renderPreview() {
+          const product = productById.get(productField.value);
+          if (!product) {
+            preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>No ingredient selected yet.</strong><p>Select an item from shared POS stock to see its current quantity and cost.</p></article>';
+            return;
+          }
+          preview.innerHTML = `<article class="service-item-preview-card"><img class="product-thumb product-thumb-large" src="${escape(product.imageUrl || '/assets/oneroot-icon-transparent.png')}" alt="${escape(product.name)}" onerror="this.src='/assets/oneroot-icon-transparent.png'"><div class="service-item-preview-copy"><strong>${escape(product.name)}</strong><span>${escape(product.category || 'Inventory')} · ${escape(product.sku || 'No SKU')}</span><span>Available ${product.quantityOnHand} · Unit cost ${money.format(product.costPrice)}</span></div></article>`;
+        }
+
+        function renderLines() {
+          if (!lineItems.length) {
+            lines.innerHTML = '<article class="service-line-empty"><strong>No ingredients have been issued yet.</strong><p>Select a stock item, enter the quantity taken, and add it to this production batch.</p></article>';
+            updateFigures();
+            return;
+          }
+          lines.innerHTML = lineItems.map((item, index) => `<article class="service-line-item"><div><strong>${escape(item.name)}</strong><span>${escape(item.sku || 'No SKU')} · ${item.quantity} taken @ ${money.format(item.unitCost)}</span><span>Ingredient cost ${money.format(item.lineCost)}</span></div><button class="text-button danger-text" type="button" data-kitchen-ingredient-remove="${index}">Remove</button></article>`).join("");
+          updateFigures();
+        }
+
+        function addIngredient() {
+          const product = productById.get(productField.value);
+          const quantity = Math.max(parseNumber(quantityField.value), 0);
+          if (!product || quantity <= 0) return;
+          const existing = lineItems.find((item) => item.productId === product.id);
+          if (existing) {
+            existing.quantity = parseNumber(existing.quantity) + quantity;
+            existing.unitCost = parseNumber(product.costPrice);
+            existing.lineCost = existing.quantity * existing.unitCost;
+          } else {
+            lineItems.push({ productId: product.id, name: product.name, sku: product.sku || product.barcode || "", quantity, unitCost: parseNumber(product.costPrice), lineCost: quantity * parseNumber(product.costPrice) });
+          }
+          quantityField.value = "1";
+          productField.value = "";
+          renderPreview();
+          renderLines();
+        }
+
+        function applyMenuPrice() {
+          const recipeName = String(recipeNameField?.value || "").trim().toLowerCase();
+          const menuItem = menuCatalog.find((item) => String(item.name || "").trim().toLowerCase() === recipeName);
+          if (menuItem && sellingPriceField && parseNumber(sellingPriceField.value) <= 0) {
+            sellingPriceField.value = parseNumber(menuItem.salesPrice).toFixed(2);
+            updateFigures();
+          }
+        }
+
+        productField.addEventListener("change", renderPreview);
+        addButton.addEventListener("click", addIngredient);
+        recipeNameField?.addEventListener("change", applyMenuPrice);
+        lines.addEventListener("click", (event) => {
+          const button = event.target.closest("[data-kitchen-ingredient-remove]");
+          if (!button) return;
+          const index = Number.parseInt(button.dataset.kitchenIngredientRemove || "-1", 10);
+          if (Number.isInteger(index) && index >= 0 && index < lineItems.length) {
+            lineItems.splice(index, 1);
+            renderLines();
+          }
+        });
+        [packagingCostField, overheadCostField, servingsField, sellingPriceField].filter(Boolean).forEach((field) => {
+          field.addEventListener("input", updateFigures);
+          field.addEventListener("change", updateFigures);
+        });
+        document.getElementById("generic-module-form")?.addEventListener("submit", updateFigures);
+        renderPreview();
+        renderLines();
+        applyMenuPrice();
       })();
     </script>
   {% endif %}

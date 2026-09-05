@@ -630,6 +630,17 @@ a { color: inherit; text-decoration: none; }
   margin: 0.35rem 0 0;
   color: var(--muted);
 }
+.kitchen-ingredient-builder {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid #ead7bc;
+  border-radius: 1rem;
+  background: linear-gradient(135deg, #fffaf2, #f3f8f1);
+}
+.kitchen-ingredient-controls {
+  align-items: end;
+}
 .social-post-card {
   align-content: start;
 }

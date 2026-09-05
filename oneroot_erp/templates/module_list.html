@@ -685,7 +685,7 @@
                 {% elif definition.key == 'customer_service_cases' %}
                   <span class="table-secondary">{{ record.payload.get('caseType', 'Customer Case') }} · {{ record.payload.get('channel', 'Walk-in') }} · Due {{ record.payload.get('dueDate') or 'Not set' }}</span>
                 {% elif definition.key == 'kitchen_recipe_plans' %}
-                  <span class="table-secondary">Cost {{ (record.payload.get('totalRecipeCost', 0))|currency }} · Sales {{ (record.payload.get('projectedSales', 0))|currency }} · Margin {{ record.payload.get('marginPercent', 0) }}%</span>
+                  <span class="table-secondary">Cost {{ (record.payload.get('totalRecipeCost', 0))|currency }} · Sales {{ (record.payload.get('projectedSales', 0))|currency }} · Margin {{ record.payload.get('marginPercent', 0) }}% · {{ record.payload.get('ingredientItems', [])|length }} POS stock item{% if record.payload.get('ingredientItems', [])|length != 1 %}s{% endif %} issued</span>
                 {% elif definition.key == 'catering_quotes' %}
                   <span class="table-secondary">Deposit {{ (record.payload.get('depositPaid', 0))|currency }} · Balance {{ (record.payload.get('balanceDue', 0))|currency }} · Event {{ record.payload.get('eventDate') or 'To confirm' }}</span>
                 {% elif definition.key == 'supplier_price_updates' %}

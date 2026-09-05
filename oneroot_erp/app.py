@@ -64,6 +64,7 @@ DATABASE_INIT_DELAY_SECONDS = 1
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
 SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
+KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
 # Food Sales on the POS ribbon should reflect kitchen trading only:
 # online food orders, direct kitchen checkout, and manual OneRoot Kitchen sales.
 POS_FOOD_SALES_AREA_IDS = {"kitchen"}
@@ -6640,10 +6641,63 @@ def delivery_dispatch_rollup(payload: dict[str, Any]) -> None:
     payload["outstandingAmount"] = round(max(order_total - cash_collected, 0), 2)
 
 
+def kitchen_ingredient_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    raw_items = payload.get(KITCHEN_INGREDIENT_ITEMS_KEY)
+    if not isinstance(raw_items, list):
+        return []
+
+    normalized: list[dict[str, Any]] = []
+    for raw_item in raw_items:
+        if not isinstance(raw_item, dict):
+            continue
+        product_id = normalize_text(raw_item.get("productId"))
+        quantity = round(max(parse_amount(raw_item.get("quantity")), 0), 2)
+        if not product_id or quantity <= 0:
+            continue
+        unit_cost = round(max(parse_amount(raw_item.get("unitCost")), 0), 2)
+        normalized.append(
+            {
+                "productId": product_id,
+                "name": normalize_text(raw_item.get("name")) or "Kitchen ingredient",
+                "sku": normalize_text(raw_item.get("sku")),
+                "quantity": quantity,
+                "unitCost": unit_cost,
+                "lineCost": round(quantity * unit_cost, 2),
+            }
+        )
+    return normalized
+
+
+def hydrate_kitchen_ingredient_items(db_session, payload: dict[str, Any]) -> None:
+    """Use the live POS inventory cost, never a browser-provided cost, for kitchen issues."""
+    hydrated_items: list[dict[str, Any]] = []
+    for item in kitchen_ingredient_items(payload):
+        product = db_session.get(Product, item["productId"])
+        if not product or not product_tracks_inventory(product):
+            continue
+        quantity = item["quantity"]
+        unit_cost = round(max(parse_amount(product.cost_price), 0), 2)
+        hydrated_items.append(
+            {
+                "productId": product.id,
+                "name": product.name,
+                "sku": normalize_text(product.sku) or normalize_text(product.barcode),
+                "quantity": quantity,
+                "unitCost": unit_cost,
+                "lineCost": round(quantity * unit_cost, 2),
+            }
+        )
+    payload[KITCHEN_INGREDIENT_ITEMS_KEY] = hydrated_items
+
+
 def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
-    """Calculate a practical recipe plan without posting any sale until food is sold."""
+    """Calculate a production batch from shared-stock ingredient issues, without posting a sale."""
     servings = max(parse_amount(payload.get("servingCount")), 0)
     selling_price = max(parse_amount(payload.get("sellingPricePerServing")), 0)
+    ingredient_items = kitchen_ingredient_items(payload)
+    issued_ingredient_cost = round(sum(parse_amount(item.get("lineCost")) for item in ingredient_items), 2)
+    if ingredient_items:
+        payload["ingredientCost"] = issued_ingredient_cost
     total_cost = round(
         max(parse_amount(payload.get("ingredientCost")), 0)
         + max(parse_amount(payload.get("packagingCost")), 0)
@@ -6658,6 +6712,76 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
     payload["projectedSales"] = projected_sales
     payload["projectedProfit"] = projected_profit
     payload["marginPercent"] = round((projected_profit / projected_sales) * 100, 2) if projected_sales else 0.0
+
+
+def kitchen_recipe_issue_quantities(payload: dict[str, Any]) -> dict[str, float]:
+    if normalize_text(payload.get("productionStatus")) == "Cancelled":
+        return {}
+    quantities: dict[str, float] = defaultdict(float)
+    for item in kitchen_ingredient_items(payload):
+        quantities[item["productId"]] += parse_amount(item.get("quantity"))
+    return {product_id: round(quantity, 2) for product_id, quantity in quantities.items() if quantity > 0}
+
+
+def sync_kitchen_recipe_inventory(db_session, payload: dict[str, Any], previous_payload: dict[str, Any] | None = None) -> None:
+    """Apply only the ingredient issue difference so editing a batch never double-deducts stock."""
+    previous_quantities = kitchen_recipe_issue_quantities(previous_payload or {})
+    current_quantities = kitchen_recipe_issue_quantities(payload)
+    changed_products: list[str] = []
+    for product_id in set(previous_quantities) | set(current_quantities):
+        delta = round(current_quantities.get(product_id, 0) - previous_quantities.get(product_id, 0), 2)
+        if not delta:
+            continue
+        product = db_session.get(Product, product_id)
+        if not product or not product_tracks_inventory(product):
+            continue
+        product.quantity_on_hand = round(parse_amount(product.quantity_on_hand) - delta, 2)
+        product.quantity_known = True
+        product.updated_at = datetime.utcnow()
+        changed_products.append(f"{product.name} ({delta:g})")
+
+    payload["inventoryIssueNote"] = (
+        "Shared POS stock issued: " + ", ".join(changed_products)
+        if changed_products
+        else "No shared-stock quantity changed."
+    )
+
+
+def kitchen_recipe_stock_errors(db_session, payload: dict[str, Any], previous_payload: dict[str, Any] | None = None) -> list[str]:
+    """Keep a batch edit safe by treating its previously issued quantity as available to reverse."""
+    errors: list[str] = []
+    previous_quantities = kitchen_recipe_issue_quantities(previous_payload or {})
+    for product_id, requested_quantity in kitchen_recipe_issue_quantities(payload).items():
+        product = db_session.get(Product, product_id)
+        if not product or not product_tracks_inventory(product):
+            errors.append("One selected kitchen ingredient is no longer an active stock item. Refresh the form and choose it again.")
+            continue
+        available_quantity = round(parse_amount(product.quantity_on_hand) + previous_quantities.get(product_id, 0), 2)
+        if requested_quantity > available_quantity + 0.009:
+            errors.append(
+                f"{product.name} has only {available_quantity:g} available in shared POS stock; the batch requests {requested_quantity:g}."
+            )
+    return errors
+
+
+def sync_kitchen_menu_cost_from_recipe(db_session, payload: dict[str, Any]) -> None:
+    """Make future Kitchen/POS food sales use this batch's real ingredient cost per serving."""
+    recipe_name = normalize_text(payload.get("recipeName"))
+    cost_per_serving = round(max(parse_amount(payload.get("costPerServing")), 0), 2)
+    if not recipe_name or cost_per_serving <= 0 or normalize_text(payload.get("productionStatus")) == "Cancelled":
+        return
+    menu_item = db_session.scalar(
+        select(Product).where(
+            Product.business_area_id == "kitchen",
+            Product.name.ilike(recipe_name),
+        )
+    )
+    if not menu_item:
+        payload["menuCostUpdateNote"] = "No matching kitchen menu item was found; this batch cost remains saved on the production record."
+        return
+    menu_item.cost_price = cost_per_serving
+    menu_item.updated_at = datetime.utcnow()
+    payload["menuCostUpdateNote"] = f"Updated {menu_item.name} cost to {format_currency(cost_per_serving)} per serving for future food sales."
 
 
 def catering_quote_rollup(payload: dict[str, Any]) -> None:
@@ -14490,6 +14614,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 ):
                     continue
                 payload[field.name] = parse_field_input(field, request.form)
+            if module_key == "kitchen_recipe_plans":
+                raw_ingredients = normalize_text(request.form.get("ingredientItemsJson"))
+                try:
+                    parsed_ingredients = json.loads(raw_ingredients) if raw_ingredients else []
+                except json.JSONDecodeError:
+                    parsed_ingredients = []
+                payload[KITCHEN_INGREDIENT_ITEMS_KEY] = parsed_ingredients if isinstance(parsed_ingredients, list) else []
+                hydrate_kitchen_ingredient_items(g.db, payload)
             if module_key == "customer_credit_accounts":
                 payload["linkedCreditAccountId"] = normalize_text(request.form.get("linkedCreditAccountId")) or normalize_text(
                     record_payload.get("linkedCreditAccountId")
@@ -14627,6 +14759,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["documentAttachmentType"] = document_attachment_type
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
+            if module_key == "kitchen_recipe_plans":
+                form_errors.extend(kitchen_recipe_stock_errors(g.db, payload, record_payload))
             if (
                 module_key == "customer_credit_accounts"
                 and normalize_text(payload.get("transactionType")) == "Write-Off"
@@ -14647,6 +14781,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     g.db.add(record)
                 if module_key == "apartments":
                     sync_tenant_portal_account(g.db, payload)
+                if module_key == "kitchen_recipe_plans":
+                    sync_kitchen_recipe_inventory(g.db, payload, record_payload)
+                    sync_kitchen_menu_cost_from_recipe(g.db, payload)
                 set_module_record_metadata(record, definition, payload)
                 if module_key == "customer_credit_accounts":
                     current_credit_key = customer_credit_rollup_key(g.db, payload)
@@ -14949,6 +15086,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "note": "Compare cash and bank movement with day sales totals.",
                     }
                 )
+        if module_key == "kitchen_recipe_plans":
+            if user_has_access(g.current_user, "pos"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Food POS",
+                        "href": url_for("pos_page", desk="food"),
+                        "note": "Sell prepared food here. It uses the same kitchen menu cost updated from the latest production batch.",
+                    }
+                )
+            if user_has_access(g.current_user, "kitchen_orders"):
+                module_quick_actions.append(
+                    {
+                        "label": "Open Kitchen Orders",
+                        "href": url_for("module_list", module_key="kitchen_orders"),
+                        "note": "Record direct, takeaway, delivery, and website food orders, then capture the actual customer payment.",
+                    }
+                )
         category_map = expense_category_map() if module_key in {"expenses", "budgets", "forecast_plans", "recurring_controls"} else inventory_category_map()
         if module_key == "mobile_money_reconciliations":
             return render_template(
@@ -14990,6 +15144,34 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 today_iso=date.today().isoformat(),
             )
         supplier_directory_options = []
+        kitchen_ingredient_catalog = []
+        kitchen_menu_options = []
+        if module_key == "kitchen_recipe_plans":
+            kitchen_ingredient_catalog = [
+                {
+                    "id": product.id,
+                    "name": product.name,
+                    "sku": normalize_text(product.sku) or normalize_text(product.barcode),
+                    "category": normalize_text(product.category),
+                    "quantityOnHand": round(parse_amount(product.quantity_on_hand), 2),
+                    "costPrice": round(parse_amount(product.cost_price), 2),
+                    "imageUrl": product_image_src(product),
+                }
+                for product in g.db.scalars(select(Product).where(Product.active.is_(True)).order_by(Product.name.asc())).all()
+                if product_tracks_inventory(product)
+            ]
+            kitchen_menu_options = [
+                {
+                    "name": product.name,
+                    "salesPrice": round(parse_amount(product.sales_price), 2),
+                    "category": normalize_text(product.category),
+                }
+                for product in g.db.scalars(
+                    select(Product)
+                    .where(Product.business_area_id == "kitchen", Product.active.is_(True))
+                    .order_by(Product.name.asc())
+                ).all()
+            ]
         if module_key in {"suppliers", "supplier_price_updates"}:
             supplier_directory_options = [
                 {
@@ -15019,6 +15201,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             mobile_money_day_helper=mobile_money_day_helper,
             mobile_money_live_snapshot=mobile_money_live_snapshot,
             supplier_directory_options=supplier_directory_options,
+            kitchen_ingredient_catalog=kitchen_ingredient_catalog,
+            kitchen_ingredient_items=kitchen_ingredient_items(record_payload) if module_key == "kitchen_recipe_plans" else [],
+            kitchen_menu_options=kitchen_menu_options,
             today_iso=date.today().isoformat(),
         )
 
