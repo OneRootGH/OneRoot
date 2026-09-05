@@ -55,6 +55,7 @@
   const posDesk = document.querySelector("[data-pos-desk]")?.dataset.posDesk || "general";
   const kitchenIssueMode = document.querySelector("[data-kitchen-issue-mode]")?.dataset.kitchenIssueMode === "yes";
   const kitchenBatchId = document.querySelector("[data-kitchen-batch-id]")?.dataset.kitchenBatchId || "";
+  const kitchenMealInput = document.getElementById("pos-kitchen-meal-id");
   const canVoidOrders = document.querySelector("[data-can-void-orders]")?.dataset.canVoidOrders === "yes";
 
   if (!searchInput || !resultsContainer || !cartContainer || !saveButton) {
@@ -816,6 +817,7 @@
       desk: posDesk,
       transactionMode: kitchenIssueMode ? "kitchen-stock-issue" : "",
       kitchenBatchId: kitchenIssueMode ? kitchenBatchId : "",
+      kitchenMealId: kitchenIssueMode ? (kitchenMealInput?.value || "") : "",
       paymentMethod: paymentMethodInput?.value,
       customerName: customerNameInput?.value,
       customerPhone: customerPhoneInput?.value,
@@ -855,7 +857,7 @@
     }
     setStatus(
       kitchenIssueMode
-        ? `${result.orderNumber} issued to the production batch at ${formatCurrency(result.totalAmount)} cost. Food cost has been updated.`
+        ? `${result.orderNumber} issued to ${kitchenMealInput?.selectedOptions?.[0]?.textContent || "the selected meal"} at ${formatCurrency(result.totalAmount)} cost. Food cost has been updated.`
         : `${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.`
     );
     if (searchInput) {
@@ -880,6 +882,11 @@
   if (paymentLabelNode && paymentMethodInput) {
     paymentLabelNode.textContent = paymentMethodInput.value || "Cash";
   }
+  kitchenMealInput?.addEventListener("change", () => {
+    if (state.cart.length) {
+      setStatus(`Current ingredient cart will be issued to ${kitchenMealInput.selectedOptions?.[0]?.textContent || "the selected meal"}.`);
+    }
+  });
   if (paymentMethodInput) {
     setActiveButton(paymentButtonNodes, (button) => button.dataset.paymentMethod === paymentMethodInput.value);
   }

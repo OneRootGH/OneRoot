@@ -5,7 +5,7 @@
       <div class="pos-workbench-title">
         <h3>{% if kitchen_issue_mode %}Kitchen Stock Issue{% elif food_pos_mode %}Kitchen Checkout{% else %}Checkout{% endif %}</h3>
         <p class="muted pos-serving-note">
-          {% if kitchen_issue_mode %}Issue ingredients at inventory cost. This is internal stock use, not a customer sale.{% elif food_pos_mode %}OneRoot Kitchen meals and drinks only. Press <strong>/</strong> to search quickly.{% else %}Fast counter view. Press <strong>/</strong> to jump to search.{% endif %}
+          {% if kitchen_issue_mode %}Choose the meal first, then issue ingredients at inventory cost. This is internal stock use, not a customer sale.{% elif food_pos_mode %}OneRoot Kitchen meals and drinks only. Press <strong>/</strong> to search quickly.{% else %}Fast counter view. Press <strong>/</strong> to jump to search.{% endif %}
         </p>
       </div>
       <div class="toolbar pos-workbench-tools">
@@ -32,8 +32,13 @@
       <section class="kitchen-stock-issue-banner">
         <div>
           <span class="eyebrow">Production Batch</span>
-          <strong>{{ kitchen_batch.recipeName }}</strong>
-          <small>{{ kitchen_batch.servingCount|round(0)|int }} planned servings</small>
+          {% if kitchen_batch.mealItems|length > 1 %}
+            <strong>{{ kitchen_batch.mealItems|length }} meals in this session</strong>
+            <small>{{ kitchen_batch.recipeName }} · {{ kitchen_batch.servingCount|round(0)|int }} planned servings</small>
+          {% else %}
+            <strong>{{ kitchen_batch.recipeName }}</strong>
+            <small>{{ kitchen_batch.servingCount|round(0)|int }} planned servings</small>
+          {% endif %}
         </div>
         <div><span>Current batch cost</span><strong>{{ kitchen_batch.totalRecipeCost|currency }}</strong></div>
         <div><span>Current cost per serving</span><strong>{{ kitchen_batch.costPerServing|currency }}</strong></div>
@@ -123,6 +128,14 @@
             </label>
             {% if kitchen_issue_mode %}
               <div class="pos-locked-area"><span>Source</span><strong>Shared Inventory</strong></div>
+              <label class="pos-kitchen-meal-select">
+                <span>For Meal</span>
+                <select id="pos-kitchen-meal-id">
+                  {% for meal in kitchen_batch.mealItems %}
+                    <option value="{{ meal.mealId }}">{{ meal.recipeName }} · {{ meal.plannedServings|round(0)|int }} servings</option>
+                  {% endfor %}
+                </select>
+              </label>
             {% elif not food_pos_mode %}<label>
               <span>Area</span>
               <select id="pos-area-filter">

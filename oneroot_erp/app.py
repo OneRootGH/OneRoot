@@ -65,6 +65,7 @@ DATABASE_RETRY_COOLDOWN_SECONDS = 15
 SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
 KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
+KITCHEN_MEAL_ITEMS_KEY = "mealItems"
 # Food Sales on the POS ribbon should reflect kitchen trading only:
 # online food orders, direct kitchen checkout, and manual OneRoot Kitchen sales.
 POS_FOOD_SALES_AREA_IDS = {"kitchen"}
@@ -6658,6 +6659,76 @@ def delivery_dispatch_rollup(payload: dict[str, Any]) -> None:
     payload["outstandingAmount"] = round(max(order_total - cash_collected, 0), 2)
 
 
+def kitchen_meal_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    """Return normalized meals for a Kitchen production session, including legacy one-meal records."""
+    raw_items = payload.get(KITCHEN_MEAL_ITEMS_KEY)
+    normalized: list[dict[str, Any]] = []
+    if isinstance(raw_items, list):
+        for index, raw_item in enumerate(raw_items, start=1):
+            if not isinstance(raw_item, dict):
+                continue
+            recipe_name = normalize_text(raw_item.get("recipeName")) or normalize_text(raw_item.get("name"))
+            planned_servings = round(max(parse_amount(raw_item.get("plannedServings") or raw_item.get("servingCount")), 0), 2)
+            if not recipe_name or planned_servings <= 0:
+                continue
+            product_id = normalize_text(raw_item.get("productId"))
+            meal_id = normalize_text(raw_item.get("mealId")) or product_id or f"meal-{index}"
+            normalized.append(
+                {
+                    "mealId": meal_id,
+                    "productId": product_id,
+                    "recipeName": recipe_name,
+                    "category": normalize_text(raw_item.get("category")),
+                    "plannedServings": planned_servings,
+                    "sellingPricePerServing": round(max(parse_amount(raw_item.get("sellingPricePerServing") or raw_item.get("sellingPrice")), 0), 2),
+                    "actualProduced": round(max(parse_amount(raw_item.get("actualProduced")), 0), 2),
+                    "actualSold": round(max(parse_amount(raw_item.get("actualSold")), 0), 2),
+                    "wasteQuantity": round(max(parse_amount(raw_item.get("wasteQuantity")), 0), 2),
+                    "ingredientCost": round(max(parse_amount(raw_item.get("ingredientCost")), 0), 2),
+                    "packagingCost": round(max(parse_amount(raw_item.get("packagingCost")), 0), 2),
+                    "overheadCost": round(max(parse_amount(raw_item.get("overheadCost")), 0), 2),
+                    "totalRecipeCost": round(max(parse_amount(raw_item.get("totalRecipeCost")), 0), 2),
+                    "costPerServing": round(max(parse_amount(raw_item.get("costPerServing")), 0), 2),
+                    "projectedSales": round(max(parse_amount(raw_item.get("projectedSales")), 0), 2),
+                    "projectedProfit": round(parse_amount(raw_item.get("projectedProfit")), 2),
+                    "marginPercent": round(parse_amount(raw_item.get("marginPercent")), 2),
+                }
+            )
+    if normalized:
+        return normalized
+
+    # Existing production records used one set of top-level fields. Keep them editable and reportable.
+    recipe_name = normalize_text(payload.get("recipeName"))
+    planned_servings = round(max(parse_amount(payload.get("servingCount")), 0), 2)
+    if not recipe_name or planned_servings <= 0:
+        return []
+    return [
+        {
+            "mealId": normalize_text(payload.get("linkedProductId")) or f"legacy-{recipe_name.lower().replace(' ', '-')}",
+            "productId": normalize_text(payload.get("linkedProductId")),
+            "recipeName": recipe_name,
+            "category": normalize_text(payload.get("kitchenCategory")),
+            "plannedServings": planned_servings,
+            "sellingPricePerServing": round(max(parse_amount(payload.get("sellingPricePerServing")), 0), 2),
+            "actualProduced": round(max(parse_amount(payload.get("actualProduced")), 0), 2),
+            "actualSold": round(max(parse_amount(payload.get("actualSold")), 0), 2),
+            "wasteQuantity": round(max(parse_amount(payload.get("wasteQuantity")), 0), 2),
+            "ingredientCost": round(max(parse_amount(payload.get("ingredientCost")), 0), 2),
+            "packagingCost": round(max(parse_amount(payload.get("packagingCost")), 0), 2),
+            "overheadCost": round(max(parse_amount(payload.get("overheadCost")), 0), 2),
+            "totalRecipeCost": round(max(parse_amount(payload.get("totalRecipeCost")), 0), 2),
+            "costPerServing": round(max(parse_amount(payload.get("costPerServing")), 0), 2),
+            "projectedSales": round(max(parse_amount(payload.get("projectedSales")), 0), 2),
+            "projectedProfit": round(parse_amount(payload.get("projectedProfit")), 2),
+            "marginPercent": round(parse_amount(payload.get("marginPercent")), 2),
+        }
+    ]
+
+
+def kitchen_meal_title(meal_items: list[dict[str, Any]]) -> str:
+    return " + ".join(normalize_text(item.get("recipeName")) for item in meal_items if normalize_text(item.get("recipeName")))
+
+
 def kitchen_ingredient_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     raw_items = payload.get(KITCHEN_INGREDIENT_ITEMS_KEY)
     if not isinstance(raw_items, list):
@@ -6677,6 +6748,8 @@ def kitchen_ingredient_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
                 "productId": product_id,
                 "name": normalize_text(raw_item.get("name")) or "Kitchen ingredient",
                 "sku": normalize_text(raw_item.get("sku")),
+                "mealId": normalize_text(raw_item.get("mealId")),
+                "mealName": normalize_text(raw_item.get("mealName")),
                 "quantity": quantity,
                 "unitCost": unit_cost,
                 "lineCost": round(quantity * unit_cost, 2),
@@ -6685,13 +6758,70 @@ def kitchen_ingredient_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
     return normalized
 
 
+def hydrate_kitchen_meal_items(db_session, payload: dict[str, Any]) -> None:
+    """Use saved Kitchen menu names, categories, and current menu prices for new meal lines."""
+    menu_products = db_session.scalars(
+        select(Product).where(Product.business_area_id == "kitchen").order_by(Product.name.asc())
+    ).all()
+    by_id = {product.id: product for product in menu_products}
+    by_name = {normalize_text(product.name).lower(): product for product in menu_products}
+    hydrated: list[dict[str, Any]] = []
+    seen_product_ids: set[str] = set()
+    for meal in kitchen_meal_items(payload):
+        product = by_id.get(normalize_text(meal.get("productId"))) or by_name.get(normalize_text(meal.get("recipeName")).lower())
+        if product:
+            product_id = product.id
+            recipe_name = product.name
+            category = normalize_text(product.category)
+            meal_id = product.id
+            menu_price = round(max(parse_amount(product.sales_price), 0), 2)
+        else:
+            # Legacy items remain available even if the original menu product was retired.
+            product_id = normalize_text(meal.get("productId"))
+            recipe_name = normalize_text(meal.get("recipeName"))
+            category = normalize_text(meal.get("category"))
+            meal_id = normalize_text(meal.get("mealId")) or product_id or f"meal-{len(hydrated) + 1}"
+            menu_price = 0.0
+        if not recipe_name:
+            continue
+        price = round(max(parse_amount(meal.get("sellingPricePerServing")), 0), 2) or menu_price
+        if product_id and product_id in seen_product_ids:
+            # The same menu item belongs on one line in a session; combine the planned quantities.
+            existing = next(item for item in hydrated if item["productId"] == product_id)
+            existing["plannedServings"] = round(existing["plannedServings"] + parse_amount(meal.get("plannedServings")), 2)
+            existing["actualProduced"] = round(existing["actualProduced"] + parse_amount(meal.get("actualProduced")), 2)
+            existing["actualSold"] = round(existing["actualSold"] + parse_amount(meal.get("actualSold")), 2)
+            existing["wasteQuantity"] = round(existing["wasteQuantity"] + parse_amount(meal.get("wasteQuantity")), 2)
+            continue
+        hydrated.append(
+            {
+                "mealId": meal_id,
+                "productId": product_id,
+                "recipeName": recipe_name,
+                "category": category,
+                "plannedServings": round(max(parse_amount(meal.get("plannedServings")), 0), 2),
+                "sellingPricePerServing": price,
+                "actualProduced": round(max(parse_amount(meal.get("actualProduced")), 0), 2),
+                "actualSold": round(max(parse_amount(meal.get("actualSold")), 0), 2),
+                "wasteQuantity": round(max(parse_amount(meal.get("wasteQuantity")), 0), 2),
+            }
+        )
+        if product_id:
+            seen_product_ids.add(product_id)
+    payload[KITCHEN_MEAL_ITEMS_KEY] = hydrated
+
+
 def hydrate_kitchen_ingredient_items(db_session, payload: dict[str, Any]) -> None:
     """Use the live POS inventory cost, never a browser-provided cost, for kitchen issues."""
+    meals = kitchen_meal_items(payload)
+    meals_by_id = {normalize_text(item.get("mealId")): item for item in meals}
+    default_meal = meals[0] if meals else None
     hydrated_items: list[dict[str, Any]] = []
     for item in kitchen_ingredient_items(payload):
         product = db_session.get(Product, item["productId"])
         if not product or not product_tracks_inventory(product):
             continue
+        meal = meals_by_id.get(normalize_text(item.get("mealId"))) or default_meal
         quantity = item["quantity"]
         unit_cost = round(max(parse_amount(product.cost_price), 0), 2)
         hydrated_items.append(
@@ -6699,6 +6829,8 @@ def hydrate_kitchen_ingredient_items(db_session, payload: dict[str, Any]) -> Non
                 "productId": product.id,
                 "name": product.name,
                 "sku": normalize_text(product.sku) or normalize_text(product.barcode),
+                "mealId": normalize_text(meal.get("mealId")) if meal else "",
+                "mealName": normalize_text(meal.get("recipeName")) if meal else "",
                 "quantity": quantity,
                 "unitCost": unit_cost,
                 "lineCost": round(quantity * unit_cost, 2),
@@ -6707,54 +6839,87 @@ def hydrate_kitchen_ingredient_items(db_session, payload: dict[str, Any]) -> Non
     payload[KITCHEN_INGREDIENT_ITEMS_KEY] = hydrated_items
 
 
-def hydrate_kitchen_recipe_menu_defaults(db_session, payload: dict[str, Any]) -> None:
-    """Fill menu price and category from the saved Kitchen menu when the batch is linked to one."""
-    recipe_name = normalize_text(payload.get("recipeName"))
-    if not recipe_name:
-        return
-    menu_item = db_session.scalar(
-        select(Product).where(
-            Product.business_area_id == "kitchen",
-            Product.active.is_(True),
-            Product.name.ilike(recipe_name),
-        )
-    )
-    if not menu_item:
-        return
-    if parse_amount(payload.get("sellingPricePerServing")) <= 0:
-        payload["sellingPricePerServing"] = round(max(parse_amount(menu_item.sales_price), 0), 2)
-    payload["kitchenCategory"] = normalize_text(menu_item.category)
-
-
 def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
-    """Calculate a production batch from shared-stock ingredient issues, without posting a sale."""
-    servings = max(parse_amount(payload.get("servingCount")), 0)
-    selling_price = max(parse_amount(payload.get("sellingPricePerServing")), 0)
+    """Calculate a multi-meal production session from its assigned shared-stock issues."""
+    meals = kitchen_meal_items(payload)
     ingredient_items = kitchen_ingredient_items(payload)
-    issued_ingredient_cost = round(sum(parse_amount(item.get("lineCost")) for item in ingredient_items), 2)
-    # Ingredient cost is always derived from the current saved stock issues.
-    payload["ingredientCost"] = issued_ingredient_cost
-    total_cost = round(
-        max(parse_amount(payload.get("ingredientCost")), 0)
-        + max(parse_amount(payload.get("packagingCost")), 0)
-        + max(parse_amount(payload.get("overheadCost")), 0),
-        2,
-    )
-    projected_sales = round(servings * selling_price, 2)
+    if not meals:
+        payload[KITCHEN_MEAL_ITEMS_KEY] = []
+        payload["ingredientCost"] = 0.0
+        payload["totalRecipeCost"] = 0.0
+        payload["costPerServing"] = 0.0
+        payload["projectedSales"] = 0.0
+        payload["projectedProfit"] = 0.0
+        payload["marginPercent"] = 0.0
+        return
+
+    meals_by_id = {normalize_text(item.get("mealId")): dict(item) for item in meals}
+    default_meal_id = normalize_text(meals[0].get("mealId"))
+    ingredient_costs: dict[str, float] = defaultdict(float)
+    for ingredient in ingredient_items:
+        meal_id = normalize_text(ingredient.get("mealId"))
+        if meal_id not in meals_by_id:
+            meal_id = default_meal_id
+        ingredient_costs[meal_id] += max(parse_amount(ingredient.get("lineCost")), 0)
+
+    total_servings = round(sum(max(parse_amount(item.get("plannedServings")), 0) for item in meals_by_id.values()), 2)
+    total_ingredient_cost = round(sum(ingredient_costs.values()), 2)
+    packaging_total = round(max(parse_amount(payload.get("packagingCost")), 0), 2)
+    overhead_total = round(max(parse_amount(payload.get("overheadCost")), 0), 2)
+    production_status = normalize_text(payload.get("productionStatus"))
+    rolled_meals: list[dict[str, Any]] = []
+    for meal in meals:
+        meal_id = normalize_text(meal.get("mealId"))
+        planned_servings = max(parse_amount(meal.get("plannedServings")), 0)
+        share = planned_servings / total_servings if total_servings else 0.0
+        ingredient_cost = round(ingredient_costs.get(meal_id, 0), 2)
+        packaging_cost = round(packaging_total * share, 2)
+        overhead_cost = round(overhead_total * share, 2)
+        total_cost = round(ingredient_cost + packaging_cost + overhead_cost, 2)
+        selling_price = max(parse_amount(meal.get("sellingPricePerServing")), 0)
+        projected_sales = round(planned_servings * selling_price, 2)
+        projected_profit = round(projected_sales - total_cost, 2)
+        actual_produced = max(parse_amount(meal.get("actualProduced")), 0)
+        if production_status in {"Ready", "Completed"} and actual_produced <= 0 and planned_servings > 0:
+            actual_produced = planned_servings
+        rolled_meals.append(
+            {
+                **meal,
+                "plannedServings": round(planned_servings, 2),
+                "sellingPricePerServing": round(selling_price, 2),
+                "actualProduced": round(actual_produced, 2),
+                "actualSold": round(max(parse_amount(meal.get("actualSold")), 0), 2),
+                "wasteQuantity": round(max(parse_amount(meal.get("wasteQuantity")), 0), 2),
+                "ingredientCost": ingredient_cost,
+                "packagingCost": packaging_cost,
+                "overheadCost": overhead_cost,
+                "totalRecipeCost": total_cost,
+                "costPerServing": round(total_cost / planned_servings, 2) if planned_servings else 0.0,
+                "projectedSales": projected_sales,
+                "projectedProfit": projected_profit,
+                "marginPercent": round((projected_profit / projected_sales) * 100, 2) if projected_sales else 0.0,
+            }
+        )
+
+    total_cost = round(sum(parse_amount(item.get("totalRecipeCost")) for item in rolled_meals), 2)
+    projected_sales = round(sum(parse_amount(item.get("projectedSales")) for item in rolled_meals), 2)
     projected_profit = round(projected_sales - total_cost, 2)
+    categories = {normalize_text(item.get("category")) for item in rolled_meals if normalize_text(item.get("category"))}
+    payload[KITCHEN_MEAL_ITEMS_KEY] = rolled_meals
     payload["businessAreaId"] = "kitchen"
+    payload["recipeName"] = kitchen_meal_title(rolled_meals)
+    payload["kitchenCategory"] = next(iter(categories)) if len(categories) == 1 else "Multiple Meals"
+    payload["servingCount"] = total_servings
+    payload["sellingPricePerServing"] = round(projected_sales / total_servings, 2) if total_servings else 0.0
+    payload["ingredientCost"] = total_ingredient_cost
     payload["totalRecipeCost"] = total_cost
-    payload["costPerServing"] = round(total_cost / servings, 2) if servings else 0.0
+    payload["costPerServing"] = round(total_cost / total_servings, 2) if total_servings else 0.0
     payload["projectedSales"] = projected_sales
     payload["projectedProfit"] = projected_profit
     payload["marginPercent"] = round((projected_profit / projected_sales) * 100, 2) if projected_sales else 0.0
-    if (
-        normalize_text(payload.get("productionStatus")) in {"Ready", "Completed"}
-        and parse_amount(payload.get("actualProduced")) <= 0
-        and servings > 0
-    ):
-        # A ready batch normally yields its planned count unless staff records a different figure.
-        payload["actualProduced"] = round(servings, 2)
+    payload["actualProduced"] = round(sum(parse_amount(item.get("actualProduced")) for item in rolled_meals), 2)
+    payload["actualSold"] = round(sum(parse_amount(item.get("actualSold")) for item in rolled_meals), 2)
+    payload["wasteQuantity"] = round(sum(parse_amount(item.get("wasteQuantity")) for item in rolled_meals), 2)
 
 
 def kitchen_recipe_issue_quantities(payload: dict[str, Any]) -> dict[str, float]:
@@ -6807,24 +6972,42 @@ def kitchen_recipe_stock_errors(db_session, payload: dict[str, Any], previous_pa
     return errors
 
 
+def kitchen_recipe_form_errors(payload: dict[str, Any]) -> list[str]:
+    """Require a saved meal line before a production session can be stored."""
+    meal_items = kitchen_meal_items(payload)
+    if not meal_items:
+        return ["Add at least one Kitchen meal with a planned serving quantity before saving this production session."]
+    return []
+
+
 def sync_kitchen_menu_cost_from_recipe(db_session, payload: dict[str, Any]) -> None:
-    """Make future Kitchen/POS food sales use this batch's real ingredient cost per serving."""
-    recipe_name = normalize_text(payload.get("recipeName"))
-    cost_per_serving = round(max(parse_amount(payload.get("costPerServing")), 0), 2)
-    if not recipe_name or cost_per_serving <= 0 or normalize_text(payload.get("productionStatus")) == "Cancelled":
+    """Make future Kitchen/POS food sales use each meal's real cost per serving."""
+    if normalize_text(payload.get("productionStatus")) == "Cancelled":
         return
-    menu_item = db_session.scalar(
-        select(Product).where(
-            Product.business_area_id == "kitchen",
-            Product.name.ilike(recipe_name),
-        )
-    )
-    if not menu_item:
-        payload["menuCostUpdateNote"] = "No matching kitchen menu item was found; this batch cost remains saved on the production record."
-        return
-    menu_item.cost_price = cost_per_serving
-    menu_item.updated_at = datetime.utcnow()
-    payload["menuCostUpdateNote"] = f"Updated {menu_item.name} cost to {format_currency(cost_per_serving)} per serving for future food sales."
+    updates: list[str] = []
+    unmatched: list[str] = []
+    for meal in kitchen_meal_items(payload):
+        cost_per_serving = round(max(parse_amount(meal.get("costPerServing")), 0), 2)
+        if cost_per_serving <= 0:
+            continue
+        menu_item = db_session.get(Product, normalize_text(meal.get("productId"))) if normalize_text(meal.get("productId")) else None
+        if not menu_item:
+            menu_item = db_session.scalar(
+                select(Product).where(
+                    Product.business_area_id == "kitchen",
+                    Product.name.ilike(normalize_text(meal.get("recipeName"))),
+                )
+            )
+        if not menu_item:
+            unmatched.append(normalize_text(meal.get("recipeName")))
+            continue
+        menu_item.cost_price = cost_per_serving
+        menu_item.updated_at = datetime.utcnow()
+        updates.append(f"{menu_item.name} {format_currency(cost_per_serving)}")
+    if updates:
+        payload["menuCostUpdateNote"] = "Updated food cost per serving: " + "; ".join(updates) + "."
+    elif unmatched:
+        payload["menuCostUpdateNote"] = "No matching Kitchen menu item was found for: " + ", ".join(unmatched) + "."
 
 
 def catering_quote_rollup(payload: dict[str, Any]) -> None:
@@ -14665,14 +14848,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     continue
                 payload[field.name] = parse_field_input(field, request.form)
             if module_key == "kitchen_recipe_plans":
+                raw_meals = normalize_text(request.form.get("mealItemsJson"))
+                try:
+                    parsed_meals = json.loads(raw_meals) if raw_meals else []
+                except json.JSONDecodeError:
+                    parsed_meals = []
+                payload[KITCHEN_MEAL_ITEMS_KEY] = parsed_meals if isinstance(parsed_meals, list) else []
                 raw_ingredients = normalize_text(request.form.get("ingredientItemsJson"))
                 try:
                     parsed_ingredients = json.loads(raw_ingredients) if raw_ingredients else []
                 except json.JSONDecodeError:
                     parsed_ingredients = []
                 payload[KITCHEN_INGREDIENT_ITEMS_KEY] = parsed_ingredients if isinstance(parsed_ingredients, list) else []
+                hydrate_kitchen_meal_items(g.db, payload)
                 hydrate_kitchen_ingredient_items(g.db, payload)
-                hydrate_kitchen_recipe_menu_defaults(g.db, payload)
             if module_key == "customer_credit_accounts":
                 payload["linkedCreditAccountId"] = normalize_text(request.form.get("linkedCreditAccountId")) or normalize_text(
                     record_payload.get("linkedCreditAccountId")
@@ -14811,6 +15000,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
             if module_key == "kitchen_recipe_plans":
+                form_errors.extend(kitchen_recipe_form_errors(payload))
                 form_errors.extend(kitchen_recipe_stock_errors(g.db, payload, record_payload))
             if (
                 module_key == "customer_credit_accounts"
@@ -15222,6 +15412,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ]
             kitchen_menu_options = [
                 {
+                    "id": product.id,
                     "name": product.name,
                     "salesPrice": round(parse_amount(product.sales_price), 2),
                     "category": normalize_text(product.category),
@@ -15263,6 +15454,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             supplier_directory_options=supplier_directory_options,
             kitchen_ingredient_catalog=kitchen_ingredient_catalog,
             kitchen_ingredient_items=kitchen_ingredient_items(record_payload) if module_key == "kitchen_recipe_plans" else [],
+            kitchen_meal_items=kitchen_meal_items(record_payload) if module_key == "kitchen_recipe_plans" else [],
             kitchen_menu_options=kitchen_menu_options,
             today_iso=date.today().isoformat(),
         )
@@ -16394,6 +16586,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "servingCount": parse_amount((kitchen_batch.payload or {}).get("servingCount")),
                 "totalRecipeCost": parse_amount((kitchen_batch.payload or {}).get("totalRecipeCost")),
                 "costPerServing": parse_amount((kitchen_batch.payload or {}).get("costPerServing")),
+                "mealItems": kitchen_meal_items(dict(kitchen_batch.payload or {})),
             } if kitchen_batch else None,
             can_void_pos_orders=user_can_void_pos_orders(g.current_user),
         )
@@ -16580,12 +16773,27 @@ def create_app(config: AppConfig | None = None) -> Flask:
         kitchen_issue_mode = normalize_text(payload.get("transactionMode")) == "kitchen-stock-issue"
         kitchen_batch_id = normalize_text(payload.get("kitchenBatchId"))
         kitchen_batch = None
+        kitchen_batch_payload: dict[str, Any] = {}
+        kitchen_target_meal: dict[str, Any] | None = None
         if kitchen_issue_mode:
             kitchen_batch = g.db.get(ModuleRecord, kitchen_batch_id)
             if not kitchen_batch or kitchen_batch.module_key != "kitchen_recipe_plans":
                 return jsonify({"ok": False, "error": "Choose a valid saved production batch before issuing stock."}), 400
             if normalize_text((kitchen_batch.payload or {}).get("productionStatus")) == "Cancelled":
                 return jsonify({"ok": False, "error": "Cancelled production batches cannot receive stock issues."}), 400
+            kitchen_batch_payload = dict(kitchen_batch.payload or {})
+            batch_meals = kitchen_meal_items(kitchen_batch_payload)
+            if not batch_meals:
+                return jsonify({"ok": False, "error": "Add at least one meal to this production session before issuing stock."}), 400
+            requested_meal_id = normalize_text(payload.get("kitchenMealId"))
+            if not requested_meal_id and len(batch_meals) == 1:
+                requested_meal_id = normalize_text(batch_meals[0].get("mealId"))
+            kitchen_target_meal = next(
+                (item for item in batch_meals if normalize_text(item.get("mealId")) == requested_meal_id),
+                None,
+            )
+            if not kitchen_target_meal:
+                return jsonify({"ok": False, "error": "Choose the meal these ingredients are being used for before issuing stock."}), 400
         selected_area = "" if kitchen_issue_mode else ("kitchen" if food_pos_mode else normalize_text(payload.get("areaId")))
         payment_method = KITCHEN_STOCK_ISSUE_PAYMENT_METHOD if kitchen_issue_mode else (normalize_text(payload.get("paymentMethod")) or "Cash")
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
@@ -16686,29 +16894,33 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if kitchen_issue_mode:
             order.notes = (
                 f"{KITCHEN_STOCK_ISSUE_NOTE_PREFIX} batch:{kitchen_batch.id} · "
-                f"{normalize_text((kitchen_batch.payload or {}).get('recipeName')) or kitchen_batch.title}"
+                f"{normalize_text(kitchen_target_meal.get('recipeName')) or kitchen_batch.title}"
             )
         g.db.add(order)
         g.db.flush()
         if kitchen_issue_mode:
-            batch_payload = dict(kitchen_batch.payload or {})
-            issued_items = kitchen_ingredient_items(batch_payload)
+            issued_items = kitchen_ingredient_items(kitchen_batch_payload)
             issued_items.extend(
                 {
                     "productId": line.product_id,
                     "name": line.name,
                     "sku": line.sku or line.barcode,
+                    "mealId": normalize_text(kitchen_target_meal.get("mealId")),
+                    "mealName": normalize_text(kitchen_target_meal.get("recipeName")),
                     "quantity": parse_amount(line.quantity),
                     "unitCost": parse_amount(line.unit_cost),
                     "lineCost": parse_amount(line.cost_amount),
                 }
                 for line in order.lines
             )
-            batch_payload[KITCHEN_INGREDIENT_ITEMS_KEY] = issued_items
-            kitchen_recipe_rollup(batch_payload)
-            batch_payload["inventoryIssueNote"] = f"POS stock issue {order.order_number}: {order.item_count:g} ingredient item(s) issued at cost."
-            sync_kitchen_menu_cost_from_recipe(g.db, batch_payload)
-            set_module_record_metadata(kitchen_batch, MODULES["kitchen_recipe_plans"], batch_payload)
+            kitchen_batch_payload[KITCHEN_INGREDIENT_ITEMS_KEY] = issued_items
+            kitchen_recipe_rollup(kitchen_batch_payload)
+            kitchen_batch_payload["inventoryIssueNote"] = (
+                f"POS stock issue {order.order_number}: {order.item_count:g} ingredient item(s) issued for "
+                f"{normalize_text(kitchen_target_meal.get('recipeName'))}."
+            )
+            sync_kitchen_menu_cost_from_recipe(g.db, kitchen_batch_payload)
+            set_module_record_metadata(kitchen_batch, MODULES["kitchen_recipe_plans"], kitchen_batch_payload)
         else:
             sync_customer_credit_from_pos_order(order, g.db)
             sync_generated_sales_for_pos(order_date, order.business_area_ids)

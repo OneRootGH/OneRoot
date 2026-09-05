@@ -9,7 +9,7 @@
           {% if definition.key in ['customer_crm', 'promotions', 'whatsapp_campaigns', 'campaign_roi'] %}
             Use this growth form to keep follow-up, promotions, WhatsApp, and Facebook-driven activity clean and easy to work with later.
           {% elif definition.key == 'kitchen_recipe_plans' %}
-            Select the ingredients taken from shared POS stock. Saving the batch deducts stock once, records the real production cost, and updates the matching food item's future cost per serving.
+            Add every meal being prepared in this session, then assign shared POS stock to the meal it is used for. Saving deducts stock once, calculates each meal's real cost, and updates the matching food items' future cost per serving.
           {% else %}
             Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.
           {% endif %}
@@ -91,22 +91,14 @@
     <form method="post" enctype="multipart/form-data" class="form-grid module-form-grid" id="generic-module-form">
       {% if definition.key == 'kitchen_recipe_plans' %}
         <input type="hidden" name="ingredientItemsJson" id="kitchen-ingredient-items-json">
+        <input type="hidden" name="mealItemsJson" id="kitchen-meal-items-json">
       {% endif %}
       {% if definition.key == 'customer_credit_accounts' and payload.get('linkedCreditAccountId') %}
         <input type="hidden" name="linkedCreditAccountId" value="{{ payload.get('linkedCreditAccountId') }}">
       {% endif %}
-      {% set kitchen_auto_fields = ['businessAreaId', 'kitchenCategory', 'ingredientCost', 'totalRecipeCost', 'costPerServing', 'projectedSales', 'projectedProfit', 'marginPercent'] %}
+      {% set kitchen_auto_fields = ['businessAreaId', 'recipeName', 'kitchenCategory', 'servingCount', 'sellingPricePerServing', 'ingredientCost', 'totalRecipeCost', 'costPerServing', 'projectedSales', 'projectedProfit', 'marginPercent', 'actualProduced', 'actualSold', 'wasteQuantity'] %}
       {% for field in definition.fields %}
-        {% if definition.key == 'kitchen_recipe_plans' and field.name == 'actualProduced' %}
-          <section class="span-2 kitchen-end-of-batch-heading" id="kitchen-end-of-batch-heading">
-            <div>
-              <p class="eyebrow">Finish Later</p>
-              <h3>Actual Output</h3>
-            </div>
-            <p>Only complete these figures after production or at the end of the day. A Ready or Completed batch starts with the planned yield automatically.</p>
-          </section>
-        {% endif %}
-        <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in kitchen_auto_fields %} kitchen-auto-field{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in ['actualProduced', 'actualSold', 'wasteQuantity'] %} kitchen-end-of-batch-field{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in ['recipeSummary', 'notes'] %} kitchen-optional-field{% endif %}">
+        <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in kitchen_auto_fields %} kitchen-auto-field{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in ['recipeSummary', 'notes'] %} kitchen-optional-field{% endif %}">
           <span>{{ field.label }}</span>
           {% if field.field_type == 'textarea' %}
             <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
@@ -153,8 +145,7 @@
             </datalist>
             <small class="muted form-helper">Choose a saved supplier to reuse their name and business area, or type a new name and add them to Supplier Directory later.</small>
           {% elif definition.key == 'kitchen_recipe_plans' and field.name == 'recipeName' %}
-            <input id="kitchen-recipe-name" type="search" name="{{ field.name }}" list="kitchen-menu-options" value="{{ payload.get(field.name, '') }}" placeholder="Search a kitchen menu item" autocomplete="off" {% if field.required %}required{% endif %}>
-            <small class="muted form-helper">Start typing the food name. The saved menu price and category fill automatically when the item matches.</small>
+            <input id="kitchen-recipe-name" type="hidden" name="{{ field.name }}" value="{{ payload.get(field.name, '') }}">
           {% elif field.field_type == 'select' %}
             <select name="{{ field.name }}" {% if field.required %}required{% endif %}>
               <option value="">Select {{ field.label }}</option>
@@ -358,13 +349,42 @@
             <option value="{{ item.name }}">{{ item.category }} · {{ item.salesPrice|currency }}</option>
           {% endfor %}
         </datalist>
+        <section class="span-2 kitchen-meal-builder">
+          <div class="service-line-builder-head">
+            <div>
+              <p class="eyebrow">Production Session</p>
+              <h3>Meals / Recipes Being Prepared</h3>
+            </div>
+            <p class="muted">Add every meal being prepared now. Each meal keeps its own servings, selling price, ingredient cost, and profit.</p>
+          </div>
+          <div class="form-grid kitchen-meal-controls">
+            <label class="span-2">
+              <span>Meal / Recipe Name</span>
+              <input id="kitchen-meal-product" type="search" list="kitchen-menu-options" placeholder="Search a saved Kitchen menu item" autocomplete="off">
+              <small class="muted form-helper">Search by meal name, choose it, then add it to this production session.</small>
+            </label>
+            <label>
+              <span>Planned Servings</span>
+              <input id="kitchen-meal-servings" type="number" min="1" step="1" value="1">
+            </label>
+            <label>
+              <span>Price / Serving</span>
+              <input id="kitchen-meal-price" type="number" min="0" step="0.01" placeholder="Fills from menu">
+            </label>
+            <div class="form-actions">
+              <button class="button primary" id="kitchen-add-meal" type="button">Add Meal</button>
+            </div>
+          </div>
+          <div id="kitchen-meal-preview" class="service-item-preview"></div>
+          <div id="kitchen-meal-lines" class="service-line-items"></div>
+        </section>
         <section class="span-2 kitchen-production-summary" aria-live="polite">
           <div class="service-line-builder-head">
             <div>
               <p class="eyebrow">Automatic Costing</p>
-              <h3>Batch Cost & Profit</h3>
+              <h3>Session Cost & Profit</h3>
             </div>
-            <p class="muted">These figures update from the ingredients issued, portions, and menu price. Staff do not need to type them.</p>
+            <p class="muted">These totals update from the meal lines, ingredients issued, portions, and saved menu price. Staff do not need to type them.</p>
           </div>
           <div class="kitchen-production-metrics">
             <div><span>Ingredient Cost</span><strong id="kitchen-summary-ingredient-cost">GH₵0.00</strong></div>
@@ -374,6 +394,7 @@
             <div><span>Projected Profit</span><strong id="kitchen-summary-projected-profit">GH₵0.00</strong></div>
             <div><span>Margin</span><strong id="kitchen-summary-margin">0.00%</strong></div>
           </div>
+          <div id="kitchen-meal-profit-lines" class="kitchen-meal-profit-lines"></div>
         </section>
         <section class="span-2 kitchen-ingredient-builder">
           <div class="service-line-builder-head">
@@ -381,9 +402,15 @@
               <p class="eyebrow">Shared Stock Issue</p>
               <h3>Ingredients Taken From POS Stock</h3>
             </div>
-            <p class="muted">This is not a customer sale. Search by item name, SKU, or barcode, then add the quantity taken from shared stock.</p>
+            <p class="muted">This is not a customer sale. Choose the meal first, then search by item name, SKU, or barcode and add the quantity taken from shared stock.</p>
           </div>
           <div class="form-grid kitchen-ingredient-controls">
+            <label>
+              <span>For Meal</span>
+              <select id="kitchen-ingredient-meal">
+                <option value="">Add a meal first</option>
+              </select>
+            </label>
             <label class="span-2">
               <span>Ingredient From Inventory</span>
               <input id="kitchen-ingredient-product" type="search" list="kitchen-ingredient-options" placeholder="Search item name, SKU, or barcode" autocomplete="off">
@@ -1101,6 +1128,7 @@
         const catalog = {{ kitchen_ingredient_catalog|tojson }};
         const menuCatalog = {{ kitchen_menu_options|tojson }};
         const lineItems = {{ kitchen_ingredient_items|tojson }}.map((item) => ({ ...item }));
+        const mealItems = {{ kitchen_meal_items|tojson }}.map((item) => ({ ...item }));
         const productField = document.getElementById("kitchen-ingredient-product");
         const ingredientOptions = document.getElementById("kitchen-ingredient-options");
         const quantityField = document.getElementById("kitchen-ingredient-quantity");
@@ -1108,6 +1136,14 @@
         const preview = document.getElementById("kitchen-ingredient-preview");
         const lines = document.getElementById("kitchen-ingredient-lines");
         const dataField = document.getElementById("kitchen-ingredient-items-json");
+        const mealProductField = document.getElementById("kitchen-meal-product");
+        const mealServingsField = document.getElementById("kitchen-meal-servings");
+        const mealPriceField = document.getElementById("kitchen-meal-price");
+        const addMealButton = document.getElementById("kitchen-add-meal");
+        const mealPreview = document.getElementById("kitchen-meal-preview");
+        const mealLines = document.getElementById("kitchen-meal-lines");
+        const mealDataField = document.getElementById("kitchen-meal-items-json");
+        const ingredientMealField = document.getElementById("kitchen-ingredient-meal");
         const ingredientCostField = document.querySelector('input[name="ingredientCost"]');
         const packagingCostField = document.querySelector('input[name="packagingCost"]');
         const overheadCostField = document.querySelector('input[name="overheadCost"]');
@@ -1126,11 +1162,12 @@
         const projectedSalesSummary = document.getElementById("kitchen-summary-projected-sales");
         const projectedProfitSummary = document.getElementById("kitchen-summary-projected-profit");
         const marginSummary = document.getElementById("kitchen-summary-margin");
+        const mealProfitLines = document.getElementById("kitchen-meal-profit-lines");
         const productionStatusField = document.querySelector('[name="productionStatus"]');
         const actualProducedField = document.querySelector('input[name="actualProduced"]');
-        const endOfBatchHeading = document.getElementById("kitchen-end-of-batch-heading");
-        const endOfBatchFields = Array.from(document.querySelectorAll(".kitchen-end-of-batch-field"));
-        if (!productField || !ingredientOptions || !quantityField || !addButton || !preview || !lines || !dataField) return;
+        const actualSoldField = document.querySelector('input[name="actualSold"]');
+        const wasteField = document.querySelector('input[name="wasteQuantity"]');
+        if (!productField || !ingredientOptions || !quantityField || !addButton || !preview || !lines || !dataField || !mealProductField || !mealServingsField || !mealPriceField || !addMealButton || !mealPreview || !mealLines || !mealDataField || !ingredientMealField) return;
 
         const money = new Intl.NumberFormat("en-GH", { style: "currency", currency: "GHS", minimumFractionDigits: 2 });
         const parseNumber = (value) => {
@@ -1138,7 +1175,9 @@
           return Number.isFinite(parsed) ? parsed : 0;
         };
         const escape = (value) => String(value || "").replace(/[&<>'"]/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "'": "&#39;", '"': "&quot;" }[character]));
+        const displayNumber = (value) => new Intl.NumberFormat("en-GH", { maximumFractionDigits: 2 }).format(parseNumber(value));
         const productById = new Map(catalog.map((product) => [product.id, product]));
+        const menuById = new Map(menuCatalog.map((item) => [item.id, item]));
         const findProduct = (value) => {
           const needle = String(value || "").trim().toLowerCase();
           if (!needle) return null;
@@ -1148,6 +1187,13 @@
               .some((candidate) => String(candidate).trim().toLowerCase() === needle)
           )) || null;
         };
+        const findMenuItem = (value) => {
+          const needle = String(value || "").trim().toLowerCase();
+          if (!needle) return null;
+          return menuById.get(String(value || "").trim()) || menuCatalog.find((item) => String(item.name || "").trim().toLowerCase() === needle) || null;
+        };
+        const mealForId = (mealId) => mealItems.find((item) => String(item.mealId || "") === String(mealId || "")) || null;
+        const readyForOutput = () => ["Ready", "Completed"].includes(String(productionStatusField?.value || "").trim());
 
         function addSearchOption(value, label) {
           if (!value) return;
@@ -1164,15 +1210,60 @@
           if (product.barcode && product.barcode !== product.sku) addSearchOption(product.barcode, `${product.name} · Barcode · Stock ${product.quantityOnHand}`);
         });
 
-        function updateFigures() {
-          const ingredientCost = lineItems.reduce((sum, item) => sum + parseNumber(item.lineCost), 0);
+        function calculateMealFigures() {
+          const ingredientCostByMeal = new Map(mealItems.map((meal) => [String(meal.mealId), 0]));
+          const defaultMealId = mealItems[0] ? String(mealItems[0].mealId) : "";
+          lineItems.forEach((item) => {
+            const mealId = mealForId(item.mealId) ? String(item.mealId) : defaultMealId;
+            if (!mealId) return;
+            item.mealId = mealId;
+            item.mealName = mealForId(mealId)?.recipeName || "";
+            ingredientCostByMeal.set(mealId, (ingredientCostByMeal.get(mealId) || 0) + parseNumber(item.lineCost));
+          });
           const packagingCost = parseNumber(packagingCostField?.value);
           const overheadCost = parseNumber(overheadCostField?.value);
-          const servings = Math.max(parseNumber(servingsField?.value), 0);
-          const sellingPrice = Math.max(parseNumber(sellingPriceField?.value), 0);
-          const totalCost = ingredientCost + packagingCost + overheadCost;
-          const projectedSales = servings * sellingPrice;
+          const servings = mealItems.reduce((sum, meal) => sum + Math.max(parseNumber(meal.plannedServings), 0), 0);
+          const showActuals = readyForOutput();
+          mealItems.forEach((meal) => {
+            const plannedServings = Math.max(parseNumber(meal.plannedServings), 0);
+            const allocation = servings > 0 ? plannedServings / servings : 0;
+            const ingredientCost = ingredientCostByMeal.get(String(meal.mealId)) || 0;
+            const mealPackagingCost = packagingCost * allocation;
+            const mealOverheadCost = overheadCost * allocation;
+            const totalCost = ingredientCost + mealPackagingCost + mealOverheadCost;
+            const sellingPrice = Math.max(parseNumber(meal.sellingPricePerServing), 0);
+            const projectedSales = plannedServings * sellingPrice;
+            const projectedProfit = projectedSales - totalCost;
+            if (showActuals && parseNumber(meal.actualProduced) <= 0 && plannedServings > 0) {
+              meal.actualProduced = plannedServings;
+            }
+            meal.ingredientCost = Number(ingredientCost.toFixed(2));
+            meal.packagingCost = Number(mealPackagingCost.toFixed(2));
+            meal.overheadCost = Number(mealOverheadCost.toFixed(2));
+            meal.totalRecipeCost = Number(totalCost.toFixed(2));
+            meal.costPerServing = Number((plannedServings > 0 ? totalCost / plannedServings : 0).toFixed(2));
+            meal.projectedSales = Number(projectedSales.toFixed(2));
+            meal.projectedProfit = Number(projectedProfit.toFixed(2));
+            meal.marginPercent = Number((projectedSales > 0 ? (projectedProfit / projectedSales) * 100 : 0).toFixed(2));
+          });
+          const ingredientCost = mealItems.reduce((sum, meal) => sum + parseNumber(meal.ingredientCost), 0);
+          const totalCost = mealItems.reduce((sum, meal) => sum + parseNumber(meal.totalRecipeCost), 0);
+          const projectedSales = mealItems.reduce((sum, meal) => sum + parseNumber(meal.projectedSales), 0);
           const projectedProfit = projectedSales - totalCost;
+          return { ingredientCost, totalCost, projectedSales, projectedProfit, servings };
+        }
+
+        function renderMealProfitLines() {
+          if (!mealProfitLines) return;
+          if (!mealItems.length) {
+            mealProfitLines.innerHTML = '<p class="muted">Add a meal to see its individual cost, profit, and margin.</p>';
+            return;
+          }
+          mealProfitLines.innerHTML = mealItems.map((meal) => `<article class="kitchen-meal-profit-line"><div><strong>${escape(meal.recipeName)}</strong><span>${displayNumber(meal.plannedServings)} servings · ${escape(meal.category || "Kitchen menu")}</span></div><div><span>Cost ${money.format(meal.totalRecipeCost)}</span><span>Sales ${money.format(meal.projectedSales)}</span><strong>Profit ${money.format(meal.projectedProfit)} · ${displayNumber(meal.marginPercent)}%</strong></div></article>`).join("");
+        }
+
+        function updateFigures() {
+          const { ingredientCost, totalCost, projectedSales, projectedProfit, servings } = calculateMealFigures();
           if (ingredientCostField) ingredientCostField.value = ingredientCost.toFixed(2);
           if (totalCostField) totalCostField.value = totalCost.toFixed(2);
           if (costPerServingField) costPerServingField.value = (servings > 0 ? totalCost / servings : 0).toFixed(2);
@@ -1185,7 +1276,97 @@
           if (projectedSalesSummary) projectedSalesSummary.textContent = money.format(projectedSales);
           if (projectedProfitSummary) projectedProfitSummary.textContent = money.format(projectedProfit);
           if (marginSummary) marginSummary.textContent = `${(projectedSales > 0 ? (projectedProfit / projectedSales) * 100 : 0).toFixed(2)}%`;
+          if (recipeNameField) recipeNameField.value = mealItems.map((meal) => meal.recipeName).filter(Boolean).join(" + ");
+          if (servingsField) servingsField.value = servings.toFixed(2);
+          if (sellingPriceField) sellingPriceField.value = (servings > 0 ? projectedSales / servings : 0).toFixed(2);
+          if (categoryField) {
+            const categories = [...new Set(mealItems.map((meal) => meal.category).filter(Boolean))];
+            categoryField.value = categories.length === 1 ? categories[0] : (categories.length ? "Multiple Meals" : "");
+          }
+          if (actualProducedField) actualProducedField.value = mealItems.reduce((sum, meal) => sum + parseNumber(meal.actualProduced), 0).toFixed(2);
+          if (actualSoldField) actualSoldField.value = mealItems.reduce((sum, meal) => sum + parseNumber(meal.actualSold), 0).toFixed(2);
+          if (wasteField) wasteField.value = mealItems.reduce((sum, meal) => sum + parseNumber(meal.wasteQuantity), 0).toFixed(2);
           dataField.value = JSON.stringify(lineItems);
+          mealDataField.value = JSON.stringify(mealItems);
+          renderMealProfitLines();
+        }
+
+        function renderMealPreview() {
+          const menuItem = findMenuItem(mealProductField.value);
+          if (!menuItem) {
+            mealPreview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>No meal selected yet.</strong><p>Search for a saved OneRoot Kitchen menu item, then add the planned servings.</p></article>';
+            return;
+          }
+          if (parseNumber(mealPriceField.value) <= 0) {
+            mealPriceField.value = parseNumber(menuItem.salesPrice).toFixed(2);
+          }
+          mealPreview.innerHTML = `<article class="service-item-preview-card"><div class="service-item-preview-copy"><strong>${escape(menuItem.name)}</strong><span>${escape(menuItem.category || "Kitchen menu")} · Saved selling price ${money.format(menuItem.salesPrice)}</span><span>Set servings and price, then add this meal to the production session.</span></div></article>`;
+        }
+
+        function renderMealSelector() {
+          const selectedValue = ingredientMealField.value;
+          ingredientMealField.innerHTML = "";
+          if (!mealItems.length) {
+            ingredientMealField.disabled = true;
+            ingredientMealField.innerHTML = '<option value="">Add a meal first</option>';
+            return;
+          }
+          ingredientMealField.disabled = false;
+          mealItems.forEach((meal) => {
+            const option = document.createElement("option");
+            option.value = meal.mealId;
+            option.textContent = `${meal.recipeName} · ${displayNumber(meal.plannedServings)} servings`;
+            if (String(meal.mealId) === String(selectedValue || mealItems[0].mealId)) option.selected = true;
+            ingredientMealField.appendChild(option);
+          });
+        }
+
+        function renderMealLines() {
+          // Seed ready/completed output before drawing the per-meal closeout inputs.
+          calculateMealFigures();
+          const showActuals = readyForOutput();
+          if (!mealItems.length) {
+            mealLines.innerHTML = '<article class="service-line-empty"><strong>No meals added yet.</strong><p>Search for every meal being prepared and add it to this production session.</p></article>';
+            updateFigures();
+            return;
+          }
+          mealLines.innerHTML = mealItems.map((meal, index) => `<article class="service-line-item kitchen-meal-line"><div class="kitchen-meal-line-copy"><strong>${escape(meal.recipeName)}</strong><span>${escape(meal.category || "Kitchen menu")} · Projected sales ${money.format(meal.projectedSales)}</span><span>Cost ${money.format(meal.totalRecipeCost)} · Profit ${money.format(meal.projectedProfit)} · ${displayNumber(meal.marginPercent)}% margin</span></div><div class="kitchen-meal-line-fields"><label><span>Servings</span><input type="number" min="1" step="1" value="${escape(meal.plannedServings)}" data-kitchen-meal-field="plannedServings" data-kitchen-meal-index="${index}"></label><label><span>Price</span><input type="number" min="0" step="0.01" value="${escape(meal.sellingPricePerServing)}" data-kitchen-meal-field="sellingPricePerServing" data-kitchen-meal-index="${index}"></label>${showActuals ? `<label><span>Produced</span><input type="number" min="0" step="1" value="${escape(meal.actualProduced)}" data-kitchen-meal-field="actualProduced" data-kitchen-meal-index="${index}"></label><label><span>Sold</span><input type="number" min="0" step="1" value="${escape(meal.actualSold)}" data-kitchen-meal-field="actualSold" data-kitchen-meal-index="${index}"></label><label><span>Waste</span><input type="number" min="0" step="1" value="${escape(meal.wasteQuantity)}" data-kitchen-meal-field="wasteQuantity" data-kitchen-meal-index="${index}"></label>` : ""}</div><button class="text-button danger-text" type="button" data-kitchen-meal-remove="${index}">Remove</button></article>`).join("");
+          updateFigures();
+        }
+
+        function addMeal() {
+          const menuItem = findMenuItem(mealProductField.value);
+          const plannedServings = Math.max(parseNumber(mealServingsField.value), 0);
+          const sellingPrice = Math.max(parseNumber(mealPriceField.value), 0);
+          if (!menuItem || plannedServings <= 0) {
+            mealPreview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Choose a matching Kitchen meal first.</strong><p>Search the saved menu, then enter a planned serving quantity greater than zero.</p></article>';
+            mealProductField.focus();
+            return;
+          }
+          const existing = mealItems.find((item) => String(item.productId || item.mealId) === String(menuItem.id));
+          if (existing) {
+            existing.plannedServings = parseNumber(existing.plannedServings) + plannedServings;
+            if (sellingPrice > 0) existing.sellingPricePerServing = sellingPrice;
+          } else {
+            mealItems.push({
+              mealId: menuItem.id,
+              productId: menuItem.id,
+              recipeName: menuItem.name,
+              category: menuItem.category || "",
+              plannedServings,
+              sellingPricePerServing: sellingPrice || parseNumber(menuItem.salesPrice),
+              actualProduced: 0,
+              actualSold: 0,
+              wasteQuantity: 0
+            });
+          }
+          mealProductField.value = "";
+          mealServingsField.value = "1";
+          mealPriceField.value = "";
+          renderMealPreview();
+          renderMealSelector();
+          renderMealLines();
+          renderLines();
         }
 
         function renderPreview() {
@@ -1194,7 +1375,8 @@
             preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>No ingredient selected yet.</strong><p>Select an item from shared POS stock to see its current quantity and cost.</p></article>';
             return;
           }
-          preview.innerHTML = `<article class="service-item-preview-card"><img class="product-thumb product-thumb-large" src="${escape(product.imageUrl || '/assets/oneroot-icon-transparent.png')}" alt="${escape(product.name)}" onerror="this.src='/assets/oneroot-icon-transparent.png'"><div class="service-item-preview-copy"><strong>${escape(product.name)}</strong><span>${escape(product.category || 'Inventory')} · ${escape(product.sku || 'No SKU')}</span><span>Available ${product.quantityOnHand} · Unit cost ${money.format(product.costPrice)}</span></div></article>`;
+          const meal = mealForId(ingredientMealField.value);
+          preview.innerHTML = `<article class="service-item-preview-card"><img class="product-thumb product-thumb-large" src="${escape(product.imageUrl || '/assets/oneroot-icon-transparent.png')}" alt="${escape(product.name)}" onerror="this.src='/assets/oneroot-icon-transparent.png'"><div class="service-item-preview-copy"><strong>${escape(product.name)}</strong><span>${escape(product.category || 'Inventory')} · ${escape(product.sku || 'No SKU')}</span><span>For ${escape(meal?.recipeName || 'select a meal')} · Available ${product.quantityOnHand} · Unit cost ${money.format(product.costPrice)}</span></div></article>`;
         }
 
         function renderLines() {
@@ -1203,25 +1385,27 @@
             updateFigures();
             return;
           }
-          lines.innerHTML = lineItems.map((item, index) => `<article class="service-line-item"><div><strong>${escape(item.name)}</strong><span>${escape(item.sku || 'No SKU')} · ${item.quantity} taken @ ${money.format(item.unitCost)}</span><span>Ingredient cost ${money.format(item.lineCost)}</span></div><button class="text-button danger-text" type="button" data-kitchen-ingredient-remove="${index}">Remove</button></article>`).join("");
+          lines.innerHTML = lineItems.map((item, index) => `<article class="service-line-item"><div><strong>${escape(item.name)}</strong><span>For ${escape(item.mealName || mealForId(item.mealId)?.recipeName || 'Kitchen session')} · ${escape(item.sku || 'No SKU')} · ${item.quantity} taken @ ${money.format(item.unitCost)}</span><span>Ingredient cost ${money.format(item.lineCost)}</span></div><button class="text-button danger-text" type="button" data-kitchen-ingredient-remove="${index}">Remove</button></article>`).join("");
           updateFigures();
         }
 
         function addIngredient() {
           const product = findProduct(productField.value);
           const quantity = Math.max(parseNumber(quantityField.value), 0);
-          if (!product || quantity <= 0) {
-            preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Choose a matching inventory item first.</strong><p>Search by product name, SKU, or barcode, then enter a quantity greater than zero.</p></article>';
+          const meal = mealForId(ingredientMealField.value);
+          if (!meal || !product || quantity <= 0) {
+            preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Choose a meal and matching inventory item first.</strong><p>Add the meal being prepared, select it here, then search by product name, SKU, or barcode and enter a quantity greater than zero.</p></article>';
+            if (!meal) ingredientMealField.focus();
             productField.focus();
             return;
           }
-          const existing = lineItems.find((item) => item.productId === product.id);
+          const existing = lineItems.find((item) => item.productId === product.id && String(item.mealId) === String(meal.mealId));
           if (existing) {
             existing.quantity = parseNumber(existing.quantity) + quantity;
             existing.unitCost = parseNumber(product.costPrice);
             existing.lineCost = existing.quantity * existing.unitCost;
           } else {
-            lineItems.push({ productId: product.id, name: product.name, sku: product.sku || product.barcode || "", quantity, unitCost: parseNumber(product.costPrice), lineCost: quantity * parseNumber(product.costPrice) });
+            lineItems.push({ productId: product.id, name: product.name, sku: product.sku || product.barcode || "", mealId: meal.mealId, mealName: meal.recipeName, quantity, unitCost: parseNumber(product.costPrice), lineCost: quantity * parseNumber(product.costPrice) });
           }
           quantityField.value = "1";
           productField.value = "";
@@ -1230,25 +1414,15 @@
           productField.focus();
         }
 
-        function applyMenuPrice() {
-          const recipeName = String(recipeNameField?.value || "").trim().toLowerCase();
-          const menuItem = menuCatalog.find((item) => String(item.name || "").trim().toLowerCase() === recipeName);
-          if (menuItem && sellingPriceField && parseNumber(sellingPriceField.value) <= 0) {
-            sellingPriceField.value = parseNumber(menuItem.salesPrice).toFixed(2);
+        function syncOutputFields() {
+          if (readyForOutput()) {
+            mealItems.forEach((meal) => {
+              if (parseNumber(meal.actualProduced) <= 0 && parseNumber(meal.plannedServings) > 0) {
+                meal.actualProduced = parseNumber(meal.plannedServings);
+              }
+            });
           }
-          if (menuItem && categoryField) categoryField.value = menuItem.category || "";
-          updateFigures();
-        }
-
-        function syncEndOfBatchFields() {
-          const status = String(productionStatusField?.value || "").trim();
-          const showActuals = ["Ready", "Completed"].includes(status);
-          endOfBatchHeading?.classList.toggle("is-hidden", !showActuals);
-          endOfBatchFields.forEach((field) => field.classList.toggle("is-hidden", !showActuals));
-          if (showActuals && actualProducedField && parseNumber(actualProducedField.value) <= 0) {
-            const planned = Math.max(parseNumber(servingsField?.value), 0);
-            if (planned > 0) actualProducedField.value = planned.toFixed(0);
-          }
+          renderMealLines();
         }
 
         productField.addEventListener("input", renderPreview);
@@ -1259,9 +1433,41 @@
           addIngredient();
         });
         addButton.addEventListener("click", addIngredient);
-        recipeNameField?.addEventListener("input", applyMenuPrice);
-        recipeNameField?.addEventListener("change", applyMenuPrice);
-        productionStatusField?.addEventListener("change", syncEndOfBatchFields);
+        ingredientMealField.addEventListener("change", renderPreview);
+        mealProductField.addEventListener("input", renderMealPreview);
+        mealProductField.addEventListener("change", renderMealPreview);
+        mealProductField.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") return;
+          event.preventDefault();
+          addMeal();
+        });
+        addMealButton.addEventListener("click", addMeal);
+        productionStatusField?.addEventListener("change", syncOutputFields);
+        mealLines.addEventListener("click", (event) => {
+          const button = event.target.closest("[data-kitchen-meal-remove]");
+          if (!button) return;
+          const index = Number.parseInt(button.dataset.kitchenMealRemove || "-1", 10);
+          if (!Number.isInteger(index) || index < 0 || index >= mealItems.length) return;
+          const [removedMeal] = mealItems.splice(index, 1);
+          for (let itemIndex = lineItems.length - 1; itemIndex >= 0; itemIndex -= 1) {
+            if (String(lineItems[itemIndex].mealId) === String(removedMeal.mealId)) lineItems.splice(itemIndex, 1);
+          }
+          renderMealSelector();
+          renderMealLines();
+          renderLines();
+        });
+        mealLines.addEventListener("input", (event) => {
+          const field = event.target.dataset.kitchenMealField;
+          const index = Number.parseInt(event.target.dataset.kitchenMealIndex || "-1", 10);
+          if (!field || !Number.isInteger(index) || !mealItems[index]) return;
+          mealItems[index][field] = Math.max(parseNumber(event.target.value), 0);
+          updateFigures();
+        });
+        mealLines.addEventListener("change", (event) => {
+          if (!event.target.dataset.kitchenMealField) return;
+          renderMealLines();
+          renderLines();
+        });
         lines.addEventListener("click", (event) => {
           const button = event.target.closest("[data-kitchen-ingredient-remove]");
           if (!button) return;
@@ -1271,15 +1477,31 @@
             renderLines();
           }
         });
-        [packagingCostField, overheadCostField, servingsField, sellingPriceField].filter(Boolean).forEach((field) => {
+        [packagingCostField, overheadCostField].filter(Boolean).forEach((field) => {
           field.addEventListener("input", updateFigures);
           field.addEventListener("change", updateFigures);
         });
-        document.getElementById("generic-module-form")?.addEventListener("submit", updateFigures);
+        document.getElementById("generic-module-form")?.addEventListener("submit", (event) => {
+          updateFigures();
+          if (!mealItems.length) {
+            event.preventDefault();
+            window.alert("Add at least one Kitchen meal before saving this production session.");
+            mealProductField.focus();
+          }
+        });
+        lineItems.forEach((item) => {
+          const meal = mealForId(item.mealId) || mealItems[0];
+          if (meal) {
+            item.mealId = meal.mealId;
+            item.mealName = meal.recipeName;
+          }
+        });
+        renderMealPreview();
+        renderMealSelector();
+        renderMealLines();
         renderPreview();
         renderLines();
-        applyMenuPrice();
-        syncEndOfBatchFields();
+        updateFigures();
       })();
     </script>
   {% endif %}

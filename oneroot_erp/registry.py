@@ -1336,7 +1336,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "kitchen_recipe_plans": ModuleDefinition(
         key="kitchen_recipe_plans",
-        label="Kitchen Production & Ingredient Issues",
+        label="Kitchen Production Sessions",
         legacy_collection="kitchenRecipePlans",
         menu_group="Services",
         amount_field="projectedProfit",
@@ -1346,11 +1346,11 @@ MODULES: dict[str, ModuleDefinition] = {
         fields=[
             FieldDefinition("recipeDate", "Production Date", "date", True),
             FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
-            FieldDefinition("recipeName", "Meal / Recipe Name", "text", True),
+            FieldDefinition("recipeName", "Meal / Recipe Name", "text"),
             FieldDefinition("kitchenCategory", "Kitchen Category", "select", False, KITCHEN_ORDER_CATEGORY_OPTIONS),
             FieldDefinition("recipeSummary", "Preparation Notes", "textarea"),
-            FieldDefinition("servingCount", "Planned Servings", "number", True, step="1"),
-            FieldDefinition("sellingPricePerServing", "Selling Price / Serving", "number", True),
+            FieldDefinition("servingCount", "Planned Servings", "number", False, step="1"),
+            FieldDefinition("sellingPricePerServing", "Selling Price / Serving", "number"),
             FieldDefinition("ingredientCost", "Ingredient Cost From POS Stock", "number"),
             FieldDefinition("packagingCost", "Packaging Cost", "number"),
             FieldDefinition("overheadCost", "Fuel / Other Production Cost", "number"),
