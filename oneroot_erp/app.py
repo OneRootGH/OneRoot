@@ -21,7 +21,7 @@ from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
 from sqlalchemy import create_engine, desc, inspect, or_, select
-from sqlalchemy.exc import OperationalError
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
 from .config import AppConfig, load_config
@@ -7184,6 +7184,14 @@ def reference_for_module_record(definition: ModuleDefinition, payload: dict[str,
         return normalize_text(payload.get("linkedGeneratedSalesKey"))
     if definition.key == "customer_crm":
         return customer_crm_reference(payload) or normalize_text(payload.get("reference"))
+    if definition.key == "staff_documents":
+        # A staff member can hold several documents, so a name alone cannot be a unique record reference.
+        explicit_reference = normalize_text(payload.get("reference"))
+        if explicit_reference:
+            return explicit_reference
+        document_id = normalize_text(payload.get("id"))
+        if document_id:
+            return f"staff-document|{document_id}"
     if definition.key == "apartments":
         suite = normalize_text(payload.get("suite"))
         month_key = parse_month(payload.get("month"))
@@ -15857,23 +15865,31 @@ def create_app(config: AppConfig | None = None) -> Flask:
             profile.record_date = parse_date(payload["startDate"]) or date.today()
             profile.payload = payload
             g.db.add(profile)
-            for document_type, title in [
+            for document_index, (document_type, title) in enumerate([
                 ("Appointment Letter", "Appointment Letter"),
                 ("Employment Contract", "Employment Contract"),
                 ("Staff Policy", "Code of Conduct Acknowledgement"),
                 ("Staff Policy", "Confidentiality Acknowledgement"),
                 ("Other", "Payroll and Bank Details Form"),
-            ]:
+            ], start=1):
                 document_payload = {
                     "id": uuid4().hex, "staffName": payload["staffName"], "staffRole": payload["staffRole"],
                     "documentTitle": title, "documentType": document_type, "issueDate": payload["startDate"],
-                    "documentStatus": "Active", "notes": f"Generated from staff onboarding profile {profile.id}.",
+                    "documentStatus": "Active", "onboardingProfileId": profile.id,
+                    "reference": f"staff-document|{profile.id}|{document_index}",
+                    "notes": f"Generated from staff onboarding profile {profile.id}.",
                 }
                 document = ModuleRecord(id=document_payload["id"], module_key="staff_documents", created_at=datetime.utcnow())
                 set_module_record_metadata(document, MODULES["staff_documents"], document_payload)
                 g.db.add(document)
             audit("staff_onboarding_profiles", "Staff Onboarding", "create", payload["staffName"], profile.id, "Staff details captured and core document register created.")
-            g.db.commit()
+            try:
+                g.db.commit()
+            except IntegrityError:
+                # Keep the staff form open with its values rather than exposing a database error page.
+                g.db.rollback()
+                flash("The staff pack could not be created because one of its document records already exists. Please try again.", "error")
+                return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload=payload, staff_role_options=STAFF_WORK_ROLES)
             return redirect(url_for("staff_onboarding_pack", profile_id=profile.id))
         return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload={"startDate": date.today().isoformat(), "employmentType": "Full-Time", "supervisor": workspace_owner_name()}, staff_role_options=STAFF_WORK_ROLES)
 
