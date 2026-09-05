@@ -1,29 +1,45 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card pos-workbench" data-pos-desk="{{ 'food' if food_pos_mode else 'general' }}" data-can-void-orders="{{ 'yes' if can_void_pos_orders else 'no' }}">
+  <section class="card pos-workbench{% if kitchen_issue_mode %} kitchen-stock-issue-workbench{% endif %}" data-pos-desk="{{ 'food' if food_pos_mode else 'general' }}" data-kitchen-issue-mode="{{ 'yes' if kitchen_issue_mode else 'no' }}" data-kitchen-batch-id="{{ kitchen_batch.id if kitchen_batch else '' }}" data-can-void-orders="{{ 'yes' if can_void_pos_orders else 'no' }}">
     <div class="pos-workbench-bar">
       <div class="pos-workbench-title">
-        <h3>{% if food_pos_mode %}Kitchen Checkout{% else %}Checkout{% endif %}</h3>
+        <h3>{% if kitchen_issue_mode %}Kitchen Stock Issue{% elif food_pos_mode %}Kitchen Checkout{% else %}Checkout{% endif %}</h3>
         <p class="muted pos-serving-note">
-          {% if food_pos_mode %}OneRoot Kitchen meals and drinks only. Press <strong>/</strong> to search quickly.{% else %}Fast counter view. Press <strong>/</strong> to jump to search.{% endif %}
+          {% if kitchen_issue_mode %}Issue ingredients at inventory cost. This is internal stock use, not a customer sale.{% elif food_pos_mode %}OneRoot Kitchen meals and drinks only. Press <strong>/</strong> to search quickly.{% else %}Fast counter view. Press <strong>/</strong> to jump to search.{% endif %}
         </p>
       </div>
       <div class="toolbar pos-workbench-tools">
         <a class="button subtle" href="{{ url_for('inventory') }}">Inventory</a>
-        {% if 'customer_credit_accounts' in current_access_keys %}
+        {% if not kitchen_issue_mode and 'customer_credit_accounts' in current_access_keys %}
           <a class="button subtle" href="{{ url_for('module_list', module_key='customer_credit_accounts') }}">Credit Accounts</a>
           <a class="button subtle" href="{{ url_for('module_form', module_key='customer_credit_accounts', transactionType='Payment Received', entryDate=today_iso, paymentMethod='Cash') }}">Receive Credit</a>
         {% endif %}
-        {% if 'mobile_money_transactions' in current_access_keys %}
+        {% if not kitchen_issue_mode and 'mobile_money_transactions' in current_access_keys %}
           <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">MoMo Counter</a>
         {% endif %}
-        {% if 'sales_summary' in current_access_keys %}
+        {% if not kitchen_issue_mode and 'sales_summary' in current_access_keys %}
           <a class="button subtle" href="{{ url_for('sales_summary_page', date=today_iso, area=initial_area) }}">Summary</a>
         {% endif %}
-        <button class="button subtle" type="button" id="pos-closeout">Close</button>
+        {% if kitchen_issue_mode %}
+          <a class="button subtle" href="{{ url_for('module_form', module_key='kitchen_recipe_plans', record_id=kitchen_batch.id) }}">Back to Batch</a>
+        {% else %}
+          <button class="button subtle" type="button" id="pos-closeout">Close</button>
+        {% endif %}
       </div>
     </div>
 
+    {% if kitchen_issue_mode %}
+      <section class="kitchen-stock-issue-banner">
+        <div>
+          <span class="eyebrow">Production Batch</span>
+          <strong>{{ kitchen_batch.recipeName }}</strong>
+          <small>{{ kitchen_batch.servingCount|round(0)|int }} planned servings</small>
+        </div>
+        <div><span>Current batch cost</span><strong>{{ kitchen_batch.totalRecipeCost|currency }}</strong></div>
+        <div><span>Current cost per serving</span><strong>{{ kitchen_batch.costPerServing|currency }}</strong></div>
+        <p>Search or scan ingredients, set quantities, then save the issue. You can return and issue more stock to this same batch later.</p>
+      </section>
+    {% else %}
     <section class="pos-counter-ribbon">
       <article class="pos-counter-pill">
         <span class="pos-counter-label">POS Sales</span>
@@ -77,6 +93,7 @@
       </span>
       · Credit repayment is a collection, not a new sale: it is excluded from POS Sales and All Daily Sales, but cash repayments are included in expected close cash. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
     </p>
+    {% endif %}
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
       <section class="card pos-catalog-card">
@@ -104,7 +121,9 @@
               <span>Scan</span>
               <input type="search" id="pos-barcode" placeholder="Scan or enter code and press Enter" autocomplete="off">
             </label>
-            {% if not food_pos_mode %}<label>
+            {% if kitchen_issue_mode %}
+              <div class="pos-locked-area"><span>Source</span><strong>Shared Inventory</strong></div>
+            {% elif not food_pos_mode %}<label>
               <span>Area</span>
               <select id="pos-area-filter">
                 <option value="">All POS Areas</option>
@@ -135,7 +154,7 @@
         </div>
         <div id="pos-results" class="pos-results-list pos-results-list-tall">
           {% for product in top_products %}
-            <button class="pos-product-tile" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product_tracks_inventory(product), "itemType": normalized_product_item_type(product.item_type, product.track_inventory), "stockLabel": format_product_stock_badge(product), "imageUrl": product_image_src(product), "sku": product.sku, "barcode": product.barcode}|tojson }}'>
+            <button class="pos-product-tile" type="button" data-product='{{ {"id": product.id, "name": product.name, "businessAreaId": product.business_area_id, "businessAreaLabel": business_area_short.get(product.business_area_id, product.business_area_id), "category": product.category, "salesPrice": product.sales_price, "costPrice": product.cost_price, "quantityOnHand": product.quantity_on_hand, "trackInventory": product_tracks_inventory(product), "itemType": normalized_product_item_type(product.item_type, product.track_inventory), "stockLabel": format_product_stock_badge(product), "imageUrl": product_image_src(product), "sku": product.sku, "barcode": product.barcode}|tojson }}'>
               <span class="pos-product-top">
                 <img class="product-thumb pos-product-thumb" src="{{ product_image_src(product) }}" alt="{{ product.name }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
                 <span class="pos-product-meta">
@@ -145,7 +164,7 @@
               </span>
               <strong class="pos-product-name">{{ product.name }}</strong>
               <span class="pos-product-footer">
-                <strong class="pos-product-price">{{ product.sales_price|currency }}</strong>
+                <strong class="pos-product-price">{% if kitchen_issue_mode %}{{ product.cost_price|currency }} cost{% else %}{{ product.sales_price|currency }}{% endif %}</strong>
                 <span class="pos-product-add">Add</span>
               </span>
             </button>
@@ -156,12 +175,12 @@
       <aside class="card pos-cart-panel pos-cart-panel-enhanced">
         <div class="card-header">
           <div>
-            <h3>Cart</h3>
+            <h3>{% if kitchen_issue_mode %}Ingredients{% else %}Cart{% endif %}</h3>
           </div>
           <strong class="pos-cart-grand-total" data-pos-total>GH₵0.00</strong>
         </div>
 
-        <section class="mini-card pos-payment-dock">
+        {% if not kitchen_issue_mode %}<section class="mini-card pos-payment-dock">
           <div class="pos-payment-dock-head">
             <strong>Payment</strong>
             <label class="pos-payment-inline">
@@ -173,21 +192,21 @@
               </select>
             </label>
           </div>
-        </section>
+        </section>{% endif %}
 
         <div class="pos-ticket-inline">
           <span><strong id="pos-cart-item-count-duplicate">0</strong> items</span>
-          <span><strong id="pos-payment-label">{{ payment_methods[0] if payment_methods else 'Cash' }}</strong></span>
+          <span><strong id="pos-payment-label">{% if kitchen_issue_mode %}Stock cost{% else %}{{ payment_methods[0] if payment_methods else 'Cash' }}{% endif %}</strong></span>
         </div>
 
-        <section class="mini-card pos-last-receipt-card pos-last-receipt-inline">
+        {% if not kitchen_issue_mode %}<section class="mini-card pos-last-receipt-card pos-last-receipt-inline">
           <div>
             <strong id="pos-last-order-number">No receipt yet</strong>
           </div>
           <a class="button subtle is-disabled" href="#" id="pos-last-receipt" target="_blank" rel="noopener">Receipt</a>
-        </section>
+        </section>{% endif %}
 
-        <section class="mini-card pos-cash-closeout-card">
+        {% if not kitchen_issue_mode %}<section class="mini-card pos-cash-closeout-card">
           <div class="pos-cash-closeout-grid">
             <label>
               <span>Opening Cash</span>
@@ -204,9 +223,9 @@
             <span>Expected <strong id="pos-expected-cash">{{ counter_summary.expectedClosingCash|currency }}</strong></span>
             <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
           </div>
-        </section>
+        </section>{% endif %}
 
-        <details class="muted-box pos-customer-box pos-customer-box-compact">
+        {% if not kitchen_issue_mode %}<details class="muted-box pos-customer-box pos-customer-box-compact">
           <summary>Customer</summary>
           <div class="form-grid single">
             <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Only if needed"></label>
@@ -230,7 +249,7 @@
               <li><span>No daily sales have been recorded yet.</span></li>
             {% endfor %}
           </ul>
-        </details>
+        </details>{% endif %}
 
         <div class="cart-box pos-cart-box pos-cart-box-grow">
           <div class="card-header compact">
@@ -241,14 +260,14 @@
 
         <div class="form-actions pos-action-bar">
           <button class="button subtle" type="button" id="pos-clear">Clear Cart</button>
-          <button class="button primary" type="button" id="pos-save">Save Sale</button>
+          <button class="button primary" type="button" id="pos-save">{% if kitchen_issue_mode %}Issue to Kitchen{% else %}Save Sale{% endif %}</button>
         </div>
         <div id="pos-status" class="muted"></div>
       </aside>
     </div>
   </section>
 
-  <details class="card pos-history-drawer">
+  {% if not kitchen_issue_mode %}<details class="card pos-history-drawer">
     <summary class="pos-history-summary">
       <div>
         <h3>Recent Sales</h3>
@@ -296,7 +315,7 @@
         </tbody>
       </table>
     </div>
-  </details>
+  </details>{% endif %}
 {% endblock %}
 {% block scripts %}
   <script src="{{ url_for('static', filename='app.js', v=static_asset_version) }}"></script>

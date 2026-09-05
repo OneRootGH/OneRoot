@@ -53,6 +53,8 @@
   const lastOrderNode = document.getElementById("pos-last-order-number");
   const lastReceiptLink = document.getElementById("pos-last-receipt");
   const posDesk = document.querySelector("[data-pos-desk]")?.dataset.posDesk || "general";
+  const kitchenIssueMode = document.querySelector("[data-kitchen-issue-mode]")?.dataset.kitchenIssueMode === "yes";
+  const kitchenBatchId = document.querySelector("[data-kitchen-batch-id]")?.dataset.kitchenBatchId || "";
   const canVoidOrders = document.querySelector("[data-can-void-orders]")?.dataset.canVoidOrders === "yes";
 
   if (!searchInput || !resultsContainer || !cartContainer || !saveButton) {
@@ -256,7 +258,7 @@
         category: product.category,
         businessAreaLabel: product.businessAreaLabel,
         quantity,
-        unitPrice: Number(product.salesPrice || 0)
+        unitPrice: Number(kitchenIssueMode ? product.costPrice : product.salesPrice) || 0
       });
     }
     renderCart();
@@ -314,7 +316,7 @@
             </span>
             <strong class="pos-product-name">${escapeHtml(product.name)}</strong>
             <span class="pos-product-footer">
-              <strong class="pos-product-price">${formatCurrency(product.salesPrice)}</strong>
+              <strong class="pos-product-price">${formatCurrency(kitchenIssueMode ? product.costPrice : product.salesPrice)}${kitchenIssueMode ? " cost" : ""}</strong>
               <span class="pos-product-add">Add</span>
             </span>
           </button>
@@ -341,7 +343,10 @@
     if (posDesk === "food") {
       url.searchParams.set("desk", "food");
     }
-    const cacheKey = JSON.stringify({ query, area, category });
+    if (kitchenIssueMode) {
+      url.searchParams.set("mode", "kitchen-issue");
+    }
+    const cacheKey = JSON.stringify({ query, area, category, kitchenIssueMode });
     if (query) {
       url.searchParams.set("q", query);
     }
@@ -803,12 +808,14 @@
     }
 
     saveButton.disabled = true;
-    setStatus("Saving sale...");
+    setStatus(kitchenIssueMode ? "Issuing ingredients to kitchen..." : "Saving sale...");
 
     const payload = {
       orderDate: getOrderDate(),
       areaId: getSelectedArea(),
       desk: posDesk,
+      transactionMode: kitchenIssueMode ? "kitchen-stock-issue" : "",
+      kitchenBatchId: kitchenIssueMode ? kitchenBatchId : "",
       paymentMethod: paymentMethodInput?.value,
       customerName: customerNameInput?.value,
       customerPhone: customerPhoneInput?.value,
@@ -840,13 +847,17 @@
     state.cart = [];
     renderCart();
     resetDraftFields();
-    setLastReceipt(result.order || null);
+    setLastReceipt(kitchenIssueMode ? null : (result.order || null));
     if (result.summary) {
       renderSummary(result.summary);
     } else {
       await refreshSummary();
     }
-    setStatus(`${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.`);
+    setStatus(
+      kitchenIssueMode
+        ? `${result.orderNumber} issued to the production batch at ${formatCurrency(result.totalAmount)} cost. Food cost has been updated.`
+        : `${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.`
+    );
     if (searchInput) {
       searchInput.focus();
       searchInput.select();

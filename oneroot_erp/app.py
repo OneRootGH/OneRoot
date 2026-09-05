@@ -4280,6 +4280,18 @@ def pos_line_is_bread(line: PosOrderLine | Product | dict[str, Any]) -> bool:
     return category in BREAD_SALES_CATEGORY_LABELS or "bread" in name
 
 
+KITCHEN_STOCK_ISSUE_PAYMENT_METHOD = "Kitchen Stock Issue"
+KITCHEN_STOCK_ISSUE_NOTE_PREFIX = "[Kitchen Stock Issue]"
+
+
+def is_kitchen_stock_issue(order: PosOrder) -> bool:
+    """Identify internal kitchen issues so they never become customer revenue."""
+    return (
+        normalize_text(order.payment_method).lower() == KITCHEN_STOCK_ISSUE_PAYMENT_METHOD.lower()
+        or normalize_text(order.notes).startswith(KITCHEN_STOCK_ISSUE_NOTE_PREFIX)
+    )
+
+
 def is_mobile_money_daily_sales_record(record: ModuleRecord) -> bool:
     payload = dict(record.payload or {})
     source_type = normalize_text(payload.get("sourceType")).lower()
@@ -5619,7 +5631,12 @@ def daily_handover_rollup(db_session, payload: dict[str, Any]) -> None:
     payload["allDailySales"] = round(sum(parse_amount(record.amount) for record in sales_records), 2)
     pos_orders = db_session.scalars(select(PosOrder).where(PosOrder.order_date == handover_date)).all()
     payload["cashExpected"] = round(
-        sum(parse_amount(order.total_amount) for order in pos_orders if normalize_text(order.payment_method).lower() in POS_CASH_PAYMENT_METHODS),
+        sum(
+            parse_amount(order.total_amount)
+            for order in pos_orders
+            if not is_kitchen_stock_issue(order)
+            and normalize_text(order.payment_method).lower() in POS_CASH_PAYMENT_METHODS
+        ),
         2,
     )
     payload["cashCounted"] = round(max(parse_amount(payload.get("cashCounted")), 0), 2)
@@ -8686,6 +8703,8 @@ def daily_sales_accountability_context(db_session, sale_date: date, area_id: str
         .order_by(desc(PosOrder.updated_at), desc(PosOrder.created_at))
     ).all()
     for order in pos_orders:
+        if is_kitchen_stock_issue(order):
+            continue
         is_credit = normalize_text(order.payment_method).lower() == "credit"
         grouped_lines: dict[str, list[PosOrderLine]] = defaultdict(list)
         for line in order.lines:
@@ -8911,6 +8930,8 @@ def category_performance_rows(db_session, month_value: str, area_id: str = "") -
 
     pos_orders = db_session.scalars(select(PosOrder).options(selectinload(PosOrder.lines))).all()
     for order in pos_orders:
+        if is_kitchen_stock_issue(order):
+            continue
         if not in_month_scope(order.order_date):
             continue
         for line in order.lines:
@@ -11366,8 +11387,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         business_areas: set[str] = set()
 
         for order in all_orders:
-            # Credit sales are managed through Customer Credit Accounts, not the cash counter.
-            if normalize_text(order.payment_method).lower() == "credit":
+            # Credit sales and internal kitchen issues are not cash-counter revenue.
+            if normalize_text(order.payment_method).lower() == "credit" or is_kitchen_stock_issue(order):
                 continue
             order_total = 0.0
             order_items = 0.0
@@ -11652,8 +11673,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         }
 
         for order in orders:
-            # Do not recognize a customer debt as collected POS or Daily Sales revenue.
-            if normalize_text(order.payment_method).lower() == "credit":
+            # Do not recognize customer debt or internal stock use as POS/Daily Sales revenue.
+            if normalize_text(order.payment_method).lower() == "credit" or is_kitchen_stock_issue(order):
                 continue
             order_area_totals: dict[str, dict[str, float]] = defaultdict(lambda: {"amount": 0.0, "cost": 0.0})
             for line in order.lines:
@@ -11722,6 +11743,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             {
                 normalize_text(area_id)
                 for order in orders
+                if not is_kitchen_stock_issue(order)
                 for area_id in (order.business_area_ids or [])
                 if normalize_text(area_id)
             }
@@ -11733,6 +11755,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         pos_area_map: dict[date, set[str]] = defaultdict(set)
         pos_orders = db_session.scalars(select(PosOrder)).all()
         for order in pos_orders:
+            if is_kitchen_stock_issue(order):
+                continue
             for area_id in order.business_area_ids or []:
                 if area_id:
                     pos_area_map[order.order_date].add(area_id)
@@ -15088,6 +15112,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
         if module_key == "kitchen_recipe_plans":
             if user_has_access(g.current_user, "pos"):
+                if record and normalize_text(record_payload.get("productionStatus")) != "Cancelled":
+                    module_quick_actions.append(
+                        {
+                            "label": "Issue POS Stock",
+                            "href": url_for("pos_page", mode="kitchen-issue", batch=record.id),
+                            "note": "Scan or search ingredients from shared inventory. This updates this batch cost without recording customer sales.",
+                        }
+                    )
                 module_quick_actions.append(
                     {
                         "label": "Open Food POS",
@@ -16256,7 +16288,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_page():
         order_date = parse_date(request.args.get("date")) or date.today()
         food_pos_mode = normalize_text(request.args.get("desk")) == "food"
-        initial_area = "kitchen" if food_pos_mode else normalize_text(request.args.get("area"))
+        kitchen_issue_mode = normalize_text(request.args.get("mode")) == "kitchen-issue"
+        kitchen_batch_id = normalize_text(request.args.get("batch"))
+        kitchen_batch = None
+        if kitchen_issue_mode:
+            kitchen_batch = g.db.get(ModuleRecord, kitchen_batch_id)
+            if not kitchen_batch or kitchen_batch.module_key != "kitchen_recipe_plans":
+                flash("Choose a saved kitchen production batch before issuing stock.", "error")
+                return redirect(url_for("module_list", module_key="kitchen_recipe_plans"))
+            if normalize_text((kitchen_batch.payload or {}).get("productionStatus")) == "Cancelled":
+                flash("Cancelled production batches cannot receive kitchen stock issues.", "error")
+                return redirect(url_for("module_list", module_key="kitchen_recipe_plans"))
+        initial_area = "" if kitchen_issue_mode else ("kitchen" if food_pos_mode else normalize_text(request.args.get("area")))
         initial_category = normalize_text(request.args.get("category"))
         initial_search = normalize_text(request.args.get("q"))
         refresh_pos_generated_sales_for_date(order_date)
@@ -16278,14 +16321,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "item_names": pos_order_line_names(order.lines),
             }
             for order in recent_orders_raw
-            if normalize_text(order.payment_method).lower() != "credit"
+            if normalize_text(order.payment_method).lower() != "credit" and not is_kitchen_stock_issue(order)
         ]
-        active_products = load_pos_products(
-            g.db,
-            area_filter=initial_area,
-            category_filter=initial_category,
-            search=initial_search,
-        )
+        if kitchen_issue_mode:
+            active_products = [
+                product
+                for product in g.db.scalars(select(Product).where(Product.active.is_(True)).order_by(Product.name.asc())).all()
+                if product_tracks_inventory(product)
+            ]
+        else:
+            active_products = load_pos_products(
+                g.db,
+                area_filter=initial_area,
+                category_filter=initial_category,
+                search=initial_search,
+            )
         top_products = active_products[:8]
         pos_category_counts: dict[str, int] = defaultdict(int)
         for product in active_products:
@@ -16309,6 +16359,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             initial_category=initial_category,
             initial_search=initial_search,
             food_pos_mode=food_pos_mode,
+            kitchen_issue_mode=kitchen_issue_mode,
+            kitchen_batch={
+                "id": kitchen_batch.id,
+                "recipeName": normalize_text((kitchen_batch.payload or {}).get("recipeName")) or kitchen_batch.title,
+                "servingCount": parse_amount((kitchen_batch.payload or {}).get("servingCount")),
+                "totalRecipeCost": parse_amount((kitchen_batch.payload or {}).get("totalRecipeCost")),
+                "costPerServing": parse_amount((kitchen_batch.payload or {}).get("costPerServing")),
+            } if kitchen_batch else None,
             can_void_pos_orders=user_can_void_pos_orders(g.current_user),
         )
 
@@ -16428,14 +16486,29 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @access_required("pos", api=True)
     def pos_products_api():
         q = normalize_text(request.args.get("q"))
-        area = "kitchen" if normalize_text(request.args.get("desk")) == "food" else normalize_text(request.args.get("area"))
+        kitchen_issue_mode = normalize_text(request.args.get("mode")) == "kitchen-issue"
+        area = "" if kitchen_issue_mode else ("kitchen" if normalize_text(request.args.get("desk")) == "food" else normalize_text(request.args.get("area")))
         category = normalize_text(request.args.get("category"))
-        products = load_pos_products(
-            g.db,
-            area_filter=area,
-            category_filter=category,
-            search=q,
-        )[:60]
+        if kitchen_issue_mode:
+            products = [
+                product
+                for product in g.db.scalars(select(Product).where(Product.active.is_(True)).order_by(Product.name.asc())).all()
+                if product_tracks_inventory(product)
+                and (not category or normalize_text(product.category) == category)
+                and (
+                    not q
+                    or q.lower() in " ".join(
+                        [product.name, normalize_text(product.sku), normalize_text(product.barcode), normalize_text(product.category)]
+                    ).lower()
+                )
+            ][:60]
+        else:
+            products = load_pos_products(
+                g.db,
+                area_filter=area,
+                category_filter=category,
+                search=q,
+            )[:60]
         return jsonify(
             {
                 "ok": True,
@@ -16449,6 +16522,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "businessAreaLabel": BUSINESS_AREA_SHORT.get(product.business_area_id, product.business_area_id),
                         "category": product.category,
                         "salesPrice": product.sales_price,
+                        "costPrice": product.cost_price,
                         "quantityOnHand": product.quantity_on_hand,
                         "trackInventory": product_tracks_inventory(product),
                         "itemType": normalized_product_item_type(product.item_type, product.track_inventory),
@@ -16475,8 +16549,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         order_date = parse_date(payload.get("orderDate")) or date.today()
         food_pos_mode = normalize_text(payload.get("desk")) == "food"
-        selected_area = "kitchen" if food_pos_mode else normalize_text(payload.get("areaId"))
-        payment_method = normalize_text(payload.get("paymentMethod")) or "Cash"
+        kitchen_issue_mode = normalize_text(payload.get("transactionMode")) == "kitchen-stock-issue"
+        kitchen_batch_id = normalize_text(payload.get("kitchenBatchId"))
+        kitchen_batch = None
+        if kitchen_issue_mode:
+            kitchen_batch = g.db.get(ModuleRecord, kitchen_batch_id)
+            if not kitchen_batch or kitchen_batch.module_key != "kitchen_recipe_plans":
+                return jsonify({"ok": False, "error": "Choose a valid saved production batch before issuing stock."}), 400
+            if normalize_text((kitchen_batch.payload or {}).get("productionStatus")) == "Cancelled":
+                return jsonify({"ok": False, "error": "Cancelled production batches cannot receive stock issues."}), 400
+        selected_area = "" if kitchen_issue_mode else ("kitchen" if food_pos_mode else normalize_text(payload.get("areaId")))
+        payment_method = KITCHEN_STOCK_ISSUE_PAYMENT_METHOD if kitchen_issue_mode else (normalize_text(payload.get("paymentMethod")) or "Cash")
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         if not items:
             return jsonify({"ok": False, "error": "Add at least one item."}), 400
@@ -16490,10 +16573,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
         }
         if len(products) != len(set(product_ids)):
             return jsonify({"ok": False, "error": "One or more items could not be found."}), 400
-        if any(not is_pos_eligible_product(product) for product in products.values()):
+        if not kitchen_issue_mode and any(not is_pos_eligible_product(product) for product in products.values()):
             return jsonify({"ok": False, "error": "One or more items are not available for POS checkout."}), 400
-        if food_pos_mode and any(normalize_text(product.business_area_id) != "kitchen" for product in products.values()):
+        if kitchen_issue_mode and any(not product_tracks_inventory(product) for product in products.values()):
+            return jsonify({"ok": False, "error": "Kitchen stock issues can use tracked inventory items only."}), 400
+        if food_pos_mode and not kitchen_issue_mode and any(normalize_text(product.business_area_id) != "kitchen" for product in products.values()):
             return jsonify({"ok": False, "error": "Food POS accepts OneRoot Kitchen items only."}), 400
+        if kitchen_issue_mode:
+            requested_quantities: dict[str, float] = defaultdict(float)
+            for item in items:
+                product_id = normalize_text(item.get("productId"))
+                requested_quantities[product_id] += max(parse_amount(item.get("quantity")), 1.0)
+            for product_id, requested_quantity in requested_quantities.items():
+                product = products[product_id]
+                if requested_quantity > parse_amount(product.quantity_on_hand) + 0.009:
+                    return jsonify(
+                        {"ok": False, "error": f"{product.name} has only {parse_amount(product.quantity_on_hand):g} available in stock."}
+                    ), 400
 
         order_id = uuid4().hex
         order_number = f"POS-{order_date.strftime('%Y%m%d')}-{order_id[:4].upper()}"
@@ -16519,8 +16615,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             product = products[normalize_text(item.get("productId"))]
             quantity = max(parse_amount(item.get("quantity")), 1.0)
             requested_unit_price = parse_amount(item.get("unitPrice"))
-            unit_price = parse_amount(product.sales_price)
-            if requested_unit_price > 0 and abs(requested_unit_price - unit_price) >= 0.01:
+            unit_price = parse_amount(product.cost_price) if kitchen_issue_mode else parse_amount(product.sales_price)
+            if not kitchen_issue_mode and requested_unit_price > 0 and abs(requested_unit_price - unit_price) >= 0.01:
                 if user_can_override_pos_price(g.current_user):
                     unit_price = requested_unit_price
                     price_overrides.append(f"{product.name}: {format_currency(product.sales_price)} -> {format_currency(unit_price)}")
@@ -16559,14 +16655,46 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order.subtotal = round(subtotal, 2)
         order.total_amount = round(subtotal, 2)
         order.item_count = round(item_count, 2)
+        if kitchen_issue_mode:
+            order.notes = (
+                f"{KITCHEN_STOCK_ISSUE_NOTE_PREFIX} batch:{kitchen_batch.id} · "
+                f"{normalize_text((kitchen_batch.payload or {}).get('recipeName')) or kitchen_batch.title}"
+            )
         g.db.add(order)
         g.db.flush()
-        sync_customer_credit_from_pos_order(order, g.db)
-        sync_generated_sales_for_pos(order_date, order.business_area_ids)
-        sync_existing_pos_closeouts(order_date, order.business_area_ids)
-        if normalize_text(order.customer_name) or normalize_text(order.customer_phone):
+        if kitchen_issue_mode:
+            batch_payload = dict(kitchen_batch.payload or {})
+            issued_items = kitchen_ingredient_items(batch_payload)
+            issued_items.extend(
+                {
+                    "productId": line.product_id,
+                    "name": line.name,
+                    "sku": line.sku or line.barcode,
+                    "quantity": parse_amount(line.quantity),
+                    "unitCost": parse_amount(line.unit_cost),
+                    "lineCost": parse_amount(line.cost_amount),
+                }
+                for line in order.lines
+            )
+            batch_payload[KITCHEN_INGREDIENT_ITEMS_KEY] = issued_items
+            kitchen_recipe_rollup(batch_payload)
+            batch_payload["inventoryIssueNote"] = f"POS stock issue {order.order_number}: {order.item_count:g} ingredient item(s) issued at cost."
+            sync_kitchen_menu_cost_from_recipe(g.db, batch_payload)
+            set_module_record_metadata(kitchen_batch, MODULES["kitchen_recipe_plans"], batch_payload)
+        else:
+            sync_customer_credit_from_pos_order(order, g.db)
+            sync_generated_sales_for_pos(order_date, order.business_area_ids)
+            sync_existing_pos_closeouts(order_date, order.business_area_ids)
+        if not kitchen_issue_mode and (normalize_text(order.customer_name) or normalize_text(order.customer_phone)):
             sync_customer_crm_automation(g.db)
-        audit("pos", "POS", "create", f"{order.order_number} saved", order.id, f"{order.item_count:g} items · {format_currency(order.total_amount)}")
+        audit(
+            "kitchen_recipe_plans" if kitchen_issue_mode else "pos",
+            "Kitchen Production" if kitchen_issue_mode else "POS",
+            "stock-issue" if kitchen_issue_mode else "create",
+            f"{order.order_number} {'issued to kitchen' if kitchen_issue_mode else 'saved'}",
+            kitchen_batch.id if kitchen_issue_mode else order.id,
+            f"{order.item_count:g} items · {format_currency(order.total_amount)} at inventory cost" if kitchen_issue_mode else f"{order.item_count:g} items · {format_currency(order.total_amount)}",
+        )
         if price_overrides:
             audit(
                 "pos",
@@ -16596,6 +16724,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "itemCount": order.item_count,
                 "order": saved_order,
                 "summary": build_pos_counter_summary(order_date, selected_area),
+                "kitchenIssue": kitchen_issue_mode,
             }
         )
 
@@ -16615,6 +16744,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         if not order:
             return jsonify({"ok": False, "error": "That POS order could not be found."}), 404
+        if is_kitchen_stock_issue(order):
+            return jsonify({"ok": False, "error": "Kitchen stock issues are corrected from the linked production batch so food cost and stock stay aligned."}), 400
 
         affected_area_ids = {normalize_text(area_id) for area_id in (order.business_area_ids or []) if normalize_text(area_id)}
         affected_area_ids.update(

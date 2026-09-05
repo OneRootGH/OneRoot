@@ -1152,6 +1152,35 @@ textarea { resize: vertical; }
   font-size: 0.78rem;
   line-height: 1.35;
 }
+.kitchen-stock-issue-workbench {
+  background: linear-gradient(135deg, #fffaf1, #f2f8ee 56%, #e6f1e8);
+}
+.kitchen-stock-issue-banner {
+  display: grid;
+  grid-template-columns: minmax(220px, 1.5fr) repeat(2, minmax(150px, 0.7fr));
+  gap: 0.7rem;
+  align-items: center;
+  margin: 0 0 0.85rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid rgba(27, 78, 57, 0.22);
+  border-radius: 1rem;
+  background: rgba(255, 255, 255, 0.76);
+}
+.kitchen-stock-issue-banner > div {
+  display: grid;
+  gap: 0.16rem;
+}
+.kitchen-stock-issue-banner > div > span,
+.kitchen-stock-issue-banner small {
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+.kitchen-stock-issue-banner p {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.82rem;
+}
 .mobile-money-filter-grid {
   grid-template-columns: minmax(210px, 2fr) repeat(6, minmax(118px, 1fr));
 }
@@ -2088,6 +2117,9 @@ thead th {
   .pos-counter-ribbon {
     grid-template-columns: repeat(3, minmax(0, 1fr));
   }
+  .kitchen-stock-issue-banner {
+    grid-template-columns: 1fr 1fr;
+  }
   .pos-counter-pill-wide {
     grid-column: span 3;
   }
@@ -2210,6 +2242,9 @@ thead th {
   }
   .pos-counter-ribbon {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .kitchen-stock-issue-banner {
+    grid-template-columns: 1fr;
   }
   .user-role-setup-grid {
     grid-template-columns: 1fr;
