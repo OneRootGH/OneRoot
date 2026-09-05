@@ -303,14 +303,18 @@
                   <span class="table-secondary">Due {{ row.dueDate or '—' }} · Return {{ row.returnDate or '—' }}</span>
                 </td>
                 <td>
-                  {{ row.totalDue|currency }}
-                  <span class="table-secondary">Paid {{ row.amountPaid|currency }} · Bal {{ row.balance|currency }} · Profit {{ row.profitAmount|currency }}{% if row.depositAmount %} · Dep {{ row.depositAmount|currency }}{% endif %}</span>
+                  <strong>{{ row.totalDue|currency }}</strong>
+                  <span class="table-secondary">Received {{ row.amountPaid|currency }} · Balance {{ row.balance|currency }} · Profit {{ row.profitAmount|currency }}{% if row.depositAmount %} · Deposit held {{ row.depositAmount|currency }}{% endif %}</span>
                 </td>
                 <td>{{ row.status }}</td>
                 <td>
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
-                    <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">Payment</a>
+                    {% if row.balance > 0 %}
+                      <a class="table-link table-link-primary" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id, amount=row.balance) }}">Collect {{ row.balance|currency }}</a>
+                    {% else %}
+                      <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">View Payments</a>
+                    {% endif %}
                     {% if row.linkedOnlineOrderId %}
                       <a class="table-link" href="{{ url_for('online_orders_desk', order_id=row.linkedOnlineOrderId) }}">Order</a>
                     {% endif %}

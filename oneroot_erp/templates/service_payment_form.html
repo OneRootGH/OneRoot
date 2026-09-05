@@ -5,7 +5,7 @@
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }} Payment Desk</h3>
-        <p class="muted">Save each payment separately from the request so the balance, Daily Sales, and realized profit stay aligned.</p>
+        <p class="muted">Record the money received against this rental. The balance, Daily Sales, and realized profit update automatically after each collection.</p>
       </div>
       <div class="toolbar">
         <a class="button subtle" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit Request</a>
@@ -13,6 +13,24 @@
       </div>
     </div>
   </section>
+
+  {% if definition.key == 'equipment_rental_bookings' %}
+    <section class="rental-collection-banner">
+      <div>
+        <span class="eyebrow">Collection For</span>
+        <strong>{{ service_row.customerName }}</strong>
+        <small>{{ service_row.equipmentItem }}{% if service_row.customerPhone %} · {{ service_row.customerPhone }}{% endif %}</small>
+      </div>
+      <div>
+        <span>Due back</span>
+        <strong>{{ service_row.dueDate or 'Not set' }}</strong>
+      </div>
+      <div>
+        <span>To collect now</span>
+        <strong class="rental-collection-balance">{{ service_row.balance|currency }}</strong>
+      </div>
+    </section>
+  {% endif %}
 
   <section class="card-grid four">
     <article class="metric-card">
@@ -116,40 +134,59 @@
           <h3>Capture Payment</h3>
         </div>
       </div>
-      <form method="post" class="form-grid">
-        <label>
-          <span>Payment Date</span>
-          <input type="date" name="paymentDate" value="{{ today_iso }}" required>
-        </label>
-        <label>
-          <span>Amount Paid</span>
-          <input type="number" min="0" step="0.01" name="amountPaid" required>
-        </label>
-        <label>
-          <span>Payment Method</span>
-          <select name="paymentMethod">
-            <option value="">Select Payment Method</option>
-            {% for method in payment_methods %}
-              <option value="{{ method }}">{{ method }}</option>
-            {% endfor %}
-          </select>
-        </label>
-        <label>
-          <span>Reference</span>
-          <input type="text" name="paymentReference" placeholder="Transaction or receipt reference">
-        </label>
-        <label>
-          <span>Received By</span>
-          <input type="text" name="receivedBy" placeholder="Staff name">
-        </label>
-        <label class="span-2">
-          <span>Notes</span>
-          <textarea name="notes" rows="3" placeholder="Optional collection note"></textarea>
-        </label>
-        <div class="form-actions span-2">
-          <button class="button primary" type="submit">Save Payment</button>
+      {% if service_row.balance > 0 %}
+        <form method="post" class="form-grid service-collection-form">
+          {% if definition.key == 'equipment_rental_bookings' %}
+            <div class="span-2 rental-payment-shortcuts">
+              <p><strong>Fast collection:</strong> the full outstanding balance is ready below. You can replace it with a partial amount if the customer pays part now.</p>
+              <div class="quick-choice-row">
+                <button class="button primary" type="button" data-full-balance="{{ service_row.balance }}">Use full balance {{ service_row.balance|currency }}</button>
+                <button class="button subtle" type="button" data-payment-method="Cash">Cash</button>
+                <button class="button subtle" type="button" data-payment-method="Mobile Money">Mobile Money</button>
+                <button class="button subtle" type="button" data-payment-method="Bank Transfer">Bank Transfer</button>
+              </div>
+            </div>
+          {% endif %}
+          <label>
+            <span>Payment Date</span>
+            <input type="date" name="paymentDate" value="{{ today_iso }}" required>
+          </label>
+          <label>
+            <span>Amount Received</span>
+            <input type="number" min="0.01" max="{{ service_row.balance }}" step="0.01" name="amountPaid" value="{{ payment_amount_default if payment_amount_default > 0 else '' }}" required>
+            <small class="muted form-helper">Maximum collection: {{ service_row.balance|currency }}</small>
+          </label>
+          <label>
+            <span>Payment Method</span>
+            <select name="paymentMethod" required>
+              <option value="">Select payment method</option>
+              {% for method in payment_methods %}
+                <option value="{{ method }}" {% if payment_method_default == method %}selected{% endif %}>{{ method }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Reference</span>
+            <input type="text" name="paymentReference" placeholder="Transaction or receipt reference">
+          </label>
+          <label>
+            <span>Received By</span>
+            <input type="text" name="receivedBy" placeholder="Staff name">
+          </label>
+          <label class="span-2">
+            <span>Notes</span>
+            <textarea name="notes" rows="3" placeholder="Optional collection note"></textarea>
+          </label>
+          <div class="form-actions span-2">
+            <button class="button primary" type="submit">Save Collection</button>
+          </div>
+        </form>
+      {% else %}
+        <div class="service-collection-complete">
+          <strong>This rental is fully paid.</strong>
+          <p>No further collection is needed unless you first add a new charge to the rental request.</p>
         </div>
-      </form>
+      {% endif %}
     </article>
   </section>
 
@@ -193,4 +230,24 @@
       </table>
     </div>
   </section>
+{% endblock %}
+{% block scripts %}
+  {% if definition.key == 'equipment_rental_bookings' %}
+    <script>
+      (function () {
+        const amountField = document.querySelector('input[name="amountPaid"]');
+        const methodField = document.querySelector('select[name="paymentMethod"]');
+        document.querySelectorAll('[data-full-balance]').forEach((button) => {
+          button.addEventListener('click', () => {
+            if (amountField) amountField.value = Number(button.dataset.fullBalance || 0).toFixed(2);
+          });
+        });
+        document.querySelectorAll('[data-payment-method]').forEach((button) => {
+          button.addEventListener('click', () => {
+            if (methodField) methodField.value = button.dataset.paymentMethod || '';
+          });
+        });
+      })();
+    </script>
+  {% endif %}
 {% endblock %}

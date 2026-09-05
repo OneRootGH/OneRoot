@@ -573,6 +573,63 @@ a { color: inherit; text-decoration: none; }
 .module-action-card a {
   text-decoration: none;
 }
+.table-link-primary {
+  color: #fff;
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.table-link-primary:hover {
+  color: #fff;
+  background: #1f6845;
+}
+.rental-collection-banner {
+  display: grid;
+  grid-template-columns: 1.5fr repeat(2, minmax(0, 1fr));
+  gap: 0.9rem;
+  margin: 0 0 1rem;
+  padding: 0.9rem 1rem;
+  background: linear-gradient(135deg, #e9f4ec, #fff9ec);
+  border: 1px solid #cfe1d3;
+  border-radius: 1rem;
+}
+.rental-collection-banner > div {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+}
+.rental-collection-banner span,
+.rental-collection-banner small {
+  color: var(--muted);
+  font-size: 0.82rem;
+}
+.rental-collection-banner strong {
+  font-size: 1.05rem;
+}
+.rental-collection-banner .rental-collection-balance {
+  color: #1f6845;
+  font-size: 1.35rem;
+}
+.rental-payment-shortcuts {
+  padding: 0.85rem 0.95rem;
+  background: #f7fbf7;
+  border: 1px solid #d8e8db;
+  border-radius: 0.9rem;
+}
+.rental-payment-shortcuts p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+.service-collection-complete {
+  padding: 1rem;
+  border: 1px solid #c9e1d0;
+  border-radius: 0.9rem;
+  background: #edf8ef;
+}
+.service-collection-complete p {
+  margin: 0.35rem 0 0;
+  color: var(--muted);
+}
 .social-post-card {
   align-content: start;
 }
@@ -2044,6 +2101,10 @@ thead th {
 }
 
 @media (max-width: 780px) {
+  .rental-collection-banner {
+    grid-template-columns: 1fr;
+    gap: 0.7rem;
+  }
   .content,
   .sidebar {
     padding: 1rem;

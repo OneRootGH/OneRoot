@@ -13930,11 +13930,25 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if definition.editable:
                 module_quick_actions.append(
                     {
-                        "label": "New Record",
+                        "label": "New Rental" if module_key == "equipment_rental_bookings" else "New Record",
                         "href": url_for("module_form", module_key=module_key),
-                        "note": f"Capture a new {definition.label[:-1].lower() if definition.label.endswith('s') else definition.label.lower()} quickly.",
+                        "note": (
+                            "Save the customer request first. Equipment, days, fee, due date, and balance are then kept together."
+                            if module_key == "equipment_rental_bookings"
+                            else f"Capture a new {definition.label[:-1].lower() if definition.label.endswith('s') else definition.label.lower()} quickly."
+                        ),
                     }
                 )
+            if module_key == "equipment_rental_bookings":
+                outstanding_count = sum(1 for row in service_rows if parse_amount(row.get("balance")) > 0)
+                if outstanding_count:
+                    module_quick_actions.append(
+                        {
+                            "label": "Collect Outstanding",
+                            "href": url_for("module_list", module_key=module_key),
+                            "note": f"{outstanding_count} rental{'s' if outstanding_count != 1 else ''} still have a balance. Use the green Collect action beside the rental.",
+                        }
+                    )
             if user_has_access(g.current_user, "sales"):
                 module_quick_actions.append(
                     {
@@ -15025,11 +15039,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("module_list", module_key=module_key))
 
         payload = dict(record.payload or {})
+        payment_summary = service_payment_summary(module_key, payload)
         if request.method == "POST":
             payment_date = normalize_text(request.form.get("paymentDate")) or date.today().isoformat()
             amount_paid = round(parse_amount(request.form.get("amountPaid")), 2)
+            payment_method = normalize_text(request.form.get("paymentMethod"))
+            remaining_balance = round(parse_amount(payment_summary["balance"]), 2)
             if amount_paid <= 0:
                 flash("Enter a payment amount greater than zero.", "error")
+            elif not payment_method:
+                flash("Choose how the customer paid before saving the collection.", "error")
+            elif remaining_balance <= 0:
+                flash("This request is already fully paid. Edit the request first if a new charge needs to be added.", "warning")
+            elif amount_paid > remaining_balance + 0.009:
+                flash(
+                    f"The collection cannot be more than the remaining balance of {format_currency(remaining_balance)}.",
+                    "error",
+                )
             else:
                 entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY) if isinstance(payload.get(SERVICE_PAYMENT_ENTRIES_KEY), list) else []
                 if not entries and parse_amount(payload.get("amountPaid")) > 0:
@@ -15050,7 +15076,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "id": uuid4().hex,
                         "paymentDate": payment_date,
                         "amountPaid": amount_paid,
-                        "paymentMethod": normalize_text(request.form.get("paymentMethod")),
+                        "paymentMethod": payment_method,
                         "paymentReference": normalize_text(request.form.get("paymentReference")),
                         "receivedBy": normalize_text(request.form.get("receivedBy")) or g.current_user.full_name or g.current_user.username,
                         "notes": normalize_text(request.form.get("notes")),
@@ -15080,6 +15106,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             service_row = build_kitchen_service_rows([record])[0]
         else:
             service_row = build_equipment_service_rows([record])[0]
+        requested_amount = round(parse_amount(request.args.get("amount")), 2)
+        payment_amount_default = requested_amount if 0 < requested_amount <= service_row["balance"] else service_row["balance"]
         return render_template(
             "service_payment_form.html",
             page_title=f"{definition.label} Payment",
@@ -15089,6 +15117,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             service_row=service_row,
             payment_methods=PAYMENT_METHODS,
             today_iso=date.today().isoformat(),
+            payment_amount_default=payment_amount_default,
+            payment_method_default=normalize_text(request.args.get("method")) or "Cash",
         )
 
     @app.route("/app/services/<module_key>/<record_id>/payments/<payment_id>/delete", methods=["POST"])
