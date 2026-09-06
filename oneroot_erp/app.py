@@ -8393,19 +8393,43 @@ def staff_document_pack_placeholders(profile: dict[str, Any]) -> dict[str, str]:
     supervisor = normalize_text(profile.get("supervisor")) or "OneRoot Essentials"
     start_date = format_display_date(profile.get("startDate"), long_month=True) or "To be confirmed"
     monthly_salary = parse_amount(profile.get("monthlySalary"))
-    salary_label = f"{format_currency(monthly_salary)} per month" if monthly_salary > 0 else "To be agreed"
+    end_date = format_display_date(profile.get("contractEndDate"), long_month=True) or "Not fixed / to be agreed"
+    hourly_rate = parse_amount(profile.get("hourlyRate"))
+    pay_basis = normalize_text(profile.get("payBasis")) or "Monthly"
+    if pay_basis == "Hourly":
+        salary_label = f"{format_currency(hourly_rate)} per hour" if hourly_rate > 0 else "To be agreed"
+    elif pay_basis == "Hybrid":
+        parts = []
+        if monthly_salary > 0:
+            parts.append(f"{format_currency(monthly_salary)} monthly base")
+        if hourly_rate > 0:
+            parts.append(f"{format_currency(hourly_rate)} per hour")
+        salary_label = " + ".join(parts) or "To be agreed"
+    else:
+        salary_label = f"{format_currency(monthly_salary)} per month" if monthly_salary > 0 else "To be agreed"
     emergency_parts = [
         normalize_text(profile.get("emergencyContact")),
+        normalize_text(profile.get("emergencyRelationship")),
         normalize_text(profile.get("emergencyPhone")),
     ]
     emergency_contact = " · ".join(part for part in emergency_parts if part) or "To be completed"
+    role_summary = normalize_text(profile.get("roleSummary")) or STAFF_ROLE_DESCRIPTIONS.get(staff_role, "To be agreed")
+    notes = [
+        f"Role summary: {role_summary}",
+        f"Primary KPI: {normalize_text(profile.get('primaryKpi')) or 'To be agreed'}",
+        f"Measurement: {normalize_text(profile.get('kpiMeasurement')) or 'To be agreed'}",
+        f"Required training: {normalize_text(profile.get('requiredTraining')) or 'To be agreed'}",
+    ]
+    property_issued = normalize_text(profile.get("propertyIssued"))
+    if property_issued:
+        notes.append(f"Property issued: {property_issued}")
     return {
         "[Employee Full Name]": staff_name,
         "[Employee First Name]": first_name,
         "[Name]": staff_name,
         "[Job Title]": staff_role,
         "[JOB TITLE]": staff_role,
-        "[Role / Business Area]": staff_role,
+        "[Role / Business Area]": normalize_text(profile.get("primaryWorkArea")) or staff_role,
         "[Select from OneRoot staff roles]": staff_role,
         "[Manager / Operations Manager]": supervisor,
         "[Manager Name]": supervisor,
@@ -8413,19 +8437,23 @@ def staff_document_pack_placeholders(profile: dict[str, Any]) -> dict[str, str]:
         "[Start Date]": start_date,
         "[Date]": start_date,
         "[DD Month YYYY]": start_date,
-        "[Hourly / Monthly / Hybrid]": "Monthly",
+        "[Hourly / Monthly / Hybrid]": pay_basis,
         "[Hourly / Monthly Pay Amount]": salary_label,
         "[Pay Amount and basis]": salary_label,
+        "[Amount]": f"{(hourly_rate if pay_basis == 'Hourly' else monthly_salary):,.2f}" if (hourly_rate if pay_basis == "Hourly" else monthly_salary) > 0 else "To be agreed",
+        "[Weekly / Monthly]": normalize_text(profile.get("payFrequency")) or "Monthly",
         "[Phone Number]": normalize_text(profile.get("phone")) or "To be completed",
         "[Email Address]": normalize_text(profile.get("email")) or "To be completed",
         "[Address]": normalize_text(profile.get("address")) or "To be completed",
         "[Name, relationship, and phone number]": emergency_contact,
-        "[System Username]": "To be assigned",
-        "[Notice Period]": "As stated in the employment contract",
-        "[Schedule]": normalize_text(profile.get("employmentType")) or "Full-Time",
-        "[Payment Method]": "To be confirmed",
+        "[System Username]": normalize_text(profile.get("systemUsername")) or "To be assigned",
+        "[Notice Period]": normalize_text(profile.get("noticePeriod")) or "As stated in the employment contract",
+        "[Schedule]": normalize_text(profile.get("workSchedule")) or normalize_text(profile.get("employmentType")) or "Full-Time",
+        "[Payment Method]": normalize_text(profile.get("payrollPaymentMethod")) or "To be confirmed",
+        "[End Date]": end_date,
+        "[Number]": str(int(parse_amount(profile.get("probationMonths")))) if parse_amount(profile.get("probationMonths")) > 0 else "3",
         "[Authorized Signatory]": supervisor,
-        "[Notes]": f"Generated from OneRoot Staff Onboarding for {staff_name}.",
+        "[Notes]": "\n".join(notes),
     }
 
 
@@ -13021,6 +13049,31 @@ def create_app(config: AppConfig | None = None) -> Flask:
             key=lambda item: item["amount"],
             reverse=True,
         )
+        month_sales_total = round(sum(item["amount"] for item in monthly_sales_by_area), 2)
+        month_profit_total = round(sum(profit_by_area_map.values()), 2)
+        chart_palette = ["#1b4e39", "#2f6ea8", "#c47b34", "#8a4f74", "#5f6fd8", "#9a6a19", "#50606f"]
+        sales_mix_legend = []
+        mix_stops = []
+        running_share = 0.0
+        for index, area in enumerate(monthly_sales_by_area):
+            share = round((area["amount"] / month_sales_total) * 100, 1) if month_sales_total else 0.0
+            color = chart_palette[index % len(chart_palette)]
+            next_share = min(running_share + share, 100)
+            mix_stops.append(f"{color} {running_share:.1f}% {next_share:.1f}%")
+            sales_mix_legend.append({**area, "share": share, "color": color})
+            running_share = next_share
+        sales_mix_style = f"conic-gradient({', '.join(mix_stops)})" if mix_stops else "conic-gradient(#e9e3d7 0 100%)"
+        daily_sales_rows = []
+        for days_ago in range(6, -1, -1):
+            sales_date = date.today() - timedelta(days=days_ago)
+            daily_sales_rows.append({
+                "label": sales_date.strftime("%a"),
+                "short": sales_date.strftime("%d"),
+                "amount": round(sum(
+                    record.amount for record in all_records
+                    if record.module_key == "sales" and record.record_date == sales_date
+                ), 2),
+            })
         dashboard_area_rows = [
             row
             for row in report_area_rows(all_records, current_month)
@@ -13070,6 +13123,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             tenant_reminder_count=len(tenant_reminders),
             growth_context=growth_context,
             monthly_sales_by_area=monthly_sales_by_area,
+            month_sales_total=month_sales_total,
+            month_profit_total=month_profit_total,
+            sales_mix_legend=sales_mix_legend,
+            sales_mix_style=sales_mix_style,
             monthly_sales_chart=build_chart_rows(
                 monthly_sales_by_area,
                 label_key="label",
@@ -13090,6 +13147,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 value_key="amount",
                 short_key="short",
                 positive_color="var(--accent)",
+            ),
+            weekly_sales_chart=build_chart_rows(
+                daily_sales_rows,
+                label_key="label",
+                value_key="amount",
+                short_key="short",
+                positive_color="var(--green)",
             ),
             dashboard_net_chart=build_chart_rows(
                 [
@@ -16030,19 +16094,61 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload = {
                 "id": uuid4().hex,
                 "staffName": normalize_text(request.form.get("staffName")),
+                "preferredName": normalize_text(request.form.get("preferredName")),
+                "dateOfBirth": normalize_text(request.form.get("dateOfBirth")),
+                "gender": normalize_text(request.form.get("gender")),
                 "staffRole": normalize_text(request.form.get("staffRole")),
                 "phone": normalize_text(request.form.get("phone")),
+                "alternatePhone": normalize_text(request.form.get("alternatePhone")),
                 "email": normalize_text(request.form.get("email")),
                 "ghanaCard": normalize_text(request.form.get("ghanaCard")),
+                "ssnitNumber": normalize_text(request.form.get("ssnitNumber")),
+                "taxIdentificationNumber": normalize_text(request.form.get("taxIdentificationNumber")),
                 "address": normalize_text(request.form.get("address")),
+                "digitalAddress": normalize_text(request.form.get("digitalAddress")),
+                "nationality": normalize_text(request.form.get("nationality")) or "Ghanaian",
                 "emergencyContact": normalize_text(request.form.get("emergencyContact")),
+                "emergencyRelationship": normalize_text(request.form.get("emergencyRelationship")),
                 "emergencyPhone": normalize_text(request.form.get("emergencyPhone")),
+                "emergencyAddress": normalize_text(request.form.get("emergencyAddress")),
+                "guarantorName": normalize_text(request.form.get("guarantorName")),
+                "guarantorPhone": normalize_text(request.form.get("guarantorPhone")),
                 "startDate": normalize_text(request.form.get("startDate")) or date.today().isoformat(),
                 "employmentType": normalize_text(request.form.get("employmentType")) or "Full-Time",
+                "contractEndDate": normalize_text(request.form.get("contractEndDate")),
+                "probationMonths": int(max(parse_amount(request.form.get("probationMonths")), 0)),
+                "noticePeriod": normalize_text(request.form.get("noticePeriod")) or "One month after probation",
+                "primaryWorkArea": normalize_text(request.form.get("primaryWorkArea")),
+                "workLocation": normalize_text(request.form.get("workLocation")) or "OneRoot Essentials, Amasaman, Medie, Ghana",
+                "workSchedule": normalize_text(request.form.get("workSchedule")) or "Roster to be agreed",
+                "expectedHoursPerWeek": parse_amount(request.form.get("expectedHoursPerWeek")),
+                "reviewFrequency": normalize_text(request.form.get("reviewFrequency")) or "Monthly",
+                "roleSummary": normalize_text(request.form.get("roleSummary")),
+                "primaryKpi": normalize_text(request.form.get("primaryKpi")),
+                "kpiMeasurement": normalize_text(request.form.get("kpiMeasurement")),
                 "monthlySalary": parse_amount(request.form.get("monthlySalary")),
+                "hourlyRate": parse_amount(request.form.get("hourlyRate")),
+                "payBasis": normalize_text(request.form.get("payBasis")) or "Monthly",
+                "payFrequency": normalize_text(request.form.get("payFrequency")) or "Monthly",
+                "payday": normalize_text(request.form.get("payday")),
+                "payrollPaymentMethod": normalize_text(request.form.get("payrollPaymentMethod")) or "Bank Transfer",
+                "paymentProvider": normalize_text(request.form.get("paymentProvider")),
+                "accountName": normalize_text(request.form.get("accountName")),
+                "accountNumber": normalize_text(request.form.get("accountNumber")),
+                "annualLeaveDays": int(max(parse_amount(request.form.get("annualLeaveDays")), 0)),
                 "supervisor": normalize_text(request.form.get("supervisor")) or workspace_owner_name(),
+                "systemUsername": normalize_text(request.form.get("systemUsername")),
+                "propertyIssued": normalize_text(request.form.get("propertyIssued")),
+                "requiredTraining": normalize_text(request.form.get("requiredTraining")),
+                "onboardingStatus": normalize_text(request.form.get("onboardingStatus")) or "Ready for Signing",
+                "identityVerified": request.form.get("identityVerified") == "on",
+                "policyAcknowledged": request.form.get("policyAcknowledged") == "on",
+                "attendanceExplained": request.form.get("attendanceExplained") == "on",
+                "marketingConsent": request.form.get("marketingConsent") == "on",
+                "notes": normalize_text(request.form.get("notes")),
                 "createdAt": datetime.utcnow().isoformat(),
             }
+            payload["roleSummary"] = payload["roleSummary"] or STAFF_ROLE_DESCRIPTIONS.get(payload["staffRole"], "")
             if not payload["staffName"] or not payload["staffRole"]:
                 flash("Staff name and staff role are required.", "error")
                 return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload=payload, staff_role_options=STAFF_WORK_ROLES)
@@ -16080,7 +16186,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 flash("The staff pack could not be created because one of its document records already exists. Please try again.", "error")
                 return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload=payload, staff_role_options=STAFF_WORK_ROLES)
             return redirect(url_for("staff_onboarding_pack", profile_id=profile.id))
-        return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload={"startDate": date.today().isoformat(), "employmentType": "Full-Time", "supervisor": workspace_owner_name()}, staff_role_options=STAFF_WORK_ROLES)
+        return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload={
+            "startDate": date.today().isoformat(), "employmentType": "Full-Time", "supervisor": workspace_owner_name(),
+            "nationality": "Ghanaian", "payBasis": "Monthly", "payFrequency": "Monthly", "payrollPaymentMethod": "Bank Transfer",
+            "probationMonths": 3, "noticePeriod": "One month after probation", "annualLeaveDays": 15,
+            "workLocation": "OneRoot Essentials, Amasaman, Medie, Ghana", "workSchedule": "Roster to be agreed",
+            "reviewFrequency": "Monthly", "onboardingStatus": "Ready for Signing",
+        }, staff_role_options=STAFF_WORK_ROLES)
 
     @app.route("/app/staff-onboarding/<profile_id>/pack")
     @access_required("staff_documents")

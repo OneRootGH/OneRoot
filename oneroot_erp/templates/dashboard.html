@@ -1,423 +1,96 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card-grid four">
-    <article class="metric-card">
-      <span>Sales Today</span>
-      <strong>{{ today_sales_total|currency }}</strong>
-      <small>{{ counts.get('sales', 0) }} sales records saved</small>
-    </article>
-    <article class="metric-card">
-      <span>Profit Today</span>
-      <strong>{{ today_profit_total|currency }}</strong>
-      <small>Realized profit from paid sales today</small>
-    </article>
-    <article class="metric-card">
-      <span>Total Sales</span>
-      <strong>{{ sales_total|currency }}</strong>
-      <small>All captured income so far</small>
-    </article>
-    <article class="metric-card">
-      <span>Total Profit</span>
-      <strong>{{ profit_total|currency }}</strong>
-      <small>Realized gross profit so far</small>
-    </article>
+  <section class="dashboard-hero">
+    <div>
+      <p class="eyebrow">Leadership Overview</p>
+      <h3>Business Command Center</h3>
+      <p class="muted">A concise view of sales, profit, cash pressure, performance mix, and priority actions for OneRoot Essentials.</p>
+    </div>
+    <div class="toolbar">
+      <a class="button subtle" href="{{ url_for('module_list', module_key='sales') }}">Daily Sales</a>
+      <a class="button primary" href="{{ url_for('reports_page') }}">Management Reports</a>
+    </div>
   </section>
 
-  <section class="card-grid four">
-    <article class="metric-card warning">
-      <span>Apartment Exposure</span>
-      <strong>{{ apartment_due|currency }}</strong>
-      <small>{{ counts.get('apartments', 0) }} apartment records</small>
-    </article>
-    <article class="metric-card">
-      <span>Supplier Balance</span>
-      <strong>{{ supplier_balance|currency }}</strong>
-      <small>Outstanding supplier payments</small>
-    </article>
-    <article class="metric-card">
-      <span>Expenses</span>
-      <strong>{{ expenses_total|currency }}</strong>
-      <small>{{ counts.get('expenses', 0) }} expense records</small>
-    </article>
-    <article class="metric-card">
-      <span>Petty Cash</span>
-      <strong>{{ petty_cash_total|currency }}</strong>
-      <small>{{ counts.get('petty_cash', 0) }} entries saved</small>
-    </article>
-    <article class="metric-card">
-      <span>Orders Requiring Action</span>
-      <strong>{{ online_order_follow_up }}</strong>
-      <small>{{ online_balance_total|currency }} still open</small>
-    </article>
-    <article class="metric-card warning">
-      <span>Due Reminders</span>
-      <strong>{{ recurring_due_count }}</strong>
-      <small>{{ tenant_reminder_count }} tenant WhatsApp reminders ready</small>
-    </article>
-    <article class="metric-card">
-      <span>Open Work Orders</span>
-      <strong>{{ maintenance_open_count }}</strong>
-      <small>Maintenance tickets still active</small>
-    </article>
-    <article class="metric-card">
-      <span>Training Due</span>
-      <strong>{{ training_due_count }}</strong>
-      <small>Knowledge and SOP items needing follow-up</small>
-    </article>
-    <article class="metric-card">
-      <span>Attendance Today</span>
-      <strong>{{ attendance_today_count }}</strong>
-      <small>Shift records captured for today</small>
-    </article>
+  <section class="card-grid four dashboard-key-metrics">
+    <article class="metric-card"><span>Sales Today</span><strong>{{ today_sales_total|currency }}</strong><small>{{ counts.get('sales', 0) }} paid sales captured</small></article>
+    <article class="metric-card"><span>This Month Sales</span><strong>{{ month_sales_total|currency }}</strong><small>Sales across active business areas</small></article>
+    <article class="metric-card"><span>This Month Gross Profit</span><strong>{{ month_profit_total|currency }}</strong><small>Before overheads and operating costs</small></article>
+    <article class="metric-card {% if apartment_due > 0 %}warning{% endif %}"><span>Open Customer & Tenant Balances</span><strong>{{ apartment_due|currency }}</strong><small>Apartment balances needing follow-up</small></article>
   </section>
 
-  {% if target_progress_rows %}
-    <section class="card-grid four">
-      <article class="metric-card">
-        <span>Sales Target</span>
-        <strong>{{ target_total|currency }}</strong>
-        <small>Revenue plan for the current month</small>
-      </article>
-      <article class="metric-card">
-        <span>Sales Captured</span>
-        <strong>{{ target_actual_total|currency }}</strong>
-        <small>Current month actual against forecast</small>
-      </article>
-      <article class="metric-card">
-        <span>Areas On Target</span>
-        <strong>{{ target_areas_on_track }}</strong>
-        <small>Business areas already meeting plan</small>
-      </article>
-      <article class="metric-card warning">
-        <span>Target Gap</span>
-        <strong>{{ (target_actual_total - target_total)|currency }}</strong>
-        <small>Positive means ahead of plan</small>
-      </article>
-    </section>
-  {% endif %}
-
-  {% if growth_context %}
-    <section class="card-grid four">
-      <article class="metric-card">
-        <span>Growth Contacts</span>
-        <strong>{{ growth_context.counts.get('contacts', 0) }}</strong>
-        <small>Customer profiles available for follow-up</small>
-      </article>
-      <article class="metric-card warning">
-        <span>New Leads</span>
-        <strong>{{ growth_context.counts.get('newLeads', 0) }}</strong>
-        <small>New prospects that should be welcomed first</small>
-      </article>
-      <article class="metric-card warning">
-        <span>Win-Back</span>
-        <strong>{{ growth_context.counts.get('winBack', 0) }}</strong>
-        <small>Dormant customers ready for reactivation</small>
-      </article>
-      <article class="metric-card">
-        <span>WhatsApp Ready</span>
-        <strong>{{ growth_context.counts.get('whatsappReady', 0) }}</strong>
-        <small>Direct message follow-up available now</small>
-      </article>
-    </section>
-  {% endif %}
-
-  <section class="split-grid">
+  <section class="dashboard-chart-grid">
     <article class="card">
-      <div class="card-header">
-        <div>
-          <p class="eyebrow">Counter</p>
-          <h3>Recent POS Orders</h3>
+      <div class="card-header compact"><div><p class="eyebrow">Bar Chart</p><h3>Sales by Business Area</h3></div><span class="metric-chip">{{ month_sales_total|currency }} this month</span></div>
+      {% if monthly_sales_chart %}
+        <div class="chart-stack">
+          {% for area in monthly_sales_chart %}
+            <div class="chart-row"><div class="chart-row-header"><strong>{{ area.chartLabel }}</strong><span>{{ area.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span></div></div>
+          {% endfor %}
         </div>
-        <a class="button subtle" href="{{ url_for('pos_page') }}">Open POS</a>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Order</th>
-              <th>Date</th>
-              <th>Payment</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for order in recent_pos_orders %}
-              <tr>
-                <td>{{ order.order_number }}</td>
-                <td>{{ order.order_date }}</td>
-                <td>{{ order.payment_method }}</td>
-                <td>{{ order.total_amount|currency }}</td>
-              </tr>
-            {% else %}
-              <tr><td colspan="4">No POS orders yet.</td></tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
+      {% else %}<p class="muted">Sales by area will appear here once paid sales are recorded this month.</p>{% endif %}
     </article>
 
     <article class="card">
-      <div class="card-header">
-        <div>
-          <p class="eyebrow">Stock</p>
-          <h3>Low Stock Watch</h3>
-        </div>
-        <a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a>
-      </div>
-      <ul class="stack-list">
-        {% for item in low_stock %}
-          <li>
-            <strong>{{ item.name }}</strong>
-            <span>{{ business_area_short.get(item.business_area_id, item.business_area_id) }} · {{ item.quantity_on_hand }} left</span>
-          </li>
-        {% else %}
-          <li><span>No low stock items right now.</span></li>
-        {% endfor %}
-      </ul>
-    </article>
-  </section>
-
-  <section class="split-grid">
-    <article class="card">
-      <div class="card-header">
-        <div>
-          <p class="eyebrow">Performance</p>
-          <h3>This Month Sales By Business Area</h3>
-        </div>
-        <a class="button subtle" href="{{ url_for('module_list', module_key='sales') }}">Open Daily Sales</a>
-      </div>
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Sales By Area</p>
-        {% if monthly_sales_chart %}
-          <div class="chart-stack">
-            {% for area in monthly_sales_chart %}
-              <div class="chart-row">
-                <div class="chart-row-header">
-                  <strong>{{ area.chartLabel }}</strong>
-                  <span>{{ area.chartValue|currency }}</span>
-                </div>
-                <div class="chart-track">
-                  <span class="chart-fill" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="muted">No sales have been saved for this month yet.</p>
-        {% endif %}
-      </div>
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Net Position By Area</p>
-        {% if dashboard_net_chart %}
-          <div class="chart-stack">
-            {% for area in dashboard_net_chart %}
-              <div class="chart-row">
-                <div class="chart-row-header">
-                  <strong>{{ area.chartLabel }}</strong>
-                  <span class="{% if area.chartNegative %}negative-text{% endif %}">{{ area.chartValue|currency }}</span>
-                </div>
-                <div class="chart-track">
-                  <span class="chart-fill {% if area.chartNegative %}negative{% endif %}" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="muted">Net position by area will appear as activity is captured this month.</p>
-        {% endif %}
-      </div>
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Profit By Area</p>
-        {% if monthly_profit_chart %}
-          <div class="chart-stack">
-            {% for area in monthly_profit_chart %}
-              <div class="chart-row">
-                <div class="chart-row-header">
-                  <strong>{{ area.chartLabel }}</strong>
-                  <span>{{ area.chartValue|currency }}</span>
-                </div>
-                <div class="chart-track">
-                  <span class="chart-fill" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span>
-                </div>
-              </div>
-            {% endfor %}
-          </div>
-        {% else %}
-          <p class="muted">Profit by area will appear as cost-linked payments are saved this month.</p>
-        {% endif %}
-      </div>
-    </article>
-
-    <article class="card">
-      <div class="card-header">
-        <div>
-          <p class="eyebrow">Follow-Up Watch</p>
-          <h3>What Needs Attention</h3>
-        </div>
-      </div>
-
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Recurring Controls</p>
-        <ul class="stack-list compact">
-          {% for record in recurring_due %}
-            <li>
-              <strong>{{ record.title }}</strong>
-              <span>{{ record.payload.get('nextDueDate', '') }} · {{ record.status }}</span>
-            </li>
-          {% else %}
-            <li><span>No recurring controls are due soon right now.</span></li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Apartment Balances</p>
-        <ul class="stack-list compact">
-          {% for item in apartment_watch %}
-            <li>
-              <strong>{{ item.suite }} · {{ item.tenant }}</strong>
-              <span>{{ item.outstanding|currency }} outstanding</span>
-            </li>
-          {% else %}
-            <li><span>No apartment balances are currently outstanding.</span></li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Tenant WhatsApp Queue</p>
-        <ul class="stack-list compact reminder-stack">
-          {% for item in tenant_reminders %}
-            <li class="stack-list-item-row">
-              <div class="stack-list-copy">
-                <strong>{{ item.suite }} · {{ item.tenant }}</strong>
-                <span>{{ item.reminderType }} · {{ item.outstanding|currency }} open</span>
-                <span>{% if item.primaryDueLabel %}{{ item.primaryDueLabel }}{% elif item.dueSummary %}{{ item.dueSummary }}{% else %}No due date saved{% endif %}</span>
-              </div>
-              <div class="stack-list-actions">
-                <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open</a>
-                <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
-              </div>
-            </li>
-          {% else %}
-            <li><span>No tenant reminders are ready right now.</span></li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Maintenance</p>
-        <ul class="stack-list compact">
-          {% for record in maintenance_open %}
-            <li>
-              <strong>{{ record.payload.get('workOrderNumber') or record.title }}</strong>
-              <span>{{ record.payload.get('status') or record.status }} · {{ record.payload.get('location') or business_area_short.get(record.business_area_id, record.business_area_id) }}</span>
-            </li>
-          {% else %}
-            <li><span>No maintenance work orders are open right now.</span></li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <div class="dashboard-subsection">
-        <p class="eyebrow">Training & SOPs</p>
-        <ul class="stack-list compact">
-          {% for record in training_due %}
-            <li>
-              <strong>{{ record.title }}</strong>
-              <span>{{ record.payload.get('status') or record.status }} · {{ record.payload.get('reviewDate') or record.payload.get('dueDate') or 'No due date' }}</span>
-            </li>
-          {% else %}
-            <li><span>No knowledge or training follow-up is due right now.</span></li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      {% if growth_context %}
-        <div class="dashboard-subsection">
-          <p class="eyebrow">Customer Growth Queue</p>
-          <ul class="stack-list compact reminder-stack">
-            {% for item in growth_context.followUps[:6] %}
-              <li class="stack-list-item-row">
-                <div class="stack-list-copy">
-                  <strong>{{ item.customerName }}</strong>
-                  <span>{{ item.automationLabel }} · {{ item.customerSegment }} · {{ item.leadSource }}</span>
-                  <span>{{ item.businessAreaSummary or 'Shared Operations' }} · Orders {{ item.orderCount }} · Value {{ item.lifetimeValue|currency }}</span>
-                </div>
-                <div class="stack-list-actions">
-                  <a class="button subtle button-small" href="{{ url_for('module_form', module_key='customer_crm', record_id=item.id) }}">Open</a>
-                  {% if item.whatsappUrl %}
-                    <a class="button primary button-small" href="{{ item.whatsappUrl }}" target="_blank" rel="noopener">WhatsApp</a>
-                  {% endif %}
-                </div>
-              </li>
-            {% else %}
-              <li><span>No customer growth follow-up is ready right now.</span></li>
-            {% endfor %}
+      <div class="card-header compact"><div><p class="eyebrow">Pie Chart</p><h3>Sales Mix</h3></div></div>
+      {% if sales_mix_legend %}
+        <div class="dashboard-donut-layout">
+          <div class="dashboard-donut" style="background: {{ sales_mix_style }};"><div class="dashboard-donut-hole"><strong>{{ month_sales_total|currency }}</strong><span>Month total</span></div></div>
+          <ul class="dashboard-pie-legend">
+            {% for area in sales_mix_legend %}<li><span class="pie-swatch" style="background: {{ area.color }};"></span><span>{{ area.short }}</span><strong>{{ area.share }}%</strong></li>{% endfor %}
           </ul>
         </div>
-      {% endif %}
+      {% else %}<p class="muted">The sales mix will appear after the first paid sale this month.</p>{% endif %}
     </article>
   </section>
 
-  {% if target_progress_rows %}
-    <section class="card">
-      <div class="card-header">
-        <div>
-          <p class="eyebrow">Target Watch</p>
-          <h3>Monthly Sales Target Progress</h3>
+  <section class="dashboard-chart-grid">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Trend Chart</p><h3>Last 7 Days of Sales</h3></div></div>
+      <div class="dashboard-trend">
+        {% for day in weekly_sales_chart %}
+          <div class="dashboard-trend-column"><span class="trend-value">{{ day.chartValue|currency }}</span><div class="dashboard-trend-rail"><span style="height: {{ day.chartWidth }}%; background: {{ day.chartColor }};"></span></div><strong>{{ day.chartLabel }}</strong><small>{{ day.short }}</small></div>
+        {% endfor %}
+      </div>
+    </article>
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Profit Chart</p><h3>Gross Profit by Area</h3></div></div>
+      {% if monthly_profit_chart %}
+        <div class="chart-stack">
+          {% for area in monthly_profit_chart %}
+            <div class="chart-row"><div class="chart-row-header"><strong>{{ area.chartLabel }}</strong><span>{{ area.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ area.chartWidth }}%; background: {{ area.chartColor }};"></span></div></div>
+          {% endfor %}
         </div>
-        <a class="button subtle" href="{{ url_for('module_list', module_key='forecast_plans') }}">Open Planning & Targets</a>
-      </div>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Area</th>
-              <th>Actual</th>
-              <th>Target</th>
-              <th>Variance</th>
-              <th>Progress</th>
-            </tr>
-          </thead>
-          <tbody>
-            {% for row in target_progress_rows %}
-              <tr>
-                <td>{{ row.areaLabel }}</td>
-                <td>{{ row.actual|currency }}</td>
-                <td>{{ row.target|currency }}</td>
-                <td class="{% if row.variance < 0 %}negative-text{% endif %}">{{ row.variance|currency }}</td>
-                <td>
-                  <div class="inline-progress">
-                    <div class="chart-track">
-                      <span class="chart-fill" style="width: {{ row.progressWidth }}%; background: {{ row.progressTone }};"></span>
-                    </div>
-                    <small>{{ row.targetNote }}</small>
-                  </div>
-                </td>
-              </tr>
-            {% endfor %}
-          </tbody>
-        </table>
-      </div>
-    </section>
-  {% endif %}
+      {% else %}<p class="muted">Profit will appear after product or service costs are captured with sales.</p>{% endif %}
+    </article>
+  </section>
 
-  <article class="card">
-    <div class="card-header">
-      <div>
-        <p class="eyebrow">Audit</p>
-        <h3>Latest Activity</h3>
-      </div>
-      <a class="button subtle" href="{{ url_for('audit_page') }}">Full Audit Trail</a>
-    </div>
-    <ul class="stack-list">
-      {% for entry in latest_audit %}
-        <li>
-          <strong>{{ entry.title }}</strong>
-          <span>{{ entry.module_label }} · {{ entry.action }} · {{ entry.created_at }}</span>
-        </li>
-      {% endfor %}
-    </ul>
-  </article>
+  <section class="card-grid four dashboard-action-metrics">
+    <article class="metric-card"><span>Orders Requiring Action</span><strong>{{ online_order_follow_up }}</strong><small>{{ online_balance_total|currency }} still open</small></article>
+    <article class="metric-card warning"><span>Due Reminders</span><strong>{{ recurring_due_count }}</strong><small>{{ tenant_reminder_count }} tenant reminders ready</small></article>
+    <article class="metric-card"><span>Low Stock Items</span><strong>{{ low_stock_count }}</strong><small>Stock at or below its minimum level</small></article>
+    <article class="metric-card"><span>Open Work Orders</span><strong>{{ maintenance_open_count }}</strong><small>Maintenance tasks still active</small></article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header"><div><p class="eyebrow">Counter</p><h3>Recent POS Orders</h3></div><a class="button subtle" href="{{ url_for('pos_page') }}">Open POS</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Order</th><th>Date</th><th>Payment</th><th>Total</th></tr></thead><tbody>{% for order in recent_pos_orders %}<tr><td>{{ order.order_number }}</td><td>{{ order.order_date }}</td><td>{{ order.payment_method }}</td><td>{{ order.total_amount|currency }}</td></tr>{% else %}<tr><td colspan="4">No POS orders yet.</td></tr>{% endfor %}</tbody></table></div>
+    </article>
+    <article class="card">
+      <div class="card-header"><div><p class="eyebrow">Stock</p><h3>Low Stock Watch</h3></div><a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a></div>
+      <ul class="stack-list compact">{% for item in low_stock %}<li><strong>{{ item.name }}</strong><span>{{ business_area_short.get(item.business_area_id, item.business_area_id) }} · {{ item.quantity_on_hand }} left</span></li>{% else %}<li><span>No low stock items right now.</span></li>{% endfor %}</ul>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header"><div><p class="eyebrow">Collections</p><h3>Apartment Balances</h3></div><a class="button subtle" href="{{ url_for('module_list', module_key='apartments') }}">Open Apartments</a></div>
+      <ul class="stack-list compact">{% for item in apartment_watch %}<li><strong>{{ item.suite }} · {{ item.tenant }}</strong><span>{{ item.outstanding|currency }} outstanding</span></li>{% else %}<li><span>No apartment balances are currently outstanding.</span></li>{% endfor %}</ul>
+    </article>
+    <article class="card">
+      <div class="card-header"><div><p class="eyebrow">Control</p><h3>Latest Activity</h3></div><a class="button subtle" href="{{ url_for('audit_page') }}">Audit Trail</a></div>
+      <ul class="stack-list compact">{% for entry in latest_audit[:6] %}<li><strong>{{ entry.title }}</strong><span>{{ entry.module_label }} · {{ entry.action }} · {{ entry.created_at }}</span></li>{% else %}<li><span>No recorded activity yet.</span></li>{% endfor %}</ul>
+    </article>
+  </section>
 {% endblock %}

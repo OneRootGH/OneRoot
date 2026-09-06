@@ -59,20 +59,6 @@
           </div>
           <div class="topbar-actions">
             <div class="topbar-utilities">
-              {% if 'search' in current_access_keys %}
-                <details class="utility-menu">
-                  <summary>
-                    <span>Search</span>
-                  </summary>
-                  <div class="utility-panel utility-panel-search">
-                    <p class="eyebrow">Quick Search</p>
-                    <form method="get" action="{{ url_for('search_page') }}" class="search-row utility-search-form">
-                      <input type="search" name="q" placeholder="Search records, orders, stock" value="{{ request.args.get('q', '') if request.endpoint == 'search_page' else '' }}">
-                      <button class="button subtle" type="submit">Search</button>
-                    </form>
-                  </div>
-                </details>
-              {% endif %}
               {% if attendance_widget %}
                 <details class="utility-menu">
                   <summary class="utility-status utility-status-{{ attendance_widget.tone }}">

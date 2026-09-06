@@ -1,5 +1,106 @@
 {% extends "base.html" %}
 {% block content %}
-<section class="page-intro"><div><p class="eyebrow">People</p><h3>Staff Onboarding</h3><p class="muted">Capture a staff member once. OneRoot will prepare the core employment-document register and a completed printable pack.</p></div><a class="button subtle" href="{{ url_for('module_list', module_key='staff_documents') }}">Back to Staff Documents</a></section>
-<form method="post" class="form-grid module-form-grid"><label><span>Staff Full Name</span><input name="staffName" required value="{{ payload.get('staffName','') }}"></label><label><span>Staff Role</span><select name="staffRole" required><option value="">Select role</option>{% for value,label in staff_role_options %}<option value="{{ value }}" {% if payload.get('staffRole')==value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label><label><span>Phone</span><input name="phone" value="{{ payload.get('phone','') }}"></label><label><span>Email</span><input type="email" name="email" value="{{ payload.get('email','') }}"></label><label><span>Ghana Card / ID</span><input name="ghanaCard" value="{{ payload.get('ghanaCard','') }}"></label><label><span>Home Address</span><input name="address" value="{{ payload.get('address','') }}"></label><label><span>Emergency Contact Name</span><input name="emergencyContact" value="{{ payload.get('emergencyContact','') }}"></label><label><span>Emergency Contact Phone</span><input name="emergencyPhone" value="{{ payload.get('emergencyPhone','') }}"></label><label><span>Start Date</span><input type="date" name="startDate" value="{{ payload.get('startDate','') }}"></label><label><span>Employment Type</span><select name="employmentType"><option {% if payload.get('employmentType')=='Full-Time' %}selected{% endif %}>Full-Time</option><option {% if payload.get('employmentType')=='Part-Time' %}selected{% endif %}>Part-Time</option><option {% if payload.get('employmentType')=='Contract' %}selected{% endif %}>Contract</option></select></label><label><span>Monthly Salary (GH₵)</span><input type="number" step="0.01" min="0" name="monthlySalary" value="{{ payload.get('monthlySalary','') }}"></label><label><span>Supervisor</span><input name="supervisor" value="{{ payload.get('supervisor','') }}"></label><div class="form-actions span-2"><button class="button primary" type="submit">Create Completed Staff Pack</button></div></form>
+  <section class="page-intro staff-onboarding-intro">
+    <div>
+      <p class="eyebrow">People</p>
+      <h3>Staff Onboarding</h3>
+      <p class="muted">Capture the complete employment record once. OneRoot uses it to prepare the staff document pack, payroll details, work expectations, and onboarding checklist.</p>
+    </div>
+    <a class="button subtle" href="{{ url_for('module_list', module_key='staff_documents') }}">Back to Staff Documents</a>
+  </section>
+
+  <form method="post" class="staff-onboarding-form">
+    <section class="form-section">
+      <div class="form-section-heading">
+        <div><p class="eyebrow">1. Identity</p><h4>Personal and contact details</h4></div>
+        <p class="muted">Use names and identity numbers exactly as they appear on official documents.</p>
+      </div>
+      <div class="form-grid">
+        <label><span>Staff Full Name *</span><input name="staffName" required value="{{ payload.get('staffName','') }}"></label>
+        <label><span>Preferred / Short Name</span><input name="preferredName" value="{{ payload.get('preferredName','') }}"></label>
+        <label><span>Date of Birth</span><input type="date" name="dateOfBirth" value="{{ payload.get('dateOfBirth','') }}"></label>
+        <label><span>Gender</span><select name="gender"><option value="">Select if recorded</option>{% for value in ['Female', 'Male', 'Prefer not to say'] %}<option value="{{ value }}" {% if payload.get('gender') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label><span>Phone</span><input type="tel" name="phone" value="{{ payload.get('phone','') }}"></label>
+        <label><span>Alternative Phone</span><input type="tel" name="alternatePhone" value="{{ payload.get('alternatePhone','') }}"></label>
+        <label><span>Email</span><input type="email" name="email" value="{{ payload.get('email','') }}"></label>
+        <label><span>Nationality</span><input name="nationality" value="{{ payload.get('nationality','Ghanaian') }}"></label>
+        <label><span>Ghana Card / ID</span><input name="ghanaCard" value="{{ payload.get('ghanaCard','') }}"></label>
+        <label><span>SSNIT Number</span><input name="ssnitNumber" value="{{ payload.get('ssnitNumber','') }}"></label>
+        <label><span>Tax Identification Number</span><input name="taxIdentificationNumber" value="{{ payload.get('taxIdentificationNumber','') }}"></label>
+        <label><span>GhanaPost GPS / Digital Address</span><input name="digitalAddress" value="{{ payload.get('digitalAddress','') }}"></label>
+        <label class="span-2"><span>Home Address</span><textarea name="address" rows="2">{{ payload.get('address','') }}</textarea></label>
+      </div>
+    </section>
+
+    <section class="form-section">
+      <div class="form-section-heading"><div><p class="eyebrow">2. Emergency</p><h4>Emergency and guarantor contacts</h4></div><p class="muted">Keep a reachable contact for emergencies and a guarantor where your policy requires one.</p></div>
+      <div class="form-grid">
+        <label><span>Emergency Contact Name</span><input name="emergencyContact" value="{{ payload.get('emergencyContact','') }}"></label>
+        <label><span>Relationship</span><input name="emergencyRelationship" placeholder="e.g. Parent, spouse, sibling" value="{{ payload.get('emergencyRelationship','') }}"></label>
+        <label><span>Emergency Contact Phone</span><input type="tel" name="emergencyPhone" value="{{ payload.get('emergencyPhone','') }}"></label>
+        <label><span>Guarantor Name</span><input name="guarantorName" value="{{ payload.get('guarantorName','') }}"></label>
+        <label><span>Guarantor Phone</span><input type="tel" name="guarantorPhone" value="{{ payload.get('guarantorPhone','') }}"></label>
+        <label class="span-2"><span>Emergency Contact Address</span><textarea name="emergencyAddress" rows="2">{{ payload.get('emergencyAddress','') }}</textarea></label>
+      </div>
+    </section>
+
+    <section class="form-section">
+      <div class="form-section-heading"><div><p class="eyebrow">3. Employment</p><h4>Role, work expectations, and performance</h4></div><p class="muted">This section makes the appointment letter and manager expectations specific to the role.</p></div>
+      <div class="form-grid">
+        <label><span>Staff Role *</span><select name="staffRole" required><option value="">Select role</option>{% for value,label in staff_role_options %}<option value="{{ value }}" {% if payload.get('staffRole') == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label><span>Primary Work Area</span><input name="primaryWorkArea" placeholder="e.g. Retail, Kitchen, Finance" value="{{ payload.get('primaryWorkArea','') }}"></label>
+        <label><span>Supervisor</span><input name="supervisor" value="{{ payload.get('supervisor','') }}"></label>
+        <label><span>Employment Type</span><select name="employmentType">{% for value in ['Full-Time', 'Part-Time', 'Contract', 'Temporary', 'Internship'] %}<option value="{{ value }}" {% if payload.get('employmentType') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label><span>Start Date *</span><input type="date" name="startDate" required value="{{ payload.get('startDate','') }}"></label>
+        <label><span>Contract End Date</span><input type="date" name="contractEndDate" value="{{ payload.get('contractEndDate','') }}"></label>
+        <label><span>Probation (Months)</span><input type="number" min="0" step="1" name="probationMonths" value="{{ payload.get('probationMonths','3') }}"></label>
+        <label><span>Notice Period</span><input name="noticePeriod" value="{{ payload.get('noticePeriod','') }}"></label>
+        <label><span>Work Location</span><input name="workLocation" value="{{ payload.get('workLocation','') }}"></label>
+        <label><span>Work Schedule / Shift</span><input name="workSchedule" placeholder="e.g. Mon-Sat, 8am-5pm" value="{{ payload.get('workSchedule','') }}"></label>
+        <label><span>Expected Hours Per Week</span><input type="number" min="0" step="0.5" name="expectedHoursPerWeek" value="{{ payload.get('expectedHoursPerWeek','') }}"></label>
+        <label><span>Performance Review Frequency</span><select name="reviewFrequency">{% for value in ['Weekly', 'Monthly', 'Quarterly'] %}<option value="{{ value }}" {% if payload.get('reviewFrequency') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label class="span-2"><span>Role Summary / Key Responsibilities</span><textarea name="roleSummary" rows="3" placeholder="The main work this person is responsible for.">{{ payload.get('roleSummary','') }}</textarea></label>
+        <label><span>Primary KPI / Target</span><input name="primaryKpi" placeholder="e.g. Daily POS accuracy; customer follow-up" value="{{ payload.get('primaryKpi','') }}"></label>
+        <label><span>How the KPI Is Measured</span><input name="kpiMeasurement" placeholder="e.g. Daily closeout and monthly report" value="{{ payload.get('kpiMeasurement','') }}"></label>
+      </div>
+    </section>
+
+    <section class="form-section">
+      <div class="form-section-heading"><div><p class="eyebrow">4. Pay</p><h4>Payroll and payment instructions</h4></div><p class="muted">Complete only the pay method that applies. Salary information stays in the protected staff pack.</p></div>
+      <div class="form-grid">
+        <label><span>Pay Basis</span><select name="payBasis">{% for value in ['Monthly', 'Hourly', 'Hybrid'] %}<option value="{{ value }}" {% if payload.get('payBasis') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label><span>Pay Frequency</span><select name="payFrequency">{% for value in ['Monthly', 'Weekly', 'Biweekly'] %}<option value="{{ value }}" {% if payload.get('payFrequency') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label><span>Monthly Salary (GH₵)</span><input type="number" min="0" step="0.01" name="monthlySalary" value="{{ payload.get('monthlySalary','') }}"></label>
+        <label><span>Hourly Rate (GH₵)</span><input type="number" min="0" step="0.01" name="hourlyRate" value="{{ payload.get('hourlyRate','') }}"></label>
+        <label><span>Normal Payday</span><input name="payday" placeholder="e.g. Last working day of month" value="{{ payload.get('payday','') }}"></label>
+        <label><span>Payroll Payment Method</span><select name="payrollPaymentMethod">{% for value in ['Bank Transfer', 'Mobile Money', 'Cash'] %}<option value="{{ value }}" {% if payload.get('payrollPaymentMethod') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label><span>Bank / MoMo Provider</span><input name="paymentProvider" value="{{ payload.get('paymentProvider','') }}"></label>
+        <label><span>Account / MoMo Name</span><input name="accountName" value="{{ payload.get('accountName','') }}"></label>
+        <label><span>Account / MoMo Number</span><input name="accountNumber" value="{{ payload.get('accountNumber','') }}"></label>
+        <label><span>Annual Leave Days</span><input type="number" min="0" step="1" name="annualLeaveDays" value="{{ payload.get('annualLeaveDays','15') }}"></label>
+      </div>
+    </section>
+
+    <section class="form-section">
+      <div class="form-section-heading"><div><p class="eyebrow">5. Readiness</p><h4>System, assets, training, and acknowledgement</h4></div><p class="muted">Use these final checks before the staff member starts independent work.</p></div>
+      <div class="form-grid">
+        <label><span>System Username</span><input name="systemUsername" value="{{ payload.get('systemUsername','') }}"></label>
+        <label><span>Onboarding Status</span><select name="onboardingStatus">{% for value in ['Draft', 'Ready for Signing', 'Active', 'On Hold'] %}<option value="{{ value }}" {% if payload.get('onboardingStatus') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+        <label class="span-2"><span>Company Property Issued</span><textarea name="propertyIssued" rows="2" placeholder="e.g. Name tag, uniform, phone, keys, cash drawer, POS access.">{{ payload.get('propertyIssued','') }}</textarea></label>
+        <label class="span-2"><span>Required Training</span><textarea name="requiredTraining" rows="2" placeholder="e.g. POS closeout, cash handling, service quality, health and safety.">{{ payload.get('requiredTraining','') }}</textarea></label>
+        <label class="span-2"><span>Additional Notes</span><textarea name="notes" rows="3">{{ payload.get('notes','') }}</textarea></label>
+      </div>
+      <div class="checkbox-grid">
+        <label class="checkbox-row"><input type="checkbox" name="identityVerified" {% if payload.get('identityVerified') %}checked{% endif %}><span>Identity document checked</span></label>
+        <label class="checkbox-row"><input type="checkbox" name="policyAcknowledged" {% if payload.get('policyAcknowledged') %}checked{% endif %}><span>Staff policy explained</span></label>
+        <label class="checkbox-row"><input type="checkbox" name="attendanceExplained" {% if payload.get('attendanceExplained') %}checked{% endif %}><span>Attendance and check-out process explained</span></label>
+        <label class="checkbox-row"><input type="checkbox" name="marketingConsent" {% if payload.get('marketingConsent') %}checked{% endif %}><span>Internal staff communication consent recorded</span></label>
+      </div>
+    </section>
+
+    <div class="form-actions staff-onboarding-actions">
+      <a class="button subtle" href="{{ url_for('module_list', module_key='staff_documents') }}">Cancel</a>
+      <button class="button primary" type="submit">Create Completed Staff Pack</button>
+    </div>
+  </form>
 {% endblock %}

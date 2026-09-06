@@ -9,19 +9,54 @@
 
 {% block document_body %}
   <section class="document-copy">
-    <h3>Staff Details</h3>
+    <h3>Employment Profile</h3>
     <p>
       <strong>Name:</strong> {{ profile.get('staffName') }}<br>
+      <strong>Preferred Name:</strong> {{ profile.get('preferredName') or '________________' }}<br>
       <strong>Role:</strong> {{ profile.get('staffRole') }}<br>
+      <strong>Primary Work Area:</strong> {{ profile.get('primaryWorkArea') or '________________' }}<br>
       <strong>Start Date:</strong> {{ profile.get('startDate') }}<br>
+      <strong>Contract End Date:</strong> {{ profile.get('contractEndDate') or 'Open-ended / not fixed' }}<br>
       <strong>Employment Type:</strong> {{ profile.get('employmentType') }}<br>
-      <strong>Monthly Salary:</strong> {{ profile.get('monthlySalary')|currency }}<br>
+      <strong>Supervisor:</strong> {{ profile.get('supervisor') }}<br>
+      <strong>Work Schedule:</strong> {{ profile.get('workSchedule') or '________________' }}<br>
+      <strong>Probation:</strong> {{ profile.get('probationMonths') or '0' }} month(s)<br>
+      <strong>Notice Period:</strong> {{ profile.get('noticePeriod') or '________________' }}
+    </p>
+
+    <h3>Identity And Contact Details</h3>
+    <p>
       <strong>Phone:</strong> {{ profile.get('phone') or '________________' }}<br>
-      <strong>Ghana Card / ID:</strong> {{ profile.get('ghanaCard') or '________________' }}
+      <strong>Alternative Phone:</strong> {{ profile.get('alternatePhone') or '________________' }}<br>
+      <strong>Email:</strong> {{ profile.get('email') or '________________' }}<br>
+      <strong>Home Address:</strong> {{ profile.get('address') or '________________' }}<br>
+      <strong>Ghana Card / ID:</strong> {{ profile.get('ghanaCard') or '________________' }}<br>
+      <strong>SSNIT Number:</strong> {{ profile.get('ssnitNumber') or '________________' }}<br>
+      <strong>Tax ID:</strong> {{ profile.get('taxIdentificationNumber') or '________________' }}
+    </p>
+
+    <h3>Payroll Details</h3>
+    <p>
+      <strong>Pay Basis:</strong> {{ profile.get('payBasis') or 'Monthly' }}<br>
+      <strong>Monthly Salary:</strong> {{ profile.get('monthlySalary')|currency }}<br>
+      <strong>Hourly Rate:</strong> {{ profile.get('hourlyRate')|currency }}<br>
+      <strong>Frequency / Payday:</strong> {{ profile.get('payFrequency') or 'Monthly' }} · {{ profile.get('payday') or 'To be agreed' }}<br>
+      <strong>Payment Method:</strong> {{ profile.get('payrollPaymentMethod') or '________________' }}<br>
+      <strong>Payment Account:</strong> {{ profile.get('paymentProvider') or '________________' }} · {{ profile.get('accountName') or '________________' }} · {{ profile.get('accountNumber') or '________________' }}
     </p>
 
     <h3>Appointment And Employment Confirmation</h3>
-    <p>OneRoot Essentials appoints {{ profile.get('staffName') }} as {{ profile.get('staffRole') }} from {{ profile.get('startDate') }}. The staff member will report to {{ profile.get('supervisor') }} and carry out assigned duties professionally, honestly, safely, and in line with OneRoot procedures.</p>
+    <p>OneRoot Essentials appoints {{ profile.get('staffName') }} as {{ profile.get('staffRole') }} from {{ profile.get('startDate') }}. The staff member will report to {{ profile.get('supervisor') }} and carry out assigned duties professionally, honestly, safely, and in line with OneRoot procedures. {{ profile.get('roleSummary') or 'Role responsibilities will be confirmed by the supervisor.' }}</p>
+
+    <h3>Performance, Assets, And Training</h3>
+    <p>
+      <strong>Primary KPI:</strong> {{ profile.get('primaryKpi') or '________________' }}<br>
+      <strong>Measured By:</strong> {{ profile.get('kpiMeasurement') or '________________' }}<br>
+      <strong>Review Frequency:</strong> {{ profile.get('reviewFrequency') or 'Monthly' }}<br>
+      <strong>Company Property Issued:</strong> {{ profile.get('propertyIssued') or 'None recorded' }}<br>
+      <strong>Required Training:</strong> {{ profile.get('requiredTraining') or 'None recorded' }}<br>
+      <strong>System Username:</strong> {{ profile.get('systemUsername') or 'To be assigned' }}
+    </p>
 
     <h3>Documents In This Pack</h3>
     <ul>
@@ -36,7 +71,10 @@
     <p>The staff member agrees to protect customer, sales, stock, cash, mobile money, tenant, and business information; follow attendance, cash-handling, stock, safety, and customer-service procedures; and return OneRoot property when employment ends.</p>
 
     <h3>Emergency Contact</h3>
-    <p>{{ profile.get('emergencyContact') or '________________' }} · {{ profile.get('emergencyPhone') or '________________' }}</p>
+    <p>{{ profile.get('emergencyContact') or '________________' }} · {{ profile.get('emergencyRelationship') or 'Relationship not recorded' }} · {{ profile.get('emergencyPhone') or '________________' }}<br>{{ profile.get('emergencyAddress') or 'Address not recorded' }}<br>Guarantor: {{ profile.get('guarantorName') or '________________' }} · {{ profile.get('guarantorPhone') or '________________' }}</p>
+
+    <h3>Onboarding Checklist</h3>
+    <p>Identity checked: {{ 'Yes' if profile.get('identityVerified') else 'Pending' }} · Policy explained: {{ 'Yes' if profile.get('policyAcknowledged') else 'Pending' }} · Attendance process explained: {{ 'Yes' if profile.get('attendanceExplained') else 'Pending' }} · Status: {{ profile.get('onboardingStatus') or 'Draft' }}</p>
 
     <h3>Signatures</h3>
     <p>Staff signature: _______________________________ Date: __________________<br>For OneRoot Essentials: _______________________________ Date: __________________</p>
