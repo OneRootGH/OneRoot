@@ -791,6 +791,10 @@ def ensure_schema_columns(engine) -> None:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN unit_cost FLOAT DEFAULT 0")
     if "pos_order_lines" in table_names and "cost_amount" not in existing_columns:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN cost_amount FLOAT DEFAULT 0")
+    if "pos_order_lines" in table_names and "stock_source_product_id" not in existing_columns:
+        statements.append("ALTER TABLE pos_order_lines ADD COLUMN stock_source_product_id VARCHAR(100) DEFAULT ''")
+    if "pos_order_lines" in table_names and "stock_units_per_sale" not in existing_columns:
+        statements.append("ALTER TABLE pos_order_lines ADD COLUMN stock_units_per_sale FLOAT DEFAULT 1")
     product_columns = set()
     if "products" in table_names:
         product_columns = {column["name"] for column in inspector.get_columns("products")}
@@ -798,6 +802,16 @@ def ensure_schema_columns(engine) -> None:
         statements.append("ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT ''")
     if "products" in table_names and "expiry_date" not in product_columns:
         statements.append("ALTER TABLE products ADD COLUMN expiry_date DATE")
+    if "products" in table_names and "stock_source_product_id" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN stock_source_product_id VARCHAR(100) DEFAULT ''")
+    if "products" in table_names and "stock_units_per_sale" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN stock_units_per_sale FLOAT DEFAULT 1")
+    if "products" in table_names and "stock_unit_label" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN stock_unit_label VARCHAR(60) DEFAULT 'piece'")
+    if "products" in table_names and "purchase_pack_size" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN purchase_pack_size FLOAT DEFAULT 1")
+    if "products" in table_names and "purchase_pack_label" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN purchase_pack_label VARCHAR(60) DEFAULT 'unit'")
     user_columns = set()
     if "app_users" in table_names:
         user_columns = {column["name"] for column in inspector.get_columns("app_users")}
@@ -830,6 +844,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 sync_kitchen_menu_catalog(bootstrap_session)
                 sync_equipment_service_catalog(bootstrap_session, app_config)
                 reclassify_legacy_inventory_products(bootstrap_session)
+                restructure_voltic_shared_stock(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 ensure_default_job_vacancies(bootstrap_session, app_config)
@@ -1084,6 +1099,211 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
     return changed
 
 
+VOLTIC_SHARED_STOCK_PRODUCTS = {
+    "single": "voltic cool sachet water",
+    "full": "voltic full bag",
+    "half": "voltic half bag",
+    "cold_half": "voltic half bag cold",
+}
+
+
+def voltic_product_key(value: Any) -> str:
+    return " ".join(
+        "".join(character if character.isalnum() else " " for character in normalize_text(value).lower()).split()
+    )
+
+
+def product_stock_units_per_sale(product: Product | None) -> float:
+    """Return the physical source units used by one sale of this product."""
+    return max(round(parse_amount(product.stock_units_per_sale if product else 1), 4), 0.0001)
+
+
+def product_uses_shared_stock(product: Product | None) -> bool:
+    return bool(product and normalize_text(product.stock_source_product_id))
+
+
+def stock_source_product(db_session, product: Product | None) -> Product | None:
+    if not product:
+        return None
+    source_id = normalize_text(product.stock_source_product_id)
+    if source_id:
+        source = db_session.get(Product, source_id)
+        if source:
+            return source
+    return product
+
+
+def sync_shared_stock_variant_quantities(db_session, source_product: Product | None) -> None:
+    """Keep pack rows readable while the source item remains the only real balance."""
+    if not source_product:
+        return
+    source_quantity = round(parse_amount(source_product.quantity_on_hand), 4)
+    for variant in db_session.scalars(
+        select(Product).where(Product.stock_source_product_id == source_product.id)
+    ).all():
+        variant.quantity_on_hand = round(source_quantity / product_stock_units_per_sale(variant), 4)
+        variant.quantity_known = bool(source_product.quantity_known)
+        variant.updated_at = datetime.utcnow()
+
+
+def stock_display_quantity(product: Product | None) -> float:
+    return round(parse_amount(product.quantity_on_hand if product else 0), 4)
+
+
+def adjust_product_stock(db_session, product: Product, sale_quantity: Any, *, direction: float) -> Product:
+    """Post a stock movement once against the physical source item, including pack conversions."""
+    source_product = stock_source_product(db_session, product)
+    if not source_product:
+        return product
+    movement = round(max(parse_amount(sale_quantity), 0) * product_stock_units_per_sale(product) * direction, 4)
+    source_product.quantity_on_hand = round(parse_amount(source_product.quantity_on_hand) + movement, 4)
+    source_product.quantity_known = True
+    source_product.updated_at = datetime.utcnow()
+    sync_shared_stock_variant_quantities(db_session, source_product)
+    return source_product
+
+
+def restructure_voltic_shared_stock(db_session) -> bool:
+    """Convert historic Voltic pack rows into one sachet stock balance with pack sell options."""
+    products = db_session.scalars(select(Product).where(Product.active.is_(True))).all()
+    by_name = {voltic_product_key(product.name): product for product in products}
+    source_product = (
+        by_name.get(VOLTIC_SHARED_STOCK_PRODUCTS["single"])
+        or by_name.get("voltic cool sachet water single sachet")
+        or next(
+            (
+                product
+                for product in products
+                if normalize_text(product.stock_unit_label).lower() == "pieces"
+                and normalize_text(product.purchase_pack_label).lower() == "bag (30 pieces)"
+                and "voltic" in normalize_text(product.name).lower()
+            ),
+            None,
+        )
+    )
+    if not source_product:
+        return False
+
+    variants = {
+        "full": (
+            by_name.get(VOLTIC_SHARED_STOCK_PRODUCTS["full"])
+            or by_name.get("voltic water full bag 30 pieces")
+            or next((item for item in products if item.stock_source_product_id == source_product.id and product_stock_units_per_sale(item) == 30), None)
+        ),
+        "half": (
+            by_name.get(VOLTIC_SHARED_STOCK_PRODUCTS["half"])
+            or by_name.get("voltic water half bag 15 pieces")
+            or next((item for item in products if item.stock_source_product_id == source_product.id and normalize_text(item.stock_unit_label).lower() == "half bags"), None)
+        ),
+        "cold_half": (
+            by_name.get(VOLTIC_SHARED_STOCK_PRODUCTS["cold_half"])
+            or by_name.get("voltic water cold half bag 15 pieces")
+            or next((item for item in products if item.stock_source_product_id == source_product.id and "cold" in normalize_text(item.stock_unit_label).lower()), None)
+        ),
+    }
+    if not any(variants.values()):
+        return False
+
+    changed = False
+    # First run merges historical sales quantities that were previously split across four rows.
+    needs_historic_merge = any(
+        variant and normalize_text(variant.stock_source_product_id) != source_product.id
+        for variant in variants.values()
+    )
+    if needs_historic_merge:
+        historic_piece_balance = parse_amount(source_product.quantity_on_hand)
+        historic_piece_balance += sum(
+            parse_amount(variant.quantity_on_hand) * conversion
+            for variant, conversion in (
+                (variants["full"], 30),
+                (variants["half"], 15),
+                (variants["cold_half"], 15),
+            )
+            if variant
+        )
+        historic_rows = [source_product, *[item for item in variants.values() if item]]
+        # All four legacy balances were negative in the supplied record: they reflect
+        # sales without an opening count, not stock that can be carried forward.
+        # Start the new shared count at zero so staff can enter the real bag count.
+        source_product.quantity_on_hand = (
+            0.0
+            if all(parse_amount(item.quantity_on_hand) <= 0 for item in historic_rows)
+            else round(historic_piece_balance, 4)
+        )
+        changed = True
+
+    source_updates = {
+        "name": "Voltic Cool Sachet Water - Single Sachet",
+        "business_area_id": "cold-store-groceries",
+        "category": "Drinks & Refreshments",
+        "item_type": "stock",
+        "track_inventory": True,
+        "quantity_known": True,
+        "stock_source_product_id": "",
+        "stock_units_per_sale": 1,
+        "stock_unit_label": "pieces",
+        "purchase_pack_size": 30,
+        "purchase_pack_label": "bag (30 pieces)",
+        "min_stock_level": max(int(parse_amount(source_product.min_stock_level)), 30),
+    }
+    for field, value in source_updates.items():
+        if getattr(source_product, field) != value:
+            setattr(source_product, field, value)
+            changed = True
+    if not normalize_text(source_product.notes).startswith("Shared Voltic stock"):
+        source_product.notes = (
+            "Shared Voltic stock: receive stock in bags of 30 pieces. "
+            "Sell sachets, full bags, half bags, and cold half bags from this one balance. "
+            "Legacy split balances were retained in sales history; complete a physical bag count before the next sale."
+        )
+        changed = True
+
+    variant_specs = {
+        "full": ("Voltic Water - Full Bag (30 Pieces)", 30, "full bags"),
+        "half": ("Voltic Water - Half Bag (15 Pieces)", 15, "half bags"),
+        "cold_half": ("Voltic Water - Cold Half Bag (15 Pieces)", 15, "cold half bags"),
+    }
+    for key, variant in variants.items():
+        if not variant:
+            continue
+        name, units, unit_label = variant_specs[key]
+        variant_updates = {
+            "name": name,
+            "business_area_id": "cold-store-groceries",
+            "category": "Drinks & Refreshments",
+            "item_type": "stock",
+            "track_inventory": True,
+            "quantity_known": True,
+            "stock_source_product_id": source_product.id,
+            "stock_units_per_sale": units,
+            "stock_unit_label": unit_label,
+            "purchase_pack_size": 1,
+            "purchase_pack_label": "sell unit",
+            "min_stock_level": 1,
+        }
+        for field, value in variant_updates.items():
+            if getattr(variant, field) != value:
+                setattr(variant, field, value)
+                changed = True
+        note = f"Uses shared Voltic sachet stock. Each sale deducts {units} pieces."
+        if normalize_text(variant.notes) != note:
+            variant.notes = note
+            changed = True
+
+    if changed:
+        source_product.updated_at = datetime.utcnow()
+        for product in [source_product, *[item for item in variants.values() if item]]:
+            product.sku = generate_auto_product_sku(
+                product_id=product.id,
+                name=product.name,
+                business_area_id=product.business_area_id,
+                category=product.category,
+            )
+            normalize_product_record(product)
+        sync_shared_stock_variant_quantities(db_session, source_product)
+    return changed
+
+
 def sync_equipment_service_catalog(db_session, app_config: AppConfig) -> None:
     db_session.flush()
     service_offers = [
@@ -1270,6 +1490,18 @@ def format_product_stock_badge(item_or_payload: Product | dict[str, Any]) -> str
         quantity_display = str(int(round(quantity_value)))
     else:
         quantity_display = f"{quantity_value:.2f}".rstrip("0").rstrip(".")
+    if isinstance(item_or_payload, Product):
+        if product_uses_shared_stock(item_or_payload):
+            return f"Stock {quantity_display} {normalize_text(item_or_payload.stock_unit_label) or 'units'}"
+        if parse_amount(item_or_payload.purchase_pack_size) > 1:
+            pack_size = parse_amount(item_or_payload.purchase_pack_size)
+            pack_count = quantity_value / pack_size if pack_size else 0
+            pack_display = (
+                str(int(round(pack_count)))
+                if abs(pack_count - round(pack_count)) < 0.001
+                else f"{pack_count:.2f}".rstrip("0").rstrip(".")
+            )
+            return f"Stock {quantity_display} pieces ({pack_display} bags)"
     return f"Stock {quantity_display}"
 
 
@@ -1425,6 +1657,9 @@ def build_inventory_risk_rows(products: list[Product], *, area_filter: str = "",
     rows: list[dict[str, Any]] = []
     for product in products:
         if not product.active or not product_tracks_inventory(product):
+            continue
+        # Pack options share their source's physical quantity and should not create duplicate alerts.
+        if product_uses_shared_stock(product):
             continue
         if selected_area and normalize_text(product.business_area_id) != selected_area:
             continue
@@ -6990,9 +7225,7 @@ def sync_kitchen_recipe_inventory(db_session, payload: dict[str, Any], previous_
         product = db_session.get(Product, product_id)
         if not product or not product_tracks_inventory(product):
             continue
-        product.quantity_on_hand = round(parse_amount(product.quantity_on_hand) - delta, 2)
-        product.quantity_known = True
-        product.updated_at = datetime.utcnow()
+        adjust_product_stock(db_session, product, abs(delta), direction=-1 if delta > 0 else 1)
         changed_products.append(f"{product.name} ({delta:g})")
 
     payload["inventoryIssueNote"] = (
@@ -7011,7 +7244,12 @@ def kitchen_recipe_stock_errors(db_session, payload: dict[str, Any], previous_pa
         if not product or not product_tracks_inventory(product):
             errors.append("One selected kitchen ingredient is no longer an active stock item. Refresh the form and choose it again.")
             continue
-        available_quantity = round(parse_amount(product.quantity_on_hand) + previous_quantities.get(product_id, 0), 2)
+        source_product = stock_source_product(db_session, product)
+        available_quantity = round(
+            parse_amount(source_product.quantity_on_hand) / product_stock_units_per_sale(product)
+            + previous_quantities.get(product_id, 0),
+            2,
+        )
         if requested_quantity > available_quantity + 0.009:
             errors.append(
                 f"{product.name} has only {available_quantity:g} available in shared POS stock; the batch requests {requested_quantity:g}."
@@ -7096,8 +7334,7 @@ def supplier_price_update_product(db_session, payload: dict[str, Any], previous_
     quantity_delta = round(current_received - previous_received, 2)
     product.cost_price = max(parse_amount(payload.get("newUnitCost")), 0)
     if quantity_delta and normalized_product_item_type(product.item_type, product.track_inventory) != "service":
-        product.quantity_on_hand = round(parse_amount(product.quantity_on_hand) + quantity_delta, 2)
-        product.quantity_known = True
+        adjust_product_stock(db_session, product, abs(quantity_delta), direction=1 if quantity_delta > 0 else -1)
     normalize_product_record(product)
     payload["linkedProductId"] = product.id
     payload["productName"] = product.name
@@ -7105,7 +7342,7 @@ def supplier_price_update_product(db_session, payload: dict[str, Any], previous_
     payload["businessAreaId"] = normalize_text(product.business_area_id) or normalize_text(payload.get("businessAreaId"))
     payload["category"] = normalize_text(product.category) or normalize_text(payload.get("category"))
     payload["inventoryUpdateNote"] = (
-        f"Updated {product.name}; stock changed by {quantity_delta:g}."
+        f"Updated {product.name}; stock changed by {quantity_delta:g} sell units."
         if quantity_delta
         else f"Updated latest unit cost for {product.name}."
     )
@@ -10492,6 +10729,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "costPrice": product.cost_price,
                     "quantityOnHand": product.quantity_on_hand,
                     "quantityKnown": product.quantity_known,
+                    "stockSourceProductId": product.stock_source_product_id,
+                    "stockUnitsPerSale": product_stock_units_per_sale(product),
+                    "stockUnitLabel": product.stock_unit_label,
                     "itemType": normalized_product_item_type(product.item_type, product.track_inventory),
                     "trackInventory": product_tracks_inventory(product),
                     "imageUrl": product_image_src(product),
@@ -11715,8 +11955,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not product:
                 continue
             quantity = max(parse_amount(item.get("quantity")), 1.0)
-            product.quantity_on_hand = round(product.quantity_on_hand - quantity, 2)
-            product.updated_at = datetime.utcnow()
+            adjust_product_stock(db, product, quantity, direction=-1)
             posted_any = True
 
         if posted_any:
@@ -11740,6 +11979,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 unit_price = parse_amount(catalog_item.get("salesPrice"))
             pricing_multiplier = max(parse_amount(raw_item.get("pricingMultiplier") or 1), 1.0)
             line_total = round(quantity * unit_price * pricing_multiplier, 2)
+            inventory_product = g.db.get(Product, catalog_item["id"])
+            source_product = stock_source_product(g.db, inventory_product)
             order_items.append(
                 {
                     "productId": catalog_item["id"],
@@ -11750,6 +11991,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "itemType": catalog_item.get("itemType", "stock"),
                     "trackInventory": bool(catalog_item.get("trackInventory")),
                     "quantity": quantity,
+                    "stockSourceProductId": source_product.id if source_product else "",
+                    "stockUnitsPerSale": product_stock_units_per_sale(inventory_product),
                     "unitPrice": unit_price,
                     "pricingMultiplier": pricing_multiplier,
                     "requestedDays": max(int(round(parse_amount(raw_item.get("requestedDays") or 0))), 0),
@@ -16812,7 +17055,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 product.business_area_id = normalize_text(request.form.get("business_area_id"))
                 product.category = normalize_text(request.form.get("category"))
                 product.item_type = normalized_product_item_type(request.form.get("item_type"), True)
-                product.quantity_on_hand = parse_amount(request.form.get("quantity_on_hand"))
+                entered_quantity = parse_amount(request.form.get("quantity_on_hand"))
+                received_bags = max(parse_amount(request.form.get("received_bags")), 0)
+                if not product_uses_shared_stock(product):
+                    product.quantity_on_hand = entered_quantity
+                    if received_bags and parse_amount(product.purchase_pack_size) > 1:
+                        product.quantity_on_hand = round(
+                            product.quantity_on_hand + received_bags * parse_amount(product.purchase_pack_size),
+                            4,
+                        )
                 product.min_stock_level = int(parse_amount(request.form.get("min_stock_level")))
                 product.sales_price = parse_amount(request.form.get("sales_price"))
                 product.cost_price = parse_amount(request.form.get("cost_price"))
@@ -16835,6 +17086,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     raise ValueError("Name, business area, and category are required.")
 
                 normalize_product_record(product)
+                if product_uses_shared_stock(product):
+                    source_product = stock_source_product(g.db, product)
+                    sync_shared_stock_variant_quantities(g.db, source_product)
+                else:
+                    sync_shared_stock_variant_quantities(g.db, product)
                 audit("inventory", "Inventory", "create" if is_new else "update", product.name, product.id)
                 g.db.commit()
                 flash("Inventory item saved.", "success")
@@ -16886,16 +17142,28 @@ def create_app(config: AppConfig | None = None) -> Flask:
         low_stock_count = sum(
             1
             for item in products
-            if product_tracks_inventory(item) and item.active and item.quantity_on_hand <= item.min_stock_level
+            if product_tracks_inventory(item)
+            and not product_uses_shared_stock(item)
+            and item.active
+            and item.quantity_on_hand <= item.min_stock_level
         )
         active_count = sum(1 for item in products if item.active)
         service_count = sum(1 for item in products if normalized_product_item_type(item.item_type, item.track_inventory) == "service")
-        stock_value = round(sum(item.quantity_on_hand * item.cost_price for item in products if product_tracks_inventory(item)), 2)
+        stock_value = round(
+            sum(
+                item.quantity_on_hand * item.cost_price
+                for item in products
+                if product_tracks_inventory(item) and not product_uses_shared_stock(item)
+            ),
+            2,
+        )
         discard_value = round(
             sum(
                 item.quantity_on_hand * item.cost_price
                 for item in products
-                if product_tracks_inventory(item) and product_expiry_status(item)["isExpired"]
+                if product_tracks_inventory(item)
+                and not product_uses_shared_stock(item)
+                and product_expiry_status(item)["isExpired"]
             ),
             2,
         )
@@ -16930,6 +17198,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         barcode_value = normalize_text(request.values.get("barcode"))
         action_type = normalize_text(request.values.get("actionType")).lower() or "add"
         quantity_value = round(parse_amount(request.values.get("quantity")), 2) or 1.0
+        stock_unit_mode = normalize_text(request.values.get("stockUnit")) or "pieces"
         note_value = normalize_text(request.values.get("note"))
         matching_product = None
 
@@ -16955,30 +17224,42 @@ def create_app(config: AppConfig | None = None) -> Flask:
             elif action_type in {"remove", "set"} and not note_value:
                 flash("Enter a reason for a stock reduction or stock count adjustment.", "warning")
             else:
-                previous_quantity = round(parse_amount(matching_product.quantity_on_hand), 2)
+                source_product = stock_source_product(g.db, matching_product)
+                if not source_product:
+                    flash("That stock item has no valid inventory source.", "error")
+                    return redirect(url_for("inventory_barcode"))
+                multiplier = 1.0
+                if product_uses_shared_stock(matching_product):
+                    multiplier = product_stock_units_per_sale(matching_product)
+                elif stock_unit_mode == "bags" and parse_amount(matching_product.purchase_pack_size) > 1:
+                    multiplier = parse_amount(matching_product.purchase_pack_size)
+                previous_quantity = round(parse_amount(source_product.quantity_on_hand), 2)
                 quantity_value = max(quantity_value, 0)
+                physical_quantity = round(quantity_value * multiplier, 4)
                 if action_type == "set":
-                    new_quantity = quantity_value
+                    new_quantity = physical_quantity
                     action_label = "set"
                 elif action_type == "remove":
-                    new_quantity = max(previous_quantity - quantity_value, 0)
+                    new_quantity = max(previous_quantity - physical_quantity, 0)
                     action_label = "reduced"
                 else:
-                    new_quantity = previous_quantity + quantity_value
+                    new_quantity = previous_quantity + physical_quantity
                     action_label = "added"
-                matching_product.quantity_on_hand = round(new_quantity, 2)
-                matching_product.quantity_known = True
+                source_product.quantity_on_hand = round(new_quantity, 2)
+                source_product.quantity_known = True
+                source_product.updated_at = datetime.utcnow()
+                sync_shared_stock_variant_quantities(g.db, source_product)
                 audit(
                     "inventory",
                     "Inventory",
                     "update",
                     matching_product.name,
                     matching_product.id,
-                    f"Barcode stock update {action_label} {quantity_value:,.2f}. {previous_quantity:,.2f} -> {new_quantity:,.2f}. {note_value}".strip(),
+                    f"Barcode stock update {action_label} {quantity_value:,.2f} ({physical_quantity:,.2f} pieces). {previous_quantity:,.2f} -> {new_quantity:,.2f}. {note_value}".strip(),
                 )
                 g.db.commit()
                 flash(
-                    f"{matching_product.name} updated from {previous_quantity:,.2f} to {new_quantity:,.2f}.",
+                    f"{source_product.name} updated from {previous_quantity:,.2f} to {new_quantity:,.2f} pieces.",
                     "success",
                 )
                 return redirect(url_for("inventory_barcode"))
@@ -16995,8 +17276,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             barcode_value=barcode_value,
             action_type=action_type,
             quantity_value=quantity_value,
+            stock_unit_mode=stock_unit_mode,
             note_value=note_value,
             matching_product=matching_product,
+            stock_update_source=stock_source_product(g.db, matching_product),
             recent_stock_items=recent_stock_items,
             business_area_short=BUSINESS_AREA_SHORT,
             format_product_stock_badge=format_product_stock_badge,
@@ -17377,6 +17660,30 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return jsonify({"ok": False, "error": "Kitchen stock issues can use tracked inventory items only."}), 400
         if food_pos_mode and not kitchen_issue_mode and any(normalize_text(product.business_area_id) != "kitchen" for product in products.values()):
             return jsonify({"ok": False, "error": "Food POS accepts OneRoot Kitchen items only."}), 400
+        if not kitchen_issue_mode:
+            requested_stock_by_source: dict[str, float] = defaultdict(float)
+            stock_sources: dict[str, Product] = {}
+            for item in items:
+                product = products[normalize_text(item.get("productId"))]
+                if not product_tracks_inventory(product):
+                    continue
+                source_product = stock_source_product(g.db, product)
+                if not source_product:
+                    return jsonify({"ok": False, "error": f"{product.name} has no valid stock source."}), 400
+                requested_stock_by_source[source_product.id] += max(parse_amount(item.get("quantity")), 1.0) * product_stock_units_per_sale(product)
+                stock_sources[source_product.id] = source_product
+            for source_id, requested_quantity in requested_stock_by_source.items():
+                source_product = stock_sources[source_id]
+                if requested_quantity > parse_amount(source_product.quantity_on_hand) + 0.009:
+                    return jsonify(
+                        {
+                            "ok": False,
+                            "error": (
+                                f"{source_product.name} has only {parse_amount(source_product.quantity_on_hand):g} pieces available "
+                                f"for this sale."
+                            ),
+                        }
+                    ), 400
         if kitchen_issue_mode:
             requested_quantities: dict[str, float] = defaultdict(float)
             for item in items:
@@ -17422,6 +17729,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             cost_amount = round(quantity * unit_cost, 2)
             line_total = round(quantity * unit_price, 2)
             line_tracks_inventory = product_tracks_inventory(product)
+            source_product = stock_source_product(g.db, product) if line_tracks_inventory else None
+            stock_units = product_stock_units_per_sale(product) if line_tracks_inventory else 1.0
             line = PosOrderLine(
                 id=f"{order_id}:{position}",
                 position=position,
@@ -17438,6 +17747,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 unit_cost=unit_cost,
                 cost_amount=cost_amount,
                 total_amount=line_total,
+                stock_source_product_id=source_product.id if source_product else "",
+                stock_units_per_sale=stock_units,
             )
             order.lines.append(line)
             subtotal += line_total
@@ -17445,8 +17756,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if product.business_area_id:
                 area_ids.append(product.business_area_id)
             if line_tracks_inventory:
-                product.quantity_on_hand = round(product.quantity_on_hand - quantity, 2)
-                product.updated_at = datetime.utcnow()
+                adjust_product_stock(g.db, product, quantity, direction=-1)
 
         order.business_area_ids = sorted(set(area_ids))
         order.primary_business_area_id = order.business_area_ids[0] if order.business_area_ids else ""
@@ -17576,10 +17886,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not line.track_inventory:
                 continue
             product = g.db.get(Product, line.product_id)
-            if not product:
+            source_product = g.db.get(Product, normalize_text(line.stock_source_product_id)) if normalize_text(line.stock_source_product_id) else None
+            source_product = source_product or stock_source_product(g.db, product)
+            if not source_product:
                 continue
-            product.quantity_on_hand = round(parse_amount(product.quantity_on_hand) + parse_amount(line.quantity), 2)
-            product.updated_at = datetime.utcnow()
+            units_per_sale = max(parse_amount(line.stock_units_per_sale), 0.0001)
+            source_product.quantity_on_hand = round(
+                parse_amount(source_product.quantity_on_hand) + parse_amount(line.quantity) * units_per_sale,
+                4,
+            )
+            source_product.quantity_known = True
+            source_product.updated_at = datetime.utcnow()
+            sync_shared_stock_variant_quantities(g.db, source_product)
 
         g.db.delete(order)
         g.db.flush()

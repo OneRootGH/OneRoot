@@ -91,6 +91,13 @@ class Product(Base):
     quantity_on_hand: Mapped[float] = mapped_column(Float, default=0)
     quantity_known: Mapped[bool] = mapped_column(Boolean, default=True)
     min_stock_level: Mapped[int] = mapped_column(Integer, default=0)
+    # A sellable pack can draw from another product's physical stock.  For example,
+    # a Voltic full bag consumes 30 sachets from the shared Voltic sachet balance.
+    stock_source_product_id: Mapped[str] = mapped_column(String(100), default="", index=True)
+    stock_units_per_sale: Mapped[float] = mapped_column(Float, default=1)
+    stock_unit_label: Mapped[str] = mapped_column(String(60), default="piece")
+    purchase_pack_size: Mapped[float] = mapped_column(Float, default=1)
+    purchase_pack_label: Mapped[str] = mapped_column(String(60), default="unit")
     sales_price: Mapped[float] = mapped_column(Float, default=0)
     cost_price: Mapped[float] = mapped_column(Float, default=0)
     expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)
@@ -146,6 +153,8 @@ class PosOrderLine(Base):
     unit_cost: Mapped[float] = mapped_column(Float, default=0)
     cost_amount: Mapped[float] = mapped_column(Float, default=0)
     total_amount: Mapped[float] = mapped_column(Float, default=0)
+    stock_source_product_id: Mapped[str] = mapped_column(String(100), default="", index=True)
+    stock_units_per_sale: Mapped[float] = mapped_column(Float, default=1)
 
     order: Mapped["PosOrder"] = relationship(back_populates="lines")
 

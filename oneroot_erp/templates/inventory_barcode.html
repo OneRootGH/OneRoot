@@ -32,7 +32,7 @@
     <article class="metric-card">
       <span>Live Stock</span>
       <strong>{% if matching_product %}{{ format_product_stock_badge(matching_product) }}{% else %}—{% endif %}</strong>
-      <small>Current saved quantity</small>
+      <small>{% if stock_update_source and stock_update_source.id != matching_product.id %}Shared physical balance{% else %}Current saved quantity{% endif %}</small>
     </article>
   </section>
 
@@ -61,6 +61,19 @@
           <span>Quantity</span>
           <input type="number" step="0.01" min="0" name="quantity" value="{{ quantity_value or 1 }}">
         </label>
+        {% if matching_product and (matching_product.stock_source_product_id or matching_product.purchase_pack_size > 1) %}
+          <label>
+            <span>Count As</span>
+            <select name="stockUnit">
+              {% if matching_product.stock_source_product_id %}
+                <option value="sale-unit" selected>{{ matching_product.stock_unit_label|title }} ({{ matching_product.stock_units_per_sale|round(0)|int }} pieces each)</option>
+              {% else %}
+                <option value="pieces" {% if stock_unit_mode != 'bags' %}selected{% endif %}>Pieces</option>
+                <option value="bags" {% if stock_unit_mode == 'bags' %}selected{% endif %}>{{ matching_product.purchase_pack_label|title }}</option>
+              {% endif %}
+            </select>
+          </label>
+        {% endif %}
         <label class="span-2">
           <span>Note</span>
           <input type="text" name="note" value="{{ note_value }}" placeholder="Optional reason, source, or count note">
@@ -87,6 +100,7 @@
             <span>SKU {{ matching_product.sku or "—" }} · Barcode {{ matching_product.barcode or "—" }}</span>
             <span>Sales {{ matching_product.sales_price|currency }} · Cost {{ matching_product.cost_price|currency }}</span>
             <span>Stock {{ format_product_stock_badge(matching_product) }}</span>
+            {% if stock_update_source and stock_update_source.id != matching_product.id %}<span>Updates shared stock: {{ stock_update_source.name }}</span>{% endif %}
           </div>
         </div>
       {% else %}
