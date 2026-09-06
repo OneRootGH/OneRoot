@@ -4447,7 +4447,7 @@ SIDEBAR_LINK_LABELS = {
     "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
     "pos": ("POS", "pos_page", None),
     "food_pos": ("Food POS", "food_pos_page", None),
-    "workbook": ("Excel Workbook", "download_workbook", None),
+    "workbook": ("Data Export & Recovery", "download_workbook", None),
     "audit": ("Audit Trail", "audit_page", None),
     "online_orders": ("Online Orders", "online_orders_desk", None),
     "users": ("User Accounts", "users_page", None),
@@ -5798,6 +5798,17 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
                 "value": f"{uploaded_receipts}",
                 "note": f"{max(len(records) - uploaded_receipts, 0)} record{'s' if max(len(records) - uploaded_receipts, 0) != 1 else ''} still need receipts",
             },
+        ]
+    elif definition.key == "petty_cash":
+        float_added = round(sum(max(petty_cash_float_delta(record.payload or {}), 0) for record in records), 2)
+        float_used = round(sum(abs(min(petty_cash_float_delta(record.payload or {}), 0)) for record in records), 2)
+        float_balance = round(sum(petty_cash_float_delta(record.payload or {}) for record in records), 2)
+        linked_expense_count = sum(1 for record in records if normalize_text((record.payload or {}).get("linkedExpenseId")))
+        cards = [
+            {"label": "Expected Float", "value": format_currency(float_balance), "note": "Opening and top-ups less returns and linked expenses"},
+            {"label": "Float Added", "value": format_currency(float_added), "note": "Top-ups, reimbursements, and positive count adjustments"},
+            {"label": "Float Used", "value": format_currency(float_used), "note": "Returns, linked expenses, and negative adjustments"},
+            {"label": "Linked Expenses", "value": f"{linked_expense_count}", "note": "Expenses automatically reflected in the float"},
         ]
     elif definition.key == "customer_credit_accounts":
         balances: dict[str, float] = defaultdict(float)
@@ -7375,6 +7386,45 @@ def migrate_planning_workspace(db_session) -> None:
         apply_module_record_metadata(merged_record, planning_definition, merged_payload)
         db_session.add(merged_record)
 
+    legacy_petty_limit_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "petty_cash_budgets")
+        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+    ).all()
+    for legacy_record in legacy_petty_limit_records:
+        if legacy_record.id in migrated_source_ids:
+            continue
+        source_payload = dict(legacy_record.payload or {})
+        legacy_note = normalize_text(source_payload.get("notes"))
+        merged_payload = {
+            "id": uuid4().hex,
+            "createdAt": legacy_record.created_at.isoformat(),
+            "updatedAt": legacy_record.updated_at.isoformat(),
+            "month": normalize_text(source_payload.get("month")) or legacy_record.month,
+            "businessAreaId": normalize_text(source_payload.get("businessAreaId")) or legacy_record.business_area_id,
+            "planType": "Budget Line",
+            "planName": "Petty Cash Float Control Limit",
+            "category": "Petty Cash Float",
+            "budgetAmount": 0,
+            "revenueTarget": 0,
+            "expenseBudget": 0,
+            "salaryBudget": 0,
+            "marketingBudget": 0,
+            "pettyCashBudget": parse_amount(source_payload.get("budgetAmount")) or legacy_record.amount,
+            "stockBudget": 0,
+            "notes": f"Migrated from legacy Petty Cash Limits.{f' {legacy_note}' if legacy_note else ''}",
+            "mergedSourceRecordId": legacy_record.id,
+            "mergedSourceModule": "petty_cash_budgets",
+        }
+        planning_rollup(merged_payload)
+        merged_record = ModuleRecord(
+            id=merged_payload["id"],
+            module_key="forecast_plans",
+            created_at=legacy_record.created_at,
+        )
+        apply_module_record_metadata(merged_record, planning_definition, merged_payload)
+        db_session.add(merged_record)
+
 
 def record_month_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
     for candidate in (definition.month_field, "month"):
@@ -8621,7 +8671,7 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
         )
         petty_cash_total = round(
             sum(
-                record.amount
+                petty_cash_operating_expense_amount(record.payload or {})
                 for record in records
                 if record.module_key == "petty_cash"
                 and record_in_month_scope(record, month_value)
@@ -8684,6 +8734,42 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
         )
     rows.sort(key=lambda item: item["salesTotal"], reverse=True)
     return rows
+
+
+def petty_cash_float_delta(payload: dict[str, Any]) -> float:
+    """Return the cash-float movement without treating it as a business expense."""
+    amount = abs(parse_amount(payload.get("amount")))
+    transaction_type = normalize_text(payload.get("transactionTypeId"))
+    if transaction_type in {"Float Top-Up", "Reimbursement", "Cash Count Adjustment (+)"}:
+        return amount
+    if transaction_type in {
+        "Float Return",
+        "Cash Count Adjustment (-)",
+        "Expense Paid (linked from Expenses)",
+        "Restock Purchase",
+        "Transport",
+        "Cleaning & Supplies",
+        "Maintenance Support",
+        "Staff Welfare",
+        "Miscellaneous",
+    }:
+        return -amount
+    return amount if transaction_type == "Refund / Reversal" else 0.0
+
+
+def petty_cash_operating_expense_amount(payload: dict[str, Any]) -> float:
+    """Only legacy standalone spend rows reduce profit; new expenses live in Expenses."""
+    if normalize_text(payload.get("linkedExpenseId")):
+        return 0.0
+    legacy_spend_types = {
+        "Restock Purchase",
+        "Transport",
+        "Cleaning & Supplies",
+        "Maintenance Support",
+        "Staff Welfare",
+        "Miscellaneous",
+    }
+    return abs(parse_amount(payload.get("amount"))) if normalize_text(payload.get("transactionTypeId")) in legacy_spend_types else 0.0
 
 
 def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") -> dict[str, Any]:
@@ -11412,6 +11498,98 @@ def create_app(config: AppConfig | None = None) -> Flask:
             select(ModuleRecord).where(ModuleRecord.module_key == "customer_credit_accounts")
         ).all():
             sync_customer_credit_payment_to_cashbook(credit_record, db_session)
+
+    def expense_paid_from_account(payload: dict[str, Any]) -> str:
+        selected_account = normalize_text(payload.get("paidFromAccount"))
+        if selected_account:
+            return selected_account
+        method = normalize_text(payload.get("paymentMethod")).lower()
+        if method == "cash":
+            return "Main Cash Drawer"
+        if method in {"mobile money", "momo"}:
+            return "OneRoot MoMo Collection Wallet"
+        return "Business Bank Account"
+
+    def expense_payment_is_settled(payload: dict[str, Any]) -> bool:
+        return normalize_text(payload.get("paymentMethod")).lower() not in {
+            "credit",
+            "pay on pickup",
+            "cash on delivery",
+        }
+
+    def sync_expense_payment_to_finance_records(record: ModuleRecord, db_session=None) -> None:
+        """Create one auditable cash movement per expense and update the petty float when used."""
+        db = db_session or g.db
+        payload = dict(record.payload or {})
+        amount = round(abs(parse_amount(payload.get("amount"))), 2)
+        account_name = expense_paid_from_account(payload)
+        cashbook_reference = f"expense-payment|{record.id}"
+        petty_reference = f"expense-petty-cash|{record.id}"
+        linked_cashbook = db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "cashbook_entries",
+                ModuleRecord.reference == cashbook_reference,
+            )
+        )
+        linked_petty = db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "petty_cash",
+                ModuleRecord.reference == petty_reference,
+            )
+        )
+
+        if amount <= 0 or not expense_payment_is_settled(payload):
+            if linked_cashbook:
+                db.delete(linked_cashbook)
+            if linked_petty:
+                db.delete(linked_petty)
+            return
+
+        cashbook_payload = {
+            "id": linked_cashbook.id if linked_cashbook else uuid4().hex,
+            "date": normalize_text(payload.get("date")) or date.today().isoformat(),
+            "businessAreaId": normalize_text(payload.get("businessAreaId")) or "shared-operations",
+            "accountName": account_name,
+            "entryType": "Cash Out",
+            "amount": amount,
+            "paymentMethod": normalize_text(payload.get("paymentMethod")) or "Cash",
+            "reference": cashbook_reference,
+            "sourceType": "expense-payment",
+            "linkedExpenseId": record.id,
+            "notes": (
+                f"[Expense Sync] {normalize_text(payload.get('vendor')) or 'Vendor'} · "
+                f"{normalize_text(payload.get('category')) or 'Expense'} · "
+                f"{normalize_text(payload.get('description')) or 'Business expense'}"
+            ),
+        }
+        if not linked_cashbook:
+            linked_cashbook = ModuleRecord(
+                id=cashbook_payload["id"], module_key="cashbook_entries", created_at=datetime.utcnow()
+            )
+            db.add(linked_cashbook)
+        set_module_record_metadata(linked_cashbook, MODULES["cashbook_entries"], cashbook_payload)
+
+        if account_name == "Petty Cash Float":
+            petty_payload = {
+                "id": linked_petty.id if linked_petty else uuid4().hex,
+                "date": normalize_text(payload.get("date")) or date.today().isoformat(),
+                "businessAreaId": normalize_text(payload.get("businessAreaId")) or "shared-operations",
+                "transactionTypeId": "Expense Paid (linked from Expenses)",
+                "description": f"Expense: {normalize_text(payload.get('vendor')) or normalize_text(payload.get('category')) or 'OneRoot purchase'}",
+                "amount": amount,
+                "paymentMethod": normalize_text(payload.get("paymentMethod")) or "Cash",
+                "reference": petty_reference,
+                "linkedExpenseId": record.id,
+                "notes": "Created automatically from the matching expense. Do not enter this purchase again in Cash Float Control.",
+            }
+            if not linked_petty:
+                linked_petty = ModuleRecord(
+                    id=petty_payload["id"], module_key="petty_cash", created_at=datetime.utcnow()
+                )
+                db.add(linked_petty)
+            set_module_record_metadata(linked_petty, MODULES["petty_cash"], petty_payload)
+        elif linked_petty:
+            db.delete(linked_petty)
 
     def customer_credit_collection_summary(db_session, entry_date: date, area_id: str = "") -> dict[str, Any]:
         selected_area = normalize_text(area_id)
@@ -15052,6 +15230,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         record = g.db.get(ModuleRecord, record_id) if record_id else None
         if record and record.module_key != module_key:
             return redirect(url_for("module_list", module_key=module_key))
+        if record and module_key == "cashbook_entries" and normalize_text((record.payload or {}).get("sourceType")) == "expense-payment":
+            linked_expense_id = normalize_text((record.payload or {}).get("linkedExpenseId"))
+            flash("This Cashbook movement is generated from Expenses. Edit the matching expense so the books stay aligned.", "warning")
+            return redirect(url_for("module_form", module_key="expenses", record_id=linked_expense_id) if linked_expense_id else url_for("module_list", module_key="expenses"))
+        if record and module_key == "petty_cash" and normalize_text((record.payload or {}).get("linkedExpenseId")):
+            linked_expense_id = normalize_text((record.payload or {}).get("linkedExpenseId"))
+            flash("This float movement is generated from Expenses. Edit the matching expense instead.", "warning")
+            return redirect(url_for("module_form", module_key="expenses", record_id=linked_expense_id) if linked_expense_id else url_for("module_list", module_key="expenses"))
 
         record_payload = dict(record.payload if record else {})
         prior_credit_key = customer_credit_rollup_key(g.db, record_payload) if module_key == "customer_credit_accounts" and record else ""
@@ -15235,6 +15421,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     if receipt_attachment_url
                     else (normalize_text(payload.get("receiptStatus")) or "Pending")
                 )
+                payload["paidFromAccount"] = expense_paid_from_account(payload)
             elif module_key == "staff_documents":
                 document_attachment_url = normalize_text(payload.get("documentAttachmentUrl"))
                 document_attachment_name = normalize_text(payload.get("documentAttachmentName"))
@@ -15282,6 +15469,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     sync_kitchen_recipe_inventory(g.db, payload, record_payload)
                     sync_kitchen_menu_cost_from_recipe(g.db, payload)
                 set_module_record_metadata(record, definition, payload)
+                if module_key == "expenses":
+                    sync_expense_payment_to_finance_records(record, g.db)
                 if module_key == "customer_credit_accounts":
                     current_credit_key = customer_credit_rollup_key(g.db, payload)
                     rollup_customer_credit_account(g.db, current_credit_key)
@@ -15412,7 +15601,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
         elif module_key == "expenses":
             record_payload.setdefault("date", date.today().isoformat())
             record_payload.setdefault("paymentMethod", "Cash")
+            record_payload.setdefault("paidFromAccount", expense_paid_from_account(record_payload))
             record_payload.setdefault("receiptStatus", "Pending")
+        elif module_key == "petty_cash":
+            record_payload.setdefault("date", date.today().isoformat())
+            record_payload.setdefault("businessAreaId", "shared-operations")
+            record_payload.setdefault("transactionTypeId", "Float Top-Up")
+            record_payload.setdefault("paymentMethod", "Cash")
         elif module_key == "cashbook_entries":
             record_payload.setdefault("date", date.today().isoformat())
             record_payload.setdefault("businessAreaId", "shared-operations")
@@ -15945,6 +16140,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
             if linked_cashbook:
                 g.db.delete(linked_cashbook)
+
+        if module_key == "expenses":
+            for linked_module, reference in (
+                ("cashbook_entries", f"expense-payment|{record.id}"),
+                ("petty_cash", f"expense-petty-cash|{record.id}"),
+            ):
+                linked_record = g.db.scalar(
+                    select(ModuleRecord).where(
+                        ModuleRecord.module_key == linked_module,
+                        ModuleRecord.reference == reference,
+                    )
+                )
+                if linked_record:
+                    g.db.delete(linked_record)
 
         title = record.title
         g.db.delete(record)

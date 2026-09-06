@@ -104,6 +104,14 @@
             </select>
           </label>
           <label>
+            <span>{{ expense_field_map['paidFromAccount'].label }}</span>
+            <select name="paidFromAccount" required>
+              {% for value, label in expense_field_map['paidFromAccount'].options %}
+                <option value="{{ value }}" {% if payload.get('paidFromAccount', '') == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
             <span>{{ expense_field_map['receiptStatus'].label }}</span>
             <select name="receiptStatus" id="expense-receipt-status-field" required>
               <option value="">Select Receipt Status</option>
@@ -165,13 +173,13 @@
         <div class="card-header compact">
           <div>
             <p class="eyebrow">Quick Reminder</p>
-            <h3>Use Expense Vs Cashbook</h3>
+            <h3>One Entry, Automatic Trail</h3>
           </div>
         </div>
         <ol class="mobile-money-reconciliation-steps">
-          <li>Use `Expenses` to explain what was spent, which area spent it, and to attach the receipt.</li>
-          <li>Use `Cashbook / Bankbook` when you need the actual money movement trail in cash or bank.</li>
-          <li>If both matter, save the expense here and record the money movement in the cashbook too.</li>
+          <li>Use `Expenses` once for every purchase, bill, or business cost, including its receipt and payment source.</li>
+          <li>Saving creates the matching Cashbook cash-out automatically. Do not enter the same payment again in Cashbook.</li>
+          <li>Select `Petty Cash Float` only when the purchase was paid from that physical float; OneRoot will reduce the float automatically.</li>
         </ol>
       </article>
 

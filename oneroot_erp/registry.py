@@ -447,6 +447,9 @@ ROLE_ACCESS_KEYS["retail-stock-service"] = set(ROLE_ACCESS_KEYS["frontline-servi
 ROLE_ACCESS_KEYS["kitchen-food-counter"] = set(ROLE_ACCESS_KEYS["cashier"]) | {"kitchen_orders", "kitchen_recipe_plans", "daily_handovers", "customer_loyalty", "inventory", "sales_summary"}
 ROLE_ACCESS_KEYS["growth-apartments-dispatch"] = set(ROLE_ACCESS_KEYS["marketing-crm"]) | set(ROLE_ACCESS_KEYS["delivery-dispatch"])
 ROLE_ACCESS_KEYS["dispatch-maintenance-service"] = set(ROLE_ACCESS_KEYS["delivery-dispatch"]) | set(ROLE_ACCESS_KEYS["equipment-desk"]) | set(ROLE_ACCESS_KEYS["laundry-desk"]) | {"inventory", "inventory_barcode", "maintenance_records", "online_orders", "daily_handovers"}
+for _role_key, _permissions in ROLE_ACCESS_KEYS.items():
+    if _role_key not in {"owner", "admin", "finance", "operations", "operations-controls-lead", "finance-hr-controls"}:
+        _permissions.discard("workbook")
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
     ROLE_ACCESS_KEYS[_role_key].add("loss_prevention_controls")
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead", "finance-hr-controls"):
@@ -482,6 +485,12 @@ PAYMENT_METHODS = [
     "Credit",
     "Pay On Pickup",
     "Cash On Delivery",
+]
+EXPENSE_PAYMENT_SOURCES = [
+    ("Main Cash Drawer", "Main Cash Drawer"),
+    ("Petty Cash Float", "Petty Cash Float"),
+    ("Business Bank Account", "Business Bank Account"),
+    ("OneRoot MoMo Collection Wallet", "OneRoot MoMo Collection Wallet"),
 ]
 RECEIPT_STATUSES = ["Uploaded", "Pending", "Not Required"]
 EXPENSE_CATEGORY_LIBRARY = {
@@ -664,13 +673,18 @@ MOBILE_MONEY_TRANSACTION_STATUSES = [
 ]
 PETTY_CASH_TRANSACTION_TYPES = [
     ("Float Top-Up", "Float Top-Up"),
-    ("Restock Purchase", "Restock Purchase"),
-    ("Transport", "Transport"),
-    ("Cleaning & Supplies", "Cleaning & Supplies"),
-    ("Maintenance Support", "Maintenance Support"),
-    ("Staff Welfare", "Staff Welfare"),
-    ("Refund / Reversal", "Refund / Reversal"),
-    ("Miscellaneous", "Miscellaneous"),
+    ("Float Return", "Float Return / Return To Main Cash"),
+    ("Reimbursement", "Reimbursement Added To Float"),
+    ("Cash Count Adjustment (+)", "Cash Count Adjustment (+)"),
+    ("Cash Count Adjustment (-)", "Cash Count Adjustment (-)"),
+    ("Expense Paid (linked from Expenses)", "Expense Paid (linked from Expenses)"),
+    ("Restock Purchase", "Legacy: Restock Purchase (do not use for new spending)"),
+    ("Transport", "Legacy: Transport (do not use for new spending)"),
+    ("Cleaning & Supplies", "Legacy: Cleaning & Supplies (do not use for new spending)"),
+    ("Maintenance Support", "Legacy: Maintenance Support (do not use for new spending)"),
+    ("Staff Welfare", "Legacy: Staff Welfare (do not use for new spending)"),
+    ("Refund / Reversal", "Legacy: Refund / Reversal"),
+    ("Miscellaneous", "Legacy: Miscellaneous (do not use for new spending)"),
 ]
 CASHBOOK_ENTRY_TYPES = [
     ("Cash In", "Cash In"),
@@ -1028,6 +1042,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("category", "Expense Category", "text", True),
             FieldDefinition("description", "Description", "textarea"),
             FieldDefinition("paymentMethod", "Payment Method", "select", True, [(m, m) for m in PAYMENT_METHODS]),
+            FieldDefinition("paidFromAccount", "Paid From", "select", True, EXPENSE_PAYMENT_SOURCES),
             FieldDefinition("receiptStatus", "Receipt Status", "select", True, [(m, m) for m in RECEIPT_STATUSES]),
             FieldDefinition("receiptReference", "Receipt / Reference No.", "text"),
             FieldDefinition("receiptUpload", "Upload Receipt", "file"),
@@ -1149,7 +1164,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "petty_cash": ModuleDefinition(
         key="petty_cash",
-        label="Petty Cash",
+        label="Cash Float & Petty Cash Control",
         legacy_collection="pettyCash",
         menu_group="Finance",
         amount_field="amount",
@@ -1168,7 +1183,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "petty_cash_budgets": ModuleDefinition(
         key="petty_cash_budgets",
-        label="Petty Cash Limits",
+        label="Petty Cash Limits (Legacy)",
         legacy_collection="pettyCashBudgets",
         menu_group="Finance",
         amount_field="budgetAmount",
@@ -2221,14 +2236,14 @@ MENU_GROUPS = [
         "Workspace",
         [
             ("Overview", ["dashboard", "reports"]),
-            ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch", "workbook"]),
+            ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Stock", ["inventory", "inventory_barcode"]),
         ],
     ),
     (
         "Finance",
         [
-            ("Sales & Spend", ["sales_summary", "sales", "customer_credit_accounts", "expenses", "petty_cash", "petty_cash_budgets"]),
+            ("Sales & Spend", ["sales_summary", "sales", "customer_credit_accounts", "expenses", "petty_cash"]),
             ("Cash & Reconciliation", ["cashbook_entries", "mobile_money_reconciliations"]),
         ],
     ),
@@ -2256,7 +2271,7 @@ MENU_GROUPS = [
     (
         "Control",
         [
-            ("Planning & Reporting", ["forecast_plans", "business_area_scorecards", "daily_handovers", "recurring_controls", "pos_closeouts", "loss_prevention_controls"]),
+            ("Planning & Reporting", ["forecast_plans", "recurring_controls", "pos_closeouts", "loss_prevention_controls"]),
             ("Assets & Admin", ["asset_records", "audit", "users"]),
         ],
     ),

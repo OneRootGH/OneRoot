@@ -10,6 +10,10 @@
             Use this growth form to keep follow-up, promotions, WhatsApp, and Facebook-driven activity clean and easy to work with later.
           {% elif definition.key == 'kitchen_recipe_plans' %}
             Add every meal being prepared in this session, then assign shared POS stock to the meal it is used for. Saving deducts stock once, calculates each meal's real cost, and updates the matching food items' future cost per serving.
+          {% elif definition.key == 'petty_cash' %}
+            Use this only for float top-ups, returns, reimbursements, and count adjustments. Record actual purchases under Expenses so they are not counted twice.
+          {% elif definition.key == 'forecast_plans' %}
+            Set revenue and spending plans here, including the monthly petty-cash float control limit. This replaces the old separate petty-cash budget tool.
           {% else %}
             Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.
           {% endif %}

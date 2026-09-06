@@ -149,6 +149,13 @@
     </section>
   {% endif %}
 
+  {% if definition.key == 'petty_cash' %}
+    <section class="card compact-note">
+      <strong>Cash float control</strong>
+      <p>Use this page for float top-ups, returns, reimbursements, and count adjustments only. Record a purchase once in <em>Expenses</em>; if it was paid from Petty Cash Float, OneRoot creates the matching float movement and Cashbook cash-out automatically.</p>
+    </section>
+  {% endif %}
+
   {% if growth_context %}
     <section class="card-grid four">
       <article class="metric-card">
