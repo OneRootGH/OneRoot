@@ -1201,9 +1201,6 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             or next((item for item in products if item.stock_source_product_id == source_product.id and "cold" in normalize_text(item.stock_unit_label).lower()), None)
         ),
     }
-    if not any(variants.values()):
-        return False
-
     changed = False
     # First run merges historical sales quantities that were previously split across four rows.
     needs_historic_merge = any(
@@ -1290,9 +1287,46 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             variant.notes = note
             changed = True
 
+    # The Food POS has its own Kitchen menu row for Voltic Cool. It sells one sachet,
+    # but must draw from the same Cold Store physical balance rather than acting as a
+    # zero-cost service item.
+    kitchen_voltic = db_session.get(Product, "kitchen-drink-voltic-cool") or next(
+        (
+            product
+            for product in products
+            if normalize_text(product.business_area_id) == "kitchen"
+            and voltic_product_key(product.name) in {"voltic cool", "voltic cool sachet water"}
+        ),
+        None,
+    )
+    if kitchen_voltic:
+        kitchen_updates = {
+            "name": "Voltic Cool",
+            "business_area_id": "kitchen",
+            "category": "Drinks",
+            "item_type": "stock",
+            "track_inventory": True,
+            "quantity_known": True,
+            "stock_source_product_id": source_product.id,
+            "stock_units_per_sale": 1,
+            "stock_unit_label": "pieces",
+            "purchase_pack_size": 1,
+            "purchase_pack_label": "sell unit",
+            "min_stock_level": 0,
+            "cost_price": round(parse_amount(source_product.cost_price), 2),
+        }
+        for field, value in kitchen_updates.items():
+            if getattr(kitchen_voltic, field) != value:
+                setattr(kitchen_voltic, field, value)
+                changed = True
+        kitchen_note = "Kitchen/Food POS sale linked to shared Voltic sachet stock. Each sale deducts one piece."
+        if normalize_text(kitchen_voltic.notes) != kitchen_note:
+            kitchen_voltic.notes = kitchen_note
+            changed = True
+
     if changed:
         source_product.updated_at = datetime.utcnow()
-        for product in [source_product, *[item for item in variants.values() if item]]:
+        for product in [source_product, *[item for item in variants.values() if item], *([kitchen_voltic] if kitchen_voltic else [])]:
             product.sku = generate_auto_product_sku(
                 product_id=product.id,
                 name=product.name,
