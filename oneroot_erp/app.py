@@ -845,6 +845,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 sync_equipment_service_catalog(bootstrap_session, app_config)
                 reclassify_legacy_inventory_products(bootstrap_session)
                 restructure_voltic_shared_stock(bootstrap_session)
+                link_bread_stock_to_food_pos(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 ensure_default_job_vacancies(bootstrap_session, app_config)
@@ -1334,6 +1335,86 @@ def restructure_voltic_shared_stock(db_session) -> bool:
                 category=product.category,
             )
             normalize_product_record(product)
+        sync_shared_stock_variant_quantities(db_session, source_product)
+    return changed
+
+
+def is_sellable_bread_product(product: Product) -> bool:
+    name_key = normalize_text(product.name).lower()
+    return (
+        normalize_text(product.business_area_id) == "cold-store-groceries"
+        and product_tracks_inventory(product)
+        and "bread" in name_key
+        and "short bread" not in name_key
+    )
+
+
+def link_bread_stock_to_food_pos(db_session) -> bool:
+    """Expose each retail bread type at the Food POS without duplicating its physical stock."""
+    bread_sources = [
+        product
+        for product in db_session.scalars(select(Product).where(Product.active.is_(True))).all()
+        if is_sellable_bread_product(product)
+    ]
+    changed = False
+    for source_product in bread_sources:
+        if normalize_text(source_product.category) != "Bakery & Bread":
+            source_product.category = "Bakery & Bread"
+            source_product.updated_at = datetime.utcnow()
+            changed = True
+        if parse_amount(source_product.quantity_on_hand) < 0:
+            source_product.quantity_on_hand = 0.0
+            source_product.quantity_known = True
+            source_product.notes = (
+                f"{normalize_text(source_product.notes)} "
+                "Legacy negative stock was retained in sales history; complete a physical loaf count before the next sale."
+            ).strip()
+            source_product.updated_at = datetime.utcnow()
+            changed = True
+
+        linked_id = f"kitchen-bread-{source_product.id}"
+        kitchen_product = db_session.get(Product, linked_id)
+        if not kitchen_product:
+            kitchen_product = Product(id=linked_id, created_at=datetime.utcnow())
+            db_session.add(kitchen_product)
+            changed = True
+
+        kitchen_updates = {
+            "source_catalog_id": f"linked-bread:{source_product.id}",
+            "name": source_product.name,
+            "business_area_id": "kitchen",
+            "category": "Bread",
+            "source_category": "Linked Cold Store Bread",
+            "item_type": "stock",
+            "track_inventory": True,
+            "quantity_known": bool(source_product.quantity_known),
+            "stock_source_product_id": source_product.id,
+            "stock_units_per_sale": 1,
+            "stock_unit_label": "loaves",
+            "purchase_pack_size": 1,
+            "purchase_pack_label": "sell unit",
+            "min_stock_level": 0,
+            "sales_price": round(parse_amount(source_product.sales_price), 2),
+            "cost_price": round(parse_amount(source_product.cost_price), 2),
+            "image_url": normalize_text(source_product.image_url),
+            "active": bool(source_product.active),
+            "user_created": False,
+            "notes": "Food POS sale linked to this exact Cold Store bread stock. Each sale deducts one loaf.",
+        }
+        for field, value in kitchen_updates.items():
+            if getattr(kitchen_product, field) != value:
+                setattr(kitchen_product, field, value)
+                changed = True
+        sku_value = generate_auto_product_sku(
+            product_id=kitchen_product.id,
+            name=kitchen_product.name,
+            business_area_id=kitchen_product.business_area_id,
+            category=kitchen_product.category,
+        )
+        if normalize_text(kitchen_product.sku) != sku_value:
+            kitchen_product.sku = sku_value
+            changed = True
+        normalize_product_record(kitchen_product)
         sync_shared_stock_variant_quantities(db_session, source_product)
     return changed
 
