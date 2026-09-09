@@ -14746,6 +14746,76 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_status_options=["pending", "part-paid", "paid", "refunded"],
         )
 
+    @app.route("/app/api/online-orders/notifications")
+    @access_required("online_orders", api=True)
+    def online_order_notifications():
+        """Return newly created website orders for the lightweight staff alert poller."""
+        after_value = normalize_text(request.args.get("after"))
+        initialize = normalize_text(request.args.get("initialize")).lower() in {"1", "true", "yes"}
+        after_timestamp: datetime | None = None
+        after_id = ""
+        if after_value:
+            try:
+                timestamp_value, after_id = after_value.rsplit("|", 1)
+                after_timestamp = datetime.fromisoformat(timestamp_value.replace("Z", "+00:00")).replace(tzinfo=None)
+            except ValueError:
+                try:
+                    after_timestamp = datetime.fromisoformat(after_value.replace("Z", "+00:00")).replace(tzinfo=None)
+                    after_id = ""
+                except ValueError:
+                    after_timestamp = None
+
+        latest_record = g.db.scalar(
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "online_orders")
+            .order_by(desc(ModuleRecord.created_at), desc(ModuleRecord.id))
+            .limit(1)
+        )
+        if initialize and not after_timestamp:
+            return jsonify(
+                {
+                    "ok": True,
+                    "orders": [],
+                    "cursor": (
+                        f"{latest_record.created_at.isoformat()}|{latest_record.id}"
+                        if latest_record
+                        else f"{datetime.utcnow().isoformat()}|"
+                    ),
+                }
+            )
+
+        query = select(ModuleRecord).where(ModuleRecord.module_key == "online_orders")
+        if after_timestamp:
+            query = query.where(
+                or_(
+                    ModuleRecord.created_at > after_timestamp,
+                    (ModuleRecord.created_at == after_timestamp) & (ModuleRecord.id > after_id),
+                )
+            )
+        records = g.db.scalars(query.order_by(ModuleRecord.created_at.asc(), ModuleRecord.id.asc()).limit(20)).all()
+        cursor_record = records[-1] if records else None
+        cursor = f"{cursor_record.created_at.isoformat()}|{cursor_record.id}" if cursor_record else after_value
+        orders = [] if initialize and not after_value else [serialize_online_order(record) for record in records]
+        return jsonify(
+            {
+                "ok": True,
+                "orders": [
+                    {
+                        "id": order["id"],
+                        "orderNumber": order["orderNumber"],
+                        "customerName": order["customerName"],
+                        "customerPhone": order["customerPhone"],
+                        "businessAreaSummary": order["businessAreaSummary"],
+                        "totalAmount": order["totalAmount"],
+                        "deliveryMode": order["deliveryMode"],
+                        "createdAt": order["createdAt"],
+                    }
+                    for order in orders
+                ],
+                "cursor": cursor,
+            }
+        )
+
     @app.route("/app/online-orders/export.csv")
     @access_required("online_orders")
     def online_orders_export():

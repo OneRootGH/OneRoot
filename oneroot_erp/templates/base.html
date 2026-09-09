@@ -12,7 +12,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=static_asset_version) }}">
   </head>
-  <body>
+  <body{% if current_user and 'online_orders' in current_access_keys %} data-online-order-alerts="true" data-online-order-alert-url="{{ url_for('online_order_notifications') }}" data-online-order-desk-url="{{ url_for('online_orders_desk') }}"{% endif %}>
     <div class="shell">
       <aside class="sidebar">
         <div class="brand">
@@ -138,6 +138,9 @@
       </main>
     </div>
     <script src="/website/pwa.js?v=20260725a" defer></script>
+    {% if current_user and 'online_orders' in current_access_keys %}
+      <script src="{{ url_for('static', filename='order-alerts.js', v=static_asset_version) }}" defer></script>
+    {% endif %}
     {% block scripts %}{% endblock %}
   </body>
 </html>
