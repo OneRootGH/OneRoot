@@ -1,0 +1,99 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="dashboard-hero compact-hero">
+    <div>
+      <p class="eyebrow">Finance Control</p>
+      <h3>Cash & Float Control</h3>
+      <p class="muted">See where OneRoot money is held, move funds with a matching audit trail, and keep MoMo float separate from business sales.</p>
+    </div>
+    <div class="toolbar">
+      <a class="button subtle" href="{{ url_for('module_list', module_key='cashbook_entries') }}">Open Cashbook</a>
+      <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_reconciliations') }}">MoMo Closeout</a>
+    </div>
+  </section>
+
+  <section class="card compact-filter-card">
+    <form class="toolbar" method="get">
+      <label class="compact-field"><span>As Of Date</span><input type="date" name="date" value="{{ as_of_date|date_value }}"></label>
+      <button class="button primary" type="submit">Refresh Balances</button>
+      <a class="button subtle" href="{{ url_for('wallet_control') }}">Today</a>
+    </form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card"><span>Physical Cash</span><strong>{{ wallet_context.physicalCashTotal|currency }}</strong><small>Recorded drawers, petty cash, and MTN physical float</small></article>
+    <article class="metric-card"><span>MoMo E-Cash</span><strong>{{ wallet_context.eCashTotal|currency }}</strong><small>MTN float from the live counter or saved closeout</small></article>
+    <article class="metric-card"><span>Bank</span><strong>{{ wallet_context.bankTotal|currency }}</strong><small>Recorded Business Bank Account movement</small></article>
+    <article class="metric-card {% if wallet_context.controlledTotal < 0 %}warning{% endif %}"><span>Controlled Funds</span><strong>{{ wallet_context.controlledTotal|currency }}</strong><small>All wallets recorded in this control view</small></article>
+  </section>
+
+  <section class="split-grid wallet-workspace">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Live Balances</p><h3>Business Wallets</h3></div><span class="metric-chip">{{ wallet_context.asOfDate|pretty_date }}</span></div>
+      <div class="table-wrap">
+        <table>
+          <thead><tr><th>Wallet</th><th>Recorded Balance</th><th>Basis</th><th>Control Note</th></tr></thead>
+          <tbody>
+            {% for wallet in wallet_context.wallets %}
+              <tr>
+                <td><strong>{{ wallet.label }}</strong>{% if wallet.isAuto %}<span class="table-secondary">Automatic counter balance</span>{% endif %}</td>
+                <td class="{% if wallet.isNegative %}negative-text{% endif %}">{{ wallet.balance|currency }}</td>
+                <td>{{ wallet.source }}</td>
+                <td>{{ wallet.note }}</td>
+              </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      <p class="muted compact-copy">POS and service sales remain sales records. Use this desk to control where money is held, transferred, added, or removed after collection.</p>
+    </article>
+
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Controlled Movement</p><h3>Move Funds</h3></div></div>
+      <form method="post" class="form-grid wallet-movement-form">
+        <label><span>Movement Type</span><select name="movementType" id="wallet-movement-type"><option value="Transfer">Transfer Between Wallets</option><option value="Add Funds">Add Opening / Owner Funds</option><option value="Remove Funds">Remove Funds / Banking Handover</option></select></label>
+        <label class="wallet-transfer-field"><span>From Wallet</span><select name="sourceWallet"><option value="">Select source</option>{% for value, label in wallet_options %}{% if value not in ['MTN MoMo Physical Cash Float', 'MTN MoMo E-Cash Float'] %}<option value="{{ value }}">{{ label }}</option>{% endif %}{% endfor %}</select></label>
+        <label class="wallet-transfer-field"><span>To Wallet</span><select name="destinationWallet"><option value="">Select destination</option>{% for value, label in wallet_options %}{% if value not in ['MTN MoMo Physical Cash Float', 'MTN MoMo E-Cash Float'] %}<option value="{{ value }}">{{ label }}</option>{% endif %}{% endfor %}</select></label>
+        <label class="wallet-active-field" hidden><span>Receiving / Active Wallet</span><select name="activeWallet"><option value="">Select wallet</option>{% for value, label in wallet_options %}{% if value not in ['MTN MoMo Physical Cash Float', 'MTN MoMo E-Cash Float'] %}<option value="{{ value }}">{{ label }}</option>{% endif %}{% endfor %}</select></label>
+        <label><span>Amount</span><input type="number" name="amount" min="0.01" step="0.01" required placeholder="0.00"></label>
+        <label><span>Date</span><input type="date" name="date" value="{{ as_of_date|date_value }}" required></label>
+        <label><span>Business Area</span><select name="businessAreaId">{% for value, label in business_area_options %}<option value="{{ value }}" {% if value == 'shared-operations' %}selected{% endif %}>{{ label }}</option>{% endfor %}</select></label>
+        <label><span>Reference</span><input type="text" name="reference" placeholder="Receipt, teller, or handover no."></label>
+        <label class="form-span-2"><span>Reason / Notes</span><textarea name="notes" rows="3" placeholder="Who handed over or received the funds, and why?"></textarea></label>
+        <div class="form-actions form-span-2"><button class="button primary" type="submit">Save Controlled Movement</button></div>
+      </form>
+      <p class="finance-form-note">Every transfer saves a cash-out from the source and a cash-in to the destination. MTN physical cash and e-cash are controlled from the Mobile Money Counter to protect its reconciliation.</p>
+    </article>
+  </section>
+
+  <section class="card-grid three">
+    <article class="metric-card"><span>Cashbook Money In</span><strong>{{ wallet_context.moneyIn|currency }}</strong><small>In the recorded cashbook up to this date</small></article>
+    <article class="metric-card"><span>Cashbook Money Out</span><strong>{{ wallet_context.moneyOut|currency }}</strong><small>In the recorded cashbook up to this date</small></article>
+    <article class="metric-card {% if wallet_context.netMovement < 0 %}warning{% endif %}"><span>Net Cashbook Movement</span><strong>{{ wallet_context.netMovement|currency }}</strong><small>Money in less money out; transfers net to zero</small></article>
+  </section>
+
+  {% if wallet_context.warnings %}
+    <section class="card warning-card"><div class="card-header compact"><div><p class="eyebrow">Review Needed</p><h3>Cash-Control Warnings</h3></div></div><ul class="stack-list compact">{% for warning in wallet_context.warnings %}<li><span>{{ warning }}</span></li>{% endfor %}</ul></section>
+  {% endif %}
+
+  <section class="card">
+    <div class="card-header compact"><div><p class="eyebrow">Audit Trail</p><h3>Recent Cashbook Movements</h3></div></div>
+    <div class="table-wrap"><table><thead><tr><th>Date</th><th>Wallet</th><th>Type</th><th>Amount</th><th>Reference</th><th>Notes</th></tr></thead><tbody>{% for item in wallet_context.recentMovements %}<tr><td>{{ item.date|pretty_date }}</td><td>{{ item.account }}</td><td>{{ item.entryType }}</td><td class="{% if item.effect < 0 %}negative-text{% endif %}">{{ item.amount|currency }}</td><td>{{ item.reference or '—' }}</td><td>{{ item.notes or '—' }}</td></tr>{% else %}<tr><td colspan="6">No cashbook movements have been recorded yet.</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+{% endblock %}
+{% block scripts %}
+  <script>
+    (() => {
+      const type = document.getElementById("wallet-movement-type");
+      const transferFields = document.querySelectorAll(".wallet-transfer-field");
+      const activeFields = document.querySelectorAll(".wallet-active-field");
+      const refresh = () => {
+        const transfer = type.value === "Transfer";
+        transferFields.forEach((field) => { field.hidden = !transfer; });
+        activeFields.forEach((field) => { field.hidden = transfer; });
+      };
+      type.addEventListener("change", refresh);
+      refresh();
+    })();
+  </script>
+{% endblock %}

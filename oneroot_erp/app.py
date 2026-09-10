@@ -4788,6 +4788,7 @@ def cashbook_entry_preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
+    "owner_briefing": ("Owner Daily Briefing", "owner_daily_briefing", None),
     "profits": ("Profit Center", "profits_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
@@ -4801,6 +4802,7 @@ SIDEBAR_LINK_LABELS = {
     "audit": ("Audit Trail", "audit_page", None),
     "online_orders": ("Online Orders", "online_orders_desk", None),
     "users": ("User Accounts", "users_page", None),
+    "wallet_control": ("Cash & Float Control", "wallet_control", None),
 }
 
 MODULE_FILTER_CATEGORY_FIELDS = {
@@ -9614,6 +9616,294 @@ def daily_sales_accountability_context(db_session, sale_date: date, area_id: str
     }
 
 
+BUSINESS_WALLET_OPTIONS = [
+    ("Main Cash Drawer", "Retail / Main Cash Drawer"),
+    ("Kitchen Cash Drawer", "Kitchen Cash Drawer"),
+    ("Cold Store Cash Drawer", "Cold Store Cash Drawer"),
+    ("Laundry Desk Cash", "Laundry Desk Cash"),
+    ("Equipment Rental Cash", "Equipment Rental Cash"),
+    ("Apartment Rent Collections", "Apartment Rent Collections"),
+    ("Delivery Cash", "Delivery Cash"),
+    ("Petty Cash Float", "Petty Cash Float"),
+    ("Business Bank Account", "Business Bank Account"),
+    ("OneRoot MoMo Collection Wallet", "OneRoot MoMo Collection Wallet"),
+    ("MTN MoMo Physical Cash Float", "MTN MoMo Physical Cash Float"),
+    ("MTN MoMo E-Cash Float", "MTN MoMo E-Cash Float"),
+]
+WALLET_LABELS = dict(BUSINESS_WALLET_OPTIONS)
+WALLET_AUTO_BALANCE_ACCOUNTS = {"MTN MoMo Physical Cash Float", "MTN MoMo E-Cash Float"}
+WALLET_PHYSICAL_CASH_ACCOUNTS = {
+    "Main Cash Drawer",
+    "Kitchen Cash Drawer",
+    "Cold Store Cash Drawer",
+    "Laundry Desk Cash",
+    "Equipment Rental Cash",
+    "Apartment Rent Collections",
+    "Delivery Cash",
+    "Petty Cash Float",
+    "MTN MoMo Physical Cash Float",
+}
+
+
+def cashbook_wallet_effect(payload: dict[str, Any]) -> float:
+    entry_type = normalize_text(payload.get("entryType"))
+    amount = abs(parse_amount(payload.get("amount")))
+    if entry_type in CASHBOOK_MONEY_IN_TYPES:
+        return amount
+    if entry_type in CASHBOOK_MONEY_OUT_TYPES:
+        return -amount
+    # Older one-sided Transfer rows do not carry a dependable source and destination.
+    # They stay visible in the exceptions list instead of distorting a wallet balance.
+    return 0.0
+
+
+def wallet_control_context(db_session, as_of_date: date | None = None) -> dict[str, Any]:
+    """Combine authoritative cashbook, petty cash, and MoMo float records into one control view."""
+    as_of = as_of_date or date.today()
+    wallet_rows = {
+        account: {
+            "account": account,
+            "label": label,
+            "balance": 0.0,
+            "source": "Cashbook",
+            "note": "Recorded cashbook movements to this wallet.",
+            "isAuto": account in WALLET_AUTO_BALANCE_ACCOUNTS,
+            "isPhysicalCash": account in WALLET_PHYSICAL_CASH_ACCOUNTS,
+            "movementCount": 0,
+        }
+        for account, label in BUSINESS_WALLET_OPTIONS
+    }
+    manual_transfer_rows: list[dict[str, Any]] = []
+    unassigned_rows: list[dict[str, Any]] = []
+    recent_movements: list[dict[str, Any]] = []
+    cashbook_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "cashbook_entries", ModuleRecord.record_date <= as_of)
+        .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+    ).all()
+    money_in = 0.0
+    money_out = 0.0
+    for record in cashbook_records:
+        payload = dict(record.payload or {})
+        account = normalize_text(payload.get("accountName"))
+        entry_type = normalize_text(payload.get("entryType"))
+        amount = abs(parse_amount(payload.get("amount")))
+        effect = cashbook_wallet_effect(payload)
+        movement = {
+            "id": record.id,
+            "date": record.record_date.isoformat() if record.record_date else normalize_text(payload.get("date")),
+            "account": account or "Unassigned account",
+            "entryType": entry_type or "Unspecified",
+            "amount": amount,
+            "effect": effect,
+            "reference": normalize_text(record.reference) or normalize_text(payload.get("reference")),
+            "notes": normalize_text(payload.get("notes")),
+        }
+        if len(recent_movements) < 12:
+            recent_movements.append(movement)
+        if entry_type in CASHBOOK_MONEY_IN_TYPES:
+            money_in += amount
+        elif entry_type in CASHBOOK_MONEY_OUT_TYPES:
+            money_out += amount
+        if entry_type == "Transfer":
+            manual_transfer_rows.append(movement)
+            continue
+        if account in WALLET_AUTO_BALANCE_ACCOUNTS:
+            # MoMo float is calculated from its dedicated transaction and closeout flow.
+            continue
+        if account in wallet_rows:
+            wallet_rows[account]["balance"] = round(wallet_rows[account]["balance"] + effect, 2)
+            wallet_rows[account]["movementCount"] += 1
+        elif amount > 0:
+            unassigned_rows.append(movement)
+
+    petty_balance = round(
+        sum(
+            petty_cash_float_delta(dict(record.payload or {}))
+            for record in db_session.scalars(
+                select(ModuleRecord).where(
+                    ModuleRecord.module_key == "petty_cash",
+                    ModuleRecord.record_date <= as_of,
+                )
+            ).all()
+        ),
+        2,
+    )
+    wallet_rows["Petty Cash Float"].update(
+        {
+            "balance": petty_balance,
+            "source": "Cash Float Control",
+            "note": "Top-ups, returns, reimbursements, and linked petty-cash expenses.",
+        }
+    )
+
+    momo_snapshot = mobile_money_live_balance_snapshot(db_session, as_of, "MTN Mobile Money")
+    today_reconciliation = db_session.scalar(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "mobile_money_reconciliations",
+            ModuleRecord.record_date == as_of,
+        )
+        .order_by(desc(ModuleRecord.updated_at))
+    )
+    reconciliation_payload = dict(today_reconciliation.payload or {}) if today_reconciliation else {}
+    cash_counted = normalize_text(reconciliation_payload.get("closingCashCounted")) != ""
+    ecash_counted = normalize_text(reconciliation_payload.get("closingECashCounted")) != ""
+    wallet_rows["MTN MoMo Physical Cash Float"].update(
+        {
+            "balance": round(
+                parse_amount(reconciliation_payload.get("closingCashCounted"))
+                if cash_counted
+                else momo_snapshot["physicalCashAvailable"],
+                2,
+            ),
+            "source": "MoMo Closeout" if cash_counted else "MoMo Live Counter",
+            "note": "Counted closeout" if cash_counted else "Expected from current float activity; save a MoMo closeout to confirm.",
+        }
+    )
+    wallet_rows["MTN MoMo E-Cash Float"].update(
+        {
+            "balance": round(
+                parse_amount(reconciliation_payload.get("closingECashCounted"))
+                if ecash_counted
+                else momo_snapshot["eCashAvailable"],
+                2,
+            ),
+            "source": "MoMo Closeout" if ecash_counted else "MoMo Live Counter",
+            "note": "Counted closeout" if ecash_counted else "Expected from current float activity; save a MoMo closeout to confirm.",
+        }
+    )
+
+    wallets = list(wallet_rows.values())
+    for wallet in wallets:
+        wallet["balance"] = round(parse_amount(wallet["balance"]), 2)
+        wallet["isNegative"] = wallet["balance"] < -0.009
+    wallets.sort(key=lambda row: (not row["isAuto"], -abs(row["balance"]), row["label"]))
+    physical_cash_total = round(sum(row["balance"] for row in wallets if row["isPhysicalCash"]), 2)
+    ecash_total = round(sum(row["balance"] for row in wallets if row["account"] == "MTN MoMo E-Cash Float"), 2)
+    bank_total = round(sum(row["balance"] for row in wallets if row["account"] == "Business Bank Account"), 2)
+    controlled_total = round(sum(row["balance"] for row in wallets), 2)
+    warnings = []
+    for wallet in wallets:
+        if wallet["isNegative"]:
+            warnings.append(f"{wallet['label']} is below zero at {format_currency(wallet['balance'])}.")
+    if abs(mobile_money_variance(reconciliation_payload)) >= 0.01:
+        warnings.append(f"MTN physical-cash closeout variance: {format_currency(mobile_money_variance(reconciliation_payload))}.")
+    if abs(mobile_money_ecash_variance(reconciliation_payload)) >= 0.01:
+        warnings.append(f"MTN e-cash closeout variance: {format_currency(mobile_money_ecash_variance(reconciliation_payload))}.")
+    if unassigned_rows:
+        warnings.append(f"{len(unassigned_rows)} cashbook movement(s) use an account not in Cash & Float Control.")
+    if manual_transfer_rows:
+        warnings.append(f"{len(manual_transfer_rows)} legacy transfer row(s) need a source/destination review.")
+    return {
+        "asOfDate": as_of,
+        "wallets": wallets,
+        "physicalCashTotal": physical_cash_total,
+        "eCashTotal": ecash_total,
+        "bankTotal": bank_total,
+        "controlledTotal": controlled_total,
+        "moneyIn": round(money_in, 2),
+        "moneyOut": round(money_out, 2),
+        "netMovement": round(money_in - money_out, 2),
+        "recentMovements": recent_movements,
+        "unassignedRows": unassigned_rows[:10],
+        "manualTransferRows": manual_transfer_rows[:10],
+        "warnings": warnings,
+        "momoSnapshot": momo_snapshot,
+        "momoReconciled": bool(today_reconciliation),
+    }
+
+
+def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, Any]:
+    """Build a decision-focused daily briefing without creating new accounting records."""
+    sales = daily_sales_summary_context(db_session, briefing_date)
+    accountability = daily_sales_accountability_context(db_session, briefing_date)
+    wallet = wallet_control_context(db_session, briefing_date)
+    records = db_session.scalars(select(ModuleRecord)).all()
+    daily_expenses = round(
+        sum(
+            abs(parse_amount(record.amount))
+            for record in records
+            if record.module_key == "expenses" and record.record_date == briefing_date
+        ),
+        2,
+    )
+    daily_payroll = round(
+        sum(
+            parse_amount((record.payload or {}).get("amountPaid"))
+            for record in records
+            if record.module_key == "salary_records"
+            and parse_date((record.payload or {}).get("paymentDate")) == briefing_date
+        ),
+        2,
+    )
+    credit_balances: dict[str, dict[str, Any]] = {}
+    for record in sorted(
+        (item for item in records if item.module_key == "customer_credit_accounts"),
+        key=lambda item: (item.record_date or date.min, item.created_at, item.id),
+    ):
+        payload = dict(record.payload or {})
+        customer = normalize_text(payload.get("customerName")) or "Unnamed customer"
+        phone = normalize_text(payload.get("customerPhone"))
+        key = phone.lower() or customer.lower()
+        row = credit_balances.setdefault(key, {"customer": customer, "phone": phone, "balance": 0.0, "dueDate": ""})
+        row["balance"] = round(row["balance"] + customer_credit_entry_effect(payload), 2)
+        due_date = parse_date(payload.get("dueDate"))
+        if due_date:
+            row["dueDate"] = due_date.isoformat()
+    open_credit = [row for row in credit_balances.values() if row["balance"] > 0.009]
+    credit_outstanding = round(sum(row["balance"] for row in open_credit), 2)
+    overdue_credit = [row for row in open_credit if parse_date(row["dueDate"]) and parse_date(row["dueDate"]) < briefing_date]
+
+    latest_profiles = latest_apartment_suite_profiles(records)
+    tenant_outstanding = round(sum(parse_amount(profile["outstanding"]) for profile in latest_profiles), 2)
+    supplier_outstanding_total = round(
+        sum(supplier_outstanding(record.payload or {}) for record in records if record.module_key == "suppliers"),
+        2,
+    )
+    stock_items = db_session.scalars(
+        select(Product).where(Product.track_inventory.is_(True), Product.active.is_(True))
+    ).all()
+    expired = [item for item in stock_items if item.expiry_date and item.expiry_date < briefing_date]
+    expiring = [
+        item for item in stock_items
+        if item.expiry_date and briefing_date <= item.expiry_date <= briefing_date + timedelta(days=30)
+    ]
+    low_stock = [item for item in stock_items if item.quantity_on_hand <= item.min_stock_level]
+    action_items: list[dict[str, str]] = []
+    if expired:
+        action_items.append({"label": "Remove expired stock", "note": f"{len(expired)} item(s) have passed their expiry date.", "href": "/app/inventory?expiry=expired"})
+    if low_stock:
+        action_items.append({"label": "Restock low items", "note": f"{len(low_stock)} item(s) are at or below their minimum stock level.", "href": "/app/inventory?stock=low"})
+    if overdue_credit:
+        action_items.append({"label": "Follow up credit balances", "note": f"{len(overdue_credit)} customer account(s) are overdue.", "href": "/app/modules/customer_credit_accounts"})
+    if tenant_outstanding > 0:
+        action_items.append({"label": "Review tenant collections", "note": f"Tenant rent and bills outstanding: {format_currency(tenant_outstanding)}.", "href": "/app/modules/apartments"})
+    if wallet["warnings"]:
+        action_items.append({"label": "Resolve cash-control warnings", "note": wallet["warnings"][0], "href": "/app/cash-float-control"})
+    if supplier_outstanding_total > 0:
+        action_items.append({"label": "Plan supplier payments", "note": f"Supplier balances outstanding: {format_currency(supplier_outstanding_total)}.", "href": "/app/modules/suppliers"})
+
+    operating_position = round(sales["total_profit"] - daily_expenses - daily_payroll, 2)
+    return {
+        "sales": sales,
+        "accountability": accountability,
+        "wallet": wallet,
+        "dailyExpenses": daily_expenses,
+        "dailyPayroll": daily_payroll,
+        "operatingPosition": operating_position,
+        "creditOutstanding": credit_outstanding,
+        "openCreditCount": len(open_credit),
+        "overdueCreditCount": len(overdue_credit),
+        "tenantOutstanding": tenant_outstanding,
+        "supplierOutstanding": supplier_outstanding_total,
+        "expiredCount": len(expired),
+        "expiringCount": len(expiring),
+        "lowStockCount": len(low_stock),
+        "actionItems": action_items[:8],
+    }
+
+
 def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: str = "") -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for record in records:
@@ -11794,6 +12084,50 @@ def create_app(config: AppConfig | None = None) -> Flask:
         set_module_record_metadata(existing, MODULES["customer_credit_accounts"], payload)
         rollup_customer_credit_account(db, customer_credit_rollup_key(db, payload))
 
+    def pos_payment_cashbook_account(payment_method: Any) -> str:
+        method = normalize_text(payment_method).lower()
+        if method in POS_CASH_PAYMENT_METHODS:
+            return "Main Cash Drawer"
+        if method in {"mobile money", "momo"}:
+            return "OneRoot MoMo Collection Wallet"
+        if method in {"bank transfer", "card"}:
+            return "Business Bank Account"
+        return ""
+
+    def sync_pos_payment_to_cashbook(order: PosOrder, db_session=None) -> None:
+        """Make every completed non-credit POS collection visible in the wallet control view."""
+        db = db_session or g.db
+        reference = f"pos-payment|{order.id}"
+        linked_entry = db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "cashbook_entries",
+                ModuleRecord.reference == reference,
+            )
+        )
+        account_name = pos_payment_cashbook_account(order.payment_method)
+        amount = round(abs(parse_amount(order.total_amount)), 2)
+        if is_kitchen_stock_issue(order) or not account_name or amount <= 0:
+            if linked_entry:
+                db.delete(linked_entry)
+            return
+        payload = {
+            "id": linked_entry.id if linked_entry else uuid4().hex,
+            "date": order.order_date.isoformat(),
+            "businessAreaId": order.primary_business_area_id or "shared-operations",
+            "accountName": account_name,
+            "entryType": "Cash In",
+            "amount": amount,
+            "paymentMethod": normalize_text(order.payment_method),
+            "reference": reference,
+            "sourceType": "pos-payment",
+            "linkedPosOrderId": order.id,
+            "notes": f"[POS Collection Sync] {order.order_number} · {pos_order_item_summary(order.lines, limit=6)}",
+        }
+        if not linked_entry:
+            linked_entry = ModuleRecord(id=payload["id"], module_key="cashbook_entries", created_at=datetime.utcnow())
+            db.add(linked_entry)
+        set_module_record_metadata(linked_entry, MODULES["cashbook_entries"], payload)
+
     def customer_credit_cashbook_account(payment_method: Any) -> str:
         method = normalize_text(payment_method).lower()
         if method == "cash":
@@ -13714,6 +14048,150 @@ def create_app(config: AppConfig | None = None) -> Flask:
             recent_pos_orders=g.db.scalars(
                 select(PosOrder).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(8)
             ).all(),
+        )
+
+    @app.route("/app/cash-float-control", methods=["GET", "POST"])
+    @access_required("wallet_control")
+    def wallet_control():
+        as_of_date = parse_date(request.values.get("date")) or date.today()
+        if request.method == "POST":
+            movement_type = normalize_text(request.form.get("movementType")) or "Transfer"
+            source_wallet = normalize_text(request.form.get("sourceWallet"))
+            destination_wallet = normalize_text(request.form.get("destinationWallet"))
+            active_wallet = normalize_text(request.form.get("activeWallet"))
+            amount = round(abs(parse_amount(request.form.get("amount"))), 2)
+            movement_date = parse_date(request.form.get("date")) or date.today()
+            business_area_id = normalize_text(request.form.get("businessAreaId")) or "shared-operations"
+            reference_suffix = normalize_text(request.form.get("reference"))
+            notes = normalize_text(request.form.get("notes"))
+            errors: list[str] = []
+            if amount <= 0:
+                errors.append("Enter a movement amount greater than zero.")
+            if movement_type == "Transfer":
+                if source_wallet not in WALLET_LABELS or destination_wallet not in WALLET_LABELS:
+                    errors.append("Choose both the source and destination wallet.")
+                elif source_wallet == destination_wallet:
+                    errors.append("The source and destination wallet must be different.")
+                elif source_wallet in WALLET_AUTO_BALANCE_ACCOUNTS or destination_wallet in WALLET_AUTO_BALANCE_ACCOUNTS:
+                    errors.append("Use the Mobile Money Counter for MTN physical cash or e-cash float movements.")
+            else:
+                if active_wallet not in WALLET_LABELS:
+                    errors.append("Choose the wallet that is receiving or releasing the money.")
+                elif active_wallet in WALLET_AUTO_BALANCE_ACCOUNTS:
+                    errors.append("Use the Mobile Money Counter for MTN physical cash or e-cash float movements.")
+            if errors:
+                for error in errors:
+                    flash(error, "error")
+            else:
+                movement_id = uuid4().hex
+                reference = f"wallet-control|{movement_id}"
+                if reference_suffix:
+                    reference = f"{reference}|{reference_suffix}"
+
+                def add_cashbook_entry(account: str, entry_type: str, movement_note: str, reference_side: str) -> ModuleRecord:
+                    payload = {
+                        "id": uuid4().hex,
+                        "date": movement_date.isoformat(),
+                        "businessAreaId": business_area_id,
+                        "accountName": account,
+                        "entryType": entry_type,
+                        "amount": amount,
+                        "paymentMethod": "Cash",
+                        "reference": f"{reference}|{reference_side}",
+                        "sourceType": "wallet-control",
+                        "walletMovementId": movement_id,
+                        "notes": movement_note,
+                    }
+                    entry = ModuleRecord(id=payload["id"], module_key="cashbook_entries", created_at=datetime.utcnow())
+                    set_module_record_metadata(entry, MODULES["cashbook_entries"], payload)
+                    g.db.add(entry)
+                    return entry
+
+                involved_wallets: list[str] = []
+                if movement_type == "Transfer":
+                    add_cashbook_entry(
+                        source_wallet,
+                        "Cash Out",
+                        f"[Wallet Transfer] Moved to {WALLET_LABELS[destination_wallet]}. {notes}".strip(),
+                        "out",
+                    )
+                    add_cashbook_entry(
+                        destination_wallet,
+                        "Cash In",
+                        f"[Wallet Transfer] Received from {WALLET_LABELS[source_wallet]}. {notes}".strip(),
+                        "in",
+                    )
+                    involved_wallets = [source_wallet, destination_wallet]
+                elif movement_type == "Add Funds":
+                    add_cashbook_entry(
+                        active_wallet,
+                        "Cash In",
+                        f"[Wallet Funding] External/owner funds added. {notes}".strip(),
+                        "funding",
+                    )
+                    involved_wallets = [active_wallet]
+                else:
+                    add_cashbook_entry(
+                        active_wallet,
+                        "Cash Out",
+                        f"[Wallet Removal] Funds removed from OneRoot control. {notes}".strip(),
+                        "removal",
+                    )
+                    involved_wallets = [active_wallet]
+
+                # Petty cash keeps its dedicated float balance, so reflect the same
+                # controlled movement there while its matching cashbook trail remains auditable.
+                if "Petty Cash Float" in involved_wallets:
+                    petty_is_inflow = (
+                        (movement_type == "Transfer" and destination_wallet == "Petty Cash Float")
+                        or (movement_type == "Add Funds" and active_wallet == "Petty Cash Float")
+                    )
+                    petty_payload = {
+                        "id": uuid4().hex,
+                        "date": movement_date.isoformat(),
+                        "businessAreaId": business_area_id,
+                        "transactionTypeId": "Float Top-Up" if petty_is_inflow else "Float Return",
+                        "description": "Wallet-controlled petty cash movement",
+                        "amount": amount,
+                        "paymentMethod": "Cash",
+                        "reference": f"petty-{reference}",
+                        "walletMovementId": movement_id,
+                        "notes": notes or "Created from Cash & Float Control.",
+                    }
+                    petty_record = ModuleRecord(id=petty_payload["id"], module_key="petty_cash", created_at=datetime.utcnow())
+                    set_module_record_metadata(petty_record, MODULES["petty_cash"], petty_payload)
+                    g.db.add(petty_record)
+
+                audit(
+                    "wallet_control",
+                    "Cash & Float Control",
+                    "create",
+                    f"{movement_type}: {format_currency(amount)}",
+                    movement_id,
+                    f"{', '.join(WALLET_LABELS.get(wallet, wallet) for wallet in involved_wallets)} · {movement_date.isoformat()}",
+                )
+                g.db.commit()
+                flash("Wallet movement saved with matching cashbook records.", "success")
+                return redirect(url_for("wallet_control", date=movement_date.isoformat()))
+
+        return render_template(
+            "wallet_control.html",
+            page_title="Cash & Float Control",
+            wallet_context=wallet_control_context(g.db, as_of_date),
+            as_of_date=as_of_date,
+            wallet_options=BUSINESS_WALLET_OPTIONS,
+            business_area_options=BUSINESS_AREA_OPTIONS,
+        )
+
+    @app.route("/app/owner-daily-briefing")
+    @access_required("owner_briefing")
+    def owner_daily_briefing():
+        briefing_date = parse_date(request.args.get("date")) or date.today()
+        return render_template(
+            "owner_daily_briefing.html",
+            page_title="Owner Daily Briefing",
+            briefing_date=briefing_date,
+            briefing=owner_daily_briefing_context(g.db, briefing_date),
         )
 
     @app.route("/app/export/backup.json")
@@ -17980,6 +18458,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             set_module_record_metadata(kitchen_batch, MODULES["kitchen_recipe_plans"], kitchen_batch_payload)
         else:
             sync_customer_credit_from_pos_order(order, g.db)
+            sync_pos_payment_to_cashbook(order, g.db)
             sync_generated_sales_for_pos(order_date, order.business_area_ids)
             sync_existing_pos_closeouts(order_date, order.business_area_ids)
         if not kitchen_issue_mode and (normalize_text(order.customer_name) or normalize_text(order.customer_phone)):
@@ -18066,6 +18545,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if credit_record:
                 credit_customer_key = customer_credit_key(credit_record.payload or {})
                 g.db.delete(credit_record)
+
+        linked_cashbook_entry = g.db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "cashbook_entries",
+                ModuleRecord.reference == f"pos-payment|{order.id}",
+            )
+        )
+        if linked_cashbook_entry:
+            g.db.delete(linked_cashbook_entry)
 
         for line in order.lines:
             if not line.track_inventory:

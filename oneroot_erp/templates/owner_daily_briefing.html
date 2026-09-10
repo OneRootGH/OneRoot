@@ -1,0 +1,33 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="dashboard-hero compact-hero">
+    <div><p class="eyebrow">Leadership Briefing</p><h3>Owner Daily Briefing</h3><p class="muted">A read-only daily decision view. Sales, collections, cash control, risks, and follow-up actions remain connected to their original records.</p></div>
+    <div class="toolbar"><a class="button subtle" href="{{ url_for('dashboard') }}">Dashboard</a><a class="button primary" href="{{ url_for('wallet_control', date=briefing_date|date_value) }}">Cash & Float Control</a></div>
+  </section>
+  <section class="card compact-filter-card"><form class="toolbar" method="get"><label class="compact-field"><span>Briefing Date</span><input type="date" name="date" value="{{ briefing_date|date_value }}"></label><button class="button primary" type="submit">Open Briefing</button><a class="button subtle" href="{{ url_for('owner_daily_briefing') }}">Today</a></form></section>
+
+  <section class="card-grid four">
+    <article class="metric-card"><span>Paid Sales</span><strong>{{ briefing.sales.total_sales|currency }}</strong><small>{{ briefing.sales.transaction_total }} paid transaction{{ '' if briefing.sales.transaction_total == 1 else 's' }} captured</small></article>
+    <article class="metric-card"><span>Gross Profit</span><strong>{{ briefing.sales.total_profit|currency }}</strong><small>{{ briefing.sales.total_cost|currency }} direct cost</small></article>
+    <article class="metric-card {% if briefing.operatingPosition < 0 %}warning{% endif %}"><span>Daily Operating Position</span><strong>{{ briefing.operatingPosition|currency }}</strong><small>Gross profit less {{ briefing.dailyExpenses|currency }} expenses and {{ briefing.dailyPayroll|currency }} payroll paid</small></article>
+    <article class="metric-card"><span>Controlled Funds</span><strong>{{ briefing.wallet.controlledTotal|currency }}</strong><small>Cash, bank, and e-cash shown by wallet</small></article>
+  </section>
+  <section class="card-grid four">
+    <article class="metric-card warning"><span>Customer Credit Open</span><strong>{{ briefing.creditOutstanding|currency }}</strong><small>{{ briefing.openCreditCount }} customer balance{{ '' if briefing.openCreditCount == 1 else 's' }} · {{ briefing.overdueCreditCount }} overdue</small></article>
+    <article class="metric-card warning"><span>Tenant Outstanding</span><strong>{{ briefing.tenantOutstanding|currency }}</strong><small>Rent and monthly bills still open</small></article>
+    <article class="metric-card warning"><span>Supplier Balances</span><strong>{{ briefing.supplierOutstanding|currency }}</strong><small>Payables needing a plan</small></article>
+    <article class="metric-card {% if briefing.expiredCount %}warning{% endif %}"><span>Stock Risks</span><strong>{{ briefing.expiredCount + briefing.expiringCount + briefing.lowStockCount }}</strong><small>{{ briefing.expiredCount }} expired · {{ briefing.expiringCount }} expiring · {{ briefing.lowStockCount }} low stock</small></article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card"><div class="card-header compact"><div><p class="eyebrow">Sales Mix</p><h3>Paid Sales by Business Area</h3></div></div>{% if briefing.sales.sales_area_chart %}<div class="chart-stack">{% for item in briefing.sales.sales_area_chart %}<div class="chart-row"><div class="chart-row-header"><strong>{{ item.chartLabel }}</strong><span>{{ item.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ item.chartWidth }}%; background: {{ item.chartColor }};"></span></div></div>{% endfor %}</div>{% else %}<p class="muted">No paid sales are recorded for this date.</p>{% endif %}</article>
+    <article class="card"><div class="card-header compact"><div><p class="eyebrow">Sales Sources</p><h3>Where Today’s Sales Came From</h3></div></div>{% if briefing.sales.sales_source_chart %}<div class="chart-stack">{% for item in briefing.sales.sales_source_chart %}<div class="chart-row"><div class="chart-row-header"><strong>{{ item.chartLabel }}</strong><span>{{ item.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ item.chartWidth }}%; background: {{ item.chartColor }};"></span></div></div>{% endfor %}</div>{% else %}<p class="muted">No paid sales sources are available for this date.</p>{% endif %}</article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card"><div class="card-header compact"><div><p class="eyebrow">Priority Actions</p><h3>What Needs Attention</h3></div></div><ul class="stack-list compact">{% for item in briefing.actionItems %}<li class="stack-list-item-row"><div class="stack-list-copy"><strong>{{ item.label }}</strong><span>{{ item.note }}</span></div><a class="button subtle button-small" href="{{ item.href }}">Open</a></li>{% else %}<li><span>No priority issues were identified from the records for this date.</span></li>{% endfor %}</ul></article>
+    <article class="card"><div class="card-header compact"><div><p class="eyebrow">Cash Position</p><h3>Wallet Snapshot</h3></div></div><ul class="stack-list compact">{% for wallet in briefing.wallet.wallets[:8] %}<li class="stack-list-item-row"><div class="stack-list-copy"><strong>{{ wallet.label }}</strong><span>{{ wallet.source }} · {{ wallet.note }}</span></div><strong class="{% if wallet.isNegative %}negative-text{% endif %}">{{ wallet.balance|currency }}</strong></li>{% endfor %}</ul></article>
+  </section>
+
+  <section class="card"><div class="card-header compact"><div><p class="eyebrow">Daily Accountability</p><h3>Sales, Credit, and Collections</h3></div><a class="button subtle button-small" href="{{ url_for('sales_summary_page', date=briefing_date|date_value) }}">Open Daily Sales Review</a></div><div class="table-wrap"><table><thead><tr><th>Paid Sales</th><th>Credit Supplied</th><th>Credit Collected</th><th>Money Received Today</th><th>Credit Movement</th></tr></thead><tbody><tr><td>{{ briefing.accountability.salesTotal|currency }}</td><td>{{ briefing.accountability.creditSuppliedTotal|currency }}</td><td>{{ briefing.accountability.creditCollectionTotal|currency }}</td><td>{{ briefing.accountability.customerMoneyReceivedTotal|currency }}</td><td class="{% if briefing.accountability.creditOutstandingMovement > 0 %}negative-text{% endif %}">{{ briefing.accountability.creditOutstandingMovement|currency }}</td></tr></tbody></table></div><p class="muted compact-copy">Credit supplied is not added to paid sales. Credit collections are shown separately because they settle an earlier sale rather than create a new sale.</p></section>
+{% endblock %}

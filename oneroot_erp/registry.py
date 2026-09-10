@@ -453,6 +453,10 @@ for _role_key, _permissions in ROLE_ACCESS_KEYS.items():
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
     ROLE_ACCESS_KEYS[_role_key].add("loss_prevention_controls")
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead", "finance-hr-controls"):
+    ROLE_ACCESS_KEYS[_role_key].add("wallet_control")
+for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead", "finance-hr-controls"):
+    ROLE_ACCESS_KEYS[_role_key].add("owner_briefing")
+for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead", "finance-hr-controls"):
     ROLE_ACCESS_KEYS[_role_key].add("supplier_directory")
 for _role_key in ("owner", "admin", "operations", "finance", "frontline-service-lead", "sales-stock-operator", "cashier"):
     ROLE_ACCESS_KEYS[_role_key].add("customer_credit_accounts")
@@ -2235,7 +2239,7 @@ MENU_GROUPS = [
     (
         "Workspace",
         [
-            ("Overview", ["dashboard", "reports"]),
+            ("Overview", ["dashboard", "owner_briefing", "reports"]),
             ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Stock", ["inventory", "inventory_barcode"]),
         ],
@@ -2244,7 +2248,7 @@ MENU_GROUPS = [
         "Finance",
         [
             ("Sales & Spend", ["sales_summary", "sales", "customer_credit_accounts", "expenses", "petty_cash"]),
-            ("Cash & Reconciliation", ["cashbook_entries", "mobile_money_reconciliations"]),
+            ("Cash & Reconciliation", ["wallet_control", "cashbook_entries", "mobile_money_reconciliations"]),
         ],
     ),
     (
