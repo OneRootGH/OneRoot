@@ -9814,6 +9814,12 @@ def wallet_control_context(db_session, as_of_date: date | None = None) -> dict[s
     }
 
 
+def customer_credit_balance_effect(payload: dict[str, Any]) -> float:
+    """Return the signed effect of one customer-credit account activity."""
+    amount = abs(parse_amount(payload.get("amount")))
+    return amount if normalize_text(payload.get("transactionType")) == "Credit Sale" else -amount
+
+
 def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, Any]:
     """Build a decision-focused daily briefing without creating new accounting records."""
     sales = daily_sales_summary_context(db_session, briefing_date)
@@ -9847,7 +9853,7 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
         phone = normalize_text(payload.get("customerPhone"))
         key = phone.lower() or customer.lower()
         row = credit_balances.setdefault(key, {"customer": customer, "phone": phone, "balance": 0.0, "dueDate": ""})
-        row["balance"] = round(row["balance"] + customer_credit_entry_effect(payload), 2)
+        row["balance"] = round(row["balance"] + customer_credit_balance_effect(payload), 2)
         due_date = parse_date(payload.get("dueDate"))
         if due_date:
             row["dueDate"] = due_date.isoformat()
@@ -11935,8 +11941,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return next(iter(name_keys)) if len(name_keys) == 1 else direct_key
 
     def customer_credit_entry_effect(payload: dict[str, Any]) -> float:
-        amount = abs(parse_amount(payload.get("amount")))
-        return amount if normalize_text(payload.get("transactionType")) == "Credit Sale" else -amount
+        return customer_credit_balance_effect(payload)
 
     def rollup_customer_credit_account(db_session, customer_key: str) -> None:
         if not customer_key:
