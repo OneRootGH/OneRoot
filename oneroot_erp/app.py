@@ -12268,6 +12268,41 @@ def create_app(config: AppConfig | None = None) -> Flask:
         set_module_record_metadata(existing, MODULES["customer_credit_accounts"], payload)
         rollup_customer_credit_account(db, customer_credit_rollup_key(db, payload))
 
+    def upsert_pos_customer_crm_contact(order: PosOrder, db_session=None) -> None:
+        """Capture a POS customer without rebuilding every CRM record at checkout."""
+        db = db_session or g.db
+        customer_name = normalize_text(order.customer_name)
+        customer_phone = normalize_text(order.customer_phone)
+        reference = customer_reference_key(customer_name, customer_phone)
+        if not reference:
+            return
+        existing = db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "customer_crm",
+                ModuleRecord.reference == reference,
+            )
+        )
+        payload = dict(existing.payload or {}) if existing else {}
+        payload.update(
+            {
+                "id": payload.get("id") or (existing.id if existing else uuid4().hex),
+                "captureDate": normalize_text(payload.get("captureDate")) or order.order_date.isoformat(),
+                "businessAreaId": normalize_text(payload.get("businessAreaId")) or order.primary_business_area_id or "shared-operations",
+                "customerName": customer_name or normalize_text(payload.get("customerName")),
+                "customerPhone": customer_phone or normalize_text(payload.get("customerPhone")),
+                "customerSegment": normalize_text(payload.get("customerSegment")) or "Customer",
+                "leadSource": normalize_text(payload.get("leadSource")) or "POS",
+                "preferredContact": normalize_text(payload.get("preferredContact")) or ("WhatsApp" if customer_phone else "Phone"),
+                "lastOrderDate": order.order_date.isoformat(),
+                "status": normalize_text(payload.get("status")) or "Active",
+                "notes": normalize_text(payload.get("notes")) or "Captured from OneRoot POS checkout.",
+            }
+        )
+        record = existing or ModuleRecord(id=payload["id"], module_key="customer_crm", created_at=datetime.utcnow())
+        if not existing:
+            db.add(record)
+        set_module_record_metadata(record, MODULES["customer_crm"], payload)
+
     def pos_payment_cashbook_account(payment_method: Any) -> str:
         method = normalize_text(payment_method).lower()
         if method in POS_CASH_PAYMENT_METHODS:
@@ -18671,7 +18706,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             sync_generated_sales_for_pos(order_date, order.business_area_ids)
             sync_existing_pos_closeouts(order_date, order.business_area_ids)
         if not kitchen_issue_mode and (normalize_text(order.customer_name) or normalize_text(order.customer_phone)):
-            sync_customer_crm_automation(g.db)
+            upsert_pos_customer_crm_contact(order, g.db)
         audit(
             "kitchen_recipe_plans" if kitchen_issue_mode else "pos",
             "Kitchen Production" if kitchen_issue_mode else "POS",

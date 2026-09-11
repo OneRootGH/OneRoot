@@ -239,10 +239,10 @@
         </section>{% endif %}
 
         {% if not kitchen_issue_mode %}<details class="muted-box pos-customer-box pos-customer-box-compact">
-          <summary>Customer</summary>
+          <summary>Customer <span class="muted">Required for credit sales</span></summary>
           <div class="form-grid single">
-            <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Only if needed"></label>
-            <label><span>Customer Phone</span><input type="text" id="pos-customer-phone" placeholder="Optional contact"></label>
+            <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Only if needed" autocomplete="name"></label>
+            <label><span>Customer Phone</span><input type="tel" id="pos-customer-phone" placeholder="Optional contact" autocomplete="tel"></label>
             <label><span>Notes</span><textarea id="pos-notes" rows="3" placeholder="Optional counter note"></textarea></label>
           </div>
           <p class="muted pos-closeout-note" id="pos-closeout-meta">

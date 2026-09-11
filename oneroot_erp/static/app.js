@@ -46,6 +46,7 @@
   const customerNameInput = document.getElementById("pos-customer-name");
   const customerPhoneInput = document.getElementById("pos-customer-phone");
   const notesInput = document.getElementById("pos-notes");
+  const customerBox = document.querySelector(".pos-customer-box");
   const saveButton = document.getElementById("pos-save");
   const clearButton = document.getElementById("pos-clear");
   const historyBody = document.getElementById("pos-history-body");
@@ -128,6 +129,24 @@
 
   function getOrderDate() {
     return orderDateInput?.value || new Date().toISOString().slice(0, 10);
+  }
+
+  function isCreditSale() {
+    return (paymentMethodInput?.value || "").trim().toLowerCase() === "credit";
+  }
+
+  function syncCreditCustomerFields() {
+    const requiresCustomer = isCreditSale();
+    if (customerNameInput) {
+      customerNameInput.required = requiresCustomer;
+      customerNameInput.placeholder = requiresCustomer ? "Required for credit sale" : "Only if needed";
+    }
+    if (customerPhoneInput) {
+      customerPhoneInput.placeholder = requiresCustomer ? "Recommended to link the credit account" : "Optional contact";
+    }
+    if (requiresCustomer && customerBox) {
+      customerBox.open = true;
+    }
   }
 
   function setActiveButton(buttons, predicate) {
@@ -762,6 +781,7 @@
       paymentLabelNode.textContent = paymentMethodInput.value || "Cash";
     }
     setActiveButton(paymentButtonNodes, (button) => button.dataset.paymentMethod === paymentMethodInput.value);
+    syncCreditCustomerFields();
   });
 
   paymentButtonNodes.forEach((button) => {
@@ -847,6 +867,14 @@
   saveButton.addEventListener("click", async () => {
     if (!state.cart.length) {
       setStatus("Add at least one item before saving.", "error");
+      return;
+    }
+    if (isCreditSale() && !customerNameInput?.value?.trim()) {
+      if (customerBox) {
+        customerBox.open = true;
+      }
+      setStatus("Enter the customer name before saving a credit sale.", "error");
+      customerNameInput?.focus();
       return;
     }
 
@@ -943,6 +971,7 @@
   if (paymentLabelNode && paymentMethodInput) {
     paymentLabelNode.textContent = paymentMethodInput.value || "Cash";
   }
+  syncCreditCustomerFields();
   kitchenMealInput?.addEventListener("change", () => {
     if (state.cart.length) {
       setStatus(`Current ingredient cart will be issued to ${kitchenMealInput.selectedOptions?.[0]?.textContent || "the selected meal"}.`);
