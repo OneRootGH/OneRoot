@@ -114,6 +114,8 @@ class PosOrder(Base):
 
     id: Mapped[str] = mapped_column(String(64), primary_key=True)
     order_number: Mapped[str] = mapped_column(String(100), unique=True, index=True)
+    # Lets a browser safely retry a sale when the network drops after the server saves it.
+    client_request_id: Mapped[str] = mapped_column(String(80), default="", index=True)
     order_date: Mapped[datetime] = mapped_column(Date, index=True)
     business_area_ids: Mapped[list] = mapped_column(JSON, default=list)
     primary_business_area_id: Mapped[str] = mapped_column(String(100), default="", index=True)

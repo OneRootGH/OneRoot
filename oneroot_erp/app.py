@@ -786,6 +786,7 @@ def ensure_schema_columns(engine) -> None:
     inspector = inspect(engine)
     table_names = set(inspector.get_table_names())
     existing_columns = {column["name"] for column in inspector.get_columns("pos_order_lines")} if "pos_order_lines" in table_names else set()
+    pos_order_columns = {column["name"] for column in inspector.get_columns("pos_orders")} if "pos_orders" in table_names else set()
     statements: list[str] = []
     if "pos_order_lines" in table_names and "unit_cost" not in existing_columns:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN unit_cost FLOAT DEFAULT 0")
@@ -795,6 +796,8 @@ def ensure_schema_columns(engine) -> None:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN stock_source_product_id VARCHAR(100) DEFAULT ''")
     if "pos_order_lines" in table_names and "stock_units_per_sale" not in existing_columns:
         statements.append("ALTER TABLE pos_order_lines ADD COLUMN stock_units_per_sale FLOAT DEFAULT 1")
+    if "pos_orders" in table_names and "client_request_id" not in pos_order_columns:
+        statements.append("ALTER TABLE pos_orders ADD COLUMN client_request_id VARCHAR(80) DEFAULT ''")
     product_columns = set()
     if "products" in table_names:
         product_columns = {column["name"] for column in inspector.get_columns("products")}
@@ -849,6 +852,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 ensure_default_job_vacancies(bootstrap_session, app_config)
+                repair_staff_access_roles(bootstrap_session)
                 bootstrap_session.commit()
             session_factory.remove()
             return
@@ -4606,6 +4610,50 @@ def normalize_staff_role(value: Any, *, fallback_role: Any = "viewer") -> str:
         if normalized in {option_value.lower(), option_label.lower()}:
             return option_value
     return default_staff_role_for_access_role(fallback_role)
+
+
+# Staff assignments are the business-facing source of truth. Older accounts that
+# were accidentally stored as Viewer are repaired centrally at application start,
+# not only when the Owner visits the User Accounts page.
+STAFF_ROLE_ACCESS_ROLE_REPAIRS = {
+    "Manager": "operations",
+    "Operations Manager": "operations",
+    "Business Manager & Operations Lead": "operations",
+    "POS Cashier": "cashier",
+    "Stock Officer": "sales-stock-operator",
+    "Mobile Money Agent": "mobile-money-agent",
+    "Laundry Desk Officer": "laundry-desk",
+    "Equipment Rental Officer": "equipment-desk",
+    "Front Desk / Service Desk Officer": "frontline-service-lead",
+    "Stock & Dispatch Officer": "delivery-dispatch",
+    "Dispatch Coordinator": "delivery-dispatch",
+    "Delivery Rider": "delivery-dispatch",
+    "Kitchen Staff": "kitchen-food-counter",
+    "Finance Officer": "finance",
+    "Finance, HR & Payroll Officer": "finance-hr-controls",
+    "HR & Payroll Officer": "hr-payroll",
+    "CRM & Marketing Officer": "marketing-crm",
+    "CRM, Marketing & Support Officer": "marketing-crm",
+    "Owner & Business Manager": "owner",
+    "Finance HR & Controls Officer": "finance-hr-controls",
+    "Retail Stock & Service Desk Officer": "retail-stock-service",
+    "Kitchen & Food Counter Officer": "kitchen-food-counter",
+    "Customer Growth & Dispatch Officer": "growth-apartments-dispatch",
+    "Customer Growth & Service Booking Officer": "growth-apartments-dispatch",
+    "Inventory Dispatch Maintenance & Service Officer": "dispatch-maintenance-service",
+}
+
+
+def repair_staff_access_roles(db_session) -> int:
+    repaired = 0
+    for account in db_session.scalars(select(User)).all():
+        restored_role = STAFF_ROLE_ACCESS_ROLE_REPAIRS.get(normalize_text(account.staff_role))
+        if not restored_role or normalize_role_key(account.role) != "viewer":
+            continue
+        account.role = restored_role
+        account.updated_at = datetime.utcnow()
+        repaired += 1
+    return repaired
 
 
 def staff_role_label(value: Any, *, fallback_role: Any = "viewer") -> str:
@@ -8588,6 +8636,71 @@ def tenant_portal_advance_bill_warning(statement_rows: list[dict[str, Any]]) -> 
     return {"show": False}
 
 
+def tenant_advance_bill_warning_message(profile: dict[str, Any], warning: dict[str, Any], *, support_phone: str = "") -> str:
+    """Build a clear planning message without treating bills as rent payments."""
+    tenant = normalize_text(profile.get("tenant")) or "Tenant"
+    suite = normalize_text(profile.get("suite")) or "your suite"
+    portal_username = normalize_text(profile.get("tenantPortalUsername"))
+    portal_access = normalize_text(profile.get("tenantPortalActive")).lower() != "no"
+    planning_position = (
+        f"Bills are now {format_currency(warning.get('amountOver'))} above the value of recorded advance rent."
+        if parse_amount(warning.get("amountOver")) > 0
+        else f"Only {format_currency(warning.get('amountRemaining'))} remains before bills reach the value of recorded advance rent."
+    )
+    portal_line = (
+        f" Check your statement at https://oneroot.shop/tenant/login using username {portal_username}."
+        if portal_access and portal_username
+        else ""
+    )
+    contact_line = f" Please contact OneRoot on {support_phone} to agree the next payment arrangement." if normalize_text(support_phone) else ""
+    return (
+        f"Hello {tenant}, this is an account-planning notice from OneRoot Essentials for {suite}. "
+        f"Recorded advance rent is {format_currency(warning.get('advanceRent'))}; unpaid monthly bills and charges are "
+        f"{format_currency(warning.get('unpaidBills'))}. {planning_position} "
+        "This notice does not transfer rent to bills; it helps you plan your bills and next rent renewal."
+        f"{portal_line}{contact_line}"
+    ).strip()
+
+
+def build_tenant_advance_bill_watchlist(records: list[ModuleRecord], *, support_phone: str = "") -> list[dict[str, Any]]:
+    """Return the latest occupied suite records where bills threaten advance rent."""
+    apartment_records = [record for record in records if record.module_key == "apartments"]
+    latest_profiles = latest_apartment_suite_profiles(apartment_records, support_phone=support_phone)
+    watchlist: list[dict[str, Any]] = []
+    for profile in latest_profiles:
+        if profile.get("occupancyKey") not in {"occupied", "reserved"}:
+            continue
+        suite_records = [
+            record
+            for record in apartment_records
+            if normalize_text(apartment_record_payload(record).get("suite")) == normalize_text(profile.get("suite"))
+        ]
+        statement_rows = apartment_statement_rows(profile["record"], suite_records)
+        warning = tenant_portal_advance_bill_warning(statement_rows)
+        if not warning.get("show"):
+            continue
+        message = tenant_advance_bill_warning_message(profile, warning, support_phone=support_phone)
+        whatsapp_url = ""
+        if normalize_phone(profile.get("tenantPhone")) and normalize_text(profile.get("reminderConsent")) != "Opted Out":
+            whatsapp_url = whatsapp_chat_url(profile.get("tenantPhone"), message)
+        watchlist.append(
+            {
+                **profile,
+                "advanceBillWarning": warning,
+                "advanceBillMessage": message,
+                "advanceBillWhatsappUrl": whatsapp_url,
+            }
+        )
+    return sorted(
+        watchlist,
+        key=lambda item: (
+            0 if item["advanceBillWarning"].get("severity") == "consumed" else 1,
+            -parse_amount(item["advanceBillWarning"].get("unpaidBills")),
+            item.get("suite", ""),
+        ),
+    )
+
+
 def apartment_document_source_payload(reference_record: ModuleRecord, suite_records: list[ModuleRecord]) -> dict[str, Any]:
     current_payload = apartment_record_payload(reference_record)
     scoped_history = list(reversed(apartment_relevant_history(reference_record, suite_records)))
@@ -9919,6 +10032,7 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
 
     latest_profiles = latest_apartment_suite_profiles(records)
     tenant_outstanding = round(sum(parse_amount(profile["outstanding"]) for profile in latest_profiles), 2)
+    advance_rent_alerts = build_tenant_advance_bill_watchlist(records)
     supplier_outstanding_total = round(
         sum(supplier_outstanding(record.payload or {}) for record in records if record.module_key == "suppliers"),
         2,
@@ -9941,6 +10055,14 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
         action_items.append({"label": "Follow up credit balances", "note": f"{len(overdue_credit)} customer account(s) are overdue.", "href": "/app/modules/customer_credit_accounts"})
     if tenant_outstanding > 0:
         action_items.append({"label": "Review tenant collections", "note": f"Tenant rent and bills outstanding: {format_currency(tenant_outstanding)}.", "href": "/app/modules/apartments"})
+    if advance_rent_alerts:
+        action_items.append(
+            {
+                "label": "Review bills against advance rent",
+                "note": f"{len(advance_rent_alerts)} tenant account(s) need payment planning before bills absorb advance rent.",
+                "href": "/app/modules/apartments",
+            }
+        )
     if wallet["warnings"]:
         action_items.append({"label": "Resolve cash-control warnings", "note": wallet["warnings"][0], "href": "/app/cash-float-control"})
     if supplier_outstanding_total > 0:
@@ -9958,6 +10080,7 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
         "openCreditCount": len(open_credit),
         "overdueCreditCount": len(overdue_credit),
         "tenantOutstanding": tenant_outstanding,
+        "advanceRentAlertCount": len(advance_rent_alerts),
         "supplierOutstanding": supplier_outstanding_total,
         "expiredCount": len(expired),
         "expiringCount": len(expiring),
@@ -14890,24 +15013,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/users", methods=["GET", "POST"])
     @access_required("users")
     def users_page():
-        # Repair accounts saved while the new five-person role values were not yet
-        # recognized. Only known new staff assignments are restored; real Viewers stay Viewers.
-        staff_role_repairs = {
-            "Owner & Business Manager": "owner",
-            "Finance HR & Controls Officer": "owner",
-            "Retail Stock & Service Desk Officer": "retail-stock-service",
-            "Kitchen & Food Counter Officer": "kitchen-food-counter",
-            "Customer Growth & Dispatch Officer": "growth-apartments-dispatch",
-            "Customer Growth & Service Booking Officer": "growth-apartments-dispatch",
-            "Inventory Dispatch Maintenance & Service Officer": "dispatch-maintenance-service",
-        }
-        repaired_accounts = 0
-        for account in g.db.scalars(select(User).where(User.role == "viewer")).all():
-            restored_role = staff_role_repairs.get(normalize_text(account.staff_role))
-            if restored_role:
-                account.role = restored_role
-                account.updated_at = datetime.utcnow()
-                repaired_accounts += 1
+        repaired_accounts = repair_staff_access_roles(g.db)
         if repaired_accounts:
             audit("users", "User Accounts", "update", "Role repair", detail=f"Restored {repaired_accounts} account role(s) from their saved staff assignment.")
             g.db.commit()
@@ -15591,6 +15697,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if profile["alertKey"] not in {"current", "vacant", "maintenance", "reserved"}
             ][:10]
             tenant_reminders = build_tenant_reminder_queue(suite_profiles)[:10]
+            advance_rent_alerts = build_tenant_advance_bill_watchlist(records, support_phone=app_config.support_phone)[:12]
 
             return render_template(
                 "apartments.html",
@@ -15626,6 +15733,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 total_rent_collected=round(sum(item["rentPaid"] for item in history_rows), 2),
                 total_bills_collected=round(sum(item["billsPaid"] for item in history_rows), 2),
                 tenant_reminders=tenant_reminders,
+                advance_rent_alerts=advance_rent_alerts,
                 whatsapp_ready_count=sum(1 for item in suite_profiles if item["whatsappReady"]),
             )
 
@@ -18342,6 +18450,44 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order_date = parse_date(payload.get("orderDate")) or date.today()
         food_pos_mode = normalize_text(payload.get("desk")) == "food"
         kitchen_issue_mode = normalize_text(payload.get("transactionMode")) == "kitchen-stock-issue"
+        selected_area = "" if kitchen_issue_mode else ("kitchen" if food_pos_mode else normalize_text(payload.get("areaId")))
+        client_request_id = normalize_text(payload.get("requestId"))[:80]
+
+        def saved_order_payload(saved_order: PosOrder) -> dict[str, Any]:
+            return {
+                "id": saved_order.id,
+                "orderNumber": saved_order.order_number,
+                "orderDate": saved_order.order_date.isoformat(),
+                "paymentMethod": saved_order.payment_method,
+                "customerName": saved_order.customer_name,
+                "itemCount": saved_order.item_count,
+                "totalAmount": saved_order.total_amount,
+                "businessAreaIds": list(saved_order.business_area_ids or []),
+                "receiptUrl": url_for("pos_receipt", order_id=saved_order.id),
+            }
+
+        # A connection can fail after the database commits. Reusing the browser's
+        # request id returns the original receipt instead of reducing stock twice.
+        if client_request_id:
+            existing_order = g.db.scalar(
+                select(PosOrder)
+                .where(PosOrder.client_request_id == client_request_id)
+                .order_by(desc(PosOrder.created_at))
+            )
+            if existing_order:
+                return jsonify(
+                    {
+                        "ok": True,
+                        "orderNumber": existing_order.order_number,
+                        "totalAmount": existing_order.total_amount,
+                        "itemCount": existing_order.item_count,
+                        "order": saved_order_payload(existing_order),
+                        "summary": build_pos_counter_summary(order_date, selected_area),
+                        "kitchenIssue": kitchen_issue_mode,
+                        "alreadySaved": True,
+                    }
+                )
+
         kitchen_batch_id = normalize_text(payload.get("kitchenBatchId"))
         kitchen_batch = None
         kitchen_batch_payload: dict[str, Any] = {}
@@ -18365,7 +18511,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
             if not kitchen_target_meal:
                 return jsonify({"ok": False, "error": "Choose the meal these ingredients are being used for before issuing stock."}), 400
-        selected_area = "" if kitchen_issue_mode else ("kitchen" if food_pos_mode else normalize_text(payload.get("areaId")))
         payment_method = KITCHEN_STOCK_ISSUE_PAYMENT_METHOD if kitchen_issue_mode else (normalize_text(payload.get("paymentMethod")) or "Cash")
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         if not items:
@@ -18427,6 +18572,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         order = PosOrder(
             id=order_id,
             order_number=order_number,
+            client_request_id=client_request_id,
             order_date=order_date,
             business_area_ids=[],
             primary_business_area_id="",
@@ -18544,17 +18690,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "; ".join(price_overrides),
             )
         g.db.commit()
-        saved_order = {
-            "id": order.id,
-            "orderNumber": order.order_number,
-            "orderDate": order.order_date.isoformat(),
-            "paymentMethod": order.payment_method,
-            "customerName": order.customer_name,
-            "itemCount": order.item_count,
-            "totalAmount": order.total_amount,
-            "businessAreaIds": list(order.business_area_ids or []),
-            "receiptUrl": url_for("pos_receipt", order_id=order.id),
-        }
+        saved_order = saved_order_payload(order)
         return jsonify(
             {
                 "ok": True,

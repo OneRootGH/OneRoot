@@ -112,6 +112,38 @@
     </article>
   </section>
 
+  {% if advance_rent_alerts %}
+    <section class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Account Planning</p>
+          <h3>Bills Against Advance Rent</h3>
+        </div>
+        <p class="muted list-summary">{{ advance_rent_alerts|length }} tenant{{ '' if advance_rent_alerts|length == 1 else 's' }} need early payment planning.</p>
+      </div>
+      <p class="muted compact-copy">This is a planning alert only. Rent and bills remain separate balances; no rent payment is automatically transferred to bills.</p>
+      <ul class="stack-list compact reminder-stack">
+        {% for item in advance_rent_alerts %}
+          {% set warning = item.advanceBillWarning %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy">
+              <strong>{{ item.suite }} · {{ item.tenant }}</strong>
+              <span>{{ warning.title }}</span>
+              <span>Advance rent {{ warning.advanceRent|currency }} · unpaid bills {{ warning.unpaidBills|currency }}</span>
+              <span>{% if warning.amountOver > 0 %}Bills are {{ warning.amountOver|currency }} above recorded advance rent{% else %}{{ warning.amountRemaining|currency }} remains before bills reach advance rent{% endif %}</span>
+            </div>
+            <div class="stack-list-actions">
+              <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open Suite</a>
+              {% if item.advanceBillWhatsappUrl %}
+                <a class="button primary button-small" href="{{ item.advanceBillWhatsappUrl }}" target="_blank" rel="noopener">WhatsApp Notice</a>
+              {% endif %}
+            </div>
+          </li>
+        {% endfor %}
+      </ul>
+    </section>
+  {% endif %}
+
   <section class="split-grid">
     <article class="card">
       <div class="card-header">

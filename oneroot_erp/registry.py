@@ -447,6 +447,23 @@ ROLE_ACCESS_KEYS["retail-stock-service"] = set(ROLE_ACCESS_KEYS["frontline-servi
 ROLE_ACCESS_KEYS["kitchen-food-counter"] = set(ROLE_ACCESS_KEYS["cashier"]) | {"kitchen_orders", "kitchen_recipe_plans", "daily_handovers", "customer_loyalty", "inventory", "sales_summary"}
 ROLE_ACCESS_KEYS["growth-apartments-dispatch"] = set(ROLE_ACCESS_KEYS["marketing-crm"]) | set(ROLE_ACCESS_KEYS["delivery-dispatch"])
 ROLE_ACCESS_KEYS["dispatch-maintenance-service"] = set(ROLE_ACCESS_KEYS["delivery-dispatch"]) | set(ROLE_ACCESS_KEYS["equipment-desk"]) | set(ROLE_ACCESS_KEYS["laundry-desk"]) | {"inventory", "inventory_barcode", "maintenance_records", "online_orders", "daily_handovers"}
+# Staff who prepare, fulfil, or follow up customer orders need the same live order
+# desk and alert access. Finance-only and float-only roles remain excluded.
+for _role_key in (
+    "owner",
+    "admin",
+    "operations",
+    "frontline-service-lead",
+    "sales-stock-operator",
+    "cashier",
+    "delivery-dispatch",
+    "marketing-crm",
+    "retail-stock-service",
+    "kitchen-food-counter",
+    "growth-apartments-dispatch",
+    "dispatch-maintenance-service",
+):
+    ROLE_ACCESS_KEYS[_role_key].add("online_orders")
 for _role_key, _permissions in ROLE_ACCESS_KEYS.items():
     if _role_key not in {"owner", "admin", "finance", "operations", "operations-controls-lead", "finance-hr-controls"}:
         _permissions.discard("workbook")

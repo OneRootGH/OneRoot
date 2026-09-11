@@ -70,7 +70,10 @@
     searchAbortController: null,
     productSearchCache: new Map(),
     resultPage: 0,
-    currentSummary: null
+    currentSummary: null,
+    isSaving: false,
+    pendingSaleRequestId: "",
+    pendingSaleFingerprint: ""
   };
   const RESULTS_PER_PAGE = 8;
 
@@ -146,6 +149,45 @@
     return state.cart.reduce((sum, item) => sum + item.quantity, 0);
   }
 
+  function saleFingerprint() {
+    return JSON.stringify({
+      orderDate: getOrderDate(),
+      areaId: getSelectedArea(),
+      desk: posDesk,
+      transactionMode: kitchenIssueMode ? "kitchen-stock-issue" : "",
+      kitchenBatchId: kitchenIssueMode ? kitchenBatchId : "",
+      kitchenMealId: kitchenIssueMode ? (kitchenMealInput?.value || "") : "",
+      paymentMethod: paymentMethodInput?.value || "Cash",
+      customerName: customerNameInput?.value || "",
+      customerPhone: customerPhoneInput?.value || "",
+      notes: notesInput?.value || "",
+      items: state.cart.map((item) => ({ productId: item.productId, quantity: item.quantity, unitPrice: item.unitPrice }))
+    });
+  }
+
+  function nextSaleRequestId(fingerprint) {
+    if (state.pendingSaleRequestId && state.pendingSaleFingerprint === fingerprint) {
+      return state.pendingSaleRequestId;
+    }
+    const generatedId = window.crypto?.randomUUID?.()
+      || `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    state.pendingSaleRequestId = generatedId;
+    state.pendingSaleFingerprint = fingerprint;
+    return generatedId;
+  }
+
+  async function readApiResponse(response) {
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      return response.json();
+    }
+    await response.text();
+    if (response.status === 503 || response.status === 504) {
+      return { ok: false, error: "The server is reconnecting and could not confirm this sale. Check Recent POS Orders before pressing Save again." };
+    }
+    return { ok: false, error: "The sale could not be confirmed. Check Recent POS Orders before trying again." };
+  }
+
   function getSelectedQuantity(productId) {
     const productKey = String(productId || "");
     if (!productKey) {
@@ -184,7 +226,7 @@
       cartItemCountDuplicateNode.textContent = String(itemCount);
     }
     if (saveButton) {
-      saveButton.disabled = state.cart.length === 0;
+      saveButton.disabled = state.cart.length === 0 || state.isSaving;
     }
 
     cartContainer.innerHTML = "";
@@ -808,9 +850,11 @@
       return;
     }
 
+    state.isSaving = true;
     saveButton.disabled = true;
     setStatus(kitchenIssueMode ? "Issuing ingredients to kitchen..." : "Saving sale...");
 
+    const fingerprint = saleFingerprint();
     const payload = {
       orderDate: getOrderDate(),
       areaId: getSelectedArea(),
@@ -822,6 +866,7 @@
       customerName: customerNameInput?.value,
       customerPhone: customerPhoneInput?.value,
       notes: notesInput?.value,
+      requestId: nextSaleRequestId(fingerprint),
       items: state.cart.map((item) => ({
         productId: item.productId,
         quantity: item.quantity,
@@ -829,40 +874,56 @@
       }))
     };
 
-    const response = await fetch("/app/api/pos/orders", {
-      method: "POST",
-      credentials: "same-origin",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json"
-      },
-      body: JSON.stringify(payload)
-    });
-    const result = await response.json();
-    saveButton.disabled = false;
+    let saved = false;
+    try {
+      const response = await fetch("/app/api/pos/orders", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json"
+        },
+        body: JSON.stringify(payload)
+      });
+      const result = await readApiResponse(response);
 
-    if (!response.ok || !result.ok) {
-      setStatus(result.error || "The sale could not be saved.", "error");
-      return;
-    }
+      if (!response.ok || !result.ok) {
+        setStatus(result.error || "The sale could not be saved.", "error");
+        return;
+      }
 
-    state.cart = [];
-    renderCart();
-    resetDraftFields();
-    setLastReceipt(kitchenIssueMode ? null : (result.order || null));
-    if (result.summary) {
-      renderSummary(result.summary);
-    } else {
-      await refreshSummary();
-    }
-    setStatus(
-      kitchenIssueMode
-        ? `${result.orderNumber} issued to ${kitchenMealInput?.selectedOptions?.[0]?.textContent || "the selected meal"} at ${formatCurrency(result.totalAmount)} cost. Food cost has been updated.`
-        : `${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.`
-    );
-    if (searchInput) {
-      searchInput.focus();
-      searchInput.select();
+      saved = true;
+      state.pendingSaleRequestId = "";
+      state.pendingSaleFingerprint = "";
+      state.cart = [];
+      renderCart();
+      resetDraftFields();
+      setLastReceipt(kitchenIssueMode ? null : (result.order || null));
+      if (result.summary) {
+        renderSummary(result.summary);
+      } else {
+        await refreshSummary();
+      }
+      const retryNote = result.alreadySaved ? " It was already saved and was not duplicated." : "";
+      setStatus(
+        kitchenIssueMode
+          ? `${result.orderNumber} issued to ${kitchenMealInput?.selectedOptions?.[0]?.textContent || "the selected meal"} at ${formatCurrency(result.totalAmount)} cost. Food cost has been updated.${retryNote}`
+          : `${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.${retryNote}`
+      );
+      if (searchInput) {
+        searchInput.focus();
+        searchInput.select();
+      }
+    } catch (error) {
+      setStatus(
+        saved
+          ? "The sale was saved, but the counter summary could not refresh. Refresh the page when convenient."
+          : "The server could not confirm this sale. Check Recent POS Orders before pressing Save again.",
+        "error"
+      );
+    } finally {
+      state.isSaving = false;
+      renderCart();
     }
   });
 
