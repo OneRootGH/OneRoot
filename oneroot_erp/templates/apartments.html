@@ -112,16 +112,16 @@
     </article>
   </section>
 
-  {% if advance_rent_alerts %}
-    <section class="card">
-      <div class="card-header compact">
-        <div>
-          <p class="eyebrow">Account Planning</p>
-          <h3>Bills Against Advance Rent</h3>
-        </div>
-        <p class="muted list-summary">{{ advance_rent_alerts|length }} tenant{{ '' if advance_rent_alerts|length == 1 else 's' }} need early payment planning.</p>
+  <section class="card">
+    <div class="card-header compact">
+      <div>
+        <p class="eyebrow">Account Planning</p>
+        <h3>Bills Against Advance Rent</h3>
       </div>
-      <p class="muted compact-copy">This is a planning alert only. Rent and bills remain separate balances; no rent payment is automatically transferred to bills.</p>
+      <p class="muted list-summary">{{ advance_rent_alerts|length }} tenant{{ '' if advance_rent_alerts|length == 1 else 's' }} need early payment planning.</p>
+    </div>
+    <p class="muted compact-copy">This is a planning alert only. Rent and bills remain separate balances; no rent payment is automatically transferred to bills.</p>
+    {% if advance_rent_alerts %}
       <ul class="stack-list compact reminder-stack">
         {% for item in advance_rent_alerts %}
           {% set warning = item.advanceBillWarning %}
@@ -141,8 +141,10 @@
           </li>
         {% endfor %}
       </ul>
-    </section>
-  {% endif %}
+    {% else %}
+      <p class="muted">No occupied tenant account currently has unpaid bills at or above 75% of recorded advance rent.</p>
+    {% endif %}
+  </section>
 
   <section class="split-grid">
     <article class="card">
