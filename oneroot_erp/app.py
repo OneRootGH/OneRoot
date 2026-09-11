@@ -8532,6 +8532,62 @@ def apartment_statement_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
     return totals
 
 
+def tenant_portal_advance_bill_warning(statement_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    """Explain when unpaid bills have absorbed the value of recorded advance rent.
+
+    This is deliberately a planning alert only. Rent and monthly bills stay as
+    separate account balances; no payment is reallocated merely because this
+    warning appears in the tenant portal.
+    """
+    if not statement_rows:
+        return {"show": False}
+
+    final_row = statement_rows[-1]
+    advance_rent = round(
+        sum(
+            parse_amount(row.get("rentPaid")) + parse_amount(row.get("creditApplied"))
+            for row in statement_rows
+        ),
+        2,
+    )
+    unpaid_bills = round(max(parse_amount(final_row.get("billsBalance")), 0), 2)
+    if advance_rent <= 0 or unpaid_bills <= 0:
+        return {"show": False}
+
+    amount_remaining = round(max(advance_rent - unpaid_bills, 0), 2)
+    amount_over = round(max(unpaid_bills - advance_rent, 0), 2)
+    proportion_used = unpaid_bills / advance_rent
+    if proportion_used >= 1:
+        return {
+            "show": True,
+            "severity": "consumed",
+            "title": "Bills Have Reached Your Advance Rent",
+            "message": (
+                "Your unpaid monthly bills and charges now equal or exceed the rent amount recorded as paid in advance. "
+                "Please prepare for your next rent renewal and contact OneRoot to agree the payment arrangement."
+            ),
+            "advanceRent": advance_rent,
+            "unpaidBills": unpaid_bills,
+            "amountRemaining": amount_remaining,
+            "amountOver": amount_over,
+        }
+    if proportion_used >= 0.75:
+        return {
+            "show": True,
+            "severity": "near",
+            "title": "Bills Are Close To Your Advance Rent",
+            "message": (
+                "Your unpaid monthly bills and charges are now using most of the value of rent recorded as paid in advance. "
+                "Please plan ahead for bills and your next rent renewal."
+            ),
+            "advanceRent": advance_rent,
+            "unpaidBills": unpaid_bills,
+            "amountRemaining": amount_remaining,
+            "amountOver": amount_over,
+        }
+    return {"show": False}
+
+
 def apartment_document_source_payload(reference_record: ModuleRecord, suite_records: list[ModuleRecord]) -> dict[str, Any]:
     current_payload = apartment_record_payload(reference_record)
     scoped_history = list(reversed(apartment_relevant_history(reference_record, suite_records)))
@@ -13402,6 +13458,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         ]
         for plan in payment_plans:
             tenant_payment_plan_rollup(plan.payload)
+        advance_bill_warning = tenant_portal_advance_bill_warning(statement_rows)
         return render_template(
             "tenant_portal.html",
             page_title="Tenant Portal",
@@ -13414,6 +13471,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_plans=payment_plans,
             payment_receipts=tenant_portal_receipt_rows(suite_records),
             tenant_contact_number="0244620860",
+            advance_bill_warning=advance_bill_warning,
         )
 
     @app.route("/tenant/documents/receipt/<record_id>")

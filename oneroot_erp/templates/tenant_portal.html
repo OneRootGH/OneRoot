@@ -28,6 +28,22 @@
         <div class="tenant-support-actions"><a class="button primary button-small" href="tel:{{ tenant_contact_number }}">Call OneRoot</a><a class="button subtle button-small" href="https://wa.me/233244620860?text=Hello%20OneRoot%2C%20I%20need%20help%20with%20my%20suite%20account." target="_blank" rel="noopener">WhatsApp OneRoot</a></div>
       </section>
       {% if profile %}
+        {% if advance_bill_warning.show %}
+          <section class="tenant-advance-warning {{ advance_bill_warning.severity }}" aria-live="polite">
+            <div>
+              <p class="eyebrow">Advance Rent Notice</p>
+              <h2>{{ advance_bill_warning.title }}</h2>
+              <p>{{ advance_bill_warning.message }}</p>
+              <p class="tenant-advance-warning-note">This is a planning alert only. Your rent and bills remain recorded separately on your account.</p>
+            </div>
+            <dl class="tenant-advance-warning-figures">
+              <div><dt>Advance Rent Recorded</dt><dd>{{ advance_bill_warning.advanceRent|currency }}</dd></div>
+              <div><dt>Unpaid Bills & Charges</dt><dd>{{ advance_bill_warning.unpaidBills|currency }}</dd></div>
+              {% if advance_bill_warning.amountOver > 0 %}<div><dt>Bills Above Advance</dt><dd>{{ advance_bill_warning.amountOver|currency }}</dd></div>{% else %}<div><dt>Advance Value Remaining</dt><dd>{{ advance_bill_warning.amountRemaining|currency }}</dd></div>{% endif %}
+            </dl>
+            <a class="button primary button-small" href="tel:{{ tenant_contact_number }}">Plan Renewal With OneRoot</a>
+          </section>
+        {% endif %}
         <section class="card-grid four tenant-summary-grid">
           <article class="metric-card"><span>Rent Balance</span><strong>{{ profile.rentBalance|currency }}</strong><small>Next due {{ profile.nextRentDueDate or 'Not set' }}</small></article>
           <article class="metric-card"><span>Bills Balance</span><strong>{{ profile.billsBalance|currency }}</strong><small>Bill due {{ profile.billDueDate or 'Not set' }}</small></article>
