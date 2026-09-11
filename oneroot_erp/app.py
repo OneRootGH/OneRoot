@@ -8580,8 +8580,38 @@ def apartment_statement_totals(rows: list[dict[str, Any]]) -> dict[str, float]:
     return totals
 
 
-def tenant_portal_advance_bill_warning(statement_rows: list[dict[str, Any]]) -> dict[str, Any]:
-    """Explain when unpaid bills have absorbed the value of recorded advance rent.
+def tenant_prepaid_rent_remaining(source_payload: dict[str, Any], *, as_of: date | None = None) -> dict[str, Any]:
+    """Estimate the unused value of a tenant's prepaid suite rent from its coverage dates."""
+    comparison_date = as_of or date.today()
+    coverage_start = parse_date(source_payload.get("rentCoverageStartDate")) or parse_date(source_payload.get("leaseStartDate"))
+    coverage_end = parse_date(source_payload.get("rentCoverageEndDate")) or parse_date(source_payload.get("leaseEndDate"))
+    prepaid_rent = round(
+        parse_amount(source_payload.get("suiteRentPaid"))
+        or parse_amount(source_payload.get("rentPaid")),
+        2,
+    )
+    if prepaid_rent <= 0:
+        return {"prepaidRent": 0.0, "remainingRentAdvance": 0.0, "coverageEnd": "", "asOf": comparison_date.isoformat()}
+
+    remaining_rent_advance = prepaid_rent
+    if coverage_start and coverage_end and coverage_end > coverage_start:
+        total_days = max((coverage_end - coverage_start).days, 1)
+        days_remaining = max((coverage_end - max(comparison_date, coverage_start)).days, 0)
+        remaining_rent_advance = round(prepaid_rent * days_remaining / total_days, 2)
+    return {
+        "prepaidRent": prepaid_rent,
+        "remainingRentAdvance": remaining_rent_advance,
+        "coverageEnd": coverage_end.isoformat() if coverage_end else "",
+        "asOf": comparison_date.isoformat(),
+    }
+
+
+def tenant_portal_advance_bill_warning(
+    statement_rows: list[dict[str, Any]],
+    *,
+    prepaid_rent_position: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Explain when unpaid bills threaten the remaining value of prepaid rent.
 
     This is deliberately a planning alert only. Rent and monthly bills stay as
     separate account balances; no payment is reallocated merely because this
@@ -8591,47 +8621,56 @@ def tenant_portal_advance_bill_warning(statement_rows: list[dict[str, Any]]) -> 
         return {"show": False}
 
     final_row = statement_rows[-1]
-    advance_rent = round(
+    recorded_rent_paid = round(
         sum(
             parse_amount(row.get("rentPaid")) + parse_amount(row.get("creditApplied"))
             for row in statement_rows
         ),
         2,
     )
+    rent_advance_remaining = round(
+        parse_amount((prepaid_rent_position or {}).get("remainingRentAdvance"))
+        or recorded_rent_paid,
+        2,
+    )
     unpaid_bills = round(max(parse_amount(final_row.get("billsBalance")), 0), 2)
-    if advance_rent <= 0 or unpaid_bills <= 0:
+    if recorded_rent_paid <= 0 or unpaid_bills <= 0:
         return {"show": False}
 
-    amount_remaining = round(max(advance_rent - unpaid_bills, 0), 2)
-    amount_over = round(max(unpaid_bills - advance_rent, 0), 2)
-    proportion_used = unpaid_bills / advance_rent
+    amount_remaining = round(max(rent_advance_remaining - unpaid_bills, 0), 2)
+    amount_over = round(max(unpaid_bills - rent_advance_remaining, 0), 2)
+    proportion_used = unpaid_bills / rent_advance_remaining if rent_advance_remaining > 0 else float("inf")
+    details = {
+        "recordedRentPaid": recorded_rent_paid,
+        "advanceRent": rent_advance_remaining,
+        "remainingRentAdvance": rent_advance_remaining,
+        "unpaidBills": unpaid_bills,
+        "amountRemaining": amount_remaining,
+        "amountOver": amount_over,
+        "coverageEnd": normalize_text((prepaid_rent_position or {}).get("coverageEnd")),
+        "comparisonAsOf": normalize_text((prepaid_rent_position or {}).get("asOf")),
+    }
     if proportion_used >= 1:
         return {
             "show": True,
             "severity": "consumed",
-            "title": "Bills Have Reached Your Advance Rent",
+            "title": "Bills Have Reached Your Remaining Rent Advance",
             "message": (
-                "Your unpaid monthly bills and charges now equal or exceed the rent amount recorded as paid in advance. "
+                "Your unpaid monthly bills and charges now equal or exceed the value of rent still paid in advance for future coverage. "
                 "Please prepare for your next rent renewal and contact OneRoot to agree the payment arrangement."
             ),
-            "advanceRent": advance_rent,
-            "unpaidBills": unpaid_bills,
-            "amountRemaining": amount_remaining,
-            "amountOver": amount_over,
+            **details,
         }
     if proportion_used >= 0.75:
         return {
             "show": True,
             "severity": "near",
-            "title": "Bills Are Close To Your Advance Rent",
+            "title": "Bills Are Close To Your Remaining Rent Advance",
             "message": (
-                "Your unpaid monthly bills and charges are now using most of the value of rent recorded as paid in advance. "
+                "Your unpaid monthly bills and charges are now using most of the value of rent still paid in advance for future coverage. "
                 "Please plan ahead for bills and your next rent renewal."
             ),
-            "advanceRent": advance_rent,
-            "unpaidBills": unpaid_bills,
-            "amountRemaining": amount_remaining,
-            "amountOver": amount_over,
+            **details,
         }
     return {"show": False}
 
@@ -8643,9 +8682,9 @@ def tenant_advance_bill_warning_message(profile: dict[str, Any], warning: dict[s
     portal_username = normalize_text(profile.get("tenantPortalUsername"))
     portal_access = normalize_text(profile.get("tenantPortalActive")).lower() != "no"
     planning_position = (
-        f"Bills are now {format_currency(warning.get('amountOver'))} above the value of recorded advance rent."
+        f"Bills are now {format_currency(warning.get('amountOver'))} above the value of rent still paid in advance."
         if parse_amount(warning.get("amountOver")) > 0
-        else f"Only {format_currency(warning.get('amountRemaining'))} remains before bills reach the value of recorded advance rent."
+        else f"Only {format_currency(warning.get('amountRemaining'))} of rent paid in advance remains after this bills comparison."
     )
     portal_line = (
         f" Check your statement at https://oneroot.shop/tenant/login using username {portal_username}."
@@ -8655,7 +8694,7 @@ def tenant_advance_bill_warning_message(profile: dict[str, Any], warning: dict[s
     contact_line = f" Please contact OneRoot on {support_phone} to agree the next payment arrangement." if normalize_text(support_phone) else ""
     return (
         f"Hello {tenant}, this is an account-planning notice from OneRoot Essentials for {suite}. "
-        f"Recorded advance rent is {format_currency(warning.get('advanceRent'))}; unpaid monthly bills and charges are "
+        f"Rent still paid in advance is {format_currency(warning.get('remainingRentAdvance'))}; unpaid monthly bills and charges are "
         f"{format_currency(warning.get('unpaidBills'))}. {planning_position} "
         "This notice does not transfer rent to bills; it helps you plan your bills and next rent renewal."
         f"{portal_line}{contact_line}"
@@ -8663,7 +8702,7 @@ def tenant_advance_bill_warning_message(profile: dict[str, Any], warning: dict[s
 
 
 def build_tenant_advance_bill_watchlist(records: list[ModuleRecord], *, support_phone: str = "") -> list[dict[str, Any]]:
-    """Return the latest occupied suite records where bills threaten advance rent."""
+    """Return the latest occupied suite records where bills threaten remaining prepaid rent."""
     apartment_records = [record for record in records if record.module_key == "apartments"]
     latest_profiles = latest_apartment_suite_profiles(apartment_records, support_phone=support_phone)
     watchlist: list[dict[str, Any]] = []
@@ -8676,7 +8715,11 @@ def build_tenant_advance_bill_watchlist(records: list[ModuleRecord], *, support_
             if normalize_text(apartment_record_payload(record).get("suite")) == normalize_text(profile.get("suite"))
         ]
         statement_rows = apartment_statement_rows(profile["record"], suite_records)
-        warning = tenant_portal_advance_bill_warning(statement_rows)
+        source_payload = apartment_document_source_payload(profile["record"], suite_records)
+        warning = tenant_portal_advance_bill_warning(
+            statement_rows,
+            prepaid_rent_position=tenant_prepaid_rent_remaining(source_payload),
+        )
         if not warning.get("show"):
             continue
         message = tenant_advance_bill_warning_message(profile, warning, support_phone=support_phone)
@@ -10059,7 +10102,7 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
         action_items.append(
             {
                 "label": "Review bills against advance rent",
-                "note": f"{len(advance_rent_alerts)} tenant account(s) need payment planning before bills absorb advance rent.",
+                "note": f"{len(advance_rent_alerts)} tenant account(s) need payment planning before bills reach remaining prepaid rent.",
                 "href": "/app/modules/apartments",
             }
         )
@@ -13616,7 +13659,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         ]
         for plan in payment_plans:
             tenant_payment_plan_rollup(plan.payload)
-        advance_bill_warning = tenant_portal_advance_bill_warning(statement_rows)
+        advance_source_payload = (
+            apartment_document_source_payload(latest_record, suite_records)
+            if latest_record
+            else {}
+        )
+        advance_bill_warning = tenant_portal_advance_bill_warning(
+            statement_rows,
+            prepaid_rent_position=tenant_prepaid_rent_remaining(advance_source_payload),
+        )
         return render_template(
             "tenant_portal.html",
             page_title="Tenant Portal",

@@ -37,9 +37,9 @@
               <p class="tenant-advance-warning-note">This is a planning alert only. Your rent and bills remain recorded separately on your account.</p>
             </div>
             <dl class="tenant-advance-warning-figures">
-              <div><dt>Advance Rent Recorded</dt><dd>{{ advance_bill_warning.advanceRent|currency }}</dd></div>
+              <div><dt>Rent Paid In Advance Left</dt><dd>{{ advance_bill_warning.remainingRentAdvance|currency }}</dd></div>
               <div><dt>Unpaid Bills & Charges</dt><dd>{{ advance_bill_warning.unpaidBills|currency }}</dd></div>
-              {% if advance_bill_warning.amountOver > 0 %}<div><dt>Bills Above Advance</dt><dd>{{ advance_bill_warning.amountOver|currency }}</dd></div>{% else %}<div><dt>Advance Value Remaining</dt><dd>{{ advance_bill_warning.amountRemaining|currency }}</dd></div>{% endif %}
+              {% if advance_bill_warning.amountOver > 0 %}<div><dt>Bills Above Remaining Rent</dt><dd>{{ advance_bill_warning.amountOver|currency }}</dd></div>{% else %}<div><dt>Rent Advance Left After Bills</dt><dd>{{ advance_bill_warning.amountRemaining|currency }}</dd></div>{% endif %}
             </dl>
             <a class="button primary button-small" href="tel:{{ tenant_contact_number }}">Plan Renewal With OneRoot</a>
           </section>

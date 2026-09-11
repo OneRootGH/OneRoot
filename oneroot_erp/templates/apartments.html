@@ -129,8 +129,8 @@
             <div class="stack-list-copy">
               <strong>{{ item.suite }} · {{ item.tenant }}</strong>
               <span>{{ warning.title }}</span>
-              <span>Advance rent {{ warning.advanceRent|currency }} · unpaid bills {{ warning.unpaidBills|currency }}</span>
-              <span>{% if warning.amountOver > 0 %}Bills are {{ warning.amountOver|currency }} above recorded advance rent{% else %}{{ warning.amountRemaining|currency }} remains before bills reach advance rent{% endif %}</span>
+              <span>Prepaid rent still left {{ warning.remainingRentAdvance|currency }} · unpaid bills {{ warning.unpaidBills|currency }}</span>
+              <span>{% if warning.amountOver > 0 %}Bills are {{ warning.amountOver|currency }} above remaining prepaid rent{% else %}{{ warning.amountRemaining|currency }} of prepaid rent remains after bills{% endif %}</span>
             </div>
             <div class="stack-list-actions">
               <a class="button subtle button-small" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open Suite</a>
@@ -142,7 +142,7 @@
         {% endfor %}
       </ul>
     {% else %}
-      <p class="muted">No occupied tenant account currently has unpaid bills at or above 75% of recorded advance rent.</p>
+      <p class="muted">No occupied tenant account currently has unpaid bills at or above 75% of the rent still paid in advance.</p>
     {% endif %}
   </section>
 
