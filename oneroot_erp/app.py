@@ -3556,7 +3556,12 @@ def service_cost_field_name(module_key: str) -> str:
 def service_total_due(module_key: str, payload: dict[str, Any]) -> float:
     line_items = service_line_items(module_key, payload)
     if line_items:
-        return round(sum(parse_amount(item.get("lineTotal")) for item in line_items), 2)
+        line_total = round(sum(parse_amount(item.get("lineTotal")) for item in line_items), 2)
+        # Rental damage is an additional charge, not a rental line. Keep it in
+        # the balance whenever equipment has one or more selected items.
+        if module_key == "equipment_rental_bookings":
+            return round(line_total + parse_amount(payload.get("damageCharge")), 2)
+        return line_total
     if module_key == "laundry_tickets":
         return round(parse_amount(payload.get("amountDue")), 2)
     if module_key == "kitchen_orders":
@@ -3585,9 +3590,13 @@ def kitchen_order_quantity(payload: dict[str, Any]) -> int:
 
 def equipment_rental_days(payload: dict[str, Any]) -> int:
     out_date = parse_date(payload.get("outDate"))
+    return_date = parse_date(payload.get("returnDate"))
     due_date = parse_date(payload.get("dueDate"))
-    if out_date and due_date and due_date >= out_date:
-        return max((due_date - out_date).days, 1)
+    # Charge both the day equipment leaves OneRoot and the day it is returned.
+    # The actual return date takes priority over the booking's expected date.
+    charge_end_date = return_date or due_date
+    if out_date and charge_end_date and charge_end_date >= out_date:
+        return (charge_end_date - out_date).days + 1
     saved_days = int(round(parse_amount(payload.get("rentalDays"))))
     return saved_days if saved_days > 0 else 1
 
@@ -3629,12 +3638,18 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
         quantity = max(int(round(parse_amount(raw_item.get("quantity") or raw_item.get("pieces") or 1))), 1)
         unit_price = round(parse_amount(raw_item.get("unitPrice") or raw_item.get("salesPrice")), 2)
         cost_price = round(parse_amount(raw_item.get("costPrice")), 2)
-        days = max(int(round(parse_amount(raw_item.get("rentalDays") or rental_days or 1))), 1)
+        # One booking has one chargeable rental period. Date-derived days must
+        # override an old line value after staff enters the actual return date.
+        days = rental_days if module_key == "equipment_rental_bookings" else 1
         line_total = round(parse_amount(raw_item.get("lineTotal")), 2)
         line_cost = round(parse_amount(raw_item.get("lineCost") or raw_item.get("costAmount")), 2)
-        if line_total <= 0 and unit_price > 0:
+        if module_key == "equipment_rental_bookings" and unit_price > 0:
+            line_total = round(unit_price * quantity * days, 2)
+        elif line_total <= 0 and unit_price > 0:
             line_total = round(unit_price * quantity * (days if module_key == "equipment_rental_bookings" else 1), 2)
-        if line_cost <= 0 and cost_price > 0:
+        if module_key == "equipment_rental_bookings" and cost_price > 0:
+            line_cost = round(cost_price * quantity * days, 2)
+        elif line_cost <= 0 and cost_price > 0:
             line_cost = round(cost_price * quantity * (days if module_key == "equipment_rental_bookings" else 1), 2)
         category_value = normalize_text(raw_item.get("category"))
         if module_key == "equipment_rental_bookings":
@@ -4024,7 +4039,7 @@ def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str,
                 unit_price = round(parse_amount(match.sales_price), 2)
                 cost_price = round(parse_amount(match.cost_price), 2)
                 category = normalize_text(match.category) or category
-            item_days = max(int(round(parse_amount(item.get("rentalDays") or rental_days))), 1)
+            item_days = rental_days if module_key == "equipment_rental_bookings" else 1
             line_total = round(unit_price * quantity * (item_days if module_key == "equipment_rental_bookings" else 1), 2)
             line_cost = round(cost_price * quantity * (item_days if module_key == "equipment_rental_bookings" else 1), 2)
             hydrated_items.append(
@@ -4960,12 +4975,12 @@ SERVICE_MODULE_SECTIONS = {
         ),
         (
             "Charges & Payment",
-            "Select the equipment and rental days so the rental fee and service cost can auto-calculate from the saved catalog.",
+            "Select the equipment and dates. OneRoot calculates the rental fee from the day it goes out through the actual return day, inclusive.",
             ["rentalDays", "rentalFee", "costAmount", "depositAmount", "damageCharge"],
         ),
         (
             "Movement & Return",
-            "Track when the item goes out, when it is due back, and how it returns.",
+            "Set the expected return when booking. Enter the actual return date when it comes back so the final amount due is exact.",
             ["outDate", "dueDate", "returnDate", "conditionOut", "conditionIn", "status", "notes"],
         ),
     ],
@@ -5185,12 +5200,15 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
     for record in records:
         payload = record.payload or {}
         line_items = service_line_items("equipment_rental_bookings", payload)
-        rental_fee = round(parse_amount(payload.get("rentalFee")), 2)
+        rental_fee = round(
+            sum(parse_amount(item.get("lineTotal")) for item in line_items),
+            2,
+        ) if line_items else round(parse_amount(payload.get("rentalFee")), 2)
         payment_summary = service_payment_summary("equipment_rental_bookings", payload)
         amount_paid = payment_summary["paidTotal"]
         deposit_amount = round(parse_amount(payload.get("depositAmount")), 2)
         damage_charge = round(parse_amount(payload.get("damageCharge")), 2)
-        billed_total = round(rental_fee + damage_charge, 2)
+        billed_total = payment_summary["totalDue"]
         balance = payment_summary["balance"]
         status = normalize_text(payload.get("status")) or "Booked"
         rental_days = equipment_rental_days(payload)
@@ -11795,7 +11813,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         elif module_key == "equipment_rental_bookings":
             out_date = preferred_date or created_date
             max_days = max((max(int(round(parse_amount(item.get("rentalDays") or 1))), 1) for item in line_items), default=1)
-            due_date = out_date + timedelta(days=max_days) if out_date else None
+            # A one-day rental starts and returns on the same calendar day.
+            due_date = out_date + timedelta(days=max_days - 1) if out_date else None
             service_payload.setdefault("bookingDate", created_date.isoformat())
             service_payload["outDate"] = out_date.isoformat() if out_date else normalize_text(service_payload.get("outDate"))
             service_payload["dueDate"] = due_date.isoformat() if due_date else normalize_text(service_payload.get("dueDate"))
@@ -17092,11 +17111,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = dict(record.payload or {})
         payment_summary = service_payment_summary(module_key, payload)
         if request.method == "POST":
+            return_date_error = ""
+            if module_key == "equipment_rental_bookings":
+                submitted_return_date = normalize_text(request.form.get("returnDate"))
+                if submitted_return_date:
+                    actual_return_date = parse_date(submitted_return_date)
+                    out_date = parse_date(payload.get("outDate"))
+                    if not actual_return_date:
+                        return_date_error = "Enter a valid actual return date."
+                    elif out_date and actual_return_date < out_date:
+                        return_date_error = "The actual return date cannot be before the equipment went out."
+                    else:
+                        # The actual return date is the final charge-through date.
+                        # Rebuild every line before validating the collection.
+                        payload["returnDate"] = actual_return_date.isoformat()
+                        if normalize_text(payload.get("status")) != "Cancelled":
+                            payload["status"] = "Returned"
+                        hydrate_service_cost_payload(g.db, module_key, payload)
+                        sync_service_line_item_rollup(module_key, payload)
+                payment_summary = service_payment_summary(module_key, payload)
             payment_date = normalize_text(request.form.get("paymentDate")) or date.today().isoformat()
             amount_paid = round(parse_amount(request.form.get("amountPaid")), 2)
             payment_method = normalize_text(request.form.get("paymentMethod"))
             remaining_balance = round(parse_amount(payment_summary["balance"]), 2)
-            if amount_paid <= 0:
+            if return_date_error:
+                flash(return_date_error, "error")
+            elif amount_paid <= 0:
                 flash("Enter a payment amount greater than zero.", "error")
             elif not payment_method:
                 flash("Choose how the customer paid before saving the collection.", "error")
@@ -17145,7 +17185,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "update",
                     record.title,
                     record.id,
-                    f"Payment captured: {format_currency(amount_paid)} on {payment_date}.",
+                    (
+                        f"Payment captured: {format_currency(amount_paid)} on {payment_date}. "
+                        f"Rental charged for {equipment_rental_days(payload)} inclusive day(s) through "
+                        f"{normalize_text(payload.get('returnDate')) or normalize_text(payload.get('dueDate'))}."
+                        if module_key == "equipment_rental_bookings"
+                        else f"Payment captured: {format_currency(amount_paid)} on {payment_date}."
+                    ),
                 )
                 g.db.commit()
                 flash("Service payment captured.", "success")

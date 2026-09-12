@@ -22,12 +22,13 @@
         <small>{{ service_row.equipmentItem }}{% if service_row.customerPhone %} · {{ service_row.customerPhone }}{% endif %}</small>
       </div>
       <div>
-        <span>Due back</span>
-        <strong>{{ service_row.dueDate or 'Not set' }}</strong>
+        <span>Rental period</span>
+        <strong>{{ service_row.outDate or 'Start not set' }} to {{ service_row.returnDate or service_row.dueDate or 'end not set' }}</strong>
+        <small>{{ service_row.rentalDays }} chargeable day{% if service_row.rentalDays != 1 %}s{% endif %}</small>
       </div>
       <div>
         <span>To collect now</span>
-        <strong class="rental-collection-balance">{{ service_row.balance|currency }}</strong>
+        <strong class="rental-collection-balance" id="rental-collection-balance">{{ service_row.balance|currency }}</strong>
       </div>
     </section>
   {% endif %}
@@ -110,7 +111,7 @@
         {% else %}
           <li><strong>Customer</strong><span>{{ service_row.customerName }}{% if service_row.customerPhone %} · {{ service_row.customerPhone }}{% endif %}</span></li>
           <li><strong>Rental</strong><span>{{ service_row.equipmentCategory }} · {{ service_row.rentalDays }} day{% if service_row.rentalDays != 1 %}s{% endif %} @ {{ service_row.dailyRate|currency }}{% if service_row.itemQuantityTotal %} · {{ service_row.itemQuantityTotal }} unit{% if service_row.itemQuantityTotal != 1 %}s{% endif %}{% endif %}</span></li>
-          <li><strong>Dates</strong><span>Due {{ service_row.dueDate or '—' }} · Return {{ service_row.returnDate or '—' }}</span></li>
+          <li><strong>Dates</strong><span>Out {{ service_row.outDate or '—' }} · Expected {{ service_row.dueDate or '—' }} · Actual return {{ service_row.returnDate or 'Not recorded' }}</span></li>
           {% if service_row.lineItems %}
             <li>
               <strong>Items</strong>
@@ -151,10 +152,17 @@
             <span>Payment Date</span>
             <input type="date" name="paymentDate" value="{{ today_iso }}" required>
           </label>
+          {% if definition.key == 'equipment_rental_bookings' %}
+            <label>
+              <span>Actual Return Date (Charge Ends)</span>
+              <input type="date" name="returnDate" id="equipment-payment-return-date" value="{{ service_row.returnDate or '' }}" min="{{ service_row.outDate or '' }}">
+              <small class="muted form-helper">Enter this when equipment returns. OneRoot charges from the out date through this date, including both days.</small>
+            </label>
+          {% endif %}
           <label>
             <span>Amount Received</span>
             <input type="number" min="0.01" max="{{ service_row.balance }}" step="0.01" name="amountPaid" value="{{ payment_amount_default if payment_amount_default > 0 else '' }}" required>
-            <small class="muted form-helper">Maximum collection: {{ service_row.balance|currency }}</small>
+            <small class="muted form-helper" id="equipment-payment-amount-helper">Maximum collection: {{ service_row.balance|currency }}</small>
           </label>
           <label>
             <span>Payment Method</span>
@@ -237,6 +245,50 @@
       (function () {
         const amountField = document.querySelector('input[name="amountPaid"]');
         const methodField = document.querySelector('select[name="paymentMethod"]');
+        const returnDateField = document.getElementById("equipment-payment-return-date");
+        const balanceDisplay = document.getElementById("rental-collection-balance");
+        const helper = document.getElementById("equipment-payment-amount-helper");
+        const outDate = {{ service_row.outDate.isoformat()|tojson if service_row.outDate else '""' }};
+        const dailyRate = {{ service_row.dailyRate|tojson }};
+        const damageCharge = {{ service_row.damageCharge|tojson }};
+        const collected = {{ service_row.amountPaid|tojson }};
+        const startingBalance = {{ service_row.balance|tojson }};
+
+        function formatCurrency(value) {
+          return new Intl.NumberFormat("en-GH", {
+            style: "currency",
+            currency: "GHS",
+            minimumFractionDigits: 2,
+          }).format(value);
+        }
+
+        function updateReturnCollection() {
+          if (!returnDateField?.value || !outDate || !amountField) {
+            return;
+          }
+          const start = new Date(outDate + "T00:00:00");
+          const end = new Date(returnDateField.value + "T00:00:00");
+          if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime()) || end < start) {
+            return;
+          }
+          const days = Math.round((end - start) / 86400000) + 1;
+          const balance = Math.max((dailyRate * days) + damageCharge - collected, 0);
+          amountField.max = balance.toFixed(2);
+          if (!amountField.value || Math.abs(Number(amountField.value) - startingBalance) < 0.01) {
+            amountField.value = balance.toFixed(2);
+          }
+          if (balanceDisplay) {
+            balanceDisplay.textContent = formatCurrency(balance);
+          }
+          if (helper) {
+            helper.textContent = `Charge through return: ${days} day${days === 1 ? "" : "s"}. Maximum collection: ${formatCurrency(balance)}`;
+          }
+          document.querySelectorAll("[data-full-balance]").forEach((button) => {
+            button.dataset.fullBalance = balance.toFixed(2);
+            button.textContent = `Use full balance ${formatCurrency(balance)}`;
+          });
+        }
+
         document.querySelectorAll('[data-full-balance]').forEach((button) => {
           button.addEventListener('click', () => {
             if (amountField) amountField.value = Number(button.dataset.fullBalance || 0).toFixed(2);
@@ -247,6 +299,7 @@
             if (methodField) methodField.value = button.dataset.paymentMethod || '';
           });
         });
+        returnDateField?.addEventListener("change", updateReturnCollection);
       })();
     </script>
   {% endif %}

@@ -123,7 +123,7 @@
                       type="{{ 'text' if field.field_type == 'month' else field.field_type }}"
                       {% if field.field_type == 'month' %}pattern="\d{4}-\d{2}"{% endif %}
                       name="{{ field.name }}"
-                      {% if field.name == 'pieces' %}id="laundry-pieces"{% elif field.name == 'itemQuantity' %}id="kitchen-item-quantity"{% elif field.name == 'amountDue' %}id="service-amount-due"{% elif field.name == 'costAmount' %}id="service-cost-amount"{% elif field.name == 'rentalDays' %}id="equipment-rental-days"{% elif field.name == 'rentalFee' %}id="equipment-rental-fee"{% elif field.name == 'outDate' %}id="equipment-out-date"{% elif field.name == 'dueDate' %}id="equipment-due-date"{% endif %}
+                      {% if field.name == 'pieces' %}id="laundry-pieces"{% elif field.name == 'itemQuantity' %}id="kitchen-item-quantity"{% elif field.name == 'amountDue' %}id="service-amount-due"{% elif field.name == 'costAmount' %}id="service-cost-amount"{% elif field.name == 'rentalDays' %}id="equipment-rental-days"{% elif field.name == 'rentalFee' %}id="equipment-rental-fee"{% elif field.name == 'outDate' %}id="equipment-out-date"{% elif field.name == 'dueDate' %}id="equipment-due-date"{% elif field.name == 'returnDate' %}id="equipment-return-date"{% endif %}
                       step="{{ field.step if field.field_type == 'number' else '' }}"
                       value="{{ payload.get(field.name, '') }}"
                       placeholder="{{ field.placeholder or field.label }}"
@@ -230,6 +230,7 @@
           rentalFee: document.getElementById("equipment-rental-fee"),
           outDate: document.getElementById("equipment-out-date"),
           dueDate: document.getElementById("equipment-due-date"),
+          returnDate: document.getElementById("equipment-return-date"),
           equipmentQuantity: document.getElementById("equipment-item-quantity"),
           addItemButton: document.getElementById("service-add-item"),
           lineItemsJson: document.getElementById("service-line-items-json"),
@@ -401,19 +402,55 @@
         }
 
         function deriveRentalDays() {
-          if (!fields.outDate || !fields.dueDate || !fields.rentalDays) {
+          if (!fields.outDate || !fields.rentalDays) {
             return 0;
           }
-          if (!fields.outDate.value || !fields.dueDate.value) {
+          const chargeEndValue = fields.returnDate?.value || fields.dueDate?.value || "";
+          if (!fields.outDate.value || !chargeEndValue) {
             return 0;
           }
           const outDate = new Date(fields.outDate.value + "T00:00:00");
-          const dueDate = new Date(fields.dueDate.value + "T00:00:00");
-          if (Number.isNaN(outDate.getTime()) || Number.isNaN(dueDate.getTime()) || dueDate < outDate) {
+          const chargeEndDate = new Date(chargeEndValue + "T00:00:00");
+          if (Number.isNaN(outDate.getTime()) || Number.isNaN(chargeEndDate.getTime()) || chargeEndDate < outDate) {
             return 0;
           }
-          const diffDays = Math.round((dueDate - outDate) / 86400000);
-          return Math.max(diffDays, 1);
+          // Rentals include the handover day and the return day.
+          return Math.round((chargeEndDate - outDate) / 86400000) + 1;
+        }
+
+        function syncExpectedReturnFromDays() {
+          if (!isEquipment || !fields.outDate?.value || !fields.dueDate || fields.returnDate?.value) {
+            return;
+          }
+          const start = new Date(fields.outDate.value + "T00:00:00");
+          const days = Math.max(Math.round(parseNumber(fields.rentalDays?.value || "1")), 1);
+          if (Number.isNaN(start.getTime())) {
+            return;
+          }
+          start.setDate(start.getDate() + days - 1);
+          fields.dueDate.value = start.toISOString().slice(0, 10);
+        }
+
+        function repriceEquipmentLineItems() {
+          if (!isEquipment || !lineItems.length) {
+            return;
+          }
+          const rentalDays = currentUnits();
+          lineItems.forEach((item) => {
+            const match = catalogMap.get(normalize(item.name));
+            const quantity = Math.max(Math.round(parseNumber(item.quantity || "1")), 1);
+            const unitPrice = match ? parseNumber(match.salesPrice) : parseNumber(item.unitPrice);
+            const costPrice = match ? parseNumber(match.costPrice) : parseNumber(item.costPrice);
+            item.unitPrice = unitPrice;
+            item.costPrice = costPrice;
+            item.rentalDays = rentalDays;
+            item.lineTotal = unitPrice * quantity * rentalDays;
+            item.lineCost = costPrice * quantity * rentalDays;
+            if (match?.imageUrl) {
+              item.imageUrl = match.imageUrl;
+            }
+          });
+          renderLineItems();
         }
 
         function currentUnits() {
@@ -699,10 +736,20 @@
           fields.rentalDays,
           fields.outDate,
           fields.dueDate,
+          fields.returnDate,
           fields.equipmentQuantity,
         ].filter(Boolean).forEach((field) => {
-          field.addEventListener("input", applyCatalogPricing);
-          field.addEventListener("change", applyCatalogPricing);
+          const updatePricing = () => {
+            if (isEquipment && field === fields.rentalDays) {
+              syncExpectedReturnFromDays();
+            }
+            applyCatalogPricing();
+            if (isEquipment && [fields.rentalDays, fields.outDate, fields.dueDate, fields.returnDate].includes(field)) {
+              repriceEquipmentLineItems();
+            }
+          };
+          field.addEventListener("input", updatePricing);
+          field.addEventListener("change", updatePricing);
         });
 
         fields.form.addEventListener("submit", () => {
