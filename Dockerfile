@@ -14,4 +14,6 @@ COPY . .
 
 EXPOSE 8080
 
-CMD ["gunicorn", "--workers", "1", "--threads", "8", "--timeout", "120", "--bind", "0.0.0.0:8080", "wsgi:app"]
+# Keep concurrency deliberately bounded for the 0.5 GB App Platform container.  Request
+# recycling prevents a long-running worker from becoming the single point of failure.
+CMD ["gunicorn", "--workers", "1", "--threads", "4", "--timeout", "90", "--graceful-timeout", "30", "--keep-alive", "5", "--max-requests", "500", "--max-requests-jitter", "50", "--bind", "0.0.0.0:8080", "wsgi:app"]
