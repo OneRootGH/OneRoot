@@ -149,8 +149,9 @@
             </div>
           {% endif %}
           <label>
-            <span>Payment Date</span>
+            <span>Collection Date (Money Received)</span>
             <input type="date" name="paymentDate" value="{{ today_iso }}" required>
+            <small class="muted form-helper">This is the day the money was collected. It determines the POS collection list, Daily Sales date, and counter closeout.</small>
           </label>
           {% if definition.key == 'equipment_rental_bookings' %}
             <label>
@@ -220,7 +221,10 @@
         <tbody>
           {% for payment in service_row.payments|reverse %}
             <tr>
-              <td>{{ payment.paymentDate or '—' }}</td>
+              <td>
+                {{ payment.paymentDate or '—' }}
+                {% if payment.recordedAt %}<span class="table-secondary">Recorded {{ payment.recordedAt[:16]|replace('T', ' ') }}</span>{% endif %}
+              </td>
               <td>{{ payment.amountPaid|currency }}</td>
               <td>{{ payment.paymentMethod or '—' }}</td>
               <td>{{ payment.paymentReference or '—' }}</td>

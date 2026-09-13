@@ -38,6 +38,10 @@
   const closingCashInput = document.getElementById("pos-closing-cash");
   const cashSalesNode = document.getElementById("pos-cash-sales");
   const creditCashNode = document.getElementById("pos-credit-cash");
+  const equipmentCashNode = document.getElementById("pos-equipment-cash");
+  const equipmentCollectionsTotalNode = document.getElementById("pos-equipment-collections-total");
+  const equipmentCollectionsCountNode = document.getElementById("pos-equipment-collections-count");
+  const equipmentCollectionsLinesNode = document.getElementById("pos-equipment-collections-lines");
   const expectedCashNode = document.getElementById("pos-expected-cash");
   const cashVarianceNode = document.getElementById("pos-cash-variance");
   const orderDateInput = document.getElementById("pos-order-date");
@@ -522,6 +526,42 @@
       : "<li><span>No daily sales have been recorded yet.</span></li>";
   }
 
+  function renderEquipmentCollections(summary) {
+    const rows = Array.isArray(summary.equipmentCollections) ? summary.equipmentCollections : [];
+    if (equipmentCashNode) {
+      equipmentCashNode.textContent = formatCurrency(summary.equipmentCashCollectionsTotal);
+    }
+    if (equipmentCollectionsTotalNode) {
+      equipmentCollectionsTotalNode.textContent = formatCurrency(summary.equipmentCollectionsTotal);
+    }
+    if (equipmentCollectionsCountNode) {
+      const count = Number(summary.equipmentCollectionCount || rows.length || 0);
+      equipmentCollectionsCountNode.textContent = `${count} payment${count === 1 ? "" : "s"}`;
+    }
+    if (!equipmentCollectionsLinesNode) {
+      return;
+    }
+    if (!rows.length) {
+      equipmentCollectionsLinesNode.innerHTML = "<li><span>No equipment payment was collected on this POS date.</span></li>";
+      return;
+    }
+    equipmentCollectionsLinesNode.innerHTML = rows.map((collection) => {
+      const details = [
+        collection.paymentDate || "",
+        collection.paymentMethod || "Unspecified",
+        collection.receivedBy ? `Received by ${collection.receivedBy}` : "",
+        collection.paymentReference || ""
+      ].filter(Boolean).map(escapeHtml).join(" · ");
+      return `
+        <li>
+          <strong>${escapeHtml(collection.customerName || "Customer")} · ${escapeHtml(collection.equipmentItem || "Equipment Rental")}</strong>
+          <span>${details}</span>
+          <strong>${formatCurrency(collection.amount)}</strong>
+        </li>
+      `;
+    }).join("");
+  }
+
   function buildHistoryRowMarkup(order) {
     return `
       <tr>
@@ -607,6 +647,7 @@
     if (creditCashNode) {
       creditCashNode.textContent = formatCurrency(summary.creditCashCollectionsTotal);
     }
+    renderEquipmentCollections(summary);
     syncMoneyInput(openingCashInput, summary.openingCash);
     syncMoneyInput(closingCashInput, summary.closingCashCounted);
     renderCloseoutPreview(summary);

@@ -71,7 +71,7 @@
         <strong id="pos-laundry-sales">{{ counter_summary.laundrySalesTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill">
-        <span class="pos-counter-label">Equipment Sales</span>
+        <span class="pos-counter-label">Equipment Collected</span>
         <strong id="pos-equipment-sales">{{ counter_summary.equipmentSalesTotal|currency }}</strong>
       </article>
       <article class="pos-counter-pill pos-counter-pill-highlight">
@@ -96,7 +96,7 @@
           No payment mix recorded yet.
         {% endif %}
       </span>
-      · Credit repayment is a collection, not a new sale: it is excluded from POS Sales and All Daily Sales, but cash repayments are included in expected close cash. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
+      · Equipment payments use their Collection Date, appear below for the selected day, and cash payments are included in expected close cash. Credit repayment is a collection, not a new sale. Mobile Money is shown here for awareness only and is excluded from POS Sales and All Daily Sales.
     </p>
     {% endif %}
 
@@ -233,6 +233,7 @@
           <div class="pos-ticket-inline pos-ticket-inline-tight">
             <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
             <span>Credit Cash <strong id="pos-credit-cash">{{ counter_summary.creditCashCollectionsTotal|currency }}</strong></span>
+            <span>Equipment Cash <strong id="pos-equipment-cash">{{ counter_summary.equipmentCashCollectionsTotal|currency }}</strong></span>
             <span>Expected <strong id="pos-expected-cash">{{ counter_summary.expectedClosingCash|currency }}</strong></span>
             <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
           </div>
@@ -260,6 +261,23 @@
               <li><span>{{ item.areaLabel }}</span><strong>{{ item.salesAmount|currency }}</strong></li>
             {% else %}
               <li><span>No daily sales have been recorded yet.</span></li>
+            {% endfor %}
+          </ul>
+        </details>
+        <details class="pos-closeout-breakdown" id="pos-equipment-collections">
+          <summary>
+            Equipment collections received: <strong id="pos-equipment-collections-total">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong>
+            <span class="muted" id="pos-equipment-collections-count">{{ counter_summary.equipmentCollectionCount }} payment{% if counter_summary.equipmentCollectionCount != 1 %}s{% endif %}</span>
+          </summary>
+          <ul id="pos-equipment-collections-lines" class="stack-list compact">
+            {% for collection in counter_summary.equipmentCollections %}
+              <li>
+                <strong>{{ collection.customerName }} · {{ collection.equipmentItem }}</strong>
+                <span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span>
+                <strong>{{ collection.amount|currency }}</strong>
+              </li>
+            {% else %}
+              <li><span>No equipment payment was collected on this POS date.</span></li>
             {% endfor %}
           </ul>
         </details>{% endif %}
