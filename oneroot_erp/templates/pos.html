@@ -13,6 +13,8 @@
         {% if kitchen_issue_mode %}
           <a class="button subtle" href="{{ url_for('module_form', module_key='kitchen_recipe_plans', record_id=kitchen_batch.id) }}">Back to Batch</a>
         {% else %}
+          <a class="button subtle" href="{{ url_for('pos_page') }}"{% if food_pos_mode %} target="_blank" rel="noopener"{% endif %}>Groceries POS{% if food_pos_mode %} (new tab){% endif %}</a>
+          <a class="button subtle" href="{{ url_for('pos_page', desk='food') }}"{% if not food_pos_mode %} target="_blank" rel="noopener"{% endif %}>Food POS{% if not food_pos_mode %} (new tab){% endif %}</a>
           <button class="button subtle" type="button" id="pos-closeout">Close</button>
         {% endif %}
       </div>

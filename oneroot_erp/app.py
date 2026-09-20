@@ -4777,6 +4777,9 @@ def normalize_role_key(value: Any) -> str:
         "sales & stock": "sales-stock-operator",
         "cashier": "cashier",
         "pos cashier": "cashier",
+        "general-counter-operator": "general-counter-operator",
+        "general counter operator": "general-counter-operator",
+        "general counter": "general-counter-operator",
         "mobile-money-agent": "mobile-money-agent",
         "mobile money agent": "mobile-money-agent",
         "laundry-desk": "laundry-desk",
@@ -4821,6 +4824,7 @@ def default_staff_role_for_access_role(value: Any) -> str:
         "apartment-manager": "Apartment Manager",
         "sales-stock-operator": "Stock Officer",
         "cashier": "POS Cashier",
+        "general-counter-operator": "General Counter Operator",
         "mobile-money-agent": "Mobile Money Agent",
         "laundry-desk": "Laundry Desk Officer",
         "equipment-desk": "Equipment Rental Officer",
@@ -4863,6 +4867,7 @@ STAFF_ROLE_ACCESS_ROLE_REPAIRS = {
     "Operations Manager": "operations",
     "Business Manager & Operations Lead": "operations",
     "POS Cashier": "cashier",
+    "General Counter Operator": "general-counter-operator",
     "Stock Officer": "sales-stock-operator",
     "Mobile Money Agent": "mobile-money-agent",
     "Laundry Desk Officer": "laundry-desk",
@@ -4891,6 +4896,14 @@ def repair_staff_access_roles(db_session) -> int:
     repaired = 0
     for account in db_session.scalars(select(User)).all():
         restored_role = STAFF_ROLE_ACCESS_ROLE_REPAIRS.get(normalize_text(account.staff_role))
+        is_general_counter_account = normalize_text(account.username).lower() == "general"
+        if is_general_counter_account and normalize_role_key(account.role) == "viewer":
+            account.role = "general-counter-operator"
+            if not normalize_text(account.staff_role) or normalize_text(account.staff_role) == "Support Staff":
+                account.staff_role = "General Counter Operator"
+            account.updated_at = datetime.utcnow()
+            repaired += 1
+            continue
         if not restored_role or normalize_role_key(account.role) != "viewer":
             continue
         account.role = restored_role
@@ -11372,6 +11385,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "marketing-crm": ["customer_crm", "whatsapp_campaigns", "workforce_attendance"],
             "sales-stock-operator": ["pos", "inventory", "workforce_attendance"],
             "cashier": ["pos", "workforce_attendance"],
+            "general-counter-operator": ["pos", "workforce_attendance"],
         }.get(role_key, [])
         if staff_role == "Kitchen Staff":
             preferred_keys = ["kitchen_orders", "pos", "workforce_attendance"]
