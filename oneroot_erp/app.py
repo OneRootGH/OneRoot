@@ -5130,6 +5130,10 @@ def load_pos_products(
     filtered_products: list[Product] = []
     for product in products:
         normalize_product_record(product)
+        # Bread has a Kitchen-linked inventory variant for recipe costing. Show the
+        # original Cold Store loaf at the counter so staff cannot sell it twice.
+        if normalize_text(product.source_catalog_id).startswith("linked-bread:"):
+            continue
         if not is_pos_eligible_product(product):
             continue
         if not product_matches_pos_desk(product, desk):
