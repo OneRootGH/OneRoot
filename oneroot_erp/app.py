@@ -13001,22 +13001,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "workspace": workspace,
         }
 
-    def equipment_rental_collection_summary(
+    def service_counter_collection_summary(
+        module_key: str,
         collection_date: date,
-        area_id: str = "",
-        area_ids: set[str] | None = None,
     ) -> dict[str, Any]:
-        """Return dated equipment payments for POS cash accountability without duplicating sales."""
-        selected_area = normalize_text(area_id)
-        selected_area_ids = {normalize_text(value) for value in (area_ids or set()) if normalize_text(value)}
-        if selected_area and selected_area != "water-equipment":
-            return {"total": 0.0, "cashTotal": 0.0, "count": 0, "paymentMix": {}, "rows": []}
-        if selected_area_ids and "water-equipment" not in selected_area_ids:
-            return {"total": 0.0, "cashTotal": 0.0, "count": 0, "paymentMix": {}, "rows": []}
-
+        """Return dated service collections for the retail-counter cash closeout."""
         records = g.db.scalars(
             select(ModuleRecord)
-            .where(ModuleRecord.module_key == "equipment_rental_bookings")
+            .where(ModuleRecord.module_key == module_key)
             .order_by(desc(ModuleRecord.updated_at))
         ).all()
         total = 0.0
@@ -13025,10 +13017,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
         rows: list[dict[str, Any]] = []
         for record in records:
             payload = dict(record.payload or {})
-            equipment_item = service_line_items_brief("equipment_rental_bookings", payload) or normalize_text(payload.get("equipmentItem")) or "Equipment Rental"
+            if module_key == "laundry_tickets":
+                service_item = service_line_items_brief(module_key, payload) or normalize_text(payload.get("laundryItem")) or "Laundry Service"
+                service_label = "Laundry"
+            else:
+                service_item = service_line_items_brief(module_key, payload) or normalize_text(payload.get("equipmentItem")) or "Equipment Rental"
+                service_label = "Equipment Rental"
             customer = normalize_text(payload.get("customerName")) or "Customer"
-            for payment in service_payment_summary("equipment_rental_bookings", payload)["payments"]:
-                payment_date = parse_date(payment.get("paymentDate")) or get_equipment_payment_date(payload)
+            for payment in service_payment_summary(module_key, payload)["payments"]:
+                payment_date = (
+                    parse_date(payment.get("paymentDate"))
+                    or (get_equipment_payment_date(payload) if module_key == "equipment_rental_bookings" else None)
+                    or parse_date(payload.get("paymentDate"))
+                    or record.record_date
+                )
                 payment_method = normalize_text(payment.get("paymentMethod")) or "Unspecified"
                 if payment_date != collection_date or payment_method.lower() == "credit":
                     continue
@@ -13044,7 +13046,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "id": normalize_text(payment.get("id")),
                         "recordId": record.id,
                         "customerName": customer,
-                        "equipmentItem": equipment_item,
+                        "serviceLabel": service_label,
+                        "serviceItem": service_item,
                         "amount": amount,
                         "paymentDate": payment_date.isoformat(),
                         "paymentMethod": payment_method,
@@ -13062,6 +13065,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "rows": rows[:20],
         }
 
+    def equipment_rental_collection_summary(collection_date: date) -> dict[str, Any]:
+        return service_counter_collection_summary("equipment_rental_bookings", collection_date)
+
+    def laundry_collection_summary(collection_date: date) -> dict[str, Any]:
+        return service_counter_collection_summary("laundry_tickets", collection_date)
+
     def build_pos_counter_summary(order_date: date, area_id: str = "", desk: str = "") -> dict[str, Any]:
         selected_area = normalize_text(area_id)
         desk_key = normalize_pos_desk(desk) if normalize_text(desk) else ""
@@ -13072,9 +13081,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
         credit_collections = customer_credit_collection_summary(
             g.db, order_date, selected_area, area_ids=scoped_area_ids
         )
-        equipment_collections = equipment_rental_collection_summary(
-            order_date, selected_area, area_ids=scoped_area_ids
-        )
+        service_counter_enabled = desk_key != "food"
+        equipment_collections = equipment_rental_collection_summary(order_date) if service_counter_enabled else {
+            "total": 0.0, "cashTotal": 0.0, "count": 0, "paymentMix": {}, "rows": []
+        }
+        laundry_collections = laundry_collection_summary(order_date) if service_counter_enabled else {
+            "total": 0.0, "cashTotal": 0.0, "count": 0, "paymentMix": {}, "rows": []
+        }
         all_orders = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == order_date).order_by(desc(PosOrder.updated_at))
         ).all()
@@ -13229,7 +13242,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         closeout_payload = serialize_module_record(closeout_record) if closeout_record else None
         cash_sales_total = pos_cash_sales_total(counter_payment_mix)
         cash_collections_total = round(
-            cash_sales_total + credit_collections["cashTotal"] + equipment_collections["cashTotal"],
+            cash_sales_total
+            + credit_collections["cashTotal"]
+            + laundry_collections["cashTotal"]
+            + equipment_collections["cashTotal"],
             2,
         )
         opening_cash = parse_amount(closeout_payload.get("openingCash")) if closeout_payload else 0.0
@@ -13240,6 +13256,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             closeout_payload["cashSalesTotal"] = cash_sales_total
             closeout_payload["creditCollectionsTotal"] = credit_collections["total"]
             closeout_payload["creditCashCollectionsTotal"] = credit_collections["cashTotal"]
+            closeout_payload["laundryCollectionsTotal"] = laundry_collections["total"]
+            closeout_payload["laundryCashCollectionsTotal"] = laundry_collections["cashTotal"]
+            closeout_payload["laundryCollectionCount"] = laundry_collections["count"]
+            closeout_payload["laundryCollections"] = laundry_collections["rows"]
+            closeout_payload["equipmentCollectionsTotal"] = equipment_collections["total"]
+            closeout_payload["equipmentCashCollectionsTotal"] = equipment_collections["cashTotal"]
+            closeout_payload["equipmentCollectionCount"] = equipment_collections["count"]
+            closeout_payload["equipmentCollections"] = equipment_collections["rows"]
             closeout_payload["cashCollectionsTotal"] = cash_collections_total
             closeout_payload["openingCash"] = opening_cash
             closeout_payload["closingCashCounted"] = closing_cash_counted
@@ -13274,6 +13298,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "equipmentCollectionCount": equipment_collections["count"],
             "equipmentCollectionPaymentMix": equipment_collections["paymentMix"],
             "equipmentCollections": equipment_collections["rows"],
+            "laundryCollectionsTotal": laundry_collections["total"],
+            "laundryCashCollectionsTotal": laundry_collections["cashTotal"],
+            "laundryCollectionCount": laundry_collections["count"],
+            "laundryCollectionPaymentMix": laundry_collections["paymentMix"],
+            "laundryCollections": laundry_collections["rows"],
             "dailySalesLedgerTotal": daily_sales_total,
             "allDailySalesTotal": all_daily_sales_total,
             "allDailySalesBreakdown": all_daily_sales_breakdown,
@@ -13344,7 +13373,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 continue
 
             summary = build_pos_counter_summary(order_date, area_id, desk=scope_desk)
-            if summary["orderCount"] <= 0 and summary["creditCollectionCount"] <= 0 and summary["equipmentCollectionCount"] <= 0:
+            if (
+                summary["orderCount"] <= 0
+                and summary["creditCollectionCount"] <= 0
+                and summary["laundryCollectionCount"] <= 0
+                and summary["equipmentCollectionCount"] <= 0
+            ):
                 g.db.delete(record)
                 continue
 
@@ -13353,7 +13387,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             closing_cash_counted = parse_amount(existing_payload.get("closingCashCounted"))
             cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
             cash_collections_total = round(
-                cash_sales_total + summary["creditCashCollectionsTotal"] + summary["equipmentCashCollectionsTotal"],
+                cash_sales_total
+                + summary["creditCashCollectionsTotal"]
+                + summary["laundryCashCollectionsTotal"]
+                + summary["equipmentCashCollectionsTotal"],
                 2,
             )
             expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_collections_total)
@@ -13373,6 +13410,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "creditCollectionsTotal": summary["creditCollectionsTotal"],
                 "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
                 "creditCollectionCount": summary["creditCollectionCount"],
+                "laundryCollectionsTotal": summary["laundryCollectionsTotal"],
+                "laundryCashCollectionsTotal": summary["laundryCashCollectionsTotal"],
+                "laundryCollectionCount": summary["laundryCollectionCount"],
+                "laundryCollections": summary["laundryCollections"],
                 "equipmentCollectionsTotal": summary["equipmentCollectionsTotal"],
                 "equipmentCashCollectionsTotal": summary["equipmentCashCollectionsTotal"],
                 "equipmentCollectionCount": summary["equipmentCollectionCount"],
@@ -19147,8 +19188,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
         requested_area = normalize_text(payload.get("areaId"))
         area_id = requested_area if requested_area in pos_desk_area_ids(pos_desk) else ""
         summary = build_pos_counter_summary(order_date, area_id, desk=pos_desk)
-        if summary["orderCount"] <= 0 and summary["creditCollectionCount"] <= 0 and summary["equipmentCollectionCount"] <= 0:
-            return jsonify({"ok": False, "error": "No POS sales, credit collections, or equipment payments are available for this date and area."}), 400
+        if (
+            summary["orderCount"] <= 0
+            and summary["creditCollectionCount"] <= 0
+            and summary["laundryCollectionCount"] <= 0
+            and summary["equipmentCollectionCount"] <= 0
+        ):
+            return jsonify({"ok": False, "error": "No POS sales, credit collections, laundry payments, or equipment payments are available for this date and counter."}), 400
         opening_cash_raw = parse_amount(payload.get("openingCash"))
         closing_cash_counted_raw = parse_amount(payload.get("closingCashCounted"))
         if opening_cash_raw < 0 or closing_cash_counted_raw < 0:
@@ -19175,7 +19221,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         existing_payload = dict(record.payload or {}) if record else {}
         cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
         cash_collections_total = round(
-            cash_sales_total + summary["creditCashCollectionsTotal"] + summary["equipmentCashCollectionsTotal"],
+            cash_sales_total
+            + summary["creditCashCollectionsTotal"]
+            + summary["laundryCashCollectionsTotal"]
+            + summary["equipmentCashCollectionsTotal"],
             2,
         )
         expected_closing_cash = pos_expected_closing_cash(opening_cash_raw, cash_collections_total)
@@ -19195,6 +19244,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "creditCollectionsTotal": summary["creditCollectionsTotal"],
             "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
             "creditCollectionCount": summary["creditCollectionCount"],
+            "laundryCollectionsTotal": summary["laundryCollectionsTotal"],
+            "laundryCashCollectionsTotal": summary["laundryCashCollectionsTotal"],
+            "laundryCollectionCount": summary["laundryCollectionCount"],
+            "laundryCollections": summary["laundryCollections"],
             "equipmentCollectionsTotal": summary["equipmentCollectionsTotal"],
             "equipmentCashCollectionsTotal": summary["equipmentCashCollectionsTotal"],
             "equipmentCollectionCount": summary["equipmentCollectionCount"],

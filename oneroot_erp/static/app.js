@@ -39,7 +39,11 @@
   const closingCashInput = document.getElementById("pos-closing-cash");
   const cashSalesNode = document.getElementById("pos-cash-sales");
   const creditCashNode = document.getElementById("pos-credit-cash");
+  const laundryCashNode = document.getElementById("pos-laundry-cash");
   const equipmentCashNode = document.getElementById("pos-equipment-cash");
+  const laundryCollectionsTotalNode = document.getElementById("pos-laundry-collections-total");
+  const laundryCollectionsCountNode = document.getElementById("pos-laundry-collections-count");
+  const laundryCollectionsLinesNode = document.getElementById("pos-laundry-collections-lines");
   const equipmentCollectionsTotalNode = document.getElementById("pos-equipment-collections-total");
   const equipmentCollectionsCountNode = document.getElementById("pos-equipment-collections-count");
   const equipmentCollectionsLinesNode = document.getElementById("pos-equipment-collections-lines");
@@ -523,26 +527,23 @@
       : "<li><span>No daily sales have been recorded yet.</span></li>";
   }
 
-  function renderEquipmentCollections(summary) {
-    const rows = Array.isArray(summary.equipmentCollections) ? summary.equipmentCollections : [];
-    if (equipmentCashNode) {
-      equipmentCashNode.textContent = formatCurrency(summary.equipmentCashCollectionsTotal);
+  function renderServiceCollectionList({ rows, totalNode, countNode, linesNode, total, count, emptyMessage }) {
+    const collectionRows = Array.isArray(rows) ? rows : [];
+    if (totalNode) {
+      totalNode.textContent = formatCurrency(total);
     }
-    if (equipmentCollectionsTotalNode) {
-      equipmentCollectionsTotalNode.textContent = formatCurrency(summary.equipmentCollectionsTotal);
+    if (countNode) {
+      const paymentCount = Number(count || collectionRows.length || 0);
+      countNode.textContent = `${paymentCount} payment${paymentCount === 1 ? "" : "s"}`;
     }
-    if (equipmentCollectionsCountNode) {
-      const count = Number(summary.equipmentCollectionCount || rows.length || 0);
-      equipmentCollectionsCountNode.textContent = `${count} payment${count === 1 ? "" : "s"}`;
-    }
-    if (!equipmentCollectionsLinesNode) {
+    if (!linesNode) {
       return;
     }
-    if (!rows.length) {
-      equipmentCollectionsLinesNode.innerHTML = "<li><span>No equipment payment was collected on this POS date.</span></li>";
+    if (!collectionRows.length) {
+      linesNode.innerHTML = `<li><span>${escapeHtml(emptyMessage)}</span></li>`;
       return;
     }
-    equipmentCollectionsLinesNode.innerHTML = rows.map((collection) => {
+    linesNode.innerHTML = collectionRows.map((collection) => {
       const details = [
         collection.paymentDate || "",
         collection.paymentMethod || "Unspecified",
@@ -551,12 +552,41 @@
       ].filter(Boolean).map(escapeHtml).join(" · ");
       return `
         <li>
-          <strong>${escapeHtml(collection.customerName || "Customer")} · ${escapeHtml(collection.equipmentItem || "Equipment Rental")}</strong>
+          <strong>${escapeHtml(collection.customerName || "Customer")} · ${escapeHtml(collection.serviceItem || "Service")}</strong>
           <span>${details}</span>
           <strong>${formatCurrency(collection.amount)}</strong>
         </li>
       `;
     }).join("");
+  }
+
+  function renderServiceCollections(summary) {
+    const laundryRows = Array.isArray(summary.laundryCollections) ? summary.laundryCollections : [];
+    const equipmentRows = Array.isArray(summary.equipmentCollections) ? summary.equipmentCollections : [];
+    if (laundryCashNode) {
+      laundryCashNode.textContent = formatCurrency(summary.laundryCashCollectionsTotal);
+    }
+    if (equipmentCashNode) {
+      equipmentCashNode.textContent = formatCurrency(summary.equipmentCashCollectionsTotal);
+    }
+    renderServiceCollectionList({
+      rows: laundryRows,
+      totalNode: laundryCollectionsTotalNode,
+      countNode: laundryCollectionsCountNode,
+      linesNode: laundryCollectionsLinesNode,
+      total: summary.laundryCollectionsTotal,
+      count: summary.laundryCollectionCount,
+      emptyMessage: "No laundry payment was collected on this POS date."
+    });
+    renderServiceCollectionList({
+      rows: equipmentRows,
+      totalNode: equipmentCollectionsTotalNode,
+      countNode: equipmentCollectionsCountNode,
+      linesNode: equipmentCollectionsLinesNode,
+      total: summary.equipmentCollectionsTotal,
+      count: summary.equipmentCollectionCount,
+      emptyMessage: "No equipment payment was collected on this POS date."
+    });
   }
 
   function buildHistoryRowMarkup(order) {
@@ -647,7 +677,7 @@
     if (creditCashNode) {
       creditCashNode.textContent = formatCurrency(summary.creditCashCollectionsTotal);
     }
-    renderEquipmentCollections(summary);
+    renderServiceCollections(summary);
     syncMoneyInput(openingCashInput, summary.openingCash);
     syncMoneyInput(closingCashInput, summary.closingCashCounted);
     renderCloseoutPreview(summary);

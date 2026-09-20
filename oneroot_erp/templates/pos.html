@@ -190,7 +190,8 @@
           <div class="pos-ticket-inline pos-ticket-inline-tight">
             <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
             <span>Credit Cash <strong id="pos-credit-cash">{{ counter_summary.creditCashCollectionsTotal|currency }}</strong></span>
-            {% if not food_pos_mode %}<span>Equipment Cash <strong id="pos-equipment-cash">{{ counter_summary.equipmentCashCollectionsTotal|currency }}</strong></span>{% endif %}
+            {% if not food_pos_mode %}<span>Laundry Cash <strong id="pos-laundry-cash">{{ counter_summary.laundryCashCollectionsTotal|currency }}</strong></span>
+            <span>Equipment Cash <strong id="pos-equipment-cash">{{ counter_summary.equipmentCashCollectionsTotal|currency }}</strong></span>{% endif %}
             <span>Expected <strong id="pos-expected-cash">{{ counter_summary.expectedClosingCash|currency }}</strong></span>
             <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
           </div>
@@ -221,15 +222,29 @@
             {% endfor %}
           </ul>
         </details>
-        {% if not food_pos_mode %}<details class="pos-closeout-breakdown" id="pos-equipment-collections">
-          <summary>
-            Equipment collections received: <strong id="pos-equipment-collections-total">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong>
-            <span class="muted" id="pos-equipment-collections-count">{{ counter_summary.equipmentCollectionCount }} payment{% if counter_summary.equipmentCollectionCount != 1 %}s{% endif %}</span>
-          </summary>
+        {% if not food_pos_mode %}<details class="pos-closeout-breakdown" id="pos-service-collections">
+          <summary>Service payments received today</summary>
+          <div class="pos-ticket-inline pos-ticket-inline-tight">
+            <span>Laundry <strong id="pos-laundry-collections-total">{{ counter_summary.laundryCollectionsTotal|currency }}</strong> <small class="muted" id="pos-laundry-collections-count">{{ counter_summary.laundryCollectionCount }} payment{% if counter_summary.laundryCollectionCount != 1 %}s{% endif %}</small></span>
+            <span>Equipment <strong id="pos-equipment-collections-total">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong> <small class="muted" id="pos-equipment-collections-count">{{ counter_summary.equipmentCollectionCount }} payment{% if counter_summary.equipmentCollectionCount != 1 %}s{% endif %}</small></span>
+          </div>
+          <h4 class="pos-service-collection-title">Laundry payments</h4>
+          <ul id="pos-laundry-collections-lines" class="stack-list compact">
+            {% for collection in counter_summary.laundryCollections %}
+              <li>
+                <strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong>
+                <span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span>
+                <strong>{{ collection.amount|currency }}</strong>
+              </li>
+            {% else %}
+              <li><span>No laundry payment was collected on this POS date.</span></li>
+            {% endfor %}
+          </ul>
+          <h4 class="pos-service-collection-title">Equipment rental payments</h4>
           <ul id="pos-equipment-collections-lines" class="stack-list compact">
             {% for collection in counter_summary.equipmentCollections %}
               <li>
-                <strong>{{ collection.customerName }} · {{ collection.equipmentItem }}</strong>
+                <strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong>
                 <span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span>
                 <strong>{{ collection.amount|currency }}</strong>
               </li>
