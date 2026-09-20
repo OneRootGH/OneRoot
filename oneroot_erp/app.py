@@ -6,6 +6,7 @@ import csv
 import hashlib
 import html
 import json
+import re
 import time
 from collections import defaultdict
 from datetime import date, datetime, timedelta
@@ -163,6 +164,16 @@ EQUIPMENT_SERVICE_KEYWORDS = (
     "cutting machine",
     "cutter",
     "impact drill",
+)
+EQUIPMENT_BUY_KEYWORDS = (
+    "nail",
+    "fastener",
+    "screw",
+    "bolt",
+    "nut",
+    "binding wire",
+    "cutting disc",
+    "drill bit",
 )
 PUBLIC_JOB_VACANCY_STATUSES = {
     status for status, _label in JOB_VACANCY_STATUSES if status not in {"Draft", "Filled", "Closed"}
@@ -850,6 +861,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 sync_equipment_service_catalog(bootstrap_session, app_config)
                 reclassify_legacy_inventory_products(bootstrap_session)
                 reclassify_cold_store_and_grocery_inventory(bootstrap_session)
+                reclassify_inventory_catalog(bootstrap_session)
                 restructure_voltic_shared_stock(bootstrap_session)
                 link_bread_stock_to_food_pos(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
@@ -1116,6 +1128,129 @@ GROCERIES_MORE_CATEGORIES = {
     "stationery & school supplies",
 }
 
+COLD_STORE_CATEGORY_LABELS = {
+    "frozen foods & proteins",
+    "drinks & refreshments",
+    "bakery & bread",
+    "frozen treats",
+    "cold store supplies",
+}
+WATER_SUPPLY_NAME_TOKENS = ("water", "gallon", "galon", "bucket")
+PACKAGED_DRINK_NAME_TOKENS = (
+    "voltic",
+    "bel-aqua",
+    "bel aqua",
+    "coca-cola",
+    "coca cola",
+    "bigoo",
+    "malta",
+    "kiki",
+    "bel cola",
+    "bel squeeze",
+)
+
+
+def product_text_blob(product: Product) -> str:
+    return " ".join(
+        normalize_text(value).lower()
+        for value in (product.name, product.category, product.source_category, product.source_catalog_id)
+        if normalize_text(value)
+    )
+
+
+def reclassify_inventory_product(product: Product) -> bool:
+    """Apply OneRoot's sellable catalogue structure without changing sales history."""
+    changed = False
+    area_id = normalize_text(product.business_area_id)
+    category_key = normalize_text(product.category).lower()
+    name_key = normalize_text(product.name).lower()
+    source_key = normalize_text(product.source_category).lower()
+    text_blob = product_text_blob(product)
+
+    def set_value(field: str, value: Any) -> None:
+        nonlocal changed
+        if getattr(product, field) != value:
+            setattr(product, field, value)
+            changed = True
+
+    # Kitchen menu items are services sold at the food counter. Their category is
+    # chosen from the Kitchen menu and must not be moved because of a drink name.
+    if area_id == "kitchen" or source_key == "oneroot kitchen menu":
+        return changed
+
+    # Laundry is a service desk, so all of its catalogue entries remain services.
+    if area_id == "laundry-services" or category_key.startswith("laundry -"):
+        set_value("business_area_id", "laundry-services")
+        if not category_key.startswith("laundry -"):
+            set_value("category", "Laundry - General Items")
+        set_value("item_type", "service")
+        return changed
+
+    # General retail was historically loaded under the old combined Cold Store
+    # area. Keep cold-chain products there, and move everyday merchandise out.
+    if area_id == "cold-store-groceries" and category_key in GROCERIES_MORE_CATEGORIES:
+        set_value("business_area_id", "groceries")
+    if area_id == "groceries" and category_key in COLD_STORE_CATEGORY_LABELS:
+        set_value("business_area_id", "cold-store-groceries")
+
+    # Packaged drinks belong in the Cold Store, except Kitchen menu service rows.
+    # This also corrects old Voltic rows that were saved under Water Supply.
+    is_packaged_drink = any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS)
+    if is_packaged_drink and area_id in {"water-equipment", "cold-store-groceries", "groceries"}:
+        set_value("business_area_id", "cold-store-groceries")
+        set_value("category", "Drinks & Refreshments")
+        set_value("item_type", "stock")
+
+    # Water refill, gallon, and bucket products stay under Water Supply. A named
+    # packaged drink is deliberately excluded by the rule immediately above.
+    is_water_supply = (
+        area_id == "water-equipment"
+        and any(token in name_key for token in WATER_SUPPLY_NAME_TOKENS)
+        and not is_packaged_drink
+        and "delivery" not in text_blob
+    )
+    if is_water_supply:
+        set_value("business_area_id", "water-equipment")
+        set_value("category", "Water Supply")
+        set_value("item_type", "stock")
+
+    if area_id == "water-equipment" and "water delivery" in text_blob:
+        set_value("category", "Water Delivery")
+        set_value("item_type", "service")
+
+    # Equipment is either hired out (Rent) or sold as a consumable (Buy). This
+    # replaces broad legacy labels such as Equipment & Construction Consumables.
+    if area_id == "water-equipment" and not is_water_supply and not is_packaged_drink:
+        if any(token in text_blob for token in EQUIPMENT_BUY_KEYWORDS):
+            set_value("category", "Buy")
+            set_value("item_type", "stock")
+        elif (
+            category_key in EQUIPMENT_RENT_LEGACY_CATEGORY_LABELS
+            or any(token in text_blob for token in EQUIPMENT_SERVICE_KEYWORDS)
+            or normalize_text(product.id).startswith("equipment-rental-")
+        ):
+            set_value("category", "Rent")
+
+    return changed
+
+
+def reclassify_inventory_catalog(db_session) -> bool:
+    """Repair legacy areas/categories and keep stock/service classification clean."""
+    changed = False
+    for product in db_session.scalars(select(Product)).all():
+        if not reclassify_inventory_product(product):
+            continue
+        product.updated_at = datetime.utcnow()
+        product.sku = generate_auto_product_sku(
+            product_id=product.id,
+            name=product.name,
+            business_area_id=product.business_area_id,
+            category=product.category,
+        )
+        normalize_product_record(product)
+        changed = True
+    return changed
+
 
 def reclassify_cold_store_and_grocery_inventory(db_session) -> bool:
     """Move general retail stock into Groceries & More, without rewriting sales history."""
@@ -1152,6 +1287,19 @@ def voltic_product_key(value: Any) -> str:
     return " ".join(
         "".join(character if character.isalnum() else " " for character in normalize_text(value).lower()).split()
     )
+
+
+def voltic_variant_stock_units(value: Any) -> float:
+    """Return how many sachets a Voltic selling option deducts from shared stock."""
+    name_key = voltic_product_key(value)
+    if "full bag" in name_key:
+        return 30.0
+    if "half bag" in name_key:
+        return 15.0
+    match = re.search(r"(?:^| )([0-9]+) pieces?(?: |$)", name_key)
+    if match:
+        return max(parse_amount(match.group(1)), 1)
+    return 1.0
 
 
 def product_stock_units_per_sale(product: Product | None) -> float:
@@ -1242,6 +1390,16 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             or next((item for item in products if item.stock_source_product_id == source_product.id and "cold" in normalize_text(item.stock_unit_label).lower()), None)
         ),
     }
+    named_variant_ids = {item.id for item in variants.values() if item}
+    extra_variants = [
+        product
+        for product in products
+        if product.id != source_product.id
+        and product.id not in named_variant_ids
+        and normalize_text(product.business_area_id) in {"water-equipment", "cold-store-groceries"}
+        and "voltic" in voltic_product_key(product.name)
+        and any(token in voltic_product_key(product.name) for token in ("sachet", "bag", "piece"))
+    ]
     changed = False
     # First run merges historical sales quantities that were previously split across four rows.
     needs_historic_merge = any(
@@ -1259,7 +1417,11 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             )
             if variant
         )
-        historic_rows = [source_product, *[item for item in variants.values() if item]]
+        historic_piece_balance += sum(
+            parse_amount(variant.quantity_on_hand) * voltic_variant_stock_units(variant.name)
+            for variant in extra_variants
+        )
+        historic_rows = [source_product, *[item for item in variants.values() if item], *extra_variants]
         # All four legacy balances were negative in the supplied record: they reflect
         # sales without an opening count, not stock that can be carried forward.
         # Start the new shared count at zero so staff can enter the real bag count.
@@ -1328,6 +1490,32 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             variant.notes = note
             changed = True
 
+    # Preserve useful customer-facing sell options such as "3 pieces" while
+    # making them draw from the same physical Voltic sachet balance.
+    for variant in extra_variants:
+        units = voltic_variant_stock_units(variant.name)
+        variant_updates = {
+            "business_area_id": "cold-store-groceries",
+            "category": "Drinks & Refreshments",
+            "item_type": "stock",
+            "track_inventory": True,
+            "quantity_known": True,
+            "stock_source_product_id": source_product.id,
+            "stock_units_per_sale": units,
+            "stock_unit_label": "pieces",
+            "purchase_pack_size": 1,
+            "purchase_pack_label": "sell unit",
+            "min_stock_level": 1,
+        }
+        for field, value in variant_updates.items():
+            if getattr(variant, field) != value:
+                setattr(variant, field, value)
+                changed = True
+        note = f"Uses shared Voltic sachet stock. Each sale deducts {int(units) if units.is_integer() else units} pieces."
+        if normalize_text(variant.notes) != note:
+            variant.notes = note
+            changed = True
+
     # The Food POS has its own Kitchen menu row for Voltic Cool. It sells one sachet,
     # but must draw from the same Cold Store physical balance rather than acting as a
     # zero-cost service item.
@@ -1367,7 +1555,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
 
     if changed:
         source_product.updated_at = datetime.utcnow()
-        for product in [source_product, *[item for item in variants.values() if item], *([kitchen_voltic] if kitchen_voltic else [])]:
+        for product in [source_product, *[item for item in variants.values() if item], *extra_variants, *([kitchen_voltic] if kitchen_voltic else [])]:
             product.sku = generate_auto_product_sku(
                 product_id=product.id,
                 name=product.name,
@@ -18213,7 +18401,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/inventory", methods=["GET", "POST"])
     @access_required("inventory")
     def inventory():
-        if reclassify_legacy_inventory_products(g.db):
+        inventory_repaired = reclassify_legacy_inventory_products(g.db)
+        inventory_repaired = reclassify_cold_store_and_grocery_inventory(g.db) or inventory_repaired
+        inventory_repaired = reclassify_inventory_catalog(g.db) or inventory_repaired
+        inventory_repaired = restructure_voltic_shared_stock(g.db) or inventory_repaired
+        inventory_repaired = link_bread_stock_to_food_pos(g.db) or inventory_repaired
+        if inventory_repaired:
             g.db.commit()
         editing_id = normalize_text(request.args.get("edit"))
         editing_product = find_inventory_product(g.db, editing_id) if editing_id else None

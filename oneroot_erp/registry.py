@@ -23,7 +23,6 @@ INVENTORY_CATEGORY_LIBRARY = {
         "Water Delivery",
         "Rent",
         "Buy",
-        "Equipment & Construction Consumables",
     ],
     "cold-store-groceries": [
         "Frozen Foods & Proteins",
@@ -73,6 +72,7 @@ INVENTORY_CATEGORY_LIBRARY = {
         "Sides",
         "Drinks",
         "Packaging & Add-ons",
+        "Bread",
         "Prepared Meals",
         "Soups & Stews",
         "Ingredients & Prep",
