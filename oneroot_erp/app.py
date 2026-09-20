@@ -5605,6 +5605,9 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
                 "linkedOnlineOrderNumber": normalize_text(payload.get("linkedOnlineOrderNumber")),
                 "isReady": status == "Ready",
                 "isDelivered": status == "Delivered",
+                # A delivered job can still be unpaid, so keep it in the
+                # collection queue until its recorded balance is cleared.
+                "isOutstanding": bool(balance > 0 and status != "Cancelled"),
                 "isOverdue": bool(balance > 0 and due_date and due_date < today and status not in {"Delivered", "Cancelled"}),
                 "isDueToday": bool(balance > 0 and due_date == today and status not in {"Delivered", "Cancelled"}),
             }
@@ -5781,11 +5784,24 @@ def build_service_module_context(
             value_key="amount",
             short_key="short",
         )
+        laundry_watch_items = sorted(
+            [
+                row
+                for row in rows
+                if row["isOverdue"] or row["isDueToday"] or row["isReady"] or row["isOutstanding"]
+            ],
+            key=lambda row: (
+                0 if row["isOverdue"] else 1 if row["isDueToday"] else 2 if row["isOutstanding"] else 3,
+                -parse_amount(row["balance"]),
+                row["dueDate"] or date.max,
+                row["customerName"].lower(),
+            ),
+        )[:10]
         return {
             "intro": "Capture each laundry request first, then record each collection separately so balances, daily sales, and realized profit stay aligned.",
             "cards": [
                 {"label": "Tickets In View", "value": f"{len(rows)}", "note": "Filtered laundry jobs"},
-                {"label": "Ready For Pickup", "value": f"{sum(1 for row in rows if row['isReady'])}", "note": "Jobs marked ready"},
+                {"label": "Collection Queue", "value": f"{sum(1 for row in rows if row['isOutstanding'])}", "note": "Tickets still awaiting payment"},
                 {"label": "Open Balance", "value": format_currency(sum(row["balance"] for row in rows)), "note": "Unpaid laundry still open"},
                 {"label": "Collected Profit", "value": format_currency(sum(row["profitAmount"] for row in rows)), "note": "Profit recognized from captured payments"},
             ],
@@ -5794,9 +5810,7 @@ def build_service_module_context(
             "mixEyebrow": "Laundry Category Mix",
             "mixTitle": "Most Common Laundry Work",
             "watchTitle": "Laundry Attention Queue",
-            "watchItems": [
-                row for row in rows if row["isOverdue"] or row["isDueToday"] or row["isReady"]
-            ][:10],
+            "watchItems": laundry_watch_items,
             "table": {
                 "primaryHeading": "Customer",
                 "secondaryHeading": "Laundry Item",
@@ -12721,6 +12735,74 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
                 set_module_record_metadata(activity_record, MODULES["customer_credit_accounts"], activity_payload)
 
+    def build_customer_credit_collection_queue(db_session, records: list[ModuleRecord]) -> list[dict[str, Any]]:
+        """Group credit activity by customer so staff collect one clear balance."""
+        customers: dict[str, dict[str, Any]] = {}
+        for record in sorted(records, key=lambda item: (item.record_date or date.min, item.created_at, item.id)):
+            payload = dict(record.payload or {})
+            customer_key = customer_credit_rollup_key(db_session, payload)
+            if not customer_key:
+                continue
+            customer_name = normalize_text(payload.get("customerName")) or "Customer"
+            customer_phone = normalize_text(payload.get("customerPhone"))
+            row = customers.setdefault(
+                customer_key,
+                {
+                    "customerName": customer_name,
+                    "customerPhone": customer_phone,
+                    "balance": 0.0,
+                    "creditSales": [],
+                    "itemSummaries": [],
+                    "dueDates": [],
+                },
+            )
+            if customer_name != "Customer":
+                row["customerName"] = customer_name
+            if customer_phone:
+                row["customerPhone"] = customer_phone
+            row["balance"] = round(row["balance"] + customer_credit_entry_effect(payload), 2)
+            if normalize_text(payload.get("transactionType")) != "Credit Sale":
+                continue
+            row["creditSales"].append(record)
+            item_summary = normalize_text(payload.get("itemSummary"))
+            if item_summary and item_summary not in row["itemSummaries"]:
+                row["itemSummaries"].append(item_summary)
+            due_date = parse_date(payload.get("dueDate"))
+            if due_date:
+                row["dueDates"].append(due_date)
+
+        queue: list[dict[str, Any]] = []
+        today = date.today()
+        for row in customers.values():
+            balance = round(max(parse_amount(row["balance"]), 0.0), 2)
+            if balance <= 0.009 or not row["creditSales"]:
+                continue
+            due_date = min(row["dueDates"]) if row["dueDates"] else None
+            item_summaries = row["itemSummaries"]
+            queue.append(
+                {
+                    "customerName": row["customerName"],
+                    "customerPhone": row["customerPhone"],
+                    "balance": balance,
+                    "dueDate": due_date.isoformat() if due_date else "",
+                    "isOverdue": bool(due_date and due_date < today),
+                    "isDueToday": bool(due_date and due_date == today),
+                    "itemSummary": "; ".join(item_summaries[:2])
+                    + (f" + {len(item_summaries) - 2} more" if len(item_summaries) > 2 else ""),
+                    # Any sale for this customer can receive a payment; the
+                    # normal roll-up links the new collection to this customer.
+                    "sourceRecordId": row["creditSales"][-1].id,
+                }
+            )
+        return sorted(
+            queue,
+            key=lambda row: (
+                0 if row["isOverdue"] else 1 if row["isDueToday"] else 2,
+                -row["balance"],
+                row["customerName"].lower(),
+            ),
+        )
+
     def sync_customer_credit_from_pos_order(order: PosOrder, db_session=None) -> None:
         db = db_session or g.db
         if normalize_text(order.payment_method).lower() != "credit":
@@ -16505,14 +16587,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         ),
                     }
                 )
-            if module_key == "equipment_rental_bookings":
+            if module_key in {"equipment_rental_bookings", "laundry_tickets"}:
                 outstanding_count = sum(1 for row in service_rows if parse_amount(row.get("balance")) > 0)
                 if outstanding_count:
                     module_quick_actions.append(
                         {
-                            "label": "Collect Outstanding",
+                            "label": "Collect Outstanding" if module_key == "equipment_rental_bookings" else "Collect Laundry Balances",
                             "href": url_for("module_list", module_key=module_key),
-                            "note": f"{outstanding_count} rental{'s' if outstanding_count != 1 else ''} still have a balance. Use the green Collect action beside the rental.",
+                            "note": (
+                                f"{outstanding_count} rental{'s' if outstanding_count != 1 else ''} still have a balance. Use the green Collect action beside the rental."
+                                if module_key == "equipment_rental_bookings"
+                                else f"{outstanding_count} laundry ticket{'s' if outstanding_count != 1 else ''} still have a balance. Use the green Collect action beside the ticket."
+                            ),
                         }
                     )
             if user_has_access(g.current_user, "sales"):
@@ -16572,6 +16658,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == module_key)
             .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
+        customer_credit_queue: list[dict[str, Any]] = []
+        if module_key == "customer_credit_accounts":
+            customer_credit_queue = build_customer_credit_collection_queue(g.db, all_records)
         if module_key == "sales":
             all_records = [record for record in all_records if not is_mobile_money_daily_sales_record(record)]
         if module_key == "customer_crm":
@@ -16918,6 +17007,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             mobile_money_live_snapshot=mobile_money_live_snapshot,
             supplier_reorder_items=supplier_reorder_items,
             supplier_price_comparison=supplier_price_comparison,
+            customer_credit_queue=customer_credit_queue,
         )
 
     @app.route("/app/modules/<module_key>/export.csv")

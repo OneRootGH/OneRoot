@@ -139,13 +139,22 @@
     <ul class="stack-list compact">
       {% if definition.key == 'laundry_tickets' %}
         {% for item in service_context.watchItems %}
-          <li>
-            <strong>{{ item.customerName }} · {{ item.itemSummary }}</strong>
-            <span>
-              {{ item.serviceCategory }} · {{ item.serviceType }} ·
-              {% if item.isReady %}Ready{% elif item.isOverdue %}Overdue{% elif item.isDueToday %}Due Today{% else %}Open{% endif %}
-              · {{ item.balance|currency }} balance
-            </span>
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy">
+              <strong>{{ item.customerName }} · {{ item.itemSummary }}</strong>
+              <span>{{ item.customerPhone or 'Phone not recorded' }} · {{ item.serviceCategory }} · {{ item.serviceType }}</span>
+              <span>
+                {% if item.isOverdue %}Payment overdue{% elif item.isDueToday %}Payment due today{% elif item.isOutstanding %}Collection outstanding{% elif item.isReady %}Ready for pickup{% else %}Open{% endif %}
+                · Due {{ item.amountDue|currency }} · Paid {{ item.amountPaid|currency }} · Balance {{ item.balance|currency }}
+              </span>
+            </div>
+            <div class="stack-list-actions">
+              {% if item.balance > 0 %}
+                <a class="button primary button-small" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=item.id, amount=item.balance) }}">Collect {{ item.balance|currency }}</a>
+              {% else %}
+                <a class="button subtle button-small" href="{{ url_for('module_form', module_key=definition.key, record_id=item.id) }}">Open Ticket</a>
+              {% endif %}
+            </div>
           </li>
         {% else %}
           <li><span>No laundry jobs need special follow-up right now.</span></li>
@@ -226,7 +235,11 @@
                 <td>
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
-                    <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">Payment</a>
+                    {% if row.balance > 0 %}
+                      <a class="table-link table-link-primary" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id, amount=row.balance) }}">Collect {{ row.balance|currency }}</a>
+                    {% else %}
+                      <a class="table-link" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id) }}">View Payments</a>
+                    {% endif %}
                     {% if row.linkedOnlineOrderId %}
                       <a class="table-link" href="{{ url_for('online_orders_desk', order_id=row.linkedOnlineOrderId) }}">Order</a>
                     {% endif %}

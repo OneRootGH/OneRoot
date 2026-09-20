@@ -147,6 +147,56 @@
       <strong>How credit accounts work</strong>
       <p>POS sales saved with the <em>Credit</em> payment method appear here automatically. Use <strong>New Record</strong> to capture a payment received, credit note, or approved write-off for a customer. A payment reduces the customer balance, creates a linked Cashbook collection, and appears in the POS closeout as a separate collection. It is never counted as a second sale.</p>
     </section>
+
+    <section class="card-grid four">
+      <article class="metric-card warning">
+        <span>Customers Owing</span>
+        <strong>{{ customer_credit_queue|length }}</strong>
+        <small>Customers with an unpaid credit balance</small>
+      </article>
+      <article class="metric-card warning">
+        <span>Total Outstanding</span>
+        <strong>{{ customer_credit_queue|sum(attribute='balance')|currency }}</strong>
+        <small>Credit still to be collected</small>
+      </article>
+      <article class="metric-card warning">
+        <span>Overdue</span>
+        <strong>{{ customer_credit_queue|selectattr('isOverdue')|list|length }}</strong>
+        <small>Customers past their stated due date</small>
+      </article>
+      <article class="metric-card">
+        <span>Due Today</span>
+        <strong>{{ customer_credit_queue|selectattr('isDueToday')|list|length }}</strong>
+        <small>Collections to follow up today</small>
+      </article>
+    </section>
+
+    <section class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Collection Queue</p>
+          <h3>Customers With Credit Still Unpaid</h3>
+        </div>
+        <p class="muted list-summary">Each customer appears once with their current combined balance.</p>
+      </div>
+      <ul class="stack-list compact reminder-stack">
+        {% for customer in customer_credit_queue %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy">
+              <strong>{{ customer.customerName }}</strong>
+              <span>{{ customer.customerPhone or 'Phone not recorded' }} · {% if customer.isOverdue %}Overdue{% elif customer.isDueToday %}Due today{% else %}Open credit{% endif %}{% if customer.dueDate %} · Due {{ customer.dueDate }}{% endif %}</span>
+              {% if customer.itemSummary %}<span>{{ customer.itemSummary }}</span>{% endif %}
+              <span>Balance to collect: {{ customer.balance|currency }}</span>
+            </div>
+            <div class="stack-list-actions">
+              <a class="button primary button-small" href="{{ url_for('module_form', module_key='customer_credit_accounts', creditAccountId=customer.sourceRecordId) }}">Receive {{ customer.balance|currency }}</a>
+            </div>
+          </li>
+        {% else %}
+          <li><span>All customer credit accounts are settled.</span></li>
+        {% endfor %}
+      </ul>
+    </section>
   {% endif %}
 
   {% if definition.key == 'petty_cash' %}
