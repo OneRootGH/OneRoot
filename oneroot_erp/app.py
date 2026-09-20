@@ -1201,11 +1201,17 @@ def reclassify_inventory_product(product: Product) -> bool:
             setattr(product, field, value)
             changed = True
 
-    # Prepared-food menu items now sit under Cold Store & Kitchen. Their menu
-    # category must not be overwritten by the ordinary drink/retail rules below.
+    # Prepared-food menu items now sit under Cold Store & Kitchen. Drinks sold
+    # from that menu are still physical stock, while prepared meals remain
+    # service/menu lines for the Food POS.
     if area_id == LEGACY_KITCHEN_AREA_ID or source_key == KITCHEN_MENU_SOURCE_CATEGORY.lower():
         set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
-        set_value("item_type", "service")
+        if category_key == "drinks" or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS):
+            set_value("category", "Drinks & Refreshments")
+            set_value("item_type", "stock")
+            set_value("track_inventory", True)
+        else:
+            set_value("item_type", "service")
         return changed
 
     # Drinks belong to Cold Store & Kitchen even when historic imports placed
@@ -1219,6 +1225,7 @@ def reclassify_inventory_product(product: Product) -> bool:
         set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
         set_value("category", "Drinks & Refreshments")
         set_value("item_type", "stock")
+        set_value("track_inventory", True)
         return changed
 
     # Laundry is a service desk, so all of its catalogue entries remain services.
@@ -3866,15 +3873,17 @@ def sync_kitchen_menu_catalog(db_session) -> None:
             normalize_product_record(product)
             continue
 
+        is_drink = normalize_text(seed.get("category")).lower() == "drinks"
         product.source_catalog_id = KITCHEN_MENU_SOURCE_ID
         product.name = normalize_text(seed["name"])
         product.business_area_id = COLD_STORE_KITCHEN_AREA_ID
-        product.category = normalize_text(seed["category"]) or "Kitchen"
+        product.category = "Drinks & Refreshments" if is_drink else (normalize_text(seed["category"]) or "Kitchen")
         product.source_category = "OneRoot Kitchen Menu"
-        product.item_type = "service"
-        product.track_inventory = False
-        product.quantity_on_hand = 0
-        product.quantity_known = False
+        product.item_type = "stock" if is_drink else "service"
+        product.track_inventory = is_drink
+        if is_new:
+            product.quantity_on_hand = 0
+        product.quantity_known = is_drink
         product.min_stock_level = 0
         product.sales_price = round(parse_amount(seed.get("salesPrice")), 2)
         product.cost_price = round(parse_amount(seed.get("costPrice")), 2)
@@ -3932,6 +3941,15 @@ def equipment_rental_days(payload: dict[str, Any]) -> int:
     out_date = parse_date(payload.get("outDate"))
     return_date = parse_date(payload.get("returnDate"))
     due_date = parse_date(payload.get("dueDate"))
+    approved_days = int(round(parse_amount(payload.get("approvedChargeableDays"))))
+    approved_return_date = normalize_text(payload.get("approvedReturnDate"))
+    if (
+        normalize_text(payload.get("returnDayApprovalStatus")).lower() == "approved"
+        and approved_days > 0
+        and return_date
+        and approved_return_date == return_date.isoformat()
+    ):
+        return approved_days
     # Charge both the day equipment leaves OneRoot and the day it is returned.
     # The actual return date takes priority over the booking's expected date.
     charge_end_date = return_date or due_date
@@ -3939,6 +3957,22 @@ def equipment_rental_days(payload: dict[str, Any]) -> int:
         return (charge_end_date - out_date).days + 1
     saved_days = int(round(parse_amount(payload.get("rentalDays"))))
     return saved_days if saved_days > 0 else 1
+
+
+def is_next_day_morning_return(payload: dict[str, Any], return_date_value: Any, return_time_value: Any) -> bool:
+    """Whether a return qualifies for the Owner-only one-day rental exception."""
+    out_date = parse_date(payload.get("outDate"))
+    due_date = parse_date(payload.get("dueDate"))
+    return_date = parse_date(return_date_value)
+    raw_time = normalize_text(return_time_value)
+    if not out_date or not due_date or not return_date or due_date != out_date + timedelta(days=1):
+        return False
+    if return_date != due_date or not raw_time:
+        return False
+    try:
+        return datetime.strptime(raw_time, "%H:%M").time().hour < 12
+    except ValueError:
+        return False
 
 
 def service_pricing_multiplier(module_key: str, payload: dict[str, Any]) -> float:
@@ -5055,6 +5089,11 @@ def user_can_void_pos_orders(user: User | None) -> bool:
     }
 
 
+def user_is_owner(user: User | None) -> bool:
+    """Keep commercially sensitive desk profit visible only to the Owner."""
+    return normalize_role_key(getattr(user, "role", "viewer")) == "owner"
+
+
 def user_can_override_pos_price(user: User | None) -> bool:
     return normalize_role_key(getattr(user, "role", "viewer")) in {"owner", "admin", "operations"}
 
@@ -5335,8 +5374,8 @@ SERVICE_MODULE_SECTIONS = {
         ),
         (
             "Movement & Return",
-            "Set the expected return when booking. Enter the actual return date when it comes back so the final amount due is exact.",
-            ["outDate", "dueDate", "returnDate", "conditionOut", "conditionIn", "status", "notes"],
+            "Set the expected return when booking. Enter the actual return date and time when it comes back so the final amount due is exact. A next-day morning one-day charge needs Owner approval.",
+            ["outDate", "dueDate", "returnDate", "returnTime", "conditionOut", "conditionIn", "status", "notes"],
         ),
     ],
 }
@@ -13394,7 +13433,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def laundry_collection_summary(collection_date: date) -> dict[str, Any]:
         return service_counter_collection_summary("laundry_tickets", collection_date)
 
-    def build_pos_counter_summary(order_date: date, area_id: str = "", desk: str = "") -> dict[str, Any]:
+    def build_pos_counter_summary(
+        order_date: date,
+        area_id: str = "",
+        desk: str = "",
+        *,
+        include_sensitive: bool = True,
+    ) -> dict[str, Any]:
         selected_area = normalize_text(area_id)
         desk_key = normalize_pos_desk(desk) if normalize_text(desk) else ""
         desk_area_ids = pos_desk_area_ids(desk_key) if desk_key else set()
@@ -13596,7 +13641,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             closeout_payload["expectedClosingCash"] = expected_closing_cash
             closeout_payload["cashVariance"] = cash_variance
 
-        return {
+        summary = {
             "orderDate": order_date.isoformat(),
             "areaId": counter_scope_id,
             "areaLabel": (
@@ -13679,6 +13724,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "businessAreaIds": sorted(business_areas),
             "lastCloseout": closeout_payload,
         }
+        if not include_sensitive:
+            for protected_key in ("costAmount", "profitAmount", "breadSalesCost", "breadSalesProfit"):
+                summary.pop(protected_key, None)
+        return summary
 
     def sync_existing_pos_closeouts(
         order_date: date,
@@ -17025,6 +17074,31 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 ):
                     continue
                 payload[field.name] = parse_field_input(field, request.form)
+            if module_key == "equipment_rental_bookings":
+                submitted_return_date = normalize_text(payload.get("returnDate"))
+                submitted_return_time = normalize_text(payload.get("returnTime"))
+                if is_next_day_morning_return(payload, submitted_return_date, submitted_return_time):
+                    if user_is_owner(g.current_user):
+                        payload["returnDayApprovalStatus"] = "Approved"
+                        payload["approvedChargeableDays"] = 1
+                        payload["approvedReturnDate"] = submitted_return_date
+                        payload["returnDayApprovalApprovedAt"] = datetime.utcnow().isoformat()
+                        payload["returnDayApprovalApprovedBy"] = g.current_user.full_name or g.current_user.username
+                    else:
+                        payload["returnDayApprovalStatus"] = "Pending Owner Approval"
+                        payload["returnDayApprovalRequestedReturnDate"] = submitted_return_date
+                        payload["returnDayApprovalRequestedReturnTime"] = submitted_return_time
+                        payload["returnDayApprovalRequestedAt"] = datetime.utcnow().isoformat()
+                        payload["returnDayApprovalRequestedBy"] = g.current_user.full_name or g.current_user.username
+                elif normalize_text(payload.get("approvedReturnDate")) != submitted_return_date:
+                    for field_name in (
+                        "returnDayApprovalStatus",
+                        "approvedChargeableDays",
+                        "approvedReturnDate",
+                        "returnDayApprovalApprovedAt",
+                        "returnDayApprovalApprovedBy",
+                    ):
+                        payload.pop(field_name, None)
             if module_key == "kitchen_recipe_plans":
                 raw_meals = normalize_text(request.form.get("mealItemsJson"))
                 try:
@@ -17178,6 +17252,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["documentAttachmentType"] = document_attachment_type
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
+            if (
+                module_key == "equipment_rental_bookings"
+                and is_next_day_morning_return(payload, payload.get("returnDate"), payload.get("returnTime"))
+                and not user_is_owner(g.current_user)
+            ):
+                form_errors.append(
+                    "This next-day morning return needs Owner approval before a one-day charge can be accepted. Use the rental's Collect action to request it."
+                )
             if module_key == "kitchen_recipe_plans":
                 form_errors.extend(kitchen_recipe_form_errors(payload))
                 form_errors.extend(kitchen_recipe_stock_errors(g.db, payload, record_payload))
@@ -17669,9 +17751,46 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = dict(record.payload or {})
         payment_summary = service_payment_summary(module_key, payload)
         if request.method == "POST":
+            if module_key == "equipment_rental_bookings" and request.form.get("ownerApproveMorningReturn") == "yes":
+                requested_return_date = normalize_text(payload.get("returnDayApprovalRequestedReturnDate"))
+                requested_return_time = normalize_text(payload.get("returnDayApprovalRequestedReturnTime"))
+                if not user_is_owner(g.current_user):
+                    flash("Only the Owner can approve a one-day next-morning rental return.", "error")
+                elif normalize_text(payload.get("returnDayApprovalStatus")) != "Pending Owner Approval":
+                    flash("There is no pending next-morning return approval for this rental.", "warning")
+                elif not is_next_day_morning_return(payload, requested_return_date, requested_return_time):
+                    flash("The saved approval request is incomplete or no longer qualifies for a one-day charge.", "error")
+                else:
+                    payload["returnDate"] = requested_return_date
+                    payload["returnTime"] = requested_return_time
+                    payload["returnDayApprovalStatus"] = "Approved"
+                    payload["approvedChargeableDays"] = 1
+                    payload["approvedReturnDate"] = requested_return_date
+                    payload["returnDayApprovalApprovedAt"] = datetime.utcnow().isoformat()
+                    payload["returnDayApprovalApprovedBy"] = g.current_user.full_name or g.current_user.username
+                    if normalize_text(payload.get("status")) != "Cancelled":
+                        payload["status"] = "Returned"
+                    hydrate_service_cost_payload(g.db, module_key, payload)
+                    sync_service_line_item_rollup(module_key, payload)
+                    apply_service_payment_rollup(module_key, payload)
+                    payload["updatedAt"] = datetime.utcnow().isoformat()
+                    set_module_record_metadata(record, definition, payload)
+                    sync_generated_sales_for_module_record(record)
+                    audit(
+                        module_key,
+                        definition.label,
+                        "update",
+                        record.title,
+                        record.id,
+                        f"Owner approved a one-day next-morning return for {requested_return_date} at {requested_return_time}.",
+                    )
+                    g.db.commit()
+                    flash("Owner approval saved. The rental now uses the approved one-day charge.", "success")
+                    return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
             return_date_error = ""
             if module_key == "equipment_rental_bookings":
                 submitted_return_date = normalize_text(request.form.get("returnDate"))
+                submitted_return_time = normalize_text(request.form.get("returnTime"))
                 if submitted_return_date:
                     actual_return_date = parse_date(submitted_return_date)
                     out_date = parse_date(payload.get("outDate"))
@@ -17679,10 +17798,45 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         return_date_error = "Enter a valid actual return date."
                     elif out_date and actual_return_date < out_date:
                         return_date_error = "The actual return date cannot be before the equipment went out."
+                    elif is_next_day_morning_return(payload, submitted_return_date, submitted_return_time) and not user_is_owner(g.current_user):
+                        payload["returnDayApprovalStatus"] = "Pending Owner Approval"
+                        payload["returnDayApprovalRequestedReturnDate"] = actual_return_date.isoformat()
+                        payload["returnDayApprovalRequestedReturnTime"] = submitted_return_time
+                        payload["returnDayApprovalRequestedAt"] = datetime.utcnow().isoformat()
+                        payload["returnDayApprovalRequestedBy"] = g.current_user.full_name or g.current_user.username
+                        payload["updatedAt"] = datetime.utcnow().isoformat()
+                        set_module_record_metadata(record, definition, payload)
+                        audit(
+                            module_key,
+                            definition.label,
+                            "update",
+                            record.title,
+                            record.id,
+                            f"Requested Owner approval for a one-day next-morning return on {actual_return_date.isoformat()} at {submitted_return_time}.",
+                        )
+                        g.db.commit()
+                        flash("Your one-day next-morning return request has been sent to the Owner. No collection was saved yet.", "warning")
+                        return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
                     else:
                         # The actual return date is the final charge-through date.
                         # Rebuild every line before validating the collection.
                         payload["returnDate"] = actual_return_date.isoformat()
+                        payload["returnTime"] = submitted_return_time
+                        if is_next_day_morning_return(payload, submitted_return_date, submitted_return_time):
+                            payload["returnDayApprovalStatus"] = "Approved"
+                            payload["approvedChargeableDays"] = 1
+                            payload["approvedReturnDate"] = actual_return_date.isoformat()
+                            payload["returnDayApprovalApprovedAt"] = datetime.utcnow().isoformat()
+                            payload["returnDayApprovalApprovedBy"] = g.current_user.full_name or g.current_user.username
+                        elif normalize_text(payload.get("approvedReturnDate")) != actual_return_date.isoformat():
+                            for field_name in (
+                                "returnDayApprovalStatus",
+                                "approvedChargeableDays",
+                                "approvedReturnDate",
+                                "returnDayApprovalApprovedAt",
+                                "returnDayApprovalApprovedBy",
+                            ):
+                                payload.pop(field_name, None)
                         if normalize_text(payload.get("status")) != "Cancelled":
                             payload["status"] = "Returned"
                         hydrate_service_cost_payload(g.db, module_key, payload)
@@ -17777,6 +17931,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             today_iso=date.today().isoformat(),
             payment_amount_default=payment_amount_default,
             payment_method_default=normalize_text(request.args.get("method")) or "Cash",
+            can_approve_morning_return=user_is_owner(g.current_user),
+            return_day_approval={
+                "status": normalize_text(payload.get("returnDayApprovalStatus")),
+                "requestedReturnDate": normalize_text(payload.get("returnDayApprovalRequestedReturnDate")),
+                "requestedReturnTime": normalize_text(payload.get("returnDayApprovalRequestedReturnTime")),
+                "requestedBy": normalize_text(payload.get("returnDayApprovalRequestedBy")),
+                "approvedBy": normalize_text(payload.get("returnDayApprovalApprovedBy")),
+            },
         )
 
     @app.route("/app/services/<module_key>/<record_id>/payments/<payment_id>/delete", methods=["POST"])
@@ -18906,7 +19068,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
         initial_search = normalize_text(request.args.get("q"))
         refresh_pos_generated_sales_for_date(order_date)
         g.db.commit()
-        summary = build_pos_counter_summary(order_date, initial_area, desk=pos_desk)
+        summary = build_pos_counter_summary(
+            order_date,
+            initial_area,
+            desk=pos_desk,
+            include_sensitive=user_is_owner(g.current_user),
+        )
         recent_orders_raw = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(20)
         ).all()
@@ -18973,6 +19140,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "mealItems": kitchen_meal_items(dict(kitchen_batch.payload or {})),
             } if kitchen_batch else None,
             can_void_pos_orders=user_can_void_pos_orders(g.current_user),
+            can_view_desk_profit=user_is_owner(g.current_user),
         )
 
     @app.route("/app/pos/<order_id>/receipt")
@@ -19151,7 +19319,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         area_id = requested_area if requested_area in pos_desk_area_ids(pos_desk) else ""
         refresh_pos_generated_sales_for_date(order_date)
         g.db.commit()
-        return jsonify({"ok": True, "summary": build_pos_counter_summary(order_date, area_id, desk=pos_desk)})
+        return jsonify({
+            "ok": True,
+            "summary": build_pos_counter_summary(
+                order_date,
+                area_id,
+                desk=pos_desk,
+                include_sensitive=user_is_owner(g.current_user),
+            ),
+        })
 
     @app.route("/app/api/pos/orders", methods=["POST"])
     @access_required("pos", api=True)
@@ -19196,7 +19372,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "totalAmount": existing_order.total_amount,
                         "itemCount": existing_order.item_count,
                         "order": saved_order_payload(existing_order),
-                        "summary": build_pos_counter_summary(order_date, selected_area, desk=pos_desk),
+                        "summary": build_pos_counter_summary(
+                            order_date,
+                            selected_area,
+                            desk=pos_desk,
+                            include_sensitive=user_is_owner(g.current_user),
+                        ),
                         "kitchenIssue": kitchen_issue_mode,
                         "alreadySaved": True,
                     }
@@ -19412,7 +19593,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "totalAmount": order.total_amount,
                 "itemCount": order.item_count,
                 "order": saved_order,
-                "summary": build_pos_counter_summary(order_date, selected_area, desk=pos_desk),
+                "summary": build_pos_counter_summary(
+                    order_date,
+                    selected_area,
+                    desk=pos_desk,
+                    include_sensitive=user_is_owner(g.current_user),
+                ),
                 "kitchenIssue": kitchen_issue_mode,
             }
         )
@@ -19517,7 +19703,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "itemCount": item_count,
                     "totalAmount": total_amount,
                 },
-                "summary": build_pos_counter_summary(order_date, normalize_text(selected_area), desk=requested_desk),
+                "summary": build_pos_counter_summary(
+                    order_date,
+                    normalize_text(selected_area),
+                    desk=requested_desk,
+                    include_sensitive=user_is_owner(g.current_user),
+                ),
             }
         )
 
@@ -19634,7 +19825,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             {
                 "ok": True,
                 "closeout": closeout_payload,
-                "summary": build_pos_counter_summary(order_date, area_id, desk=pos_desk),
+                "summary": build_pos_counter_summary(
+                    order_date,
+                    area_id,
+                    desk=pos_desk,
+                    include_sensitive=user_is_owner(g.current_user),
+                ),
                 "attendanceMessage": normalize_text(attendance_result.get("message")) if attendance_result else "",
                 "attendanceRedirect": attendance_gate_target_path() if attendance_result else "",
             }

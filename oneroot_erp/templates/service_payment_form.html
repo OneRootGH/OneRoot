@@ -31,6 +31,32 @@
         <strong class="rental-collection-balance" id="rental-collection-balance">{{ service_row.balance|currency }}</strong>
       </div>
     </section>
+    {% if return_day_approval.status %}
+      <section class="rental-collection-banner">
+        <div>
+          <span class="eyebrow">Return-Day Exception</span>
+          <strong>{{ return_day_approval.status }}</strong>
+          <small>Requested return: {{ return_day_approval.requestedReturnDate or service_row.returnDate or '—' }}{% if return_day_approval.requestedReturnTime %} at {{ return_day_approval.requestedReturnTime }}{% endif %}</small>
+        </div>
+        <div>
+          {% if return_day_approval.status == 'Pending Owner Approval' %}
+            <span>Requested By</span>
+            <strong>{{ return_day_approval.requestedBy or 'Staff member' }}</strong>
+            <small>The normal inclusive-day price stays in place until approval.</small>
+          {% else %}
+            <span>Approved By</span>
+            <strong>{{ return_day_approval.approvedBy or 'Owner' }}</strong>
+            <small>One chargeable day is applied to this approved return.</small>
+          {% endif %}
+        </div>
+        {% if return_day_approval.status == 'Pending Owner Approval' and can_approve_morning_return %}
+          <form method="post" class="form-actions">
+            <input type="hidden" name="ownerApproveMorningReturn" value="yes">
+            <button class="button primary" type="submit">Approve One-Day Return</button>
+          </form>
+        {% endif %}
+      </section>
+    {% endif %}
   {% endif %}
 
   <section class="card-grid four">
@@ -111,7 +137,7 @@
         {% else %}
           <li><strong>Customer</strong><span>{{ service_row.customerName }}{% if service_row.customerPhone %} · {{ service_row.customerPhone }}{% endif %}</span></li>
           <li><strong>Rental</strong><span>{{ service_row.equipmentCategory }} · {{ service_row.rentalDays }} day{% if service_row.rentalDays != 1 %}s{% endif %} @ {{ service_row.dailyRate|currency }}{% if service_row.itemQuantityTotal %} · {{ service_row.itemQuantityTotal }} unit{% if service_row.itemQuantityTotal != 1 %}s{% endif %}{% endif %}</span></li>
-          <li><strong>Dates</strong><span>Out {{ service_row.outDate or '—' }} · Expected {{ service_row.dueDate or '—' }} · Actual return {{ service_row.returnDate or 'Not recorded' }}</span></li>
+          <li><strong>Dates</strong><span>Out {{ service_row.outDate or '—' }} · Expected {{ service_row.dueDate or '—' }} · Actual return {{ service_row.returnDate or 'Not recorded' }}{% if payload.returnTime %} at {{ payload.returnTime }}{% endif %}</span></li>
           {% if service_row.lineItems %}
             <li>
               <strong>Items</strong>
@@ -158,6 +184,11 @@
               <span>Actual Return Date (Charge Ends)</span>
               <input type="date" name="returnDate" id="equipment-payment-return-date" value="{{ service_row.returnDate or '' }}" min="{{ service_row.outDate or '' }}">
               <small class="muted form-helper">Enter this when equipment returns. OneRoot charges from the out date through this date, including both days.</small>
+            </label>
+            <label>
+              <span>Actual Return Time</span>
+              <input type="time" name="returnTime" value="{{ payload.returnTime or '' }}">
+              <small class="muted form-helper">A return on the next morning can use a one-day charge only after the Owner approves it.</small>
             </label>
           {% endif %}
           <label>

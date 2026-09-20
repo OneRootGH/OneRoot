@@ -42,10 +42,12 @@
         <span class="pos-counter-label">Desk Sales</span>
         <strong id="pos-counter-total">{{ counter_summary.counterCollectionsTotal|currency }}</strong>
       </article>
-      <article class="pos-counter-pill">
-        <span class="pos-counter-label">Desk Profit</span>
-        <strong id="pos-counter-profit">{{ (counter_summary.profitAmount + counter_summary.breadSalesProfit)|currency }}</strong>
-      </article>
+      {% if can_view_desk_profit %}
+        <article class="pos-counter-pill">
+          <span class="pos-counter-label">Desk Profit</span>
+          <strong id="pos-counter-profit">{{ (counter_summary.profitAmount + counter_summary.breadSalesProfit)|currency }}</strong>
+        </article>
+      {% endif %}
       <article class="pos-counter-pill">
         <span class="pos-counter-label">Cash Expected</span>
         <strong id="pos-expected-cash-ribbon">{{ counter_summary.expectedClosingCash|currency }}</strong>

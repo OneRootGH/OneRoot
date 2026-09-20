@@ -1452,6 +1452,7 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("outDate", "Rental Starts / Goes Out", "date"),
             FieldDefinition("dueDate", "Expected Return Date", "date"),
             FieldDefinition("returnDate", "Actual Return Date (Charge Ends)", "date"),
+            FieldDefinition("returnTime", "Actual Return Time", "time"),
             FieldDefinition("status", "Status", "select", True, [(item, item) for item in EQUIPMENT_RENTAL_STATUSES]),
             FieldDefinition("conditionOut", "Condition Out", "select", False, [(item, item) for item in EQUIPMENT_CONDITIONS]),
             FieldDefinition("conditionIn", "Condition In", "select", False, [(item, item) for item in EQUIPMENT_CONDITIONS]),
