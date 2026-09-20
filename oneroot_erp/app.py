@@ -67,9 +67,9 @@ SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
 KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
 KITCHEN_MEAL_ITEMS_KEY = "mealItems"
-# Food POS includes prepared Kitchen meals plus cold-store items sold alongside food.
+# Food POS includes prepared meals plus cold-store items sold alongside food.
 # Groceries & More remains a separate retail counter and closeout.
-POS_FOOD_SALES_AREA_IDS = {"kitchen", "cold-store-groceries"}
+POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries"}
 POS_GROCERIES_MORE_AREA_IDS = {"groceries", "fresh-foods-drinks", "water-equipment"}
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
@@ -121,7 +121,6 @@ PRODUCT_IMAGE_AREA_COLORS = {
     "mobile-money": "#9a6a19",
     "rentals-apartments": "#8a4f74",
     "fresh-foods-drinks": "#ca5d27",
-    "kitchen": "#8e5d23",
     "shared-operations": "#50606f",
 }
 ICONIFY_API_BASE = "https://api.iconify.design"
@@ -179,6 +178,9 @@ PUBLIC_JOB_VACANCY_STATUSES = {
     status for status, _label in JOB_VACANCY_STATUSES if status not in {"Draft", "Filled", "Closed"}
 }
 KITCHEN_MENU_SOURCE_ID = "oneroot-kitchen-menu"
+LEGACY_KITCHEN_AREA_ID = "kitchen"
+COLD_STORE_KITCHEN_AREA_ID = "cold-store-groceries"
+KITCHEN_MENU_SOURCE_CATEGORY = "OneRoot Kitchen Menu"
 KITCHEN_MENU_PRODUCTS = [
     {
         "id": "kitchen-main-jollof-regular",
@@ -654,12 +656,12 @@ def build_default_job_vacancies(app_config: AppConfig) -> list[dict[str, Any]]:
             **common_vacancy,
             "reference": "vacancy-kitchen-staff",
             "displayOrder": 7,
-            "businessAreaId": "kitchen",
+            "businessAreaId": COLD_STORE_KITCHEN_AREA_ID,
             "jobTitle": "Kitchen Staff",
             "staffRole": "Kitchen Staff",
             "location": "On-site at OneRoot Essentials",
             "workingHours": "Shift-based, especially around meal rush periods and customer peak hours.",
-            "summary": "Prepare, portion, and package food for OneRoot Kitchen while maintaining hygiene and fast order fulfillment.",
+            "summary": "Prepare, portion, and package food for OneRoot Cold Store & Kitchen while maintaining hygiene and fast order fulfillment.",
             "keyResponsibilities": "\n".join(
                 [
                     "Prepare meals to standard and support quick food order fulfillment.",
@@ -858,6 +860,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 bootstrap_database(bootstrap_session, app_config)
                 migrate_planning_workspace(bootstrap_session)
                 sync_kitchen_menu_catalog(bootstrap_session)
+                merge_kitchen_into_cold_store(bootstrap_session)
                 sync_equipment_service_catalog(bootstrap_session, app_config)
                 reclassify_legacy_inventory_products(bootstrap_session)
                 reclassify_cold_store_and_grocery_inventory(bootstrap_session)
@@ -1158,6 +1161,23 @@ def product_text_blob(product: Product) -> str:
     )
 
 
+def is_kitchen_menu_product(product: Product) -> bool:
+    """Identify prepared-food menu rows after Kitchen joined the Cold Store area."""
+    return (
+        normalize_text(product.source_catalog_id) == KITCHEN_MENU_SOURCE_ID
+        or normalize_text(product.source_category) == KITCHEN_MENU_SOURCE_CATEGORY
+    )
+
+
+def is_kitchen_menu_catalog_item(item: dict[str, Any]) -> bool:
+    """Keep online food bookings separate from ordinary Cold Store retail items."""
+    return (
+        normalize_text(item.get("businessAreaId")) == LEGACY_KITCHEN_AREA_ID
+        or normalize_text(item.get("sourceCatalogId")) == KITCHEN_MENU_SOURCE_ID
+        or normalize_text(item.get("sourceCategory")) == KITCHEN_MENU_SOURCE_CATEGORY
+    )
+
+
 def reclassify_inventory_product(product: Product) -> bool:
     """Apply OneRoot's sellable catalogue structure without changing sales history."""
     changed = False
@@ -1173,9 +1193,11 @@ def reclassify_inventory_product(product: Product) -> bool:
             setattr(product, field, value)
             changed = True
 
-    # Kitchen menu items are services sold at the food counter. Their category is
-    # chosen from the Kitchen menu and must not be moved because of a drink name.
-    if area_id == "kitchen" or source_key == "oneroot kitchen menu":
+    # Prepared-food menu items now sit under Cold Store & Kitchen. Their menu
+    # category must not be overwritten by the ordinary drink/retail rules below.
+    if area_id == LEGACY_KITCHEN_AREA_ID or source_key == KITCHEN_MENU_SOURCE_CATEGORY.lower():
+        set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
+        set_value("item_type", "service")
         return changed
 
     # Laundry is a service desk, so all of its catalogue entries remain services.
@@ -1249,6 +1271,61 @@ def reclassify_inventory_catalog(db_session) -> bool:
         )
         normalize_product_record(product)
         changed = True
+    return changed
+
+
+def merge_kitchen_into_cold_store(db_session) -> bool:
+    """Replace the retired Kitchen business area without dropping its history.
+
+    Prepared food remains distinguishable by its menu source/category, while all
+    area selections, POS lines, and operational records use Cold Store & Kitchen.
+    """
+    changed = False
+    now = datetime.utcnow()
+
+    for product in db_session.scalars(select(Product).where(Product.business_area_id == LEGACY_KITCHEN_AREA_ID)).all():
+        product.business_area_id = COLD_STORE_KITCHEN_AREA_ID
+        product.updated_at = now
+        product.sku = generate_auto_product_sku(
+            product_id=product.id,
+            name=product.name,
+            business_area_id=product.business_area_id,
+            category=product.category,
+        )
+        normalize_product_record(product)
+        changed = True
+
+    for line in db_session.scalars(select(PosOrderLine).where(PosOrderLine.business_area_id == LEGACY_KITCHEN_AREA_ID)).all():
+        line.business_area_id = COLD_STORE_KITCHEN_AREA_ID
+        changed = True
+
+    for order in db_session.scalars(select(PosOrder)).all():
+        area_ids = order.business_area_ids if isinstance(order.business_area_ids, list) else []
+        migrated_area_ids = [
+            COLD_STORE_KITCHEN_AREA_ID if normalize_text(area_id) == LEGACY_KITCHEN_AREA_ID else area_id
+            for area_id in area_ids
+        ]
+        if migrated_area_ids != area_ids:
+            order.business_area_ids = list(dict.fromkeys(migrated_area_ids))
+            changed = True
+        if normalize_text(order.primary_business_area_id) == LEGACY_KITCHEN_AREA_ID:
+            order.primary_business_area_id = COLD_STORE_KITCHEN_AREA_ID
+            changed = True
+
+    for record in db_session.scalars(select(ModuleRecord)).all():
+        record_changed = False
+        if normalize_text(record.business_area_id) == LEGACY_KITCHEN_AREA_ID:
+            record.business_area_id = COLD_STORE_KITCHEN_AREA_ID
+            record_changed = True
+        payload = dict(record.payload or {})
+        if normalize_text(payload.get("businessAreaId")) == LEGACY_KITCHEN_AREA_ID:
+            payload["businessAreaId"] = COLD_STORE_KITCHEN_AREA_ID
+            record.payload = payload
+            record_changed = True
+        if record_changed:
+            record.updated_at = now
+            changed = True
+
     return changed
 
 
@@ -1523,7 +1600,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
         (
             product
             for product in products
-            if normalize_text(product.business_area_id) == "kitchen"
+            if is_kitchen_menu_product(product)
             and voltic_product_key(product.name) in {"voltic cool", "voltic cool sachet water"}
         ),
         None,
@@ -1531,7 +1608,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
     if kitchen_voltic:
         kitchen_updates = {
             "name": "Voltic Cool",
-            "business_area_id": "kitchen",
+            "business_area_id": COLD_STORE_KITCHEN_AREA_ID,
             "category": "Drinks",
             "item_type": "stock",
             "track_inventory": True,
@@ -1610,7 +1687,7 @@ def link_bread_stock_to_food_pos(db_session) -> bool:
         kitchen_updates = {
             "source_catalog_id": f"linked-bread:{source_product.id}",
             "name": source_product.name,
-            "business_area_id": "kitchen",
+            "business_area_id": COLD_STORE_KITCHEN_AREA_ID,
             "category": "Bread",
             "source_category": "Linked Cold Store Bread",
             "item_type": "stock",
@@ -2252,7 +2329,7 @@ def mapped_online_product_image(name: str, category: str, area_id: str, item_typ
         )
     ):
         return iconify_svg_url("streamline-freehand-color:laundry-washing-machine", width=288, height=216)
-    if area_id == "kitchen" and any(
+    if area_id in {LEGACY_KITCHEN_AREA_ID, COLD_STORE_KITCHEN_AREA_ID} and any(
         keyword in text_blob
         for keyword in ("jollof", "rice", "banku", "stew", "soup", "spaghetti", "indomie", "yam", "meal", "takeaway")
     ):
@@ -2274,7 +2351,7 @@ def mapped_online_product_image(name: str, category: str, area_id: str, item_typ
         return iconify_svg_url("material-symbols:school-outline", color="#50606f")
     if any(keyword in text_blob for keyword in ("gift card", "gift")):
         return iconify_svg_url("tabler:gift-card-filled", color="#8e5d23")
-    if area_id == "kitchen":
+    if area_id in {LEGACY_KITCHEN_AREA_ID, COLD_STORE_KITCHEN_AREA_ID}:
         return iconify_svg_url("game-icons:bread", color="#8e5d23")
     if area_id == "fresh-foods-drinks":
         return iconify_svg_url("fa6-solid:bottle-water", color="#ca5d27")
@@ -2466,9 +2543,9 @@ def customer_cross_sell_area(area_id: str) -> str:
         "cold-store-groceries": "groceries",
         "groceries": "cold-store-groceries",
         "laundry-services": "groceries",
-        "water-equipment": "kitchen",
+        "water-equipment": "cold-store-groceries",
         "fresh-foods-drinks": "groceries",
-        "kitchen": "fresh-foods-drinks",
+        LEGACY_KITCHEN_AREA_ID: "fresh-foods-drinks",
         "mobile-money": "groceries",
         "rentals-apartments": "laundry-services",
     }
@@ -2482,7 +2559,7 @@ def customer_offer_copy(area_id: str) -> str:
         "laundry-services": "pickup laundry offers for busy households and tenants",
         "water-equipment": "water delivery and equipment support follow-up for homes and work sites",
         "fresh-foods-drinks": "fast-moving drinks, frozen treats, and quick refreshment bundles",
-        "kitchen": "prepared meals, soups, and family kitchen packs",
+        LEGACY_KITCHEN_AREA_ID: "prepared meals, soups, and family kitchen packs",
         "mobile-money": "mobile money support and convenience transaction follow-up",
         "rentals-apartments": "tenant service bundles covering laundry, groceries, and support follow-up",
     }
@@ -2852,7 +2929,7 @@ def build_customer_activity_snapshots(db_session) -> list[dict[str, Any]]:
                 email="",
                 activity_date=parse_date(payload.get("orderDate")) or record.record_date,
                 lead_source="Kitchen",
-                area_ids=[normalize_text(payload.get("businessAreaId")) or "kitchen"],
+                area_ids=[normalize_text(payload.get("businessAreaId")) or COLD_STORE_KITCHEN_AREA_ID],
                 revenue_amount=payment_summary["paidTotal"],
                 pending_amount=payment_summary["balance"],
                 count_order=service_total_due(record.module_key, payload) > 0,
@@ -3320,13 +3397,13 @@ def build_weekly_facebook_post_ideas(records: list[ModuleRecord], *, area_filter
             ),
         },
         {
-            "areaId": "kitchen",
+            "areaId": COLD_STORE_KITCHEN_AREA_ID,
             "title": "Weekend Kitchen Sales Post",
             "audienceSegment": "Lead",
             "messageGoal": "Promo Push",
             "trendNote": "Quick-order meal content performs best when the menu is clear, local, and easy to act on.",
             "message": (
-                "Weekend food plans are sorted at OneRoot Kitchen. "
+                "Weekend food plans are sorted at OneRoot Cold Store & Kitchen. "
                 "Order jollof rice, fried rice, banku, spaghetti, fried chicken, fried fish, sides, and cold drinks for pickup or delivery. "
                 "Send us your order early so we can prepare it fresh."
             ),
@@ -3417,10 +3494,10 @@ def build_growth_action_templates(*, as_of: date | None = None) -> list[dict[str
         {
             "title": "Lunch-Time Kitchen Drop",
             "channel": "WhatsApp",
-            "areaId": "kitchen",
+            "areaId": COLD_STORE_KITCHEN_AREA_ID,
             "audience": "Nearby workers, families, and past food customers",
             "why": "Time-limited meal messages work best when the menu and order action are simple.",
-            "message": "Lunch is ready at OneRoot Kitchen. Order jollof, fried rice, banku, spaghetti, chicken, fish, sides, and cold drinks for pickup or delivery. Reply with your order now.",
+            "message": "Lunch is ready at OneRoot Cold Store & Kitchen. Order jollof, fried rice, banku, spaghetti, chicken, fish, sides, and cold drinks for pickup or delivery. Reply with your order now.",
             "goal": "Promo Push",
         },
         {
@@ -3754,7 +3831,7 @@ def sync_kitchen_menu_catalog(db_session) -> None:
 
         product.source_catalog_id = KITCHEN_MENU_SOURCE_ID
         product.name = normalize_text(seed["name"])
-        product.business_area_id = "kitchen"
+        product.business_area_id = COLD_STORE_KITCHEN_AREA_ID
         product.category = normalize_text(seed["category"]) or "Kitchen"
         product.source_category = "OneRoot Kitchen Menu"
         product.item_type = "service"
@@ -3956,7 +4033,7 @@ def service_line_items(module_key: str, payload: dict[str, Any]) -> list[dict[st
                     {
                         "name": item_name,
                         "category": normalize_text(payload.get("kitchenCategory")),
-                        "businessAreaId": "kitchen",
+                        "businessAreaId": COLD_STORE_KITCHEN_AREA_ID,
                         "itemType": "service",
                     }
                 ),
@@ -5169,7 +5246,7 @@ MODULE_FILTER_CATEGORY_LABELS = {
 
 SERVICE_MODULE_AREA_IDS = {
     "laundry_tickets": "laundry-services",
-    "kitchen_orders": "kitchen",
+    "kitchen_orders": COLD_STORE_KITCHEN_AREA_ID,
     "equipment_rental_bookings": "water-equipment",
 }
 
@@ -7486,7 +7563,12 @@ def kitchen_ingredient_items(payload: dict[str, Any]) -> list[dict[str, Any]]:
 def hydrate_kitchen_meal_items(db_session, payload: dict[str, Any]) -> None:
     """Use saved Kitchen menu names, categories, and current menu prices for new meal lines."""
     menu_products = db_session.scalars(
-        select(Product).where(Product.business_area_id == "kitchen").order_by(Product.name.asc())
+        select(Product)
+        .where(
+            Product.business_area_id == COLD_STORE_KITCHEN_AREA_ID,
+            Product.source_category == KITCHEN_MENU_SOURCE_CATEGORY,
+        )
+        .order_by(Product.name.asc())
     ).all()
     by_id = {product.id: product for product in menu_products}
     by_name = {normalize_text(product.name).lower(): product for product in menu_products}
@@ -7635,7 +7717,7 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
         if category and category not in categories:
             categories.append(category)
     payload[KITCHEN_MEAL_ITEMS_KEY] = rolled_meals
-    payload["businessAreaId"] = "kitchen"
+    payload["businessAreaId"] = COLD_STORE_KITCHEN_AREA_ID
     payload["recipeName"] = kitchen_meal_title(rolled_meals)
     payload["kitchenCategories"] = categories
     payload["kitchenCategory"] = categories[0] if len(categories) == 1 else "Multiple Meals"
@@ -7727,7 +7809,8 @@ def sync_kitchen_menu_cost_from_recipe(db_session, payload: dict[str, Any]) -> N
         if not menu_item:
             menu_item = db_session.scalar(
                 select(Product).where(
-                    Product.business_area_id == "kitchen",
+                    Product.business_area_id == COLD_STORE_KITCHEN_AREA_ID,
+                    Product.source_category == KITCHEN_MENU_SOURCE_CATEGORY,
                     Product.name.ilike(normalize_text(meal.get("recipeName"))),
                 )
             )
@@ -7851,7 +7934,7 @@ def sync_catering_quote_handoff(quote_record: ModuleRecord, db_session) -> Modul
         {
             "id": kitchen_record.id,
             "orderDate": payload.get("quoteDate") or date.today().isoformat(),
-            "businessAreaId": "kitchen",
+            "businessAreaId": COLD_STORE_KITCHEN_AREA_ID,
             "customerName": normalize_text(payload.get("customerName")),
             "customerPhone": normalize_text(payload.get("customerPhone")),
             "orderType": "Pre-Order",
@@ -10595,7 +10678,7 @@ def category_performance_rows(db_session, month_value: str, area_id: str = "") -
     ).all()
     for record in kitchen_records:
         payload = record.payload or {}
-        area_key = normalize_text(payload.get("businessAreaId")) or "kitchen"
+        area_key = normalize_text(payload.get("businessAreaId")) or COLD_STORE_KITCHEN_AREA_ID
         category_totals: dict[str, dict[str, float]] = {}
         for item in service_line_items("kitchen_orders", payload):
             category = normalize_text(item.get("category")) or "Prepared Meals"
@@ -10992,7 +11075,6 @@ def is_orderable_area(area_id: str) -> bool:
         "mobile-money",
         "rentals-apartments",
         "fresh-foods-drinks",
-        "kitchen",
     }
 
 
@@ -11629,7 +11711,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(Product.active.is_(True))
             .order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
         ).all()
-        kitchen_catalog_exists = any(normalize_text(product.business_area_id) == "kitchen" for product in products)
+        kitchen_catalog_exists = any(is_kitchen_menu_product(product) for product in products)
         for product in products:
             if not is_orderable_area(product.business_area_id):
                 continue
@@ -11662,9 +11744,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 seen_source_catalog_ids.add(normalize_text(product.source_catalog_id))
         for item in load_service_offers_catalog(app_config.root_dir):
             business_area_id = normalize_text(item.get("businessAreaId"))
+            if business_area_id == LEGACY_KITCHEN_AREA_ID:
+                business_area_id = COLD_STORE_KITCHEN_AREA_ID
             if not is_orderable_area(business_area_id):
                 continue
-            if kitchen_catalog_exists and business_area_id == "kitchen":
+            if kitchen_catalog_exists and normalize_text(item.get("businessAreaId")) == LEGACY_KITCHEN_AREA_ID:
                 continue
             item_id = normalize_text(item.get("id"))
             if item_id and (item_id in seen_catalog_ids or item_id in seen_source_catalog_ids):
@@ -11784,7 +11868,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return [
                 dict(item)
                 for item in items
-                if isinstance(item, dict) and normalize_text(item.get("businessAreaId")) == "kitchen"
+                if isinstance(item, dict) and is_kitchen_menu_catalog_item(item)
             ]
         if module_key == "equipment_rental_bookings":
             return [
@@ -11803,7 +11887,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 continue
             if normalize_text(item.get("businessAreaId")) == "laundry-services":
                 continue
-            if linked_kitchen_order_id and normalize_text(item.get("businessAreaId")) == "kitchen":
+            if linked_kitchen_order_id and is_kitchen_menu_catalog_item(item):
                 continue
             if online_order_item_matches_equipment_service(item):
                 continue
@@ -12307,7 +12391,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return
 
         if record.module_key == "kitchen_orders":
-            area_id = normalize_text(payload.get("businessAreaId")) or "kitchen"
+            area_id = normalize_text(payload.get("businessAreaId")) or COLD_STORE_KITCHEN_AREA_ID
             customer = normalize_text(payload.get("customerName")) or "Customer"
             item_summary = normalize_text(payload.get("kitchenItem")) or "Kitchen Order"
             prefix = f"kitchen-order-payment|{record.id}"
@@ -15732,7 +15816,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             five_person_plan=[
                 ("1. Owner Business Manager Finance HR Controls & Apartments", "owner", "Owner & Business Manager", "You: approvals, expenses, cashbook, suppliers, payroll, staff documents, attendance controls, financial closeout, and every apartment and tenant function: profiles, rent and bills, agreements, deposits, payment plans, portal requests, notices, statements, and maintenance oversight."),
                 ("2. Retail Sales & MoMo Desk", "retail-stock-service", "Retail Stock Service & MoMo Desk Officer", "Retail POS, Cold Store and Groceries, counter sales, customer credit, and all MoMo float and transactions."),
-                ("3. Kitchen & Food Counter", "kitchen-food-counter", "Kitchen & Food Counter Officer", "Food preparation, OneRoot Kitchen orders, direct food sales, drinks, and food-counter stock."),
+                ("3. Kitchen & Food Counter", "kitchen-food-counter", "Kitchen & Food Counter Officer", "Food preparation, Cold Store & Kitchen orders, direct food sales, drinks, and food-counter stock."),
                 ("4. Customer Growth & Service Booking", "growth-apartments-dispatch", "Customer Growth & Service Booking Officer", "CRM, promotions, Facebook, WhatsApp, online-order follow-up, and customer booking for laundry, water, and equipment services. It has no apartment or tenant access."),
                 ("5. Inventory Dispatch Maintenance & Service", "dispatch-maintenance-service", "Inventory Dispatch Maintenance & Service Officer", "Inventory and barcode stock updates, water and equipment rentals, laundry fulfilment, dispatch, delivery handover, and maintenance work."),
             ],
@@ -17124,12 +17208,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             workforce_rollup(record_payload)
         elif module_key == "kitchen_recipe_plans":
             record_payload.setdefault("recipeDate", date.today().isoformat())
-            record_payload.setdefault("businessAreaId", "kitchen")
+            record_payload.setdefault("businessAreaId", COLD_STORE_KITCHEN_AREA_ID)
             record_payload.setdefault("productionStatus", "Planned")
             kitchen_recipe_rollup(record_payload)
         elif module_key == "catering_quotes":
             record_payload.setdefault("quoteDate", date.today().isoformat())
-            record_payload.setdefault("businessAreaId", "kitchen")
+            record_payload.setdefault("businessAreaId", COLD_STORE_KITCHEN_AREA_ID)
             record_payload.setdefault("depositPercent", 50)
             record_payload.setdefault("status", "Draft")
             catering_quote_rollup(record_payload)
@@ -17485,7 +17569,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 }
                 for product in g.db.scalars(
                     select(Product)
-                    .where(Product.business_area_id == "kitchen", Product.active.is_(True))
+                    .where(
+                        Product.business_area_id == COLD_STORE_KITCHEN_AREA_ID,
+                        Product.source_category == KITCHEN_MENU_SOURCE_CATEGORY,
+                        Product.active.is_(True),
+                    )
                     .order_by(Product.name.asc())
                 ).all()
             ]

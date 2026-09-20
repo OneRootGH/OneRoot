@@ -1593,7 +1593,7 @@
       case "water-equipment":
         return "Water delivery, construction support requests, and rental equipment enquiries.";
       case "cold-store-groceries":
-        return "Frozen foods, cold drinks, bread, and kitchen-ready essentials.";
+        return "Cold-store food, prepared meals, cold drinks, bread, and kitchen-ready essentials.";
       case "groceries":
         return "Pantry goods, household essentials, personal care, baby care, and everyday retail stock.";
       case "laundry-services":
@@ -1604,8 +1604,6 @@
         return "Apartment viewing requests, tenant follow-up, and accommodation enquiries.";
       case "fresh-foods-drinks":
         return "Ice Kenkey, Sobolo, bottled ice cream, and other fast-moving refreshments.";
-      case "kitchen":
-        return "Kitchen orders, family pack requests, and made-to-order meal follow-up.";
       default:
         return "Order across the OneRoot essentials ecosystem in one checkout.";
     }
@@ -1663,8 +1661,6 @@
         return "#8a4f74";
       case "fresh-foods-drinks":
         return "#ca5d27";
-      case "kitchen":
-        return "#8e5d23";
       default:
         return "#50606f";
     }
