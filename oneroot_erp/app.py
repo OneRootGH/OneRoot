@@ -1649,9 +1649,28 @@ def is_sellable_bread_product(product: Product) -> bool:
     return (
         normalize_text(product.business_area_id) == "cold-store-groceries"
         and product_tracks_inventory(product)
+        # Food POS links are sellable copies of a stock product, never stock
+        # sources themselves. Excluding them prevents recursive link records.
+        and not normalize_text(product.source_catalog_id).startswith("linked-bread:")
         and "bread" in name_key
         and "short bread" not in name_key
     )
+
+
+def food_pos_bread_link_id(source_product_id: str) -> str:
+    """Create a stable Product.id that fits the database's 100-character limit."""
+    raw_id = f"kitchen-bread-{source_product_id}"
+    if len(raw_id) <= 100:
+        return raw_id
+    return f"food-bread-{hashlib.sha256(source_product_id.encode('utf-8')).hexdigest()[:48]}"
+
+
+def food_pos_bread_link_source_id(source_product_id: str) -> str:
+    """Keep the source-catalog marker bounded while retaining a stable link."""
+    raw_source_id = f"linked-bread:{source_product_id}"
+    if len(raw_source_id) <= 100:
+        return raw_source_id
+    return f"linked-bread:{hashlib.sha256(source_product_id.encode('utf-8')).hexdigest()[:64]}"
 
 
 def link_bread_stock_to_food_pos(db_session) -> bool:
@@ -1677,15 +1696,20 @@ def link_bread_stock_to_food_pos(db_session) -> bool:
             source_product.updated_at = datetime.utcnow()
             changed = True
 
-        linked_id = f"kitchen-bread-{source_product.id}"
-        kitchen_product = db_session.get(Product, linked_id)
+        linked_id = food_pos_bread_link_id(source_product.id)
+        kitchen_product = db_session.get(Product, linked_id) or db_session.scalar(
+            select(Product).where(
+                Product.source_category == "Linked Cold Store Bread",
+                Product.stock_source_product_id == source_product.id,
+            )
+        )
         if not kitchen_product:
             kitchen_product = Product(id=linked_id, created_at=datetime.utcnow())
             db_session.add(kitchen_product)
             changed = True
 
         kitchen_updates = {
-            "source_catalog_id": f"linked-bread:{source_product.id}",
+            "source_catalog_id": food_pos_bread_link_source_id(source_product.id),
             "name": source_product.name,
             "business_area_id": COLD_STORE_KITCHEN_AREA_ID,
             "category": "Bread",
