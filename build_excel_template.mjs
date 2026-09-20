@@ -15,7 +15,8 @@ const shouldInspectWorkbook = process.argv.includes("--with-inspect");
 
 const businessAreas = [
   "OneRoot Water & Equipment Rentals",
-  "OneRoot Cold Store & Groceries",
+  "OneRoot Cold Store & Kitchen",
+  "OneRoot Groceries & More",
   "OneRoot Laundry Services",
   "OneRoot Mobile Money Services",
   "OneRoot Rentals & Apartments",

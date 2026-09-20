@@ -66,9 +66,10 @@ SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
 KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
 KITCHEN_MEAL_ITEMS_KEY = "mealItems"
-# Food Sales on the POS ribbon should reflect kitchen trading only:
-# online food orders, direct kitchen checkout, and manual OneRoot Kitchen sales.
-POS_FOOD_SALES_AREA_IDS = {"kitchen"}
+# Food POS includes prepared Kitchen meals plus cold-store items sold alongside food.
+# Groceries & More remains a separate retail counter and closeout.
+POS_FOOD_SALES_AREA_IDS = {"kitchen", "cold-store-groceries"}
+POS_GROCERIES_MORE_AREA_IDS = {"groceries", "fresh-foods-drinks", "water-equipment"}
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
 BREAD_SALES_CATEGORY_LABELS = {"bread", "breads", "bakery", "bakery & bread"}
@@ -114,6 +115,7 @@ RECEIPT_ATTACHMENT_ALLOWED_MIME_TYPES = PRODUCT_IMAGE_ALLOWED_MIME_TYPES | {"app
 PRODUCT_IMAGE_AREA_COLORS = {
     "water-equipment": "#2f6ea8",
     "cold-store-groceries": "#1f6b5b",
+    "groceries": "#307a4a",
     "laundry-services": "#5f6fd8",
     "mobile-money": "#9a6a19",
     "rentals-apartments": "#8a4f74",
@@ -847,6 +849,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 sync_kitchen_menu_catalog(bootstrap_session)
                 sync_equipment_service_catalog(bootstrap_session, app_config)
                 reclassify_legacy_inventory_products(bootstrap_session)
+                reclassify_cold_store_and_grocery_inventory(bootstrap_session)
                 restructure_voltic_shared_stock(bootstrap_session)
                 link_bread_stock_to_food_pos(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
@@ -1070,8 +1073,8 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
             source_category_key in LEGACY_SHARED_OPERATION_STOCK_SOURCE_CATEGORIES
             and category_key == "service charges"
         ):
-            if normalize_text(product.business_area_id) != "cold-store-groceries":
-                product.business_area_id = "cold-store-groceries"
+            if normalize_text(product.business_area_id) != "groceries":
+                product.business_area_id = "groceries"
                 product_changed = True
             if normalize_text(product.category) != "Household & Cleaning":
                 product.category = "Household & Cleaning"
@@ -1101,6 +1104,39 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
             )
             normalize_product_record(product)
             changed = True
+    return changed
+
+
+GROCERIES_MORE_CATEGORIES = {
+    "groceries & pantry",
+    "household & cleaning",
+    "personal care",
+    "baby care",
+    "sanitary & tissue care",
+    "stationery & school supplies",
+}
+
+
+def reclassify_cold_store_and_grocery_inventory(db_session) -> bool:
+    """Move general retail stock into Groceries & More, without rewriting sales history."""
+    changed = False
+    products = db_session.scalars(
+        select(Product).where(Product.business_area_id == "cold-store-groceries")
+    ).all()
+    for product in products:
+        category_key = normalize_text(product.category).lower()
+        if category_key not in GROCERIES_MORE_CATEGORIES:
+            continue
+        product.business_area_id = "groceries"
+        product.updated_at = datetime.utcnow()
+        product.sku = generate_auto_product_sku(
+            product_id=product.id,
+            name=product.name,
+            business_area_id=product.business_area_id,
+            category=product.category,
+        )
+        normalize_product_record(product)
+        changed = True
     return changed
 
 
@@ -2239,20 +2275,22 @@ def business_area_summary(area_ids: list[str] | set[str] | tuple[str, ...]) -> s
 
 def customer_cross_sell_area(area_id: str) -> str:
     mapping = {
-        "cold-store-groceries": "laundry-services",
-        "laundry-services": "cold-store-groceries",
+        "cold-store-groceries": "groceries",
+        "groceries": "cold-store-groceries",
+        "laundry-services": "groceries",
         "water-equipment": "kitchen",
-        "fresh-foods-drinks": "cold-store-groceries",
+        "fresh-foods-drinks": "groceries",
         "kitchen": "fresh-foods-drinks",
-        "mobile-money": "cold-store-groceries",
+        "mobile-money": "groceries",
         "rentals-apartments": "laundry-services",
     }
-    return mapping.get(normalize_text(area_id), "cold-store-groceries")
+    return mapping.get(normalize_text(area_id), "groceries")
 
 
 def customer_offer_copy(area_id: str) -> str:
     offers = {
-        "cold-store-groceries": "weekly grocery restock offers and family essentials bundles",
+        "cold-store-groceries": "frozen foods, cold drinks, bread, and kitchen meal offers",
+        "groceries": "weekly grocery restock offers and family essentials bundles",
         "laundry-services": "pickup laundry offers for busy households and tenants",
         "water-equipment": "water delivery and equipment support follow-up for homes and work sites",
         "fresh-foods-drinks": "fast-moving drinks, frozen treats, and quick refreshment bundles",
@@ -4861,8 +4899,8 @@ SIDEBAR_LINK_LABELS = {
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
     "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
-    "pos": ("POS", "pos_page", None),
-    "food_pos": ("Food POS", "food_pos_page", None),
+    "pos": ("POS Groceries & More", "pos_page", None),
+    "food_pos": ("POS Food & Cold Store", "food_pos_page", None),
     "workbook": ("Data Export & Recovery", "download_workbook", None),
     "audit": ("Audit Trail", "audit_page", None),
     "online_orders": ("Online Orders", "online_orders_desk", None),
@@ -5061,9 +5099,26 @@ def is_pos_eligible_product(product: Product) -> bool:
     return bool(product.active)
 
 
+def normalize_pos_desk(value: Any) -> str:
+    return "food" if normalize_text(value).lower() == "food" else "groceries"
+
+
+def pos_desk_area_ids(desk: Any) -> set[str]:
+    return POS_FOOD_SALES_AREA_IDS if normalize_pos_desk(desk) == "food" else POS_GROCERIES_MORE_AREA_IDS
+
+
+def pos_desk_label(desk: Any) -> str:
+    return "POS Food & Cold Store" if normalize_pos_desk(desk) == "food" else "POS Groceries & More"
+
+
+def product_matches_pos_desk(product: Product, desk: Any) -> bool:
+    return normalize_text(product.business_area_id) in pos_desk_area_ids(desk)
+
+
 def load_pos_products(
     db_session,
     *,
+    desk: str = "groceries",
     area_filter: str = "",
     category_filter: str = "",
     search: str = "",
@@ -5076,6 +5131,8 @@ def load_pos_products(
     for product in products:
         normalize_product_record(product)
         if not is_pos_eligible_product(product):
+            continue
+        if not product_matches_pos_desk(product, desk):
             continue
         if area_filter and normalize_text(product.business_area_id) != area_filter:
             continue
@@ -5097,8 +5154,9 @@ def load_pos_products(
     return filtered_products
 
 
-def pos_business_area_options() -> list[tuple[str, str]]:
-    return [(value, label) for value, label in BUSINESS_AREA_OPTIONS if value != "laundry-services"]
+def pos_business_area_options(desk: str = "groceries") -> list[tuple[str, str]]:
+    allowed_area_ids = pos_desk_area_ids(desk)
+    return [(value, label) for value, label in BUSINESS_AREA_OPTIONS if value in allowed_area_ids]
 
 
 def pos_order_line_names(lines: list[PosOrderLine], *, area_id: str = "") -> list[str]:
@@ -10724,6 +10782,7 @@ def is_orderable_area(area_id: str) -> bool:
     return area_id in {
         "water-equipment",
         "cold-store-groceries",
+        "groceries",
         "laundry-services",
         "mobile-money",
         "rentals-apartments",
@@ -12563,8 +12622,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         elif linked_petty:
             db.delete(linked_petty)
 
-    def customer_credit_collection_summary(db_session, entry_date: date, area_id: str = "") -> dict[str, Any]:
+    def customer_credit_collection_summary(
+        db_session,
+        entry_date: date,
+        area_id: str = "",
+        area_ids: set[str] | None = None,
+    ) -> dict[str, Any]:
         selected_area = normalize_text(area_id)
+        selected_area_ids = {normalize_text(value) for value in (area_ids or set()) if normalize_text(value)}
         total = 0.0
         cash_total = 0.0
         payment_mix: dict[str, float] = defaultdict(float)
@@ -12578,7 +12643,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload = dict(credit_record.payload or {})
             if normalize_text(payload.get("transactionType")) != "Payment Received":
                 continue
-            if selected_area and normalize_text(payload.get("businessAreaId")) != selected_area:
+            credit_area_id = normalize_text(payload.get("businessAreaId"))
+            if selected_area and credit_area_id != selected_area:
+                continue
+            if selected_area_ids and credit_area_id not in selected_area_ids:
                 continue
             amount = round(abs(parse_amount(payload.get("amount"))), 2)
             if amount <= 0:
@@ -12929,10 +12997,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "workspace": workspace,
         }
 
-    def equipment_rental_collection_summary(collection_date: date, area_id: str = "") -> dict[str, Any]:
+    def equipment_rental_collection_summary(
+        collection_date: date,
+        area_id: str = "",
+        area_ids: set[str] | None = None,
+    ) -> dict[str, Any]:
         """Return dated equipment payments for POS cash accountability without duplicating sales."""
         selected_area = normalize_text(area_id)
+        selected_area_ids = {normalize_text(value) for value in (area_ids or set()) if normalize_text(value)}
         if selected_area and selected_area != "water-equipment":
+            return {"total": 0.0, "cashTotal": 0.0, "count": 0, "paymentMix": {}, "rows": []}
+        if selected_area_ids and "water-equipment" not in selected_area_ids:
             return {"total": 0.0, "cashTotal": 0.0, "count": 0, "paymentMix": {}, "rows": []}
 
         records = g.db.scalars(
@@ -12983,12 +13058,19 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "rows": rows[:20],
         }
 
-    def build_pos_counter_summary(order_date: date, area_id: str = "") -> dict[str, Any]:
+    def build_pos_counter_summary(order_date: date, area_id: str = "", desk: str = "") -> dict[str, Any]:
         selected_area = normalize_text(area_id)
-        kitchen_in_scope = not selected_area or selected_area in POS_FOOD_SALES_AREA_IDS
+        desk_key = normalize_pos_desk(desk) if normalize_text(desk) else ""
+        desk_area_ids = pos_desk_area_ids(desk_key) if desk_key else set()
+        scoped_area_ids = {selected_area} if selected_area else desk_area_ids
+        kitchen_in_scope = bool(POS_FOOD_SALES_AREA_IDS & scoped_area_ids) if scoped_area_ids else True
         mobile_money_snapshot = mobile_money_day_snapshot(g.db, order_date)
-        credit_collections = customer_credit_collection_summary(g.db, order_date, selected_area)
-        equipment_collections = equipment_rental_collection_summary(order_date, selected_area)
+        credit_collections = customer_credit_collection_summary(
+            g.db, order_date, selected_area, area_ids=scoped_area_ids
+        )
+        equipment_collections = equipment_rental_collection_summary(
+            order_date, selected_area, area_ids=scoped_area_ids
+        )
         all_orders = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == order_date).order_by(desc(PosOrder.updated_at))
         ).all()
@@ -13015,7 +13097,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             bread_order_cost = 0.0
             order_area_ids: set[str] = set()
             for line in order.lines:
-                if selected_area and line.business_area_id != selected_area:
+                if scoped_area_ids and line.business_area_id not in scoped_area_ids:
                     continue
                 if pos_line_is_bread(line):
                     bread_order_total += parse_amount(line.total_amount)
@@ -13042,7 +13124,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_mix[payment_method] += order_total
             counter_payment_mix[payment_method] += gross_order_total
             business_areas.update(order_area_ids)
-            item_names = pos_order_line_names(order.lines, area_id=selected_area)
+            item_names = [
+                normalize_text(line.name)
+                for line in order.lines
+                if normalize_text(line.name) and (not scoped_area_ids or line.business_area_id in scoped_area_ids)
+            ]
             order_rows.append(
                 {
                     "id": order.id,
@@ -13053,7 +13139,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "itemCount": gross_order_items,
                     "totalAmount": gross_order_total,
                     "itemNames": item_names,
-                    "itemSummary": pos_order_item_summary(order.lines, area_id=selected_area),
+                    "itemSummary": ", ".join(item_names[:3]) + (f" + {len(item_names) - 3} more" if len(item_names) > 3 else ""),
                     "businessAreaIds": sorted(order_area_ids),
                     "receiptUrl": url_for("pos_receipt", order_id=order.id),
                 }
@@ -13072,6 +13158,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if is_mobile_money_daily_sales_record(record):
                 continue
             sales_area_id = record.business_area_id or "shared-operations"
+            if scoped_area_ids and sales_area_id not in scoped_area_ids:
+                continue
             sales_payload = dict(record.payload or {})
             daily_sales_by_area[sales_area_id] += parse_amount(record.amount)
             daily_sales_cost_by_area[sales_area_id] += parse_amount(sales_payload.get("costAmount"))
@@ -13101,6 +13189,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         if selected_area:
             sales_query = sales_query.where(ModuleRecord.business_area_id == selected_area)
+        elif scoped_area_ids:
+            sales_query = sales_query.where(ModuleRecord.business_area_id.in_(scoped_area_ids))
         sales_rows = g.db.scalars(sales_query).all()
         daily_sales_total = round(
             sum(parse_amount(record.amount) for record in sales_rows if not is_mobile_money_daily_sales_record(record)),
@@ -13124,7 +13214,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 2,
             )
 
-        reference = f"pos-closeout|{order_date.isoformat()}|{selected_area or 'all'}"
+        counter_scope_id = selected_area or desk_key or "all"
+        reference = f"pos-closeout|{order_date.isoformat()}|{counter_scope_id}"
         closeout_record = g.db.scalar(
             select(ModuleRecord).where(
                 ModuleRecord.module_key == "pos_closeouts",
@@ -13153,8 +13244,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         return {
             "orderDate": order_date.isoformat(),
-            "areaId": selected_area,
-            "areaLabel": BUSINESS_AREA_SHORT.get(selected_area, "All POS Areas") if selected_area else "All POS Areas",
+            "areaId": counter_scope_id,
+            "areaLabel": (
+                BUSINESS_AREA_SHORT.get(selected_area, selected_area)
+                if selected_area
+                else pos_desk_label(desk_key) if desk_key else "All POS Areas"
+            ),
             "orderCount": len(order_rows),
             "itemCount": round(item_count, 2),
             "totalAmount": round(total_amount, 2),
@@ -13219,13 +13314,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "lastCloseout": closeout_payload,
         }
 
-    def sync_existing_pos_closeouts(order_date: date, area_ids: list[str] | None = None) -> None:
+    def sync_existing_pos_closeouts(
+        order_date: date,
+        area_ids: list[str] | None = None,
+        desk: str = "",
+    ) -> None:
         scoped_area_ids = {normalize_text(area_id) for area_id in (area_ids or []) if normalize_text(area_id)}
         scoped_area_ids.add("")
+        desk_key = normalize_pos_desk(desk) if normalize_text(desk) else ""
         actor_name = getattr(g.current_user, "full_name", "") or getattr(g.current_user, "username", "") or "staff"
 
-        for area_id in sorted(scoped_area_ids):
-            reference = f"pos-closeout|{order_date.isoformat()}|{area_id or 'all'}"
+        scope_items = [(area_id, "") for area_id in sorted(scoped_area_ids)]
+        if desk_key:
+            scope_items.append(("", desk_key))
+        for area_id, scope_desk in scope_items:
+            scope_id = area_id or scope_desk or "all"
+            reference = f"pos-closeout|{order_date.isoformat()}|{scope_id}"
             record = g.db.scalar(
                 select(ModuleRecord).where(
                     ModuleRecord.module_key == "pos_closeouts",
@@ -13235,7 +13339,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not record:
                 continue
 
-            summary = build_pos_counter_summary(order_date, area_id)
+            summary = build_pos_counter_summary(order_date, area_id, desk=scope_desk)
             if summary["orderCount"] <= 0 and summary["creditCollectionCount"] <= 0 and summary["equipmentCollectionCount"] <= 0:
                 g.db.delete(record)
                 continue
@@ -13252,7 +13356,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             closeout_payload = {
                 "id": record.id,
                 "orderDate": summary["orderDate"],
-                "areaId": area_id,
+                "areaId": summary["areaId"],
                 "areaLabel": summary["areaLabel"],
                 "reference": reference,
                 "status": "closed",
@@ -18394,6 +18498,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_page():
         order_date = parse_date(request.args.get("date")) or date.today()
         food_pos_mode = normalize_text(request.args.get("desk")) == "food"
+        pos_desk = "food" if food_pos_mode else "groceries"
         kitchen_issue_mode = normalize_text(request.args.get("mode")) == "kitchen-issue"
         kitchen_batch_id = normalize_text(request.args.get("batch"))
         kitchen_batch = None
@@ -18405,12 +18510,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if normalize_text((kitchen_batch.payload or {}).get("productionStatus")) == "Cancelled":
                 flash("Cancelled production batches cannot receive kitchen stock issues.", "error")
                 return redirect(url_for("module_list", module_key="kitchen_recipe_plans"))
-        initial_area = "" if kitchen_issue_mode else ("kitchen" if food_pos_mode else normalize_text(request.args.get("area")))
+        requested_area = normalize_text(request.args.get("area"))
+        initial_area = (
+            "" if kitchen_issue_mode else requested_area
+            if requested_area in pos_desk_area_ids(pos_desk) else ""
+        )
         initial_category = normalize_text(request.args.get("category"))
         initial_search = normalize_text(request.args.get("q"))
         refresh_pos_generated_sales_for_date(order_date)
         g.db.commit()
-        summary = build_pos_counter_summary(order_date, initial_area)
+        summary = build_pos_counter_summary(order_date, initial_area, desk=pos_desk)
         recent_orders_raw = g.db.scalars(
             select(PosOrder).options(selectinload(PosOrder.lines)).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(20)
         ).all()
@@ -18438,6 +18547,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         else:
             active_products = load_pos_products(
                 g.db,
+                desk=pos_desk,
                 area_filter=initial_area,
                 category_filter=initial_category,
                 search=initial_search,
@@ -18450,11 +18560,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 pos_category_counts[category] += 1
         return render_template(
             "pos.html",
-            page_title="POS",
+            page_title=pos_desk_label(pos_desk),
             top_products=top_products,
             recent_orders=recent_orders,
             payment_methods=PAYMENT_METHODS,
-            business_area_options=pos_business_area_options(),
+            business_area_options=pos_business_area_options(pos_desk),
             pos_categories=[
                 {"name": name, "count": count}
                 for name, count in sorted(pos_category_counts.items(), key=lambda item: (-item[1], item[0]))
@@ -18465,6 +18575,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             initial_category=initial_category,
             initial_search=initial_search,
             food_pos_mode=food_pos_mode,
+            pos_desk=pos_desk,
             kitchen_issue_mode=kitchen_issue_mode,
             kitchen_batch={
                 "id": kitchen_batch.id,
@@ -18594,7 +18705,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_products_api():
         q = normalize_text(request.args.get("q"))
         kitchen_issue_mode = normalize_text(request.args.get("mode")) == "kitchen-issue"
-        area = "" if kitchen_issue_mode else ("kitchen" if normalize_text(request.args.get("desk")) == "food" else normalize_text(request.args.get("area")))
+        pos_desk = normalize_pos_desk(request.args.get("desk"))
+        requested_area = normalize_text(request.args.get("area"))
+        area = "" if kitchen_issue_mode else (requested_area if requested_area in pos_desk_area_ids(pos_desk) else "")
         category = normalize_text(request.args.get("category"))
         if kitchen_issue_mode:
             products = [
@@ -18612,6 +18725,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         else:
             products = load_pos_products(
                 g.db,
+                desk=pos_desk,
                 area_filter=area,
                 category_filter=category,
                 search=q,
@@ -18645,10 +18759,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @access_required("pos", api=True)
     def pos_summary_api():
         order_date = parse_date(request.args.get("orderDate")) or date.today()
-        area_id = "kitchen" if normalize_text(request.args.get("desk")) == "food" else normalize_text(request.args.get("area"))
+        pos_desk = normalize_pos_desk(request.args.get("desk"))
+        requested_area = normalize_text(request.args.get("area"))
+        area_id = requested_area if requested_area in pos_desk_area_ids(pos_desk) else ""
         refresh_pos_generated_sales_for_date(order_date)
         g.db.commit()
-        return jsonify({"ok": True, "summary": build_pos_counter_summary(order_date, area_id)})
+        return jsonify({"ok": True, "summary": build_pos_counter_summary(order_date, area_id, desk=pos_desk)})
 
     @app.route("/app/api/pos/orders", methods=["POST"])
     @access_required("pos", api=True)
@@ -18656,8 +18772,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = request.get_json(silent=True) or {}
         order_date = parse_date(payload.get("orderDate")) or date.today()
         food_pos_mode = normalize_text(payload.get("desk")) == "food"
+        pos_desk = "food" if food_pos_mode else "groceries"
         kitchen_issue_mode = normalize_text(payload.get("transactionMode")) == "kitchen-stock-issue"
-        selected_area = "" if kitchen_issue_mode else ("kitchen" if food_pos_mode else normalize_text(payload.get("areaId")))
+        requested_area = normalize_text(payload.get("areaId"))
+        selected_area = "" if kitchen_issue_mode else (
+            requested_area if requested_area in pos_desk_area_ids(pos_desk) else ""
+        )
         client_request_id = normalize_text(payload.get("requestId"))[:80]
 
         def saved_order_payload(saved_order: PosOrder) -> dict[str, Any]:
@@ -18689,7 +18809,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "totalAmount": existing_order.total_amount,
                         "itemCount": existing_order.item_count,
                         "order": saved_order_payload(existing_order),
-                        "summary": build_pos_counter_summary(order_date, selected_area),
+                        "summary": build_pos_counter_summary(order_date, selected_area, desk=pos_desk),
                         "kitchenIssue": kitchen_issue_mode,
                         "alreadySaved": True,
                     }
@@ -18736,8 +18856,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return jsonify({"ok": False, "error": "One or more items are not available for POS checkout."}), 400
         if kitchen_issue_mode and any(not product_tracks_inventory(product) for product in products.values()):
             return jsonify({"ok": False, "error": "Kitchen stock issues can use tracked inventory items only."}), 400
-        if food_pos_mode and not kitchen_issue_mode and any(normalize_text(product.business_area_id) != "kitchen" for product in products.values()):
-            return jsonify({"ok": False, "error": "Food POS accepts OneRoot Kitchen items only."}), 400
+        if not kitchen_issue_mode and any(not product_matches_pos_desk(product, pos_desk) for product in products.values()):
+            return jsonify({"ok": False, "error": f"{pos_desk_label(pos_desk)} cannot sell one or more selected items."}), 400
         if not kitchen_issue_mode:
             requested_stock_by_source: dict[str, float] = defaultdict(float)
             stock_sources: dict[str, Product] = {}
@@ -18876,7 +18996,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             sync_customer_credit_from_pos_order(order, g.db)
             sync_pos_payment_to_cashbook(order, g.db)
             sync_generated_sales_for_pos(order_date, order.business_area_ids)
-            sync_existing_pos_closeouts(order_date, order.business_area_ids)
+            sync_existing_pos_closeouts(order_date, order.business_area_ids, desk=pos_desk)
         if not kitchen_issue_mode and (normalize_text(order.customer_name) or normalize_text(order.customer_phone)):
             upsert_pos_customer_crm_contact(order, g.db)
         audit(
@@ -18905,7 +19025,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "totalAmount": order.total_amount,
                 "itemCount": order.item_count,
                 "order": saved_order,
-                "summary": build_pos_counter_summary(order_date, selected_area),
+                "summary": build_pos_counter_summary(order_date, selected_area, desk=pos_desk),
                 "kitchenIssue": kitchen_issue_mode,
             }
         )
@@ -18935,6 +19055,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for line in order.lines
             if normalize_text(line.business_area_id)
         )
+        order_desk = "food" if affected_area_ids and affected_area_ids.issubset(POS_FOOD_SALES_AREA_IDS) else "groceries"
         order_number = normalize_text(order.order_number)
         customer_name = normalize_text(order.customer_name) or "Walk-in"
         total_amount = round(parse_amount(order.total_amount), 2)
@@ -18985,7 +19106,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             rollup_customer_credit_account(g.db, credit_customer_key)
 
         sync_generated_sales_for_pos(order_date, sorted(affected_area_ids))
-        sync_existing_pos_closeouts(order_date, sorted(affected_area_ids))
+        sync_existing_pos_closeouts(order_date, sorted(affected_area_ids), desk=order_desk)
         if normalize_text(order.customer_name) or normalize_text(order.customer_phone):
             sync_customer_crm_automation(g.db)
         audit(
@@ -18998,6 +19119,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         g.db.commit()
         selected_area = request.args.get("area") or request.headers.get("X-OneRoot-Area", "")
+        requested_desk = normalize_pos_desk(request.args.get("desk") or request.headers.get("X-OneRoot-Desk", order_desk))
         return jsonify(
             {
                 "ok": True,
@@ -19008,7 +19130,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "itemCount": item_count,
                     "totalAmount": total_amount,
                 },
-                "summary": build_pos_counter_summary(order_date, normalize_text(selected_area)),
+                "summary": build_pos_counter_summary(order_date, normalize_text(selected_area), desk=requested_desk),
             }
         )
 
@@ -19017,8 +19139,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_closeout_api():
         payload = request.get_json(silent=True) or {}
         order_date = parse_date(payload.get("orderDate")) or date.today()
-        area_id = "kitchen" if normalize_text(payload.get("desk")) == "food" else normalize_text(payload.get("areaId"))
-        summary = build_pos_counter_summary(order_date, area_id)
+        pos_desk = normalize_pos_desk(payload.get("desk"))
+        requested_area = normalize_text(payload.get("areaId"))
+        area_id = requested_area if requested_area in pos_desk_area_ids(pos_desk) else ""
+        summary = build_pos_counter_summary(order_date, area_id, desk=pos_desk)
         if summary["orderCount"] <= 0 and summary["creditCollectionCount"] <= 0 and summary["equipmentCollectionCount"] <= 0:
             return jsonify({"ok": False, "error": "No POS sales, credit collections, or equipment payments are available for this date and area."}), 400
         opening_cash_raw = parse_amount(payload.get("openingCash"))
@@ -19036,7 +19160,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     }
                 ), 400
 
-        reference = f"pos-closeout|{summary['orderDate']}|{area_id or 'all'}"
+        reference = f"pos-closeout|{summary['orderDate']}|{summary['areaId']}"
         record = g.db.scalar(
             select(ModuleRecord).where(
                 ModuleRecord.module_key == "pos_closeouts",
@@ -19054,7 +19178,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         closeout_payload = {
             "id": record.id if record else uuid4().hex,
             "orderDate": summary["orderDate"],
-            "areaId": area_id,
+            "areaId": summary["areaId"],
             "areaLabel": summary["areaLabel"],
             "reference": reference,
             "status": "closed",
@@ -19111,7 +19235,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             {
                 "ok": True,
                 "closeout": closeout_payload,
-                "summary": build_pos_counter_summary(order_date, area_id),
+                "summary": build_pos_counter_summary(order_date, area_id, desk=pos_desk),
                 "attendanceMessage": normalize_text(attendance_result.get("message")) if attendance_result else "",
                 "attendanceRedirect": attendance_gate_target_path() if attendance_result else "",
             }

@@ -512,7 +512,8 @@ function toNumberOrNull(value) {
 function getBusinessAreaLabel(areaId) {
   return {
     "water-equipment": "OneRoot Water & Equipment Rentals",
-    "cold-store-groceries": "OneRoot Cold Store & Groceries",
+    "cold-store-groceries": "OneRoot Cold Store & Kitchen",
+    groceries: "OneRoot Groceries & More",
     "laundry-services": "OneRoot Laundry Services",
     "mobile-money": "OneRoot Mobile Money Services",
     "rentals-apartments": "OneRoot Rentals & Apartments",

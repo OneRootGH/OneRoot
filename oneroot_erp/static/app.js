@@ -16,6 +16,7 @@
   const totalNodes = document.querySelectorAll("[data-pos-total]");
   const cartItemCountDuplicateNode = document.getElementById("pos-cart-item-count-duplicate");
   const counterTotalNode = document.getElementById("pos-counter-total");
+  const counterOrderCountNode = document.getElementById("pos-order-count");
   const creditCollectedNode = document.getElementById("pos-credit-collected");
   const counterProfitNode = document.getElementById("pos-counter-profit");
   const ledgerTotalNode = document.getElementById("pos-ledger-total");
@@ -43,6 +44,7 @@
   const equipmentCollectionsCountNode = document.getElementById("pos-equipment-collections-count");
   const equipmentCollectionsLinesNode = document.getElementById("pos-equipment-collections-lines");
   const expectedCashNode = document.getElementById("pos-expected-cash");
+  const expectedCashRibbonNode = document.getElementById("pos-expected-cash-ribbon");
   const cashVarianceNode = document.getElementById("pos-cash-variance");
   const orderDateInput = document.getElementById("pos-order-date");
   const areaFilterInput = document.getElementById("pos-area-filter");
@@ -406,21 +408,16 @@
     const url = new URL("/app/api/pos/products", window.location.origin);
     const area = getSelectedArea();
     const category = getSelectedCategory();
-    if (posDesk === "food") {
-      url.searchParams.set("desk", "food");
-    }
+    url.searchParams.set("desk", posDesk);
     if (kitchenIssueMode) {
       url.searchParams.set("mode", "kitchen-issue");
     }
-    const cacheKey = JSON.stringify({ query, area, category, kitchenIssueMode });
+    const cacheKey = JSON.stringify({ query, area, category, posDesk, kitchenIssueMode });
     if (query) {
       url.searchParams.set("q", query);
     }
     if (area) {
       url.searchParams.set("area", area);
-    }
-    if (posDesk === "food") {
-      url.searchParams.set("desk", "food");
     }
     if (category) {
       url.searchParams.set("category", category);
@@ -601,13 +598,16 @@
     }
     state.currentSummary = summary;
     if (counterTotalNode) {
-      counterTotalNode.textContent = formatCurrency(summary.totalAmount);
+      counterTotalNode.textContent = formatCurrency(summary.counterCollectionsTotal ?? summary.totalAmount);
+    }
+    if (counterOrderCountNode) {
+      counterOrderCountNode.textContent = String(summary.orderCount || 0);
     }
     if (creditCollectedNode) {
       creditCollectedNode.textContent = formatCurrency(summary.creditCollectionsTotal);
     }
     if (counterProfitNode) {
-      counterProfitNode.textContent = formatCurrency(summary.profitAmount);
+      counterProfitNode.textContent = formatCurrency(Number(summary.profitAmount || 0) + Number(summary.breadSalesProfit || 0));
     }
     if (ledgerTotalNode) {
       ledgerTotalNode.textContent = formatCurrency(summary.dailySalesLedgerTotal);
@@ -676,6 +676,9 @@
     if (expectedCashNode) {
       expectedCashNode.textContent = formatCurrency(expectedClose);
     }
+    if (expectedCashRibbonNode) {
+      expectedCashRibbonNode.textContent = formatCurrency(expectedClose);
+    }
     if (cashVarianceNode) {
       cashVarianceNode.textContent = formatCurrency(variance);
       cashVarianceNode.classList.toggle("danger-text", Math.abs(variance) > 0.009);
@@ -686,6 +689,7 @@
     const url = new URL("/app/api/pos/summary", window.location.origin);
     url.searchParams.set("orderDate", getOrderDate());
     const area = getSelectedArea();
+    url.searchParams.set("desk", posDesk);
     if (area) {
       url.searchParams.set("area", area);
     }
@@ -728,7 +732,8 @@
       headers: {
         Accept: "application/json",
         "Content-Type": "application/json",
-        "X-OneRoot-Area": getSelectedArea()
+        "X-OneRoot-Area": getSelectedArea(),
+        "X-OneRoot-Desk": posDesk
       },
       body: JSON.stringify({ reason })
     });

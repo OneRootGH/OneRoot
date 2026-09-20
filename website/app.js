@@ -1593,7 +1593,9 @@
       case "water-equipment":
         return "Water delivery, construction support requests, and rental equipment enquiries.";
       case "cold-store-groceries":
-        return "Frozen foods, groceries, household staples, and quick daily replenishment items.";
+        return "Frozen foods, cold drinks, bread, and kitchen-ready essentials.";
+      case "groceries":
+        return "Pantry goods, household essentials, personal care, baby care, and everyday retail stock.";
       case "laundry-services":
         return "Normal and express laundry requests with pickup, delivery, or special notes.";
       case "mobile-money":
@@ -1651,6 +1653,8 @@
         return "#2f6ea8";
       case "cold-store-groceries":
         return "#1f6b5b";
+      case "groceries":
+        return "#307a4a";
       case "laundry-services":
         return "#5f6fd8";
       case "mobile-money":

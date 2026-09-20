@@ -5,7 +5,8 @@ from dataclasses import dataclass, field
 
 BUSINESS_AREAS = [
     {"id": "water-equipment", "label": "OneRoot Water & Equipment Rentals", "short": "Water & Equipment"},
-    {"id": "cold-store-groceries", "label": "OneRoot Cold Store & Groceries", "short": "Cold Store & Groceries"},
+    {"id": "cold-store-groceries", "label": "OneRoot Cold Store & Kitchen", "short": "Cold Store & Kitchen"},
+    {"id": "groceries", "label": "OneRoot Groceries & More", "short": "Groceries & More"},
     {"id": "laundry-services", "label": "OneRoot Laundry Services", "short": "Laundry"},
     {"id": "mobile-money", "label": "OneRoot Mobile Money Services", "short": "Mobile Money"},
     {"id": "rentals-apartments", "label": "OneRoot Rentals & Apartments", "short": "Apartments"},
@@ -26,13 +27,20 @@ INVENTORY_CATEGORY_LIBRARY = {
     ],
     "cold-store-groceries": [
         "Frozen Foods & Proteins",
-        "Groceries & Pantry",
         "Drinks & Refreshments",
+        "Bakery & Bread",
+        "Frozen Treats",
+        "Cold Store Supplies",
+    ],
+    "groceries": [
+        "Groceries & Pantry",
         "Household & Cleaning",
         "Personal Care",
         "Baby Care",
         "Sanitary & Tissue Care",
         "Stationery & School Supplies",
+        "Snacks & Confectionery",
+        "General Merchandise",
     ],
     "laundry-services": [
         "Laundry - Clothing",
@@ -526,8 +534,17 @@ EXPENSE_CATEGORY_LIBRARY = {
         "General Operations",
     ],
     "cold-store-groceries": [
-        "Stock Purchase",
         "Frozen Restock",
+        "Cold Drinks & Bread",
+        "Cold Storage & Power",
+        "Packaging",
+        "Fuel & Delivery",
+        "Utilities & Rent",
+        "Marketing & Sales",
+        "General Operations",
+    ],
+    "groceries": [
+        "Stock Purchase",
         "Household Supplies",
         "Packaging",
         "Fuel & Delivery",
