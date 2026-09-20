@@ -1150,6 +1150,14 @@ PACKAGED_DRINK_NAME_TOKENS = (
     "kiki",
     "bel cola",
     "bel squeeze",
+    "drink",
+    "malt",
+    "cola",
+    "sobolo",
+    "juice",
+    "energy",
+    "beverage",
+    "wheat",
 )
 
 
@@ -1200,6 +1208,19 @@ def reclassify_inventory_product(product: Product) -> bool:
         set_value("item_type", "service")
         return changed
 
+    # Drinks belong to Cold Store & Kitchen even when historic imports placed
+    # them under Laundry, Water, Groceries, or Fresh Foods. Kitchen menu drinks
+    # returned above remain distinct service/menu lines for the Food POS.
+    is_packaged_drink = (
+        category_key in {"drinks", "drinks & refreshments"}
+        or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS)
+    )
+    if is_packaged_drink:
+        set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
+        set_value("category", "Drinks & Refreshments")
+        set_value("item_type", "stock")
+        return changed
+
     # Laundry is a service desk, so all of its catalogue entries remain services.
     if area_id == "laundry-services" or category_key.startswith("laundry -"):
         set_value("business_area_id", "laundry-services")
@@ -1214,14 +1235,6 @@ def reclassify_inventory_product(product: Product) -> bool:
         set_value("business_area_id", "groceries")
     if area_id == "groceries" and category_key in COLD_STORE_CATEGORY_LABELS:
         set_value("business_area_id", "cold-store-groceries")
-
-    # Packaged drinks belong in the Cold Store, except Kitchen menu service rows.
-    # This also corrects old Voltic rows that were saved under Water Supply.
-    is_packaged_drink = any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS)
-    if is_packaged_drink and area_id in {"water-equipment", "cold-store-groceries", "groceries"}:
-        set_value("business_area_id", "cold-store-groceries")
-        set_value("category", "Drinks & Refreshments")
-        set_value("item_type", "stock")
 
     # Water refill, gallon, and bucket products stay under Water Supply. A named
     # packaged drink is deliberately excluded by the rule immediately above.
@@ -2582,7 +2595,7 @@ def customer_offer_copy(area_id: str) -> str:
         "groceries": "weekly grocery restock offers and family essentials bundles",
         "laundry-services": "pickup laundry offers for busy households and tenants",
         "water-equipment": "water delivery and equipment support follow-up for homes and work sites",
-        "fresh-foods-drinks": "fast-moving drinks, frozen treats, and quick refreshment bundles",
+        "fresh-foods-drinks": "ice kenkey, frozen treats, and quick fresh-food bundles",
         LEGACY_KITCHEN_AREA_ID: "prepared meals, soups, and family kitchen packs",
         "mobile-money": "mobile money support and convenience transaction follow-up",
         "rentals-apartments": "tenant service bundles covering laundry, groceries, and support follow-up",

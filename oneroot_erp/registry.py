@@ -10,7 +10,7 @@ BUSINESS_AREAS = [
     {"id": "laundry-services", "label": "OneRoot Laundry Services", "short": "Laundry"},
     {"id": "mobile-money", "label": "OneRoot Mobile Money Services", "short": "Mobile Money"},
     {"id": "rentals-apartments", "label": "OneRoot Rentals & Apartments", "short": "Apartments"},
-    {"id": "fresh-foods-drinks", "label": "OneRoot Fresh Foods & Drinks", "short": "Fresh Foods & Drinks"},
+    {"id": "fresh-foods-drinks", "label": "OneRoot Fresh Foods & Treats", "short": "Fresh Foods & Treats"},
     {"id": "shared-operations", "label": "OneRoot Internal / Shared Operations", "short": "Internal"},
 ]
 BUSINESS_AREA_OPTIONS = [(item["id"], item["label"]) for item in BUSINESS_AREAS]
@@ -71,7 +71,6 @@ INVENTORY_CATEGORY_LIBRARY = {
         "Maintenance Charge",
     ],
     "fresh-foods-drinks": [
-        "Drinks & Refreshments",
         "Frozen Treats",
         "Snacks & Confectionery",
     ],

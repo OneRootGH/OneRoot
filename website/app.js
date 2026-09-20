@@ -1603,7 +1603,7 @@
       case "rentals-apartments":
         return "Apartment viewing requests, tenant follow-up, and accommodation enquiries.";
       case "fresh-foods-drinks":
-        return "Ice Kenkey, Sobolo, bottled ice cream, and other fast-moving refreshments.";
+        return "Ice Kenkey, bottled ice cream, and other quick fresh-food treats.";
       default:
         return "Order across the OneRoot essentials ecosystem in one checkout.";
     }
