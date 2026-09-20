@@ -200,30 +200,6 @@
             </ul>
           </details>
 
-          {% if not food_pos_mode %}<details class="pos-control-subdrawer" id="pos-service-collections">
-            <summary>Service payments: Laundry <strong id="pos-laundry-collections-total">{{ counter_summary.laundryCollectionsTotal|currency }}</strong> · Equipment <strong id="pos-equipment-collections-total">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong></summary>
-            <p class="muted"><span id="pos-laundry-collections-count">{{ counter_summary.laundryCollectionCount }} payment{% if counter_summary.laundryCollectionCount != 1 %}s{% endif %}</span> for Laundry · <span id="pos-equipment-collections-count">{{ counter_summary.equipmentCollectionCount }} payment{% if counter_summary.equipmentCollectionCount != 1 %}s{% endif %}</span> for Equipment.</p>
-            <h4 class="pos-service-collection-title">Laundry payments</h4>
-            <ul id="pos-laundry-collections-lines" class="stack-list compact">
-              {% for collection in counter_summary.laundryCollections %}<li><strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong><span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span><strong>{{ collection.amount|currency }}</strong></li>{% else %}<li><span>No laundry payment was collected on this POS date.</span></li>{% endfor %}
-            </ul>
-            <h4 class="pos-service-collection-title">Equipment rental payments</h4>
-            <ul id="pos-equipment-collections-lines" class="stack-list compact">
-              {% for collection in counter_summary.equipmentCollections %}<li><strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong><span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span><strong>{{ collection.amount|currency }}</strong></li>{% else %}<li><span>No equipment payment was collected on this POS date.</span></li>{% endfor %}
-            </ul>
-          </details>
-
-          <details class="pos-control-subdrawer" id="pos-momo-counter">
-            <summary>MoMo: <strong id="pos-momo-commission">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</strong> commission · <strong id="pos-momo-handled-counter">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong> handled</summary>
-            <div class="pos-ticket-inline pos-ticket-inline-tight">
-              <span>Cash In <strong id="pos-momo-cash-in">{{ counter_summary.mobileMoneyCashInValue|currency }}</strong></span>
-              <span>Cash Out <strong id="pos-momo-cash-out">{{ counter_summary.mobileMoneyCashOutValue|currency }}</strong></span>
-              <span>Physical Float <strong id="pos-momo-physical-cash">{{ counter_summary.mobileMoneyPhysicalCashAvailable|currency }}</strong></span>
-              <span>E-Cash Float <strong id="pos-momo-ecash">{{ counter_summary.mobileMoneyECashAvailable|currency }}</strong></span>
-            </div>
-            <p class="muted">MoMo float and commission are separate from retail POS sales and cash.</p>
-            <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">Open Mobile Money Counter</a>
-          </details>{% endif %}
         </details>
 
         <details class="muted-box pos-customer-box pos-customer-box-compact" hidden>

@@ -28,15 +28,7 @@
   const equipmentSalesNode = document.getElementById("pos-equipment-sales");
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
-  const momoSalesNode = document.getElementById("pos-momo-sales");
-  const momoHandledNode = document.getElementById("pos-momo-handled");
-  const momoCommissionCounterNode = document.getElementById("pos-momo-commission");
   const momoCommissionRibbonNode = document.getElementById("pos-momo-commission-ribbon");
-  const momoHandledCounterNode = document.getElementById("pos-momo-handled-counter");
-  const momoCashInNode = document.getElementById("pos-momo-cash-in");
-  const momoCashOutNode = document.getElementById("pos-momo-cash-out");
-  const momoPhysicalCashNode = document.getElementById("pos-momo-physical-cash");
-  const momoECashNode = document.getElementById("pos-momo-ecash");
   const paymentLabelNode = document.getElementById("pos-payment-label");
   const summaryDateNode = document.getElementById("pos-summary-date");
   const summaryTotalNode = document.getElementById("pos-summary-total");
@@ -48,14 +40,8 @@
   const creditCashNode = document.getElementById("pos-credit-cash");
   const laundryCashNode = document.getElementById("pos-laundry-cash");
   const equipmentCashNode = document.getElementById("pos-equipment-cash");
-  const laundryCollectionsTotalNode = document.getElementById("pos-laundry-collections-total");
   const laundryCollectionsRibbonNode = document.getElementById("pos-laundry-collections-ribbon");
-  const laundryCollectionsCountNode = document.getElementById("pos-laundry-collections-count");
-  const laundryCollectionsLinesNode = document.getElementById("pos-laundry-collections-lines");
-  const equipmentCollectionsTotalNode = document.getElementById("pos-equipment-collections-total");
   const equipmentCollectionsRibbonNode = document.getElementById("pos-equipment-collections-ribbon");
-  const equipmentCollectionsCountNode = document.getElementById("pos-equipment-collections-count");
-  const equipmentCollectionsLinesNode = document.getElementById("pos-equipment-collections-lines");
   const expectedCashNode = document.getElementById("pos-expected-cash");
   const expectedCashRibbonNode = document.getElementById("pos-expected-cash-ribbon");
   const cashVarianceNode = document.getElementById("pos-cash-variance");
@@ -539,42 +525,7 @@
       : "<li><span>No daily sales have been recorded yet.</span></li>";
   }
 
-  function renderServiceCollectionList({ rows, totalNode, countNode, linesNode, total, count, emptyMessage }) {
-    const collectionRows = Array.isArray(rows) ? rows : [];
-    if (totalNode) {
-      totalNode.textContent = formatCurrency(total);
-    }
-    if (countNode) {
-      const paymentCount = Number(count || collectionRows.length || 0);
-      countNode.textContent = `${paymentCount} payment${paymentCount === 1 ? "" : "s"}`;
-    }
-    if (!linesNode) {
-      return;
-    }
-    if (!collectionRows.length) {
-      linesNode.innerHTML = `<li><span>${escapeHtml(emptyMessage)}</span></li>`;
-      return;
-    }
-    linesNode.innerHTML = collectionRows.map((collection) => {
-      const details = [
-        collection.paymentDate || "",
-        collection.paymentMethod || "Unspecified",
-        collection.receivedBy ? `Received by ${collection.receivedBy}` : "",
-        collection.paymentReference || ""
-      ].filter(Boolean).map(escapeHtml).join(" · ");
-      return `
-        <li>
-          <strong>${escapeHtml(collection.customerName || "Customer")} · ${escapeHtml(collection.serviceItem || "Service")}</strong>
-          <span>${details}</span>
-          <strong>${formatCurrency(collection.amount)}</strong>
-        </li>
-      `;
-    }).join("");
-  }
-
   function renderServiceCollections(summary) {
-    const laundryRows = Array.isArray(summary.laundryCollections) ? summary.laundryCollections : [];
-    const equipmentRows = Array.isArray(summary.equipmentCollections) ? summary.equipmentCollections : [];
     if (laundryCashNode) {
       laundryCashNode.textContent = formatCurrency(summary.laundryCashCollectionsTotal);
     }
@@ -587,47 +538,11 @@
     if (equipmentCollectionsRibbonNode) {
       equipmentCollectionsRibbonNode.textContent = formatCurrency(summary.equipmentCollectionsTotal);
     }
-    renderServiceCollectionList({
-      rows: laundryRows,
-      totalNode: laundryCollectionsTotalNode,
-      countNode: laundryCollectionsCountNode,
-      linesNode: laundryCollectionsLinesNode,
-      total: summary.laundryCollectionsTotal,
-      count: summary.laundryCollectionCount,
-      emptyMessage: "No laundry payment was collected on this POS date."
-    });
-    renderServiceCollectionList({
-      rows: equipmentRows,
-      totalNode: equipmentCollectionsTotalNode,
-      countNode: equipmentCollectionsCountNode,
-      linesNode: equipmentCollectionsLinesNode,
-      total: summary.equipmentCollectionsTotal,
-      count: summary.equipmentCollectionCount,
-      emptyMessage: "No equipment payment was collected on this POS date."
-    });
   }
 
   function renderMobileMoneyCounter(summary) {
-    if (momoCommissionCounterNode) {
-      momoCommissionCounterNode.textContent = formatCurrency(summary.mobileMoneyCommissionEarned);
-    }
     if (momoCommissionRibbonNode) {
       momoCommissionRibbonNode.textContent = formatCurrency(summary.mobileMoneyCommissionEarned);
-    }
-    if (momoHandledCounterNode) {
-      momoHandledCounterNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
-    }
-    if (momoCashInNode) {
-      momoCashInNode.textContent = formatCurrency(summary.mobileMoneyCashInValue);
-    }
-    if (momoCashOutNode) {
-      momoCashOutNode.textContent = formatCurrency(summary.mobileMoneyCashOutValue);
-    }
-    if (momoPhysicalCashNode) {
-      momoPhysicalCashNode.textContent = formatCurrency(summary.mobileMoneyPhysicalCashAvailable);
-    }
-    if (momoECashNode) {
-      momoECashNode.textContent = formatCurrency(summary.mobileMoneyECashAvailable);
     }
   }
 
@@ -695,14 +610,6 @@
     }
     if (equipmentSalesNode) {
       equipmentSalesNode.textContent = formatCurrency(summary.equipmentSalesTotal);
-    }
-    // MoMo is visible for handover awareness, but is intentionally excluded
-    // from the retail POS and Daily Sales totals.
-    if (momoSalesNode) {
-      momoSalesNode.textContent = formatCurrency(summary.mobileMoneySalesTotal);
-    }
-    if (momoHandledNode) {
-      momoHandledNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
     }
     renderMobileMoneyCounter(summary);
     if (areaLabelNode) {
