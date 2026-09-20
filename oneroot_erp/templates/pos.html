@@ -52,21 +52,19 @@
         <span class="pos-counter-label">Orders</span>
         <strong id="pos-order-count">{{ counter_summary.orderCount }}</strong>
       </article>
+      {% if not food_pos_mode %}<article class="pos-counter-pill">
+        <span class="pos-counter-label">Laundry Received</span>
+        <strong id="pos-laundry-collections-ribbon">{{ counter_summary.laundryCollectionsTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill">
+        <span class="pos-counter-label">Equipment Received</span>
+        <strong id="pos-equipment-collections-ribbon">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong>
+      </article>
+      <article class="pos-counter-pill pos-counter-pill-highlight">
+        <span class="pos-counter-label">MoMo Commission</span>
+        <strong id="pos-momo-commission-ribbon">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</strong>
+      </article>{% endif %}
     </section>
-    <p class="muted pos-counter-note" id="pos-counter-note">
-      <span id="pos-area-label">{{ counter_summary.areaLabel }}</span>
-      · Payment mix:
-      <span id="pos-payment-mix">
-        {% if counter_summary.paymentMix %}
-          {% for label, amount in counter_summary.paymentMix.items() %}
-            {{ label }} {{ amount|currency }}{% if not loop.last %} · {% endif %}
-          {% endfor %}
-        {% else %}
-          No payment mix recorded yet.
-        {% endif %}
-      </span>
-      · Use the closeout drawer after serving customers to count cash and review collections.
-    </p>
     {% endif %}
 
     <div class="pos-layout pos-layout-enhanced pos-layout-compact">
@@ -175,96 +173,66 @@
           <strong id="pos-last-order-number" hidden>No receipt yet</strong>
         </div>
 
-        {% if not kitchen_issue_mode %}<details class="muted-box pos-cash-closeout-card">
-          <summary>Cash closeout <span class="muted">opening, counted cash, expected cash, and variance</span></summary>
-          <div class="pos-cash-closeout-grid">
-            <label>
-              <span>Opening Cash</span>
-              <input type="number" step="0.01" min="0" id="pos-opening-cash" value="{{ counter_summary.openingCash }}">
-            </label>
-            <label>
-              <span>Counted Close</span>
-              <input type="number" step="0.01" min="0" id="pos-closing-cash" value="{{ counter_summary.closingCashCounted }}">
-            </label>
-          </div>
-          <div class="pos-ticket-inline pos-ticket-inline-tight">
-            <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
-            <span>Credit Cash <strong id="pos-credit-cash">{{ counter_summary.creditCashCollectionsTotal|currency }}</strong></span>
-            {% if not food_pos_mode %}<span>Laundry Cash <strong id="pos-laundry-cash">{{ counter_summary.laundryCashCollectionsTotal|currency }}</strong></span>
-            <span>Equipment Cash <strong id="pos-equipment-cash">{{ counter_summary.equipmentCashCollectionsTotal|currency }}</strong></span>{% endif %}
-            <span>Expected <strong id="pos-expected-cash">{{ counter_summary.expectedClosingCash|currency }}</strong></span>
-            <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
-          </div>
-        </details>{% endif %}
+        {% if not kitchen_issue_mode %}<details class="muted-box pos-counter-controls">
+          <summary>Counter controls <span class="muted">closeout, collections and audit details</span></summary>
+          <section class="pos-control-section">
+            <strong>Cash closeout</strong>
+            <div class="pos-cash-closeout-grid">
+              <label><span>Opening Cash</span><input type="number" step="0.01" min="0" id="pos-opening-cash" value="{{ counter_summary.openingCash }}"></label>
+              <label><span>Counted Close</span><input type="number" step="0.01" min="0" id="pos-closing-cash" value="{{ counter_summary.closingCashCounted }}"></label>
+            </div>
+            <div class="pos-ticket-inline pos-ticket-inline-tight">
+              <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
+              <span>Credit Cash <strong id="pos-credit-cash">{{ counter_summary.creditCashCollectionsTotal|currency }}</strong></span>
+              {% if not food_pos_mode %}<span>Laundry Cash <strong id="pos-laundry-cash">{{ counter_summary.laundryCashCollectionsTotal|currency }}</strong></span><span>Equipment Cash <strong id="pos-equipment-cash">{{ counter_summary.equipmentCashCollectionsTotal|currency }}</strong></span>{% endif %}
+              <span>Expected <strong id="pos-expected-cash">{{ counter_summary.expectedClosingCash|currency }}</strong></span>
+              <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
+            </div>
+            <p class="muted pos-closeout-note" id="pos-closeout-meta">
+              {% if counter_summary.lastCloseout %}Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}.{% else %}No closeout has been saved for this counter day yet.{% endif %}
+            </p>
+          </section>
 
-        {% if not kitchen_issue_mode %}<details class="muted-box pos-customer-box pos-customer-box-compact">
-          <summary>Customer <span class="muted">Required for credit sales</span></summary>
+          <details class="pos-control-subdrawer" id="pos-closeout-breakdown">
+            <summary>Desk daily sales: <strong id="pos-all-daily-sales">{{ counter_summary.allDailySalesTotal|currency }}</strong></summary>
+            <ul id="pos-all-daily-sales-lines" class="stack-list compact">
+              {% for item in counter_summary.allDailySalesBreakdown %}<li><span>{{ item.areaLabel }}</span><strong>{{ item.salesAmount|currency }}</strong></li>{% else %}<li><span>No daily sales have been recorded yet.</span></li>{% endfor %}
+            </ul>
+          </details>
+
+          {% if not food_pos_mode %}<details class="pos-control-subdrawer" id="pos-service-collections">
+            <summary>Service payments: Laundry <strong id="pos-laundry-collections-total">{{ counter_summary.laundryCollectionsTotal|currency }}</strong> · Equipment <strong id="pos-equipment-collections-total">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong></summary>
+            <p class="muted"><span id="pos-laundry-collections-count">{{ counter_summary.laundryCollectionCount }} payment{% if counter_summary.laundryCollectionCount != 1 %}s{% endif %}</span> for Laundry · <span id="pos-equipment-collections-count">{{ counter_summary.equipmentCollectionCount }} payment{% if counter_summary.equipmentCollectionCount != 1 %}s{% endif %}</span> for Equipment.</p>
+            <h4 class="pos-service-collection-title">Laundry payments</h4>
+            <ul id="pos-laundry-collections-lines" class="stack-list compact">
+              {% for collection in counter_summary.laundryCollections %}<li><strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong><span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span><strong>{{ collection.amount|currency }}</strong></li>{% else %}<li><span>No laundry payment was collected on this POS date.</span></li>{% endfor %}
+            </ul>
+            <h4 class="pos-service-collection-title">Equipment rental payments</h4>
+            <ul id="pos-equipment-collections-lines" class="stack-list compact">
+              {% for collection in counter_summary.equipmentCollections %}<li><strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong><span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span><strong>{{ collection.amount|currency }}</strong></li>{% else %}<li><span>No equipment payment was collected on this POS date.</span></li>{% endfor %}
+            </ul>
+          </details>
+
+          <details class="pos-control-subdrawer" id="pos-momo-counter">
+            <summary>MoMo: <strong id="pos-momo-commission">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</strong> commission · <strong id="pos-momo-handled-counter">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong> handled</summary>
+            <div class="pos-ticket-inline pos-ticket-inline-tight">
+              <span>Cash In <strong id="pos-momo-cash-in">{{ counter_summary.mobileMoneyCashInValue|currency }}</strong></span>
+              <span>Cash Out <strong id="pos-momo-cash-out">{{ counter_summary.mobileMoneyCashOutValue|currency }}</strong></span>
+              <span>Physical Float <strong id="pos-momo-physical-cash">{{ counter_summary.mobileMoneyPhysicalCashAvailable|currency }}</strong></span>
+              <span>E-Cash Float <strong id="pos-momo-ecash">{{ counter_summary.mobileMoneyECashAvailable|currency }}</strong></span>
+            </div>
+            <p class="muted">MoMo float and commission are separate from retail POS sales and cash.</p>
+            <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">Open Mobile Money Counter</a>
+          </details>{% endif %}
+        </details>
+
+        <details class="muted-box pos-customer-box pos-customer-box-compact" hidden>
+          <summary>Customer details for credit sale</summary>
           <div class="form-grid single">
-            <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Only if needed" autocomplete="name"></label>
-            <label><span>Customer Phone</span><input type="tel" id="pos-customer-phone" placeholder="Optional contact" autocomplete="tel"></label>
-            <label><span>Notes</span><textarea id="pos-notes" rows="3" placeholder="Optional counter note"></textarea></label>
+            <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Required for credit sale" autocomplete="name"></label>
+            <label><span>Customer Phone</span><input type="tel" id="pos-customer-phone" placeholder="Recommended to link the credit account" autocomplete="tel"></label>
+            <label><span>Notes</span><textarea id="pos-notes" rows="3" placeholder="Optional credit note"></textarea></label>
           </div>
-          <p class="muted pos-closeout-note" id="pos-closeout-meta">
-            {% if counter_summary.lastCloseout %}
-              Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}. POS {{ counter_summary.lastCloseout.totalAmount|currency }} · All business sales {{ counter_summary.lastCloseout.allDailySalesTotal|default(counter_summary.lastCloseout.dailySalesLedgerTotal, true)|currency }}.
-            {% else %}
-              No closeout has been saved for this counter day yet.
-            {% endif %}
-          </p>
-        </details>
-        <details class="pos-closeout-breakdown" id="pos-closeout-breakdown">
-          <summary>Desk daily sales: <strong id="pos-all-daily-sales">{{ counter_summary.allDailySalesTotal|currency }}</strong></summary>
-          <ul id="pos-all-daily-sales-lines" class="stack-list compact">
-            {% for item in counter_summary.allDailySalesBreakdown %}
-              <li><span>{{ item.areaLabel }}</span><strong>{{ item.salesAmount|currency }}</strong></li>
-            {% else %}
-              <li><span>No daily sales have been recorded yet.</span></li>
-            {% endfor %}
-          </ul>
-        </details>
-        {% if not food_pos_mode %}<details class="pos-closeout-breakdown" id="pos-service-collections">
-          <summary>Service payments received today</summary>
-          <div class="pos-ticket-inline pos-ticket-inline-tight">
-            <span>Laundry <strong id="pos-laundry-collections-total">{{ counter_summary.laundryCollectionsTotal|currency }}</strong> <small class="muted" id="pos-laundry-collections-count">{{ counter_summary.laundryCollectionCount }} payment{% if counter_summary.laundryCollectionCount != 1 %}s{% endif %}</small></span>
-            <span>Equipment <strong id="pos-equipment-collections-total">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong> <small class="muted" id="pos-equipment-collections-count">{{ counter_summary.equipmentCollectionCount }} payment{% if counter_summary.equipmentCollectionCount != 1 %}s{% endif %}</small></span>
-          </div>
-          <h4 class="pos-service-collection-title">Laundry payments</h4>
-          <ul id="pos-laundry-collections-lines" class="stack-list compact">
-            {% for collection in counter_summary.laundryCollections %}
-              <li>
-                <strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong>
-                <span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span>
-                <strong>{{ collection.amount|currency }}</strong>
-              </li>
-            {% else %}
-              <li><span>No laundry payment was collected on this POS date.</span></li>
-            {% endfor %}
-          </ul>
-          <h4 class="pos-service-collection-title">Equipment rental payments</h4>
-          <ul id="pos-equipment-collections-lines" class="stack-list compact">
-            {% for collection in counter_summary.equipmentCollections %}
-              <li>
-                <strong>{{ collection.customerName }} · {{ collection.serviceItem }}</strong>
-                <span>{{ collection.paymentDate }} · {{ collection.paymentMethod }}{% if collection.receivedBy %} · Received by {{ collection.receivedBy }}{% endif %}{% if collection.paymentReference %} · {{ collection.paymentReference }}{% endif %}</span>
-                <strong>{{ collection.amount|currency }}</strong>
-              </li>
-            {% else %}
-              <li><span>No equipment payment was collected on this POS date.</span></li>
-            {% endfor %}
-          </ul>
-        </details>{% endif %}{% endif %}
-
-        {% if not kitchen_issue_mode and not food_pos_mode %}<details class="pos-closeout-breakdown" id="pos-momo-counter">
-          <summary>Mobile Money counter today <strong id="pos-momo-commission">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</strong> commission</summary>
-          <div class="pos-ticket-inline pos-ticket-inline-tight">
-            <span>Handled <strong id="pos-momo-handled-counter">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong></span>
-            <span>Cash In <strong id="pos-momo-cash-in">{{ counter_summary.mobileMoneyCashInValue|currency }}</strong></span>
-            <span>Cash Out <strong id="pos-momo-cash-out">{{ counter_summary.mobileMoneyCashOutValue|currency }}</strong></span>
-            <span>Physical Float <strong id="pos-momo-physical-cash">{{ counter_summary.mobileMoneyPhysicalCashAvailable|currency }}</strong></span>
-            <span>E-Cash Float <strong id="pos-momo-ecash">{{ counter_summary.mobileMoneyECashAvailable|currency }}</strong></span>
-          </div>
-          <p class="muted">MoMo is a separate float counter. Its handled value, commission, and float are not included in POS sales, service collections, expected POS cash, or All Daily Sales.</p>
-          <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">Open Mobile Money Counter</a>
         </details>{% endif %}
 
         <div class="cart-box pos-cart-box pos-cart-box-grow">

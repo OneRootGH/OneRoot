@@ -31,6 +31,7 @@
   const momoSalesNode = document.getElementById("pos-momo-sales");
   const momoHandledNode = document.getElementById("pos-momo-handled");
   const momoCommissionCounterNode = document.getElementById("pos-momo-commission");
+  const momoCommissionRibbonNode = document.getElementById("pos-momo-commission-ribbon");
   const momoHandledCounterNode = document.getElementById("pos-momo-handled-counter");
   const momoCashInNode = document.getElementById("pos-momo-cash-in");
   const momoCashOutNode = document.getElementById("pos-momo-cash-out");
@@ -48,9 +49,11 @@
   const laundryCashNode = document.getElementById("pos-laundry-cash");
   const equipmentCashNode = document.getElementById("pos-equipment-cash");
   const laundryCollectionsTotalNode = document.getElementById("pos-laundry-collections-total");
+  const laundryCollectionsRibbonNode = document.getElementById("pos-laundry-collections-ribbon");
   const laundryCollectionsCountNode = document.getElementById("pos-laundry-collections-count");
   const laundryCollectionsLinesNode = document.getElementById("pos-laundry-collections-lines");
   const equipmentCollectionsTotalNode = document.getElementById("pos-equipment-collections-total");
+  const equipmentCollectionsRibbonNode = document.getElementById("pos-equipment-collections-ribbon");
   const equipmentCollectionsCountNode = document.getElementById("pos-equipment-collections-count");
   const equipmentCollectionsLinesNode = document.getElementById("pos-equipment-collections-lines");
   const expectedCashNode = document.getElementById("pos-expected-cash");
@@ -162,6 +165,9 @@
     }
     if (requiresCustomer && customerBox) {
       customerBox.open = true;
+    }
+    if (customerBox) {
+      customerBox.hidden = !requiresCustomer;
     }
   }
 
@@ -572,8 +578,14 @@
     if (laundryCashNode) {
       laundryCashNode.textContent = formatCurrency(summary.laundryCashCollectionsTotal);
     }
+    if (laundryCollectionsRibbonNode) {
+      laundryCollectionsRibbonNode.textContent = formatCurrency(summary.laundryCollectionsTotal);
+    }
     if (equipmentCashNode) {
       equipmentCashNode.textContent = formatCurrency(summary.equipmentCashCollectionsTotal);
+    }
+    if (equipmentCollectionsRibbonNode) {
+      equipmentCollectionsRibbonNode.textContent = formatCurrency(summary.equipmentCollectionsTotal);
     }
     renderServiceCollectionList({
       rows: laundryRows,
@@ -598,6 +610,9 @@
   function renderMobileMoneyCounter(summary) {
     if (momoCommissionCounterNode) {
       momoCommissionCounterNode.textContent = formatCurrency(summary.mobileMoneyCommissionEarned);
+    }
+    if (momoCommissionRibbonNode) {
+      momoCommissionRibbonNode.textContent = formatCurrency(summary.mobileMoneyCommissionEarned);
     }
     if (momoHandledCounterNode) {
       momoHandledCounterNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);

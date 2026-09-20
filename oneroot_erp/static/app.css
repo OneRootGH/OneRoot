@@ -1969,8 +1969,8 @@ textarea { resize: vertical; }
   top: 1.25rem;
   background: linear-gradient(180deg, #ffffff, #f3f6fb 68%, #eef3fb);
   border-color: #d9e5f5;
-  display: grid;
-  grid-template-rows: auto auto auto auto minmax(0, 1fr) auto auto;
+  display: flex;
+  flex-direction: column;
   gap: 0;
   max-height: clamp(31rem, 70vh, 45rem);
   overflow: hidden;
@@ -1997,6 +1997,35 @@ textarea { resize: vertical; }
   margin-bottom: 0.65rem;
   display: grid;
   gap: 0.55rem;
+}
+.pos-counter-controls {
+  margin-bottom: 0.65rem;
+  display: grid;
+  gap: 0.6rem;
+}
+.pos-counter-controls > summary,
+.pos-control-subdrawer > summary {
+  cursor: pointer;
+  color: var(--ink);
+  font-weight: 750;
+  font-size: 0.88rem;
+}
+.pos-counter-controls > summary .muted {
+  margin-left: 0.32rem;
+  font-weight: 500;
+}
+.pos-control-section {
+  display: grid;
+  gap: 0.55rem;
+  padding-top: 0.1rem;
+}
+.pos-control-subdrawer {
+  padding-top: 0.55rem;
+  border-top: 1px solid var(--line);
+}
+.pos-control-subdrawer > p {
+  margin: 0.5rem 0;
+  font-size: 0.78rem;
 }
 .pos-cash-closeout-grid {
   display: grid;
@@ -2073,8 +2102,10 @@ textarea { resize: vertical; }
   font-size: 0.92rem;
 }
 .pos-cart-box-grow {
+  flex: 1 1 auto;
   min-height: 0;
   max-height: none;
+  overflow: auto;
 }
 .pos-history-drawer {
   margin-top: 1rem;
