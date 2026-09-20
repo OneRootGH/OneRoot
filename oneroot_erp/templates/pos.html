@@ -254,6 +254,19 @@
           </ul>
         </details>{% endif %}{% endif %}
 
+        {% if not kitchen_issue_mode and not food_pos_mode %}<details class="pos-closeout-breakdown" id="pos-momo-counter">
+          <summary>Mobile Money counter today <strong id="pos-momo-commission">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</strong> commission</summary>
+          <div class="pos-ticket-inline pos-ticket-inline-tight">
+            <span>Handled <strong id="pos-momo-handled-counter">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong></span>
+            <span>Cash In <strong id="pos-momo-cash-in">{{ counter_summary.mobileMoneyCashInValue|currency }}</strong></span>
+            <span>Cash Out <strong id="pos-momo-cash-out">{{ counter_summary.mobileMoneyCashOutValue|currency }}</strong></span>
+            <span>Physical Float <strong id="pos-momo-physical-cash">{{ counter_summary.mobileMoneyPhysicalCashAvailable|currency }}</strong></span>
+            <span>E-Cash Float <strong id="pos-momo-ecash">{{ counter_summary.mobileMoneyECashAvailable|currency }}</strong></span>
+          </div>
+          <p class="muted">MoMo is a separate float counter. Its handled value, commission, and float are not included in POS sales, service collections, expected POS cash, or All Daily Sales.</p>
+          <a class="button subtle" href="{{ url_for('module_list', module_key='mobile_money_transactions') }}">Open Mobile Money Counter</a>
+        </details>{% endif %}
+
         <div class="cart-box pos-cart-box pos-cart-box-grow">
           <div class="card-header compact">
             <h4>Items</h4>

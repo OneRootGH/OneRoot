@@ -13078,6 +13078,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         scoped_area_ids = {selected_area} if selected_area else desk_area_ids
         kitchen_in_scope = bool(POS_FOOD_SALES_AREA_IDS & scoped_area_ids) if scoped_area_ids else True
         mobile_money_snapshot = mobile_money_day_snapshot(g.db, order_date)
+        mobile_money_float_snapshot = mobile_money_live_balance_snapshot(
+            g.db, order_date, "MTN Mobile Money"
+        )
         credit_collections = customer_credit_collection_summary(
             g.db, order_date, selected_area, area_ids=scoped_area_ids
         )
@@ -13331,6 +13334,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "mobileMoneySalesTotal": mobile_money_snapshot["recognizedSalesTotal"],
             "mobileMoneyProfitTotal": mobile_money_snapshot["recognizedProfitTotal"],
             "mobileMoneyHandledValue": mobile_money_snapshot["handledValueTotal"],
+            "mobileMoneyCashInValue": mobile_money_snapshot["cashInValueTotal"],
+            "mobileMoneyCashOutValue": mobile_money_snapshot["cashOutValueTotal"],
+            "mobileMoneyCommissionEarned": mobile_money_snapshot["recognizedSalesTotal"],
             "mobileMoneyCompletedTransactions": mobile_money_snapshot["completedTransactionCount"],
             "mobileMoneyReconciliationTotal": mobile_money_snapshot["reconciliationFeeTotal"],
             "mobileMoneyReconciliationCount": mobile_money_snapshot["reconciliationCount"],
@@ -13338,6 +13344,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "mobileMoneyExpectedClosing": mobile_money_snapshot["expectedClosingTotal"],
             "mobileMoneyClosingCounted": mobile_money_snapshot["closingCountedTotal"],
             "mobileMoneyBalancedCount": mobile_money_snapshot["balancedCount"],
+            "mobileMoneyPhysicalCashAvailable": mobile_money_float_snapshot["physicalCashAvailable"],
+            "mobileMoneyECashAvailable": mobile_money_float_snapshot["eCashAvailable"],
+            "mobileMoneyWorkingFloatAvailable": mobile_money_float_snapshot["workingFloatAvailable"],
+            "mobileMoneyFloatBasisNote": mobile_money_float_snapshot["basisNote"],
             "mobileMoneyStatusLabel": "Separate MoMo Counter",
             "mobileMoneyUsesReconciliationFallback": False,
             "mobileMoneySourceLabel": "Mobile Money",

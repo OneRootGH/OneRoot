@@ -30,6 +30,12 @@
   const paymentMixNode = document.getElementById("pos-payment-mix");
   const momoSalesNode = document.getElementById("pos-momo-sales");
   const momoHandledNode = document.getElementById("pos-momo-handled");
+  const momoCommissionCounterNode = document.getElementById("pos-momo-commission");
+  const momoHandledCounterNode = document.getElementById("pos-momo-handled-counter");
+  const momoCashInNode = document.getElementById("pos-momo-cash-in");
+  const momoCashOutNode = document.getElementById("pos-momo-cash-out");
+  const momoPhysicalCashNode = document.getElementById("pos-momo-physical-cash");
+  const momoECashNode = document.getElementById("pos-momo-ecash");
   const paymentLabelNode = document.getElementById("pos-payment-label");
   const summaryDateNode = document.getElementById("pos-summary-date");
   const summaryTotalNode = document.getElementById("pos-summary-total");
@@ -589,6 +595,27 @@
     });
   }
 
+  function renderMobileMoneyCounter(summary) {
+    if (momoCommissionCounterNode) {
+      momoCommissionCounterNode.textContent = formatCurrency(summary.mobileMoneyCommissionEarned);
+    }
+    if (momoHandledCounterNode) {
+      momoHandledCounterNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
+    }
+    if (momoCashInNode) {
+      momoCashInNode.textContent = formatCurrency(summary.mobileMoneyCashInValue);
+    }
+    if (momoCashOutNode) {
+      momoCashOutNode.textContent = formatCurrency(summary.mobileMoneyCashOutValue);
+    }
+    if (momoPhysicalCashNode) {
+      momoPhysicalCashNode.textContent = formatCurrency(summary.mobileMoneyPhysicalCashAvailable);
+    }
+    if (momoECashNode) {
+      momoECashNode.textContent = formatCurrency(summary.mobileMoneyECashAvailable);
+    }
+  }
+
   function buildHistoryRowMarkup(order) {
     return `
       <tr>
@@ -662,6 +689,7 @@
     if (momoHandledNode) {
       momoHandledNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
     }
+    renderMobileMoneyCounter(summary);
     if (areaLabelNode) {
       areaLabelNode.textContent = summary.areaLabel || "All POS Areas";
     }
