@@ -880,6 +880,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 reclassify_cold_store_and_grocery_inventory(bootstrap_session)
                 reclassify_inventory_catalog(bootstrap_session)
                 restructure_voltic_shared_stock(bootstrap_session)
+                deduplicate_kitchen_drink_catalog(bootstrap_session)
                 link_bread_stock_to_food_pos(bootstrap_session)
                 assign_default_warehouse_locations(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
@@ -1189,6 +1190,17 @@ def product_text_blob(product: Product) -> str:
     )
 
 
+def compact_catalog_name_key(value: Any) -> str:
+    """Compare catalogue names without harmless spelling punctuation differences."""
+    return "".join(character for character in normalize_text(value).lower() if character.isalnum())
+
+
+PREFERRED_CATALOG_PRODUCT_NAMES = {
+    "belcola": "Bel Cola",
+    "cocacola": "Coca-Cola",
+}
+
+
 def is_kitchen_menu_product(product: Product) -> bool:
     """Identify prepared-food menu rows after Kitchen joined the Cold Store area."""
     return (
@@ -1334,6 +1346,64 @@ def reclassify_inventory_catalog(db_session) -> bool:
             category=product.category,
         )
         normalize_product_record(product)
+        changed = True
+    return changed
+
+
+def deduplicate_kitchen_drink_catalog(db_session) -> bool:
+    """Retire only unused Kitchen drink copies that duplicate a retail stock item.
+
+    The Kitchen menu seeds drinks for online food ordering. Once the same drink
+    exists as a normal Cold Store retail product, keeping both rows causes two
+    identical POS choices and split stock. The redundant row is deactivated,
+    not deleted, so any future references remain auditable.
+    """
+    products = db_session.scalars(select(Product).where(Product.active.is_(True))).all()
+    changed = False
+    for product in products:
+        if not is_kitchen_menu_product(product) or not product_tracks_inventory(product):
+            continue
+        product_key = compact_catalog_name_key(product.name)
+        if not product_key:
+            continue
+        matches = [
+            candidate
+            for candidate in products
+            if candidate.id != product.id
+            and not is_kitchen_menu_product(candidate)
+            and product_tracks_inventory(candidate)
+            and compact_catalog_name_key(candidate.name) == product_key
+            and normalize_text(candidate.business_area_id) == normalize_text(product.business_area_id)
+            and normalize_text(candidate.category).lower() == normalize_text(product.category).lower()
+            and round(parse_amount(candidate.sales_price), 2) == round(parse_amount(product.sales_price), 2)
+        ]
+        if not matches:
+            continue
+        canonical = max(matches, key=lambda candidate: (parse_amount(candidate.cost_price), candidate.created_at or datetime.min))
+        preferred_name = PREFERRED_CATALOG_PRODUCT_NAMES.get(product_key)
+        if preferred_name and normalize_text(canonical.name) != preferred_name:
+            canonical.name = preferred_name
+            canonical.updated_at = datetime.utcnow()
+            canonical.sku = generate_auto_product_sku(
+                product_id=canonical.id,
+                name=canonical.name,
+                business_area_id=canonical.business_area_id,
+                category=canonical.category,
+            )
+            normalize_product_record(canonical)
+            changed = True
+        # This cleanup is intentionally conservative: it only retires a zero
+        # balance seeded copy. A copied row with stock must be reviewed by staff.
+        if parse_amount(product.quantity_on_hand) != 0:
+            continue
+        product.active = False
+        product.stock_location = ""
+        product.shelf_location = ""
+        product.updated_at = datetime.utcnow()
+        product.notes = (
+            f"Retired duplicate of {canonical.name} ({canonical.sku}). "
+            "Historical references are retained."
+        )
         changed = True
     return changed
 
