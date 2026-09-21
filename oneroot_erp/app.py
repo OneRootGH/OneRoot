@@ -1211,7 +1211,14 @@ def is_kitchen_menu_product(product: Product) -> bool:
 
 
 def is_kitchen_menu_catalog_item(item: dict[str, Any]) -> bool:
-    """Keep online food bookings separate from ordinary Cold Store retail items."""
+    """Keep prepared-food bookings separate from ordinary retail drink sales."""
+    category_key = normalize_text(item.get("category")).lower()
+    item_type = normalized_product_item_type(
+        item.get("itemType") or item.get("item_type"),
+        item.get("trackInventory", item.get("track_inventory", True)),
+    )
+    if category_key in {"drinks", "drinks & refreshments"} and item_type == "stock":
+        return False
     return (
         normalize_text(item.get("businessAreaId")) == LEGACY_KITCHEN_AREA_ID
         or normalize_text(item.get("sourceCatalogId")) == KITCHEN_MENU_SOURCE_ID
@@ -1234,9 +1241,9 @@ def reclassify_inventory_product(product: Product) -> bool:
             setattr(product, field, value)
             changed = True
 
-    # Prepared-food menu items now sit under Cold Store & Kitchen. Drinks sold
-    # from that menu are still physical stock, while prepared meals remain
-    # service/menu lines for the Food POS.
+    # Prepared-food menu items stay under Cold Store & Kitchen, while all
+    # packaged drinks are sold from Groceries & More. This keeps the two
+    # counters separate without duplicating shared drink stock.
     if area_id == LEGACY_KITCHEN_AREA_ID or source_key == KITCHEN_MENU_SOURCE_CATEGORY.lower():
         set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
         if name_key.startswith("combo") or "combo -" in name_key:
@@ -1248,27 +1255,29 @@ def reclassify_inventory_product(product: Product) -> bool:
             set_value("stock_location", "")
             set_value("shelf_location", "")
         elif category_key in {"drinks", "drinks & refreshments"} or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS):
+            set_value("business_area_id", "groceries")
             set_value("category", "Drinks & Refreshments")
             set_value("item_type", "stock")
             set_value("track_inventory", True)
+            set_value("stock_location", "groceries-counter")
         else:
             set_value("item_type", "service")
             set_value("stock_location", "")
             set_value("shelf_location", "")
         return changed
 
-    # Drinks belong to Cold Store & Kitchen even when historic imports placed
-    # them under Laundry, Water, Groceries, or Fresh Foods. Kitchen menu drinks
-    # returned above remain distinct service/menu lines for the Food POS.
+    # All packaged drinks belong to Groceries & More, even when historic imports
+    # placed them under Cold Store, Kitchen, Laundry, Water, or Fresh Foods.
     is_packaged_drink = (
         category_key in {"drinks", "drinks & refreshments"}
         or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS)
     )
     if is_packaged_drink:
-        set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
+        set_value("business_area_id", "groceries")
         set_value("category", "Drinks & Refreshments")
         set_value("item_type", "stock")
         set_value("track_inventory", True)
+        set_value("stock_location", "groceries-counter")
         return changed
 
     # Retire the former combined Fresh Foods & Drinks retail area. Its frozen
@@ -1478,7 +1487,7 @@ def default_warehouse_location(product: Product) -> str:
             return "kitchen-store"
         return "cold-store-counter"
     if area_id == "groceries":
-        if category in {"snacks & confectionery", "bakery & bread"}:
+        if category in {"drinks & refreshments", "snacks & confectionery", "bakery & bread"}:
             return "groceries-counter"
         return "groceries-shelves"
     if area_id == "fresh-foods-drinks":
@@ -1719,7 +1728,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
         for product in products
         if product.id != source_product.id
         and product.id not in named_variant_ids
-        and normalize_text(product.business_area_id) in {"water-equipment", "cold-store-groceries"}
+        and normalize_text(product.business_area_id) in {"water-equipment", "cold-store-groceries", "groceries"}
         and "voltic" in voltic_product_key(product.name)
         and any(token in voltic_product_key(product.name) for token in ("sachet", "bag", "piece"))
     ]
@@ -1757,7 +1766,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
 
     source_updates = {
         "name": "Voltic Cool Sachet Water - Single Sachet",
-        "business_area_id": "cold-store-groceries",
+        "business_area_id": "groceries",
         "category": "Drinks & Refreshments",
         "item_type": "stock",
         "track_inventory": True,
@@ -1768,6 +1777,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
         "purchase_pack_size": 30,
         "purchase_pack_label": "bag (30 pieces)",
         "min_stock_level": max(int(parse_amount(source_product.min_stock_level)), 30),
+        "stock_location": "groceries-counter",
     }
     for field, value in source_updates.items():
         if getattr(source_product, field) != value:
@@ -1792,7 +1802,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
         name, units, unit_label = variant_specs[key]
         variant_updates = {
             "name": name,
-            "business_area_id": "cold-store-groceries",
+            "business_area_id": "groceries",
             "category": "Drinks & Refreshments",
             "item_type": "stock",
             "track_inventory": True,
@@ -1803,6 +1813,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             "purchase_pack_size": 1,
             "purchase_pack_label": "sell unit",
             "min_stock_level": 1,
+            "stock_location": "groceries-counter",
         }
         for field, value in variant_updates.items():
             if getattr(variant, field) != value:
@@ -1818,7 +1829,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
     for variant in extra_variants:
         units = voltic_variant_stock_units(variant.name)
         variant_updates = {
-            "business_area_id": "cold-store-groceries",
+            "business_area_id": "groceries",
             "category": "Drinks & Refreshments",
             "item_type": "stock",
             "track_inventory": True,
@@ -1829,6 +1840,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             "purchase_pack_size": 1,
             "purchase_pack_label": "sell unit",
             "min_stock_level": 1,
+            "stock_location": "groceries-counter",
         }
         for field, value in variant_updates.items():
             if getattr(variant, field) != value:
@@ -1839,9 +1851,8 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             variant.notes = note
             changed = True
 
-    # The Food POS has its own Kitchen menu row for Voltic Cool. It sells one sachet,
-    # but must draw from the same Cold Store physical balance rather than acting as a
-    # zero-cost service item.
+    # Groceries & More keeps the Kitchen-origin Voltic sell row linked to the
+    # same physical sachet balance rather than creating a separate drink count.
     kitchen_voltic = db_session.get(Product, "kitchen-drink-voltic-cool") or next(
         (
             product
@@ -1854,7 +1865,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
     if kitchen_voltic:
         kitchen_updates = {
             "name": "Voltic Cool",
-            "business_area_id": COLD_STORE_KITCHEN_AREA_ID,
+            "business_area_id": "groceries",
             "category": "Drinks & Refreshments",
             "item_type": "stock",
             "track_inventory": True,
@@ -1866,6 +1877,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
             "purchase_pack_label": "sell unit",
             "min_stock_level": 0,
             "cost_price": round(parse_amount(source_product.cost_price), 2),
+            "stock_location": "groceries-counter",
         }
         for field, value in kitchen_updates.items():
             if getattr(kitchen_voltic, field) != value:
@@ -2824,8 +2836,8 @@ def customer_cross_sell_area(area_id: str) -> str:
 
 def customer_offer_copy(area_id: str) -> str:
     offers = {
-        "cold-store-groceries": "frozen foods, cold drinks, bread, and kitchen meal offers",
-        "groceries": "weekly grocery restock offers and family essentials bundles",
+        "cold-store-groceries": "frozen foods, bread, and kitchen meal offers",
+        "groceries": "weekly grocery, cold-drink, and family essentials bundles",
         "laundry-services": "pickup laundry offers for busy households and tenants",
         "water-equipment": "water delivery and equipment support follow-up for homes and work sites",
         "fresh-foods-drinks": "ice kenkey, frozen treats, and quick fresh-food bundles",
@@ -4102,7 +4114,7 @@ def sync_kitchen_menu_catalog(db_session) -> None:
         is_drink = normalize_text(seed.get("category")).lower() == "drinks"
         product.source_catalog_id = KITCHEN_MENU_SOURCE_ID
         product.name = normalize_text(seed["name"])
-        product.business_area_id = COLD_STORE_KITCHEN_AREA_ID
+        product.business_area_id = "groceries" if is_drink else COLD_STORE_KITCHEN_AREA_ID
         product.category = "Drinks & Refreshments" if is_drink else (normalize_text(seed["category"]) or "Kitchen")
         product.source_category = "OneRoot Kitchen Menu"
         product.item_type = "stock" if is_drink else "service"
@@ -12065,8 +12077,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 seen_source_catalog_ids.add(normalize_text(product.source_catalog_id))
         for item in load_service_offers_catalog(app_config.root_dir):
             business_area_id = normalize_text(item.get("businessAreaId"))
+            category = normalize_text(item.get("category")) or "Services"
+            item_name = normalize_text(item.get("name"))
             if business_area_id == LEGACY_KITCHEN_AREA_ID:
                 business_area_id = COLD_STORE_KITCHEN_AREA_ID
+            if category.lower() in {"drinks", "drinks & refreshments"} or any(
+                token in item_name.lower() for token in PACKAGED_DRINK_NAME_TOKENS
+            ):
+                business_area_id = "groceries"
+                category = "Drinks & Refreshments"
             if not is_orderable_area(business_area_id):
                 continue
             if kitchen_catalog_exists and normalize_text(item.get("businessAreaId")) == LEGACY_KITCHEN_AREA_ID:
@@ -12082,7 +12101,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "name": normalize_text(item.get("name")),
                     "businessAreaId": business_area_id,
                     "businessAreaLabel": BUSINESS_AREA_SHORT.get(business_area_id, business_area_id),
-                    "category": normalize_text(item.get("category")) or "Services",
+                    "category": category,
                     "sourceCategory": normalize_text(item.get("sourceCategory")),
                     "salesPrice": parse_amount(item.get("salesPrice")),
                     "costPrice": parse_amount(item.get("costPrice")),
@@ -12095,7 +12114,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                             "id": normalize_text(item.get("id")) or uuid4().hex,
                             "name": normalize_text(item.get("name")),
                             "businessAreaId": business_area_id,
-                            "category": normalize_text(item.get("category")) or "Services",
+                            "category": category,
                             "itemType": normalize_text(item.get("itemType")) or "service",
                             "imageUrl": normalize_text(item.get("imageUrl")),
                         }

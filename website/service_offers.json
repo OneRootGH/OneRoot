@@ -183,7 +183,7 @@
     "id": "fresh-foods-sobolo",
     "sku": "FFD-SOBOLO",
     "name": "Sobolo",
-    "businessAreaId": "cold-store-groceries",
+    "businessAreaId": "groceries",
     "category": "Drinks & Refreshments",
     "sourceCategory": "Website Service",
     "salesPrice": 10,
