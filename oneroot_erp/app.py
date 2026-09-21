@@ -74,14 +74,13 @@ POS_GROCERIES_MORE_AREA_IDS = {"groceries", "fresh-foods-drinks", "water-equipme
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
 WAREHOUSE_LOCATION_OPTIONS = [
-    ("warehouse-back-store", "Warehouse / Back Store"),
-    ("big-shop-groceries", "Big Shop - Groceries & More"),
-    ("big-shop-cold-store", "Big Shop - Cold Store & Kitchen"),
-    ("big-shop-freezer", "Big Shop - Cold Room / Freezer"),
-    ("small-shop-express", "Small Shop - OneRoot Express"),
-    ("kitchen-store", "Kitchen Store - Staff Only"),
-    ("laundry-storage", "Laundry Storage"),
-    ("equipment-store", "Equipment Store"),
+    ("warehouse-back-store", "Warehouse - Main Back Store"),
+    ("warehouse-equipment-water", "Warehouse - Equipment & Water Section"),
+    ("groceries-shelves", "Groceries & More - Retail Shelves"),
+    ("groceries-counter", "Groceries & More - Display & Cashier Corner"),
+    ("cold-store-counter", "Cold Store & Kitchen - Display & Cashier Corner"),
+    ("cold-store-freezer", "Cold Store & Kitchen - Freezer / Cold Storage"),
+    ("kitchen-store", "Cold Store & Kitchen - Kitchen Preparation Store"),
 ]
 WAREHOUSE_LOCATION_LABELS = dict(WAREHOUSE_LOCATION_OPTIONS)
 BREAD_SALES_CATEGORY_LABELS = {"bread", "breads", "bakery", "bakery & bread"}
@@ -1318,26 +1317,41 @@ def default_warehouse_location(product: Product) -> str:
     category = normalize_text(product.category).lower()
     if area_id == "cold-store-groceries":
         if category in {"frozen foods & proteins", "frozen treats"}:
-            return "big-shop-freezer"
+            return "cold-store-freezer"
         if category in {"main meals", "proteins & extras", "sides", "prepared meals", "soups & stews", "ingredients & prep", "packaging & add-ons"}:
             return "kitchen-store"
-        return "big-shop-cold-store"
+        return "cold-store-counter"
     if area_id == "groceries":
-        return "big-shop-groceries"
+        return "groceries-shelves"
     if area_id == "fresh-foods-drinks":
-        return "small-shop-express"
+        return "cold-store-freezer" if category == "frozen treats" else "groceries-counter"
     if area_id == "water-equipment":
-        return "equipment-store" if category == "rent" else "warehouse-back-store"
+        return "warehouse-equipment-water" if category in {"rent", "water supply", "water delivery"} else "warehouse-back-store"
     if area_id == "laundry-services":
-        return "laundry-storage"
+        return "warehouse-back-store"
     return "warehouse-back-store"
 
 
 def assign_default_warehouse_locations(db_session) -> bool:
-    """Backfill only unassigned physical locations; never replace staff choices."""
+    """Backfill locations and retire the old multi-room layout without altering stock."""
     changed = False
+    legacy_location_map = {
+        "big-shop-groceries": "groceries-shelves",
+        "big-shop-cold-store": "cold-store-counter",
+        "big-shop-freezer": "cold-store-freezer",
+        "small-shop-express": "groceries-counter",
+        "equipment-store": "warehouse-equipment-water",
+        "laundry-storage": "warehouse-back-store",
+    }
     for product in db_session.scalars(select(Product)).all():
-        if normalize_text(product.stock_location):
+        previous_location = normalize_text(product.stock_location)
+        migrated_location = legacy_location_map.get(previous_location)
+        if migrated_location:
+            product.stock_location = migrated_location
+            product.updated_at = datetime.utcnow()
+            changed = True
+            continue
+        if previous_location:
             continue
         location = default_warehouse_location(product)
         if not location:
@@ -5308,8 +5322,8 @@ SIDEBAR_LINK_LABELS = {
     "inventory": ("Inventory", "inventory", None),
     "warehouse": ("Warehouse & Stock Locations", "warehouse_page", None),
     "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
-    "pos": ("Big Shop POS - Groceries & More", "pos_page", None),
-    "food_pos": ("Big Shop POS - Cold Store & Kitchen", "food_pos_page", None),
+    "pos": ("Groceries & More Counter POS", "pos_page", None),
+    "food_pos": ("Cold Store & Kitchen Counter POS", "food_pos_page", None),
     "workbook": ("Data Export & Recovery", "download_workbook", None),
     "audit": ("Audit Trail", "audit_page", None),
     "online_orders": ("Online Orders", "online_orders_desk", None),
@@ -5517,7 +5531,7 @@ def pos_desk_area_ids(desk: Any) -> set[str]:
 
 
 def pos_desk_label(desk: Any) -> str:
-    return "Big Shop POS - Cold Store & Kitchen" if normalize_pos_desk(desk) == "food" else "Big Shop POS - Groceries & More"
+    return "Cold Store & Kitchen Counter POS" if normalize_pos_desk(desk) == "food" else "Groceries & More Counter POS"
 
 
 def product_matches_pos_desk(product: Product, desk: Any) -> bool:

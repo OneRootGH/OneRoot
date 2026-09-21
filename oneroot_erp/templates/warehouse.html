@@ -5,7 +5,7 @@
       <div>
         <p class="eyebrow">Stock Control</p>
         <h3>Warehouse & Stock Locations</h3>
-        <p class="muted compact-copy">File each physical stock item by shop, storage area, freezer, or shelf. A location move does not change the item’s business area, quantity, cost, or sales history.</p>
+        <p class="muted compact-copy">File stock across your three rooms: Warehouse, Groceries & More, and Cold Store & Kitchen. Each sales room has a display and cashier corner. Moving a location never changes quantity, cost, or sales history.</p>
       </div>
       <div class="toolbar compact-toolbar">
         <a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a>
@@ -16,24 +16,24 @@
 
   <section class="card-grid four">
     <article class="metric-card">
-      <span>Tracked Items</span>
-      <strong>{{ location_summary|sum(attribute='itemCount') }}</strong>
-      <small>Physical items with a stock balance</small>
+      <span>Warehouse Room</span>
+      <strong>{{ (location_summary|selectattr('id', 'equalto', 'warehouse-back-store')|list|first).itemCount + (location_summary|selectattr('id', 'equalto', 'warehouse-equipment-water')|list|first).itemCount }}</strong>
+      <small>Bulk, reserve, water, and equipment stock</small>
+    </article>
+    <article class="metric-card">
+      <span>Groceries & More Room</span>
+      <strong>{{ (location_summary|selectattr('id', 'equalto', 'groceries-shelves')|list|first).itemCount + (location_summary|selectattr('id', 'equalto', 'groceries-counter')|list|first).itemCount }}</strong>
+      <small>Retail shelves and cashier-corner display</small>
+    </article>
+    <article class="metric-card">
+      <span>Cold Store & Kitchen Room</span>
+      <strong>{{ (location_summary|selectattr('id', 'equalto', 'cold-store-counter')|list|first).itemCount + (location_summary|selectattr('id', 'equalto', 'cold-store-freezer')|list|first).itemCount + (location_summary|selectattr('id', 'equalto', 'kitchen-store')|list|first).itemCount }}</strong>
+      <small>Cashier corner, freezer, and food preparation stock</small>
     </article>
     <article class="metric-card warning">
       <span>Unassigned</span>
       <strong>{{ unassigned_count }}</strong>
       <small>Items still needing a physical location</small>
-    </article>
-    <article class="metric-card">
-      <span>Big Shop Grocery</span>
-      <strong>{{ (location_summary|selectattr('id', 'equalto', 'big-shop-groceries')|list|first).itemCount }}</strong>
-      <small>Groceries & More retail shelves</small>
-    </article>
-    <article class="metric-card">
-      <span>Cold Store / Freezer</span>
-      <strong>{{ (location_summary|selectattr('id', 'equalto', 'big-shop-cold-store')|list|first).itemCount + (location_summary|selectattr('id', 'equalto', 'big-shop-freezer')|list|first).itemCount }}</strong>
-      <small>Cold Store & Kitchen physical stock</small>
     </article>
   </section>
 
@@ -43,7 +43,7 @@
         <p class="eyebrow">Location Overview</p>
         <h3>Where Stock Is Filed</h3>
       </div>
-      <p class="muted list-summary">Use these groups for shelf labels, cycle counts, and restock routes.</p>
+      <p class="muted list-summary">Use these sections for shelf labels, stock counts, and restock routes.</p>
     </div>
     <div class="metric-grid location-summary-grid">
       {% for location in location_summary %}
@@ -136,7 +136,7 @@
           </label>
           <label>
             <span>Move Note</span>
-            <textarea name="placement_note" rows="4" placeholder="Example: Moved from warehouse to Big Shop shelf A1 for weekend sales."></textarea>
+            <textarea name="placement_note" rows="4" placeholder="Example: Moved from warehouse to Groceries & More shelf A1 for weekend sales."></textarea>
           </label>
           <div class="form-actions">
             <button class="button primary" type="submit">Save Location</button>
@@ -147,7 +147,7 @@
       {% else %}
         <div class="empty-state compact-empty-state">
           <strong>Choose a stock item</strong>
-          <p>Search the table and select <em>Place / Move</em> to assign its warehouse, shop, freezer, shelf, or bin.</p>
+          <p>Search the table and select <em>Place / Move</em> to assign its room, freezer, shelf, or bin.</p>
         </div>
       {% endif %}
     </article>

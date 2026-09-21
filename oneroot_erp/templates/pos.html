@@ -3,7 +3,7 @@
   <section class="card pos-workbench{% if kitchen_issue_mode %} kitchen-stock-issue-workbench{% endif %}" data-pos-desk="{{ pos_desk }}" data-kitchen-issue-mode="{{ 'yes' if kitchen_issue_mode else 'no' }}" data-kitchen-batch-id="{{ kitchen_batch.id if kitchen_batch else '' }}" data-can-void-orders="{{ 'yes' if can_void_pos_orders else 'no' }}">
     <div class="pos-workbench-bar">
       <div class="pos-workbench-title">
-        <h3>{% if kitchen_issue_mode %}Kitchen Stock Issue{% elif food_pos_mode %}Big Shop POS - Cold Store & Kitchen{% else %}Big Shop POS - Groceries & More{% endif %}</h3>
+        <h3>{% if kitchen_issue_mode %}Kitchen Stock Issue{% elif food_pos_mode %}Cold Store & Kitchen Counter POS{% else %}Groceries & More Counter POS{% endif %}</h3>
         <p class="muted pos-serving-note">
           {% if kitchen_issue_mode %}Choose the meal first, then issue ingredients at inventory cost. This is internal stock use, not a customer sale.{% elif food_pos_mode %}Kitchen meals, frozen foods, bread, and cold drinks. Press <strong>/</strong> to search quickly.{% else %}Groceries, household essentials, snacks, and retail stock. Press <strong>/</strong> to jump to search.{% endif %}
         </p>
@@ -13,8 +13,8 @@
         {% if kitchen_issue_mode %}
           <a class="button subtle" href="{{ url_for('module_form', module_key='kitchen_recipe_plans', record_id=kitchen_batch.id) }}">Back to Batch</a>
         {% else %}
-          <a class="button subtle" href="{{ url_for('pos_page') }}"{% if food_pos_mode %} target="_blank" rel="noopener"{% endif %}>Big Shop Groceries POS{% if food_pos_mode %} (new tab){% endif %}</a>
-          <a class="button subtle" href="{{ url_for('pos_page', desk='food') }}"{% if not food_pos_mode %} target="_blank" rel="noopener"{% endif %}>Big Shop Cold Store POS{% if not food_pos_mode %} (new tab){% endif %}</a>
+          <a class="button subtle" href="{{ url_for('pos_page') }}"{% if food_pos_mode %} target="_blank" rel="noopener"{% endif %}>Groceries & More Counter{% if food_pos_mode %} (new tab){% endif %}</a>
+          <a class="button subtle" href="{{ url_for('pos_page', desk='food') }}"{% if not food_pos_mode %} target="_blank" rel="noopener"{% endif %}>Cold Store & Kitchen Counter{% if not food_pos_mode %} (new tab){% endif %}</a>
           <button class="button subtle" type="button" id="pos-closeout">Close</button>
         {% endif %}
       </div>
@@ -108,7 +108,7 @@
                 </select>
               </label>
             {% else %}
-              <div class="pos-locked-area"><span>Counter</span><strong>{{ 'Big Shop - Cold Store & Kitchen' if food_pos_mode else 'Big Shop - Groceries & More' }}</strong></div>
+              <div class="pos-locked-area"><span>Counter</span><strong>{{ 'Cold Store & Kitchen - Cashier Corner' if food_pos_mode else 'Groceries & More - Cashier Corner' }}</strong></div>
             {% endif %}
             <label class="pos-category-select">
               <span>Category</span>

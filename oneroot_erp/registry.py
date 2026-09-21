@@ -116,7 +116,7 @@ ROLE_DESCRIPTIONS = {
     "apartment-manager": "Apartment rentals, deposits, maintenance, and related reporting.",
     "sales-stock-operator": "Retail counter, stock handling, online order fulfillment, and day-end sales review.",
     "cashier": "Fast counter checkout, receipts, and daily POS sales follow-up.",
-    "general-counter-operator": "Uses both the Big Shop Groceries & More and Big Shop Cold Store & Kitchen POS counters, with customer credit and daily handover access only.",
+    "general-counter-operator": "Uses the Groceries & More and Cold Store & Kitchen cashier corners, with customer credit and daily handover access only.",
     "mobile-money-agent": "MTN MoMo service capture, float closeout, reconciliation, and mobile money sales review.",
     "laundry-desk": "Laundry intake, service payments, customer follow-up, and laundry day sales review.",
     "equipment-desk": "Equipment and water bookings, payments, rental follow-up, and service sales review.",
