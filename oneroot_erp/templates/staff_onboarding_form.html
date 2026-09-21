@@ -72,6 +72,7 @@
         <label><span>Pay Frequency</span><select name="payFrequency">{% for value in ['Monthly', 'Weekly', 'Biweekly'] %}<option value="{{ value }}" {% if payload.get('payFrequency') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
         <label><span>Monthly Salary (GH₵)</span><input type="number" min="0" step="0.01" name="monthlySalary" value="{{ payload.get('monthlySalary','') }}"></label>
         <label><span>Hourly Rate (GH₵)</span><input type="number" min="0" step="0.01" name="hourlyRate" value="{{ payload.get('hourlyRate','') }}"></label>
+        <label><span>Payday Day of Month</span><input type="number" min="1" max="31" step="1" name="paydayDay" value="{{ payload.get('paydayDay','28') }}"><small>OneRoot starts salary alerts seven days before this date.</small></label>
         <label><span>Normal Payday</span><input name="payday" placeholder="e.g. Last working day of month" value="{{ payload.get('payday','') }}"></label>
         <label><span>Payroll Payment Method</span><select name="payrollPaymentMethod">{% for value in ['Bank Transfer', 'Mobile Money', 'Cash'] %}<option value="{{ value }}" {% if payload.get('payrollPaymentMethod') == value %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
         <label><span>Bank / MoMo Provider</span><input name="paymentProvider" value="{{ payload.get('paymentProvider','') }}"></label>

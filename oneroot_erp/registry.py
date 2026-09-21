@@ -458,7 +458,12 @@ ROLE_ACCESS_KEYS["admin"].add("staff_documents")
 ROLE_ACCESS_KEYS["operations"].add("staff_documents")
 ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
 ROLE_ACCESS_KEYS["finance"].add("staff_documents")
+# Meal planning is managed with payroll and attendance. Front-line staff do not
+# need another editing desk; managers can publish a simple shared roster here.
+for _role_key in ("owner", "admin", "operations", "finance", "hr-payroll", "finance-hr-controls", "operations-controls-lead"):
+    ROLE_ACCESS_KEYS.setdefault(_role_key, set()).add("staff_meal_schedule")
 ROLE_ACCESS_KEYS["finance-hr-controls"] = set(ROLE_ACCESS_KEYS["finance"]) | set(ROLE_ACCESS_KEYS["hr-payroll"]) | {"staff_documents", "loss_prevention_controls"}
+ROLE_ACCESS_KEYS["finance-hr-controls"].add("staff_meal_schedule")
 ROLE_ACCESS_KEYS["retail-stock-service"] = set(ROLE_ACCESS_KEYS["frontline-service-lead"]) | set(ROLE_ACCESS_KEYS["sales-stock-operator"]) | set(ROLE_ACCESS_KEYS["mobile-money-agent"]) | {"customer_credit_accounts", "daily_handovers", "customer_loyalty"}
 ROLE_ACCESS_KEYS["kitchen-food-counter"] = set(ROLE_ACCESS_KEYS["cashier"]) | {"kitchen_orders", "kitchen_recipe_plans", "daily_handovers", "customer_loyalty", "inventory", "sales_summary"}
 ROLE_ACCESS_KEYS["growth-apartments-dispatch"] = set(ROLE_ACCESS_KEYS["marketing-crm"]) | set(ROLE_ACCESS_KEYS["delivery-dispatch"])
@@ -760,6 +765,16 @@ SALARY_FREQUENCIES = [
 SALARY_PAY_BASES = [
     ("Hourly", "Hourly - use approved hours worked"),
     ("Fixed Monthly", "Fixed Monthly - use agreed monthly base pay"),
+]
+STAFF_MEAL_PERIODS = [
+    ("Breakfast", "Breakfast"),
+    ("Lunch", "Lunch"),
+]
+STAFF_MEAL_STATUSES = [
+    ("Scheduled", "Scheduled"),
+    ("Prepared", "Prepared"),
+    ("Served", "Served"),
+    ("Cancelled", "Cancelled"),
 ]
 STAFF_WORK_ROLES = [
     ("Manager", "Manager"),
@@ -1250,6 +1265,7 @@ MODULES: dict[str, ModuleDefinition] = {
         status_field="status",
         fields=[
             FieldDefinition("month", "Month", "month", True),
+            FieldDefinition("paymentDueDate", "Salary Due Date", "date"),
             FieldDefinition("staffName", "Staff Name", "text", True),
             FieldDefinition("staffRole", "Staff Role", "select", False, STAFF_WORK_ROLES),
             FieldDefinition("businessAreaId", "Business Area", "select", False, BUSINESS_AREA_OPTIONS),
@@ -2184,6 +2200,25 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "staff_meal_schedule": ModuleDefinition(
+        key="staff_meal_schedule",
+        label="Staff Breakfast & Lunch Schedule",
+        legacy_collection="staffMealSchedule",
+        menu_group="People",
+        date_field="scheduleDate",
+        title_field="menu",
+        status_field="status",
+        fields=[
+            FieldDefinition("scheduleDate", "Schedule Date", "date", True),
+            FieldDefinition("mealPeriod", "Meal", "select", True, STAFF_MEAL_PERIODS),
+            FieldDefinition("menu", "Menu", "text", True, placeholder="Example: Tom Brown & Tea"),
+            FieldDefinition("servingTime", "Serving Time", "time"),
+            FieldDefinition("expectedHeadcount", "Expected Staff", "number", False, step="1"),
+            FieldDefinition("servedHeadcount", "Served Staff", "number", False, step="1"),
+            FieldDefinition("status", "Serving Status", "select", True, STAFF_MEAL_STATUSES),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
     "online_orders": ModuleDefinition(
         key="online_orders",
         label="Online Orders",
@@ -2301,7 +2336,7 @@ MENU_GROUPS = [
     (
         "People",
         [
-            ("Payroll, Schedules & Training", ["salary_records", "staff_documents", "workforce_attendance", "knowledge_base"]),
+            ("Payroll, Schedules & Training", ["salary_records", "staff_documents", "workforce_attendance", "staff_meal_schedule", "knowledge_base"]),
             ("Recruitment", ["job_vacancies"]),
             ("Suppliers", ["supplier_directory", "suppliers", "supplier_price_updates"]),
         ],

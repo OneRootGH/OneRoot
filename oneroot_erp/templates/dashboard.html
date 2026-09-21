@@ -72,6 +72,44 @@
     <article class="metric-card"><span>Open Work Orders</span><strong>{{ maintenance_open_count }}</strong><small>Maintenance tasks still active</small></article>
   </section>
 
+  {% if show_people_alerts %}
+    <section class="split-grid">
+      <article class="card">
+        <div class="card-header">
+          <div><p class="eyebrow">Payroll Alert</p><h3>Salary Due Watch</h3></div>
+          <a class="button subtle" href="{{ url_for('module_list', module_key='salary_records') }}">Open Payroll</a>
+        </div>
+        <ul class="stack-list compact">
+          {% for item in salary_due_alerts %}
+            <li>
+              <strong>{{ item.staffName }} · {{ item.balance|currency }} open</strong>
+              <span>{{ item.staffRole }} · {% if item.daysUntilDue <= 0 %}Due now{% else %}Due {{ item.dueDate.isoformat() }} in {{ item.daysUntilDue }} day{% if item.daysUntilDue != 1 %}s{% endif %}{% endif %}{% if not item.hasPayroll %} · Create this month’s payroll record{% endif %}</span>
+            </li>
+          {% else %}
+            <li><span>No salary payment is due within the next seven days.</span></li>
+          {% endfor %}
+        </ul>
+      </article>
+      <article class="card">
+        <div class="card-header">
+          <div><p class="eyebrow">Team Celebration</p><h3>Staff Birthdays</h3></div>
+          <a class="button subtle" href="{{ url_for('staff_onboarding_form') }}">Update Staff Details</a>
+        </div>
+        <ul class="stack-list compact">
+          {% for item in birthday_today_alerts %}
+            <li><strong>Happy birthday, {{ item.staffName }}!</strong><span>{{ item.staffRole }} · Celebrating {{ item.age }} today</span></li>
+          {% endfor %}
+          {% for item in birthday_upcoming_alerts %}
+            <li><strong>{{ item.staffName }}</strong><span>{{ item.staffRole }} · Birthday {{ item.birthday.strftime('%d %b') }} in {{ item.daysUntilBirthday }} day{% if item.daysUntilBirthday != 1 %}s{% endif %}</span></li>
+          {% endfor %}
+          {% if not birthday_today_alerts and not birthday_upcoming_alerts %}
+            <li><span>Add each staff member’s date of birth in Staff Onboarding to receive birthday reminders here.</span></li>
+          {% endif %}
+        </ul>
+      </article>
+    </section>
+  {% endif %}
+
   <section class="split-grid">
     <article class="card">
       <div class="card-header"><div><p class="eyebrow">Counter</p><h3>Recent POS Orders</h3></div><a class="button subtle" href="{{ url_for('pos_page') }}">Open POS</a></div>

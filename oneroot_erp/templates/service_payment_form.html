@@ -5,7 +5,7 @@
       <div>
         <p class="eyebrow">{{ definition.menu_group }}</p>
         <h3>{{ definition.label }} Payment Desk</h3>
-        <p class="muted">Record the money received against this rental. The balance, Daily Sales, and realized profit update automatically after each collection.</p>
+        <p class="muted">{% if definition.key == 'equipment_rental_bookings' %}Record each amount received, including a part-payment. Open rentals charge only through today; the final amount updates through the actual return date.{% else %}Record each amount received against this service. The balance, Daily Sales, and realized profit update automatically after each collection.{% endif %}</p>
       </div>
       <div class="toolbar">
         <a class="button subtle" href="{{ url_for('module_form', module_key=definition.key, record_id=record.id) }}">Edit Request</a>
@@ -23,12 +23,13 @@
       </div>
       <div>
         <span>Rental period</span>
-        <strong>{{ service_row.outDate or 'Start not set' }} to {{ service_row.returnDate or service_row.dueDate or 'end not set' }}</strong>
-        <small>{{ service_row.rentalDays }} chargeable day{% if service_row.rentalDays != 1 %}s{% endif %}</small>
+        <strong>{{ service_row.outDate or 'Start not set' }} to {{ service_row.chargeEndDate or 'end not set' }}</strong>
+        <small>{% if service_row.returnDate %}Returned and charged through actual return.{% else %}Still out: charged through today, not the expected return date.{% endif %}</small>
       </div>
       <div>
         <span>To collect now</span>
         <strong class="rental-collection-balance" id="rental-collection-balance">{{ service_row.balance|currency }}</strong>
+        <small>Paid {{ service_row.amountPaid|currency }}{% if service_row.paidThroughDate %} · covers about {{ service_row.paidCoverageDays }} day{% if service_row.paidCoverageDays != 1 %}s{% endif %} through {{ service_row.paidThroughDate }}{% endif %}</small>
       </div>
     </section>
     {% if return_day_approval.status %}
@@ -165,8 +166,9 @@
         <form method="post" class="form-grid service-collection-form">
           {% if definition.key == 'equipment_rental_bookings' %}
             <div class="span-2 rental-payment-shortcuts">
-              <p><strong>Fast collection:</strong> the full outstanding balance is ready below. You can replace it with a partial amount if the customer pays part now.</p>
+              <p><strong>Fast collection:</strong> choose one rental day for a part-payment today, or use the full current balance. The rental stays open until the equipment is returned and the balance is cleared.</p>
               <div class="quick-choice-row">
+                <button class="button subtle" type="button" data-rental-day-payment="{{ [service_row.dailyRate, service_row.balance]|min }}">Take one day {{ [service_row.dailyRate, service_row.balance]|min|currency }}</button>
                 <button class="button primary" type="button" data-full-balance="{{ service_row.balance }}">Use full balance {{ service_row.balance|currency }}</button>
                 <button class="button subtle" type="button" data-payment-method="Cash">Cash</button>
                 <button class="button subtle" type="button" data-payment-method="Mobile Money">Mobile Money</button>
@@ -327,6 +329,11 @@
         document.querySelectorAll('[data-full-balance]').forEach((button) => {
           button.addEventListener('click', () => {
             if (amountField) amountField.value = Number(button.dataset.fullBalance || 0).toFixed(2);
+          });
+        });
+        document.querySelectorAll('[data-rental-day-payment]').forEach((button) => {
+          button.addEventListener('click', () => {
+            if (amountField) amountField.value = Number(button.dataset.rentalDayPayment || 0).toFixed(2);
           });
         });
         document.querySelectorAll('[data-payment-method]').forEach((button) => {

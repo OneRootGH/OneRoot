@@ -795,6 +795,57 @@ def ensure_default_job_vacancies(db_session, app_config: AppConfig) -> None:
             apply_module_record_metadata(record, definition, payload)
 
 
+def ensure_default_staff_meal_schedule(db_session) -> None:
+    """Create a small editable meal roster for the coming week without overwriting staff changes."""
+    definition = MODULES.get("staff_meal_schedule")
+    if not definition:
+        return
+
+    start_date = date.today()
+    end_date = start_date + timedelta(days=6)
+    existing_references = {
+        normalize_text(record.reference)
+        for record in db_session.scalars(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "staff_meal_schedule",
+                ModuleRecord.record_date >= start_date,
+                ModuleRecord.record_date <= end_date,
+            )
+        ).all()
+    }
+    meal_templates = (
+        ("Breakfast", "Tom Brown & Tea", "08:00"),
+        ("Lunch", "Rice & Banku", "13:00"),
+    )
+    for day_offset in range(7):
+        schedule_date = start_date + timedelta(days=day_offset)
+        for meal_period, menu, serving_time in meal_templates:
+            reference = f"staff-meal|{schedule_date.isoformat()}|{meal_period.lower()}"
+            if reference in existing_references:
+                continue
+            payload = {
+                "id": uuid4().hex,
+                "reference": reference,
+                "scheduleDate": schedule_date.isoformat(),
+                "mealPeriod": meal_period,
+                "menu": menu,
+                "servingTime": serving_time,
+                "expectedHeadcount": 5,
+                "servedHeadcount": 0,
+                "status": "Scheduled",
+                "businessAreaId": "shared-operations",
+                "notes": "Default OneRoot staff meal roster. Edit menu, time, and headcount when needed.",
+                "createdAt": datetime.utcnow().isoformat(),
+            }
+            record = ModuleRecord(
+                id=payload["id"],
+                module_key="staff_meal_schedule",
+                created_at=datetime.utcnow(),
+            )
+            apply_module_record_metadata(record, definition, payload)
+            db_session.add(record)
+
+
 def build_database_engine(database_url: str):
     engine_options: dict[str, Any] = {"future": True}
     if database_url.startswith("postgresql+psycopg://"):
@@ -887,6 +938,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 ensure_default_job_vacancies(bootstrap_session, app_config)
+                ensure_default_staff_meal_schedule(bootstrap_session)
                 repair_staff_access_roles(bootstrap_session)
                 bootstrap_session.commit()
             session_factory.remove()
@@ -4179,6 +4231,7 @@ def equipment_rental_days(payload: dict[str, Any]) -> int:
     out_date = parse_date(payload.get("outDate"))
     return_date = parse_date(payload.get("returnDate"))
     due_date = parse_date(payload.get("dueDate"))
+    rental_status = normalize_text(payload.get("status")).casefold()
     approved_days = int(round(parse_amount(payload.get("approvedChargeableDays"))))
     approved_return_date = normalize_text(payload.get("approvedReturnDate"))
     if (
@@ -4189,8 +4242,14 @@ def equipment_rental_days(payload: dict[str, Any]) -> int:
     ):
         return approved_days
     # Charge both the day equipment leaves OneRoot and the day it is returned.
-    # The actual return date takes priority over the booking's expected date.
-    charge_end_date = return_date or due_date
+    # While an item is still out, charge only through today. The expected return
+    # date is a promise, not a charge for days the customer has not used yet.
+    if return_date:
+        charge_end_date = return_date
+    elif rental_status == "out" and out_date and out_date <= date.today():
+        charge_end_date = date.today()
+    else:
+        charge_end_date = due_date
     if out_date and charge_end_date and charge_end_date >= out_date:
         return (charge_end_date - out_date).days + 1
     saved_days = int(round(parse_amount(payload.get("rentalDays"))))
@@ -4877,6 +4936,117 @@ def salary_cost_for_reporting(payload: dict[str, Any]) -> float:
     salary_rollup(payload)
     gross_pay = parse_amount(payload.get("grossPay"))
     return gross_pay if gross_pay > 0 else parse_amount(payload.get("amountPaid"))
+
+
+def staff_payday_due_date(profile: dict[str, Any], for_date: date) -> date:
+    """Resolve an onboarding payday into a predictable date for salary reminders."""
+    last_day = calendar.monthrange(for_date.year, for_date.month)[1]
+    payday_day = int(parse_amount(profile.get("paydayDay")))
+    payday_note = normalize_text(profile.get("payday")).lower()
+    if payday_day <= 0:
+        if "last" in payday_note or "month end" in payday_note or "month-end" in payday_note:
+            payday_day = last_day
+        else:
+            match = re.search(r"\b([1-9]|[12]\d|3[01])\b", payday_note)
+            payday_day = int(match.group(1)) if match else 28
+    return date(for_date.year, for_date.month, min(max(payday_day, 1), last_day))
+
+
+def build_staff_people_alerts(records: list[ModuleRecord], *, today: date | None = None) -> dict[str, list[dict[str, Any]]]:
+    """Build practical payroll and birthday prompts from staff onboarding records."""
+    today = today or date.today()
+    current_month = today.strftime("%Y-%m")
+    latest_profiles: dict[str, ModuleRecord] = {}
+    for record in records:
+        if record.module_key != "staff_onboarding_profiles":
+            continue
+        payload = dict(record.payload or {})
+        staff_name = normalize_text(payload.get("staffName"))
+        if not staff_name or normalize_text(payload.get("onboardingStatus")).casefold() in {"on hold", "inactive"}:
+            continue
+        profile_key = staff_name.casefold()
+        current = latest_profiles.get(profile_key)
+        if not current or (record.updated_at or record.created_at) > (current.updated_at or current.created_at):
+            latest_profiles[profile_key] = record
+
+    payroll_by_staff: dict[str, list[ModuleRecord]] = defaultdict(list)
+    for record in records:
+        if record.module_key != "salary_records":
+            continue
+        payload = dict(record.payload or {})
+        if normalize_text(payload.get("month") or record.month) != current_month:
+            continue
+        staff_name = normalize_text(payload.get("staffName"))
+        if staff_name:
+            payroll_by_staff[staff_name.casefold()].append(record)
+
+    salary_due: list[dict[str, Any]] = []
+    birthday_today: list[dict[str, Any]] = []
+    birthday_upcoming: list[dict[str, Any]] = []
+    for profile_record in latest_profiles.values():
+        profile = dict(profile_record.payload or {})
+        staff_name = normalize_text(profile.get("staffName"))
+        profile_key = staff_name.casefold()
+        default_due_date = staff_payday_due_date(profile, today)
+        payroll_records = payroll_by_staff.get(profile_key, [])
+        open_balance = 0.0
+        recorded_due_dates: list[date] = []
+        for payroll_record in payroll_records:
+            payroll_payload = dict(payroll_record.payload or {})
+            payroll_balance = salary_open_balance(payroll_payload)
+            open_balance += payroll_balance
+            recorded_due_date = parse_date(payroll_payload.get("paymentDueDate"))
+            if payroll_balance > 0 and recorded_due_date:
+                recorded_due_dates.append(recorded_due_date)
+        due_date = min(recorded_due_dates) if recorded_due_dates else default_due_date
+        expected_pay = parse_amount(profile.get("monthlySalary"))
+        if not payroll_records and expected_pay > 0:
+            open_balance = expected_pay
+        days_until_due = (due_date - today).days
+        if open_balance > 0 and days_until_due <= 7:
+            salary_due.append(
+                {
+                    "staffName": staff_name,
+                    "staffRole": normalize_text(profile.get("staffRole")) or "Staff",
+                    "dueDate": due_date,
+                    "daysUntilDue": days_until_due,
+                    "balance": round(open_balance, 2),
+                    "hasPayroll": bool(payroll_records),
+                }
+            )
+
+        birth_date = parse_date(profile.get("dateOfBirth"))
+        if not birth_date:
+            continue
+        try:
+            next_birthday = date(today.year, birth_date.month, birth_date.day)
+        except ValueError:  # 29 February in a non-leap year.
+            next_birthday = date(today.year, 2, 28)
+        if next_birthday < today:
+            try:
+                next_birthday = date(today.year + 1, birth_date.month, birth_date.day)
+            except ValueError:
+                next_birthday = date(today.year + 1, 2, 28)
+        days_until_birthday = (next_birthday - today).days
+        if days_until_birthday > 7:
+            continue
+        birthday_entry = {
+            "staffName": staff_name,
+            "staffRole": normalize_text(profile.get("staffRole")) or "Staff",
+            "birthday": next_birthday,
+            "daysUntilBirthday": days_until_birthday,
+            "age": max(next_birthday.year - birth_date.year, 0),
+        }
+        if days_until_birthday == 0:
+            birthday_today.append(birthday_entry)
+        else:
+            birthday_upcoming.append(birthday_entry)
+
+    return {
+        "salaryDue": sorted(salary_due, key=lambda item: (item["daysUntilDue"], item["staffName"])),
+        "birthdayToday": sorted(birthday_today, key=lambda item: item["staffName"]),
+        "birthdayUpcoming": sorted(birthday_upcoming, key=lambda item: (item["daysUntilBirthday"], item["staffName"])),
+    }
 
 
 def months_between(start_date: date | None, end_date: date | None) -> int:
@@ -5873,7 +6043,16 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
         status = normalize_text(payload.get("status")) or "Booked"
         rental_days = equipment_rental_days(payload)
         due_date = parse_date(payload.get("dueDate"))
+        out_date = parse_date(payload.get("outDate"))
         return_date = parse_date(payload.get("returnDate"))
+        daily_rate = round(rental_fee / rental_days, 2) if rental_days > 0 else rental_fee
+        paid_coverage_days = int(amount_paid // daily_rate) if daily_rate > 0 else 0
+        paid_through_date = (
+            out_date + timedelta(days=max(paid_coverage_days - 1, 0))
+            if out_date and paid_coverage_days > 0
+            else None
+        )
+        charge_end_date = return_date or (today if status == "Out" and out_date and out_date <= today else due_date)
         rows.append(
             {
                 "record": record,
@@ -5883,7 +6062,7 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
                 "customerName": normalize_text(payload.get("customerName")) or "Customer",
                 "customerPhone": normalize_phone(payload.get("customerPhone")),
                 "bookingDate": parse_date(payload.get("bookingDate")),
-                "outDate": parse_date(payload.get("outDate")),
+                "outDate": out_date,
                 "dueDate": due_date,
                 "returnDate": return_date,
                 "reference": normalize_text(payload.get("reference")),
@@ -5898,7 +6077,10 @@ def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, 
                 "amountPaid": amount_paid,
                 "costAmount": payment_summary["totalCost"],
                 "profitAmount": payment_summary["profitRecognized"],
-                "dailyRate": round(rental_fee / rental_days, 2) if rental_days > 0 else rental_fee,
+                "dailyRate": daily_rate,
+                "chargeEndDate": charge_end_date,
+                "paidCoverageDays": paid_coverage_days,
+                "paidThroughDate": paid_through_date,
                 "totalDue": billed_total,
                 "paymentCount": len(payment_summary["payments"]),
                 "latestPaymentDate": payment_summary["payments"][-1]["paymentDate"] if payment_summary["payments"] else "",
@@ -15071,6 +15253,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             g.db.commit()
         all_records = g.db.scalars(select(ModuleRecord)).all()
         current_month = date.today().strftime("%Y-%m")
+        people_alerts = build_staff_people_alerts(all_records)
         latest_suite_profiles = latest_apartment_suite_profiles(all_records, support_phone=app_config.support_phone)
         tenant_reminders = build_tenant_reminder_queue(latest_suite_profiles)
         growth_context = build_growth_automation_context(g.db)
@@ -15217,6 +15400,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             apartment_watch=apartment_watch,
             tenant_reminders=tenant_reminders[:8],
             tenant_reminder_count=len(tenant_reminders),
+            show_people_alerts=user_is_owner(g.current_user),
+            salary_due_alerts=people_alerts["salaryDue"],
+            birthday_today_alerts=people_alerts["birthdayToday"],
+            birthday_upcoming_alerts=people_alerts["birthdayUpcoming"],
             growth_context=growth_context,
             monthly_sales_by_area=monthly_sales_by_area,
             month_sales_total=month_sales_total,
@@ -18612,6 +18799,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "payBasis": normalize_text(request.form.get("payBasis")) or "Monthly",
                 "payFrequency": normalize_text(request.form.get("payFrequency")) or "Monthly",
                 "payday": normalize_text(request.form.get("payday")),
+                "paydayDay": int(max(parse_amount(request.form.get("paydayDay")), 0)),
                 "payrollPaymentMethod": normalize_text(request.form.get("payrollPaymentMethod")) or "Bank Transfer",
                 "paymentProvider": normalize_text(request.form.get("paymentProvider")),
                 "accountName": normalize_text(request.form.get("accountName")),
@@ -18669,7 +18857,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("staff_onboarding_pack", profile_id=profile.id))
         return render_template("staff_onboarding_form.html", page_title="Staff Onboarding", payload={
             "startDate": date.today().isoformat(), "employmentType": "Full-Time", "supervisor": workspace_owner_name(),
-            "nationality": "Ghanaian", "payBasis": "Monthly", "payFrequency": "Monthly", "payrollPaymentMethod": "Bank Transfer",
+            "nationality": "Ghanaian", "payBasis": "Monthly", "payFrequency": "Monthly", "paydayDay": 28, "payrollPaymentMethod": "Bank Transfer",
             "probationMonths": 3, "noticePeriod": "One month after probation", "annualLeaveDays": 15,
             "workLocation": "OneRoot Essentials, Amasaman, Medie, Ghana", "workSchedule": "Roster to be agreed",
             "reviewFrequency": "Monthly", "onboardingStatus": "Ready for Signing",
@@ -19051,7 +19239,47 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if inventory_repaired:
             g.db.commit()
         editing_id = normalize_text(request.args.get("edit"))
+        duplicate_id = normalize_text(request.args.get("duplicate"))
         editing_product = find_inventory_product(g.db, editing_id) if editing_id else None
+        duplicate_source_name = ""
+        if duplicate_id and not editing_product:
+            source_product = find_inventory_product(g.db, duplicate_id)
+            if source_product:
+                # A duplicate is a new catalogue item, never a copied stock
+                # balance or shared-stock link. This prevents double-counting.
+                duplicate_source_name = source_product.name
+                editing_product = Product(
+                    id="",
+                    source_catalog_id="",
+                    sku="",
+                    barcode="",
+                    name=f"{source_product.name} - Copy",
+                    business_area_id=source_product.business_area_id,
+                    category=source_product.category,
+                    source_category=source_product.source_category,
+                    item_type=source_product.item_type,
+                    track_inventory=source_product.track_inventory,
+                    quantity_on_hand=0,
+                    quantity_known=True,
+                    min_stock_level=source_product.min_stock_level,
+                    stock_source_product_id="",
+                    stock_units_per_sale=1,
+                    stock_unit_label="piece",
+                    purchase_pack_size=1,
+                    purchase_pack_label="unit",
+                    stock_location=source_product.stock_location,
+                    shelf_location=source_product.shelf_location,
+                    sales_price=source_product.sales_price,
+                    cost_price=source_product.cost_price,
+                    expiry_date=None,
+                    image_url=source_product.image_url,
+                    active=True,
+                    user_created=True,
+                    notes=f"Duplicated from {source_product.name}. Update the name, barcode, location, and opening stock before saving.",
+                    created_at=datetime.utcnow(),
+                )
+            else:
+                flash("That source inventory item could not be found for duplication.", "error")
         all_products = g.db.scalars(select(Product).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())).all()
         for product in all_products:
             normalize_product_record(product)
@@ -19213,6 +19441,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             page_title="Inventory",
             products=products,
             editing_product=editing_product,
+            duplicate_source_name=duplicate_source_name,
             business_area_options=BUSINESS_AREA_OPTIONS,
             inventory_category_map=category_map,
             inventory_category_groups=category_groups,

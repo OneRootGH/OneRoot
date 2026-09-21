@@ -130,6 +130,7 @@
                 <td>
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('inventory', edit=item.id, q=search, area=area_filter, category=category_filter, expiry=expiry_filter) }}">Edit</a>
+                    <a class="table-link" href="{{ url_for('inventory', duplicate=item.id, q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Duplicate</a>
                     <form method="post" action="{{ url_for('inventory_delete', product_id=item.id) }}" onsubmit="return confirm('Delete this inventory item?');">
                       <input type="hidden" name="q" value="{{ search }}">
                       <input type="hidden" name="area" value="{{ area_filter }}">
@@ -152,11 +153,14 @@
       <div class="card-header">
         <div>
           <p class="eyebrow">Editor</p>
-          <h3>{{ "Edit Item" if editing_product else "New Item" }}</h3>
+          <h3>{% if duplicate_source_name %}Duplicate Item{% elif editing_product %}Edit Item{% else %}New Item{% endif %}</h3>
         </div>
       </div>
       <form method="post" enctype="multipart/form-data" class="form-grid single">
         <input type="hidden" name="id" value="{{ editing_product.id if editing_product else '' }}">
+        {% if duplicate_source_name %}
+          <div class="muted-box span-2"><strong>Creating a safe copy of {{ duplicate_source_name }}</strong><p>Prices and the picture have been copied. The new item starts with zero stock, no barcode, no expiry date, and a fresh SKU so it cannot affect the original item.</p></div>
+        {% endif %}
         <div class="inventory-editor-hero">
           <img class="product-thumb product-thumb-large" src="{{ product_image_src(editing_product or {}) }}" alt="{{ editing_product.name if editing_product else 'New inventory item' }}" onerror="this.src='{{ url_for('public_asset_files', filename='oneroot-icon-transparent.png') }}'">
           <div class="inventory-editor-copy">
