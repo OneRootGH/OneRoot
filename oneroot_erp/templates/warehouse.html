@@ -1,0 +1,155 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card module-hero compact-module-hero">
+    <div class="card-header compact-header">
+      <div>
+        <p class="eyebrow">Stock Control</p>
+        <h3>Warehouse & Stock Locations</h3>
+        <p class="muted compact-copy">File each physical stock item by shop, storage area, freezer, or shelf. A location move does not change the item’s business area, quantity, cost, or sales history.</p>
+      </div>
+      <div class="toolbar compact-toolbar">
+        <a class="button subtle" href="{{ url_for('inventory') }}">Open Inventory</a>
+        <a class="button subtle" href="{{ url_for('inventory_barcode') }}">Barcode Stock Update</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card">
+      <span>Tracked Items</span>
+      <strong>{{ location_summary|sum(attribute='itemCount') }}</strong>
+      <small>Physical items with a stock balance</small>
+    </article>
+    <article class="metric-card warning">
+      <span>Unassigned</span>
+      <strong>{{ unassigned_count }}</strong>
+      <small>Items still needing a physical location</small>
+    </article>
+    <article class="metric-card">
+      <span>Big Shop Grocery</span>
+      <strong>{{ (location_summary|selectattr('id', 'equalto', 'big-shop-groceries')|list|first).itemCount }}</strong>
+      <small>Groceries & More retail shelves</small>
+    </article>
+    <article class="metric-card">
+      <span>Cold Store / Freezer</span>
+      <strong>{{ (location_summary|selectattr('id', 'equalto', 'big-shop-cold-store')|list|first).itemCount + (location_summary|selectattr('id', 'equalto', 'big-shop-freezer')|list|first).itemCount }}</strong>
+      <small>Cold Store & Kitchen physical stock</small>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header compact">
+      <div>
+        <p class="eyebrow">Location Overview</p>
+        <h3>Where Stock Is Filed</h3>
+      </div>
+      <p class="muted list-summary">Use these groups for shelf labels, cycle counts, and restock routes.</p>
+    </div>
+    <div class="metric-grid location-summary-grid">
+      {% for location in location_summary %}
+        <a class="metric-card metric-card-link {% if location_filter == location.id %}is-highlight{% endif %}" href="{{ url_for('warehouse_page', location=location.id) }}">
+          <span>{{ location.label }}</span>
+          <strong>{{ location.itemCount }}</strong>
+          <small>{{ location.stockValue|currency }} at cost</small>
+        </a>
+      {% endfor %}
+    </div>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Find Stock</p>
+          <h3>Stock Location List</h3>
+        </div>
+        <form method="get" class="toolbar compact-toolbar">
+          <input type="search" name="q" value="{{ search }}" placeholder="Search product, SKU, barcode, or shelf">
+          <select name="location">
+            <option value="">All locations</option>
+            {% for value, label in warehouse_location_options %}
+              <option value="{{ value }}" {% if location_filter == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+          <button class="button subtle" type="submit">Search</button>
+        </form>
+      </div>
+      <div class="table-wrap tall">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Business Area</th>
+              <th>Physical Location</th>
+              <th>Stock</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in products %}
+              <tr>
+                <td>
+                  <strong>{{ item.name }}</strong>
+                  <span class="table-secondary">{{ item.category }} · {{ item.sku or 'No SKU' }}</span>
+                </td>
+                <td>{{ business_area_short.get(item.business_area_id, item.business_area_id) }}</td>
+                <td>
+                  <strong>{{ warehouse_location_labels.get(item.stock_location, 'Unassigned') }}</strong>
+                  <span class="table-secondary">{{ item.shelf_location or 'Shelf / bin not saved' }}</span>
+                </td>
+                <td>{{ format_product_stock_badge(item) }}</td>
+                <td><a class="table-link table-link-primary" href="{{ url_for('warehouse_page', product_id=item.id, q=search, location=location_filter) }}">Place / Move</a></td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No tracked stock items match this search.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header compact">
+        <div>
+          <p class="eyebrow">Place Stock</p>
+          <h3>{{ selected_product.name if selected_product else 'Select an Item' }}</h3>
+        </div>
+      </div>
+      {% if selected_product %}
+        <div class="muted-box">
+          <strong>{{ selected_product.category }} · {{ business_area_short.get(selected_product.business_area_id, selected_product.business_area_id) }}</strong>
+          <p>{{ format_product_stock_badge(selected_product) }}. Moving this record changes only its physical location, not its stock quantity.</p>
+        </div>
+        <form method="post" class="form-grid single">
+          <input type="hidden" name="product_id" value="{{ selected_product.id }}">
+          <label>
+            <span>Physical Location</span>
+            <select name="stock_location" required>
+              {% for value, label in warehouse_location_options %}
+                <option value="{{ value }}" {% if selected_product.stock_location == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
+          </label>
+          <label>
+            <span>Shelf / Bin / Freezer Position</span>
+            <input type="text" name="shelf_location" value="{{ selected_product.shelf_location }}" placeholder="Example: A1, F2, Freezer 1, Rack 3">
+          </label>
+          <label>
+            <span>Move Note</span>
+            <textarea name="placement_note" rows="4" placeholder="Example: Moved from warehouse to Big Shop shelf A1 for weekend sales."></textarea>
+          </label>
+          <div class="form-actions">
+            <button class="button primary" type="submit">Save Location</button>
+            <a class="button subtle" href="{{ url_for('inventory', edit=selected_product.id) }}">Edit Full Item</a>
+            <a class="button subtle" href="{{ url_for('warehouse_page', q=search, location=location_filter) }}">Cancel</a>
+          </div>
+        </form>
+      {% else %}
+        <div class="empty-state compact-empty-state">
+          <strong>Choose a stock item</strong>
+          <p>Search the table and select <em>Place / Move</em> to assign its warehouse, shop, freezer, shelf, or bin.</p>
+        </div>
+      {% endif %}
+    </article>
+  </section>
+{% endblock %}

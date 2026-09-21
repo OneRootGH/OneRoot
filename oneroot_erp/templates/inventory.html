@@ -66,10 +66,17 @@
               <option value="fresh" {% if expiry_filter == 'fresh' %}selected{% endif %}>Fresh</option>
               <option value="no-expiry" {% if expiry_filter == 'no-expiry' %}selected{% endif %}>No Expiry</option>
             </select>
+            <select name="location">
+              <option value="">All Stock Locations</option>
+              {% for value, label in warehouse_location_options %}
+                <option value="{{ value }}" {% if location_filter == value %}selected{% endif %}>{{ label }}</option>
+              {% endfor %}
+            </select>
             <button class="button subtle" type="submit">Search</button>
           </form>
+          <a class="button subtle" href="{{ url_for('warehouse_page') }}">Warehouse</a>
           <a class="button subtle" href="{{ url_for('inventory_barcode') }}">Barcode Update</a>
-          <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter, expiry=expiry_filter) }}">Export CSV</a>
+          <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Export CSV</a>
         </div>
       </div>
       <div class="table-wrap tall">
@@ -78,6 +85,7 @@
             <tr>
               <th>Item</th>
               <th>Area</th>
+              <th>Location</th>
               <th>SKU</th>
               <th>Type</th>
               <th>Stock</th>
@@ -100,6 +108,10 @@
                   </div>
                 </td>
                 <td>{{ business_area_short.get(item.business_area_id, item.business_area_id) }}</td>
+                <td>
+                  <strong>{{ warehouse_location_labels.get(item.stock_location, 'Unassigned') }}</strong>
+                  <span class="table-secondary">{{ item.shelf_location or 'No shelf / bin' }}</span>
+                </td>
                 <td>{{ item.sku or '—' }}</td>
                 <td>{{ item.item_type|title }}</td>
                 <td>{{ format_product_stock_badge(item) }}</td>
@@ -123,13 +135,14 @@
                       <input type="hidden" name="area" value="{{ area_filter }}">
                       <input type="hidden" name="category" value="{{ category_filter }}">
                       <input type="hidden" name="expiry" value="{{ expiry_filter }}">
+                      <input type="hidden" name="location" value="{{ location_filter }}">
                       <button class="text-button danger-text" type="submit">Delete</button>
                     </form>
                   </div>
                 </td>
               </tr>
             {% else %}
-              <tr><td colspan="8">No inventory items found.</td></tr>
+              <tr><td colspan="9">No inventory items found.</td></tr>
             {% endfor %}
           </tbody>
         </table>
@@ -165,6 +178,15 @@
             <option value="">Select Category</option>
           </select>
         </label>
+        <label><span>Physical Location</span>
+          <select name="stock_location">
+            <option value="">Auto-place from business area</option>
+            {% for value, label in warehouse_location_options %}
+              <option value="{{ value }}" {% if editing_product and editing_product.stock_location == value %}selected{% endif %}>{{ label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label><span>Shelf / Bin / Freezer Position</span><input type="text" name="shelf_location" value="{{ editing_product.shelf_location if editing_product else '' }}" placeholder="Example: A1, F2, Freezer 1"></label>
         <label><span>SKU</span><input type="text" name="sku" value="{{ editing_product.sku if editing_product else '' }}" placeholder="Auto-generated on save" readonly></label>
         <label><span>Barcode</span><input type="text" name="barcode" value="{{ editing_product.barcode if editing_product else '' }}"></label>
         <label><span>Item Type</span>
@@ -200,7 +222,7 @@
         <div class="form-actions">
           <button class="button primary" type="submit">Save Item</button>
           {% if editing_product %}
-            <a class="button subtle" href="{{ url_for('inventory', q=search, area=area_filter, category=category_filter, expiry=expiry_filter) }}">Cancel</a>
+            <a class="button subtle" href="{{ url_for('inventory', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Cancel</a>
           {% endif %}
         </div>
       </form>

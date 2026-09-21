@@ -98,6 +98,10 @@ class Product(Base):
     stock_unit_label: Mapped[str] = mapped_column(String(60), default="piece")
     purchase_pack_size: Mapped[float] = mapped_column(Float, default=1)
     purchase_pack_label: Mapped[str] = mapped_column(String(60), default="unit")
+    # Physical placement is separate from business-area accounting. This lets a
+    # Groceries item remain in the correct profit centre while staff can find it.
+    stock_location: Mapped[str] = mapped_column(String(120), default="")
+    shelf_location: Mapped[str] = mapped_column(String(80), default="")
     sales_price: Mapped[float] = mapped_column(Float, default=0)
     cost_price: Mapped[float] = mapped_column(Float, default=0)
     expiry_date: Mapped[date | None] = mapped_column(Date, nullable=True, index=True)

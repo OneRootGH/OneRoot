@@ -73,6 +73,17 @@ POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries"}
 POS_GROCERIES_MORE_AREA_IDS = {"groceries", "fresh-foods-drinks", "water-equipment"}
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
+WAREHOUSE_LOCATION_OPTIONS = [
+    ("warehouse-back-store", "Warehouse / Back Store"),
+    ("big-shop-groceries", "Big Shop - Groceries & More"),
+    ("big-shop-cold-store", "Big Shop - Cold Store & Kitchen"),
+    ("big-shop-freezer", "Big Shop - Cold Room / Freezer"),
+    ("small-shop-express", "Small Shop - OneRoot Express"),
+    ("kitchen-store", "Kitchen Store - Staff Only"),
+    ("laundry-storage", "Laundry Storage"),
+    ("equipment-store", "Equipment Store"),
+]
+WAREHOUSE_LOCATION_LABELS = dict(WAREHOUSE_LOCATION_OPTIONS)
 BREAD_SALES_CATEGORY_LABELS = {"bread", "breads", "bakery", "bakery & bread"}
 CASHBOOK_MONEY_IN_TYPES = {"Cash In", "Bank Withdrawal"}
 CASHBOOK_MONEY_OUT_TYPES = {"Cash Out", "Bank Deposit", "Bank Charge"}
@@ -830,6 +841,10 @@ def ensure_schema_columns(engine) -> None:
         statements.append("ALTER TABLE products ADD COLUMN purchase_pack_size FLOAT DEFAULT 1")
     if "products" in table_names and "purchase_pack_label" not in product_columns:
         statements.append("ALTER TABLE products ADD COLUMN purchase_pack_label VARCHAR(60) DEFAULT 'unit'")
+    if "products" in table_names and "stock_location" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN stock_location VARCHAR(120) DEFAULT ''")
+    if "products" in table_names and "shelf_location" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN shelf_location VARCHAR(80) DEFAULT ''")
     user_columns = set()
     if "app_users" in table_names:
         user_columns = {column["name"] for column in inspector.get_columns("app_users")}
@@ -867,6 +882,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 reclassify_inventory_catalog(bootstrap_session)
                 restructure_voltic_shared_stock(bootstrap_session)
                 link_bread_stock_to_food_pos(bootstrap_session)
+                assign_default_warehouse_locations(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
                 backfill_pos_line_costs(bootstrap_session)
                 ensure_default_job_vacancies(bootstrap_session, app_config)
@@ -1290,6 +1306,44 @@ def reclassify_inventory_catalog(db_session) -> bool:
             category=product.category,
         )
         normalize_product_record(product)
+        changed = True
+    return changed
+
+
+def default_warehouse_location(product: Product) -> str:
+    """Choose a practical first location without changing a product's area."""
+    if not product_tracks_inventory(product):
+        return ""
+    area_id = normalize_text(product.business_area_id)
+    category = normalize_text(product.category).lower()
+    if area_id == "cold-store-groceries":
+        if category in {"frozen foods & proteins", "frozen treats"}:
+            return "big-shop-freezer"
+        if category in {"main meals", "proteins & extras", "sides", "prepared meals", "soups & stews", "ingredients & prep", "packaging & add-ons"}:
+            return "kitchen-store"
+        return "big-shop-cold-store"
+    if area_id == "groceries":
+        return "big-shop-groceries"
+    if area_id == "fresh-foods-drinks":
+        return "small-shop-express"
+    if area_id == "water-equipment":
+        return "equipment-store" if category == "rent" else "warehouse-back-store"
+    if area_id == "laundry-services":
+        return "laundry-storage"
+    return "warehouse-back-store"
+
+
+def assign_default_warehouse_locations(db_session) -> bool:
+    """Backfill only unassigned physical locations; never replace staff choices."""
+    changed = False
+    for product in db_session.scalars(select(Product)).all():
+        if normalize_text(product.stock_location):
+            continue
+        location = default_warehouse_location(product)
+        if not location:
+            continue
+        product.stock_location = location
+        product.updated_at = datetime.utcnow()
         changed = True
     return changed
 
@@ -5252,9 +5306,10 @@ SIDEBAR_LINK_LABELS = {
     "sales_summary": ("Daily Sales Review", "sales_summary_page", None),
     "search": ("Global Search", "search_page", None),
     "inventory": ("Inventory", "inventory", None),
+    "warehouse": ("Warehouse & Stock Locations", "warehouse_page", None),
     "inventory_barcode": ("Barcode Stock Update", "inventory_barcode", None),
-    "pos": ("POS Groceries & More", "pos_page", None),
-    "food_pos": ("POS Food & Cold Store", "food_pos_page", None),
+    "pos": ("Big Shop POS - Groceries & More", "pos_page", None),
+    "food_pos": ("Big Shop POS - Cold Store & Kitchen", "food_pos_page", None),
     "workbook": ("Data Export & Recovery", "download_workbook", None),
     "audit": ("Audit Trail", "audit_page", None),
     "online_orders": ("Online Orders", "online_orders_desk", None),
@@ -5462,7 +5517,7 @@ def pos_desk_area_ids(desk: Any) -> set[str]:
 
 
 def pos_desk_label(desk: Any) -> str:
-    return "POS Food & Cold Store" if normalize_pos_desk(desk) == "food" else "POS Groceries & More"
+    return "Big Shop POS - Cold Store & Kitchen" if normalize_pos_desk(desk) == "food" else "Big Shop POS - Groceries & More"
 
 
 def product_matches_pos_desk(product: Product, desk: Any) -> bool:
@@ -11003,6 +11058,8 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
         "sku",
         "barcode",
         "itemType",
+        "stockLocation",
+        "shelfLocation",
         "quantityOnHand",
         "minStockLevel",
         "salesPrice",
@@ -11025,6 +11082,8 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
             "sku": item.sku,
             "barcode": item.barcode,
             "itemType": item.item_type,
+            "stockLocation": item.stock_location,
+            "shelfLocation": item.shelf_location,
             "quantityOnHand": item.quantity_on_hand,
             "minStockLevel": item.min_stock_level,
             "salesPrice": item.sales_price,
@@ -11127,7 +11186,7 @@ def build_sidebar(user: User | None = None):
             for key in keys:
                 if key == "dashboard" and not user_can_view_dashboard(user):
                     continue
-                access_key = "pos" if key == "food_pos" else key
+                access_key = "inventory" if key == "warehouse" else "pos" if key == "food_pos" else key
                 if allowed_keys and access_key not in allowed_keys:
                     continue
                 if key in SIDEBAR_LINK_LABELS:
@@ -18797,6 +18856,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         inventory_repaired = reclassify_inventory_catalog(g.db) or inventory_repaired
         inventory_repaired = restructure_voltic_shared_stock(g.db) or inventory_repaired
         inventory_repaired = link_bread_stock_to_food_pos(g.db) or inventory_repaired
+        inventory_repaired = assign_default_warehouse_locations(g.db) or inventory_repaired
         if inventory_repaired:
             g.db.commit()
         editing_id = normalize_text(request.args.get("edit"))
@@ -18839,6 +18899,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 product.business_area_id = normalize_text(request.form.get("business_area_id"))
                 product.category = normalize_text(request.form.get("category"))
                 product.item_type = normalized_product_item_type(request.form.get("item_type"), True)
+                product.stock_location = normalize_text(request.form.get("stock_location")) or default_warehouse_location(product)
+                product.shelf_location = normalize_text(request.form.get("shelf_location")).upper()
                 entered_quantity = parse_amount(request.form.get("quantity_on_hand"))
                 received_bags = max(parse_amount(request.form.get("received_bags")), 0)
                 if not product_uses_shared_stock(product):
@@ -18885,6 +18947,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         area=normalize_text(request.args.get("area")),
                         category=normalize_text(request.args.get("category")),
                         expiry=normalize_text(request.args.get("expiry")),
+                        location=normalize_text(request.args.get("location")),
                     )
                 )
             except ValueError as error:
@@ -18901,11 +18964,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         area_filter = normalize_text(request.args.get("area"))
         category_filter = normalize_text(request.args.get("category"))
         expiry_filter = normalize_text(request.args.get("expiry")).lower()
+        location_filter = normalize_text(request.args.get("location"))
         query = select(Product)
         if area_filter:
             query = query.where(Product.business_area_id == area_filter)
         if category_filter:
             query = query.where(Product.category == category_filter)
+        if location_filter:
+            query = query.where(Product.stock_location == location_filter)
         if q:
             like_value = f"%{q}%"
             query = query.where(
@@ -18963,6 +19029,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             area_filter=area_filter,
             category_filter=category_filter,
             expiry_filter=expiry_filter,
+            location_filter=location_filter,
+            warehouse_location_options=WAREHOUSE_LOCATION_OPTIONS,
+            warehouse_location_labels=WAREHOUSE_LOCATION_LABELS,
             low_stock_count=low_stock_count,
             active_count=active_count,
             service_count=service_count,
@@ -18974,6 +19043,107 @@ def create_app(config: AppConfig | None = None) -> Flask:
             product_tracks_inventory=product_tracks_inventory,
             format_product_stock_badge=format_product_stock_badge,
             product_expiry_status=product_expiry_status,
+        )
+
+    @app.route("/app/inventory/warehouse", methods=["GET", "POST"])
+    @access_required("inventory")
+    def warehouse_page():
+        """Manage where physical stock is kept without changing its area or value."""
+        if assign_default_warehouse_locations(g.db):
+            g.db.commit()
+
+        selected_id = normalize_text(request.values.get("product_id") or request.args.get("edit"))
+        selected_product = find_inventory_product(g.db, selected_id) if selected_id else None
+        if selected_product and not product_tracks_inventory(selected_product):
+            selected_product = None
+
+        if request.method == "POST":
+            if not user_can_adjust_stock_downward(g.current_user):
+                flash("Only a manager or controls role can place or move inventory stock.", "warning")
+                return redirect(url_for("warehouse_page"))
+            if not selected_product:
+                flash("Select a tracked stock item before saving its location.", "error")
+            else:
+                location = normalize_text(request.form.get("stock_location"))
+                shelf = normalize_text(request.form.get("shelf_location")).upper()
+                placement_note = normalize_text(request.form.get("placement_note"))
+                valid_locations = {value for value, _label in WAREHOUSE_LOCATION_OPTIONS}
+                if location not in valid_locations:
+                    flash("Choose a valid stock location.", "error")
+                else:
+                    source_product = stock_source_product(g.db, selected_product) or selected_product
+                    previous_location = normalize_text(source_product.stock_location)
+                    previous_shelf = normalize_text(source_product.shelf_location)
+                    source_product.stock_location = location
+                    source_product.shelf_location = shelf
+                    source_product.updated_at = datetime.utcnow()
+                    sync_shared_stock_variant_quantities(g.db, source_product)
+                    audit(
+                        "warehouse",
+                        "Warehouse & Stock Locations",
+                        "move" if previous_location and previous_location != location else "place",
+                        source_product.name,
+                        source_product.id,
+                        (
+                            f"{WAREHOUSE_LOCATION_LABELS.get(previous_location, previous_location or 'Unassigned')}"
+                            f" ({previous_shelf or 'no bin'}) -> "
+                            f"{WAREHOUSE_LOCATION_LABELS.get(location, location)} ({shelf or 'no bin'}). {placement_note}"
+                        ).strip(),
+                    )
+                    g.db.commit()
+                    flash(f"{source_product.name} is now filed at {WAREHOUSE_LOCATION_LABELS[location]}{f' · {shelf}' if shelf else ''}.", "success")
+                    return redirect(url_for("warehouse_page", location=location))
+
+        search = normalize_text(request.args.get("q"))
+        location_filter = normalize_text(request.args.get("location"))
+        all_stock_products = [
+            product
+            for product in g.db.scalars(select(Product).where(Product.active.is_(True)).order_by(Product.name.asc())).all()
+            if product_tracks_inventory(product) and not product_uses_shared_stock(product)
+        ]
+        products = [
+            product
+            for product in all_stock_products
+            if (not location_filter or normalize_text(product.stock_location) == location_filter)
+            and (
+                not search
+                or search.lower() in " ".join(
+                    [
+                        normalize_text(product.name),
+                        normalize_text(product.sku),
+                        normalize_text(product.barcode),
+                        normalize_text(product.category),
+                        normalize_text(product.shelf_location),
+                    ]
+                ).lower()
+            )
+        ][:300]
+        location_summary = []
+        for location, label in WAREHOUSE_LOCATION_OPTIONS:
+            location_products = [product for product in all_stock_products if product.stock_location == location]
+            location_summary.append(
+                {
+                    "id": location,
+                    "label": label,
+                    "itemCount": len(location_products),
+                    "stockValue": round(sum(product.quantity_on_hand * product.cost_price for product in location_products), 2),
+                }
+            )
+        unassigned_count = sum(1 for product in all_stock_products if not normalize_text(product.stock_location))
+        return render_template(
+            "warehouse.html",
+            page_title="Warehouse & Stock Locations",
+            products=products,
+            selected_product=selected_product,
+            search=search,
+            location_filter=location_filter,
+            warehouse_location_options=WAREHOUSE_LOCATION_OPTIONS,
+            warehouse_location_labels=WAREHOUSE_LOCATION_LABELS,
+            location_summary=location_summary,
+            unassigned_count=unassigned_count,
+            business_area_short=BUSINESS_AREA_SHORT,
+            product_tracks_inventory=product_tracks_inventory,
+            format_product_stock_badge=format_product_stock_badge,
         )
 
     @app.route("/app/inventory/barcode", methods=["GET", "POST"])
@@ -19092,6 +19262,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 area=normalize_text(request.form.get("area")),
                 category=normalize_text(request.form.get("category")),
                 expiry=normalize_text(request.form.get("expiry")),
+                location=normalize_text(request.form.get("location")),
             )
         )
 
@@ -19102,11 +19273,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         area_filter = normalize_text(request.args.get("area"))
         category_filter = normalize_text(request.args.get("category"))
         expiry_filter = normalize_text(request.args.get("expiry")).lower()
+        location_filter = normalize_text(request.args.get("location"))
         query = select(Product)
         if area_filter:
             query = query.where(Product.business_area_id == area_filter)
         if category_filter:
             query = query.where(Product.category == category_filter)
+        if location_filter:
+            query = query.where(Product.stock_location == location_filter)
         if q:
             like_value = f"%{q}%"
             query = query.where(
