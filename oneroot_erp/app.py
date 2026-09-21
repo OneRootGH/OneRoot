@@ -881,6 +881,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 reclassify_inventory_catalog(bootstrap_session)
                 restructure_voltic_shared_stock(bootstrap_session)
                 deduplicate_kitchen_drink_catalog(bootstrap_session)
+                deduplicate_zero_stock_catalog_items(bootstrap_session)
                 link_bread_stock_to_food_pos(bootstrap_session)
                 assign_default_warehouse_locations(bootstrap_session)
                 normalize_product_catalog(bootstrap_session)
@@ -1405,6 +1406,55 @@ def deduplicate_kitchen_drink_catalog(db_session) -> bool:
             "Historical references are retained."
         )
         changed = True
+    return changed
+
+
+def deduplicate_zero_stock_catalog_items(db_session) -> bool:
+    """Retire a zero-stock duplicate when the same stocked item has stock.
+
+    This catches operational duplicates created from any source, not only the
+    Kitchen menu. Matching requires the same cleaned name, business area,
+    category, item type, and sales price, so different packs and price points
+    remain available for staff to review separately.
+    """
+    products = db_session.scalars(select(Product).where(Product.active.is_(True))).all()
+    groups: dict[tuple[str, str, str, str, float], list[Product]] = {}
+    for product in products:
+        if not product_tracks_inventory(product) or product_uses_shared_stock(product):
+            continue
+        key = (
+            compact_catalog_name_key(product.name),
+            normalize_text(product.business_area_id),
+            normalize_text(product.category).lower(),
+            normalized_product_item_type(product.item_type, product.track_inventory),
+            round(parse_amount(product.sales_price), 2),
+        )
+        if key[0]:
+            groups.setdefault(key, []).append(product)
+
+    changed = False
+    for duplicates in groups.values():
+        if len(duplicates) < 2:
+            continue
+        stocked = [product for product in duplicates if parse_amount(product.quantity_on_hand) != 0]
+        if not stocked:
+            continue
+        canonical = max(
+            stocked,
+            key=lambda product: (parse_amount(product.quantity_on_hand), parse_amount(product.cost_price), product.created_at or datetime.min),
+        )
+        for duplicate in duplicates:
+            if duplicate.id == canonical.id or parse_amount(duplicate.quantity_on_hand) != 0:
+                continue
+            duplicate.active = False
+            duplicate.stock_location = ""
+            duplicate.shelf_location = ""
+            duplicate.updated_at = datetime.utcnow()
+            duplicate.notes = (
+                f"Retired zero-stock duplicate of {canonical.name} ({canonical.sku}). "
+                "Historical references are retained."
+            )
+            changed = True
     return changed
 
 
