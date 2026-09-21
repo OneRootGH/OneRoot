@@ -1117,6 +1117,11 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
                 product_changed = True
         elif name_key in LEGACY_SHARED_OPERATION_SERVICE_NAMES:
             expected_category = "Gift Cards" if name_key == "gift card" else "Service Charges"
+            # These are counter services, not a separate OneRoot business area.
+            # Keeping them with Groceries & More gives staff one retail counter.
+            if normalize_text(product.business_area_id) != "groceries":
+                product.business_area_id = "groceries"
+                product_changed = True
             if normalize_text(product.category) != expected_category:
                 product.category = expected_category
                 product_changed = True
@@ -1221,12 +1226,22 @@ def reclassify_inventory_product(product: Product) -> bool:
     # service/menu lines for the Food POS.
     if area_id == LEGACY_KITCHEN_AREA_ID or source_key == KITCHEN_MENU_SOURCE_CATEGORY.lower():
         set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
-        if category_key == "drinks" or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS):
+        if name_key.startswith("combo") or "combo -" in name_key:
+            # A meal combo may include a drink, but it is prepared food rather
+            # than a bottled item kept in the counter stock balance.
+            set_value("category", "Meal Combos")
+            set_value("item_type", "service")
+            set_value("track_inventory", False)
+            set_value("stock_location", "")
+            set_value("shelf_location", "")
+        elif category_key in {"drinks", "drinks & refreshments"} or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS):
             set_value("category", "Drinks & Refreshments")
             set_value("item_type", "stock")
             set_value("track_inventory", True)
         else:
             set_value("item_type", "service")
+            set_value("stock_location", "")
+            set_value("shelf_location", "")
         return changed
 
     # Drinks belong to Cold Store & Kitchen even when historic imports placed
@@ -1239,6 +1254,20 @@ def reclassify_inventory_product(product: Product) -> bool:
     if is_packaged_drink:
         set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
         set_value("category", "Drinks & Refreshments")
+        set_value("item_type", "stock")
+        set_value("track_inventory", True)
+        return changed
+
+    # Retire the former combined Fresh Foods & Drinks retail area. Its frozen
+    # treats belong in the Cold Store freezer; its snack range belongs at the
+    # Groceries & More counter and shelves.
+    if area_id == "fresh-foods-drinks":
+        if category_key == "frozen treats" or "ice cream" in name_key:
+            set_value("business_area_id", COLD_STORE_KITCHEN_AREA_ID)
+            set_value("category", "Frozen Treats")
+        else:
+            set_value("business_area_id", "groceries")
+            set_value("category", "Snacks & Confectionery")
         set_value("item_type", "stock")
         set_value("track_inventory", True)
         return changed
@@ -1309,12 +1338,19 @@ def reclassify_inventory_catalog(db_session) -> bool:
     return changed
 
 
+def product_requires_physical_filing(product: Product) -> bool:
+    """Return whether an item needs a room/shelf location for staff to find it."""
+    return product_tracks_inventory(product) or product_matches_equipment_service(product)
+
+
 def default_warehouse_location(product: Product) -> str:
     """Choose a practical first location without changing a product's area."""
-    if not product_tracks_inventory(product):
-        return ""
     area_id = normalize_text(product.business_area_id)
     category = normalize_text(product.category).lower()
+    if product_matches_equipment_service(product):
+        return "warehouse-equipment-water"
+    if not product_requires_physical_filing(product):
+        return ""
     if area_id == "cold-store-groceries":
         if category in {"frozen foods & proteins", "frozen treats"}:
             return "cold-store-freezer"
@@ -1322,6 +1358,8 @@ def default_warehouse_location(product: Product) -> str:
             return "kitchen-store"
         return "cold-store-counter"
     if area_id == "groceries":
+        if category in {"snacks & confectionery", "bakery & bread"}:
+            return "groceries-counter"
         return "groceries-shelves"
     if area_id == "fresh-foods-drinks":
         return "cold-store-freezer" if category == "frozen treats" else "groceries-counter"
@@ -1697,7 +1735,7 @@ def restructure_voltic_shared_stock(db_session) -> bool:
         kitchen_updates = {
             "name": "Voltic Cool",
             "business_area_id": COLD_STORE_KITCHEN_AREA_ID,
-            "category": "Drinks",
+            "category": "Drinks & Refreshments",
             "item_type": "stock",
             "track_inventory": True,
             "quantity_known": True,
@@ -19113,7 +19151,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         all_stock_products = [
             product
             for product in g.db.scalars(select(Product).where(Product.active.is_(True)).order_by(Product.name.asc())).all()
-            if product_tracks_inventory(product) and not product_uses_shared_stock(product)
+            if product_requires_physical_filing(product) and not product_uses_shared_stock(product)
         ]
         products = [
             product
