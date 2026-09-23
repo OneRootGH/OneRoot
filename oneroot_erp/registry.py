@@ -454,6 +454,9 @@ ROLE_ACCESS_KEYS["cashier"].update({"daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["laundry-desk"].update({"daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["equipment-desk"].update({"daily_handovers", "customer_loyalty"})
 ROLE_ACCESS_KEYS["owner"].add("staff_documents")
+# Family education records are private and deliberately excluded from all
+# business finance, staff, and administrator roles.
+ROLE_ACCESS_KEYS["owner"].add("family_education_payments")
 ROLE_ACCESS_KEYS["admin"].add("staff_documents")
 ROLE_ACCESS_KEYS["operations"].add("staff_documents")
 ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
@@ -2305,6 +2308,52 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "family_education_payments": ModuleDefinition(
+        key="family_education_payments",
+        label="Children's School Payments",
+        legacy_collection="familyEducationPayments",
+        menu_group="Owner Private",
+        amount_field="amountPaid",
+        date_field="paymentDate",
+        title_field="childName",
+        status_field="paymentStatus",
+        fields=[
+            FieldDefinition("paymentDate", "Payment Date", "date", True),
+            FieldDefinition("childName", "Child's Name", "text", True),
+            FieldDefinition(
+                "paymentType",
+                "Payment Type",
+                "select",
+                True,
+                [
+                    ("School Transport Fare", "School Transport Fare"),
+                    ("Class / Tuition Fee", "Class / Tuition Fee"),
+                    ("School Materials / Activity", "School Materials / Activity"),
+                    ("Other School Payment", "Other School Payment"),
+                ],
+            ),
+            FieldDefinition("schoolName", "School / Class Provider", "text"),
+            FieldDefinition("classLevel", "Class / Level", "text"),
+            FieldDefinition("academicTerm", "Academic Term", "select", False, [
+                ("Term 1", "Term 1"),
+                ("Term 2", "Term 2"),
+                ("Term 3", "Term 3"),
+                ("Vacation / Extra Classes", "Vacation / Extra Classes"),
+                ("Other", "Other"),
+            ]),
+            FieldDefinition("periodCovered", "Month / Period Covered", "text", placeholder="Example: September 2026 or Term 1"),
+            FieldDefinition("amountPaid", "Amount Paid", "number", True),
+            FieldDefinition("paymentMethod", "Payment Method", "select", False, [(method, method) for method in PAYMENT_METHODS]),
+            FieldDefinition("receiptReference", "Receipt / Payment Reference", "text"),
+            FieldDefinition("nextDueDate", "Next Payment Due Date", "date"),
+            FieldDefinition("paymentStatus", "Payment Status", "select", True, [
+                ("Paid", "Paid"),
+                ("Part Paid", "Part Paid"),
+                ("Advance Paid", "Advance Paid"),
+            ]),
+            FieldDefinition("notes", "Notes", "textarea"),
+        ],
+    ),
 }
 
 LEGACY_TO_MODULE = {definition.legacy_collection: definition.key for definition in MODULES.values()}
@@ -2352,6 +2401,7 @@ MENU_GROUPS = [
         [
             ("Planning & Reporting", ["forecast_plans", "recurring_controls", "pos_closeouts", "loss_prevention_controls"]),
             ("Assets & Admin", ["asset_records", "audit", "users"]),
+            ("Owner Private Records", ["family_education_payments"]),
         ],
     ),
 ]

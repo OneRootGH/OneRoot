@@ -14,6 +14,8 @@
             Use this only for float top-ups, returns, reimbursements, and count adjustments. Record actual purchases under Expenses so they are not counted twice.
           {% elif definition.key == 'forecast_plans' %}
             Set revenue and spending plans here, including the monthly petty-cash float control limit. This replaces the old separate petty-cash budget tool.
+          {% elif definition.key == 'family_education_payments' %}
+            This is a private Owner-only record for children's school transport and class payments. It is kept separate from OneRoot business sales, expenses, cashbook, and profitability reports.
           {% else %}
             Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.
           {% endif %}
