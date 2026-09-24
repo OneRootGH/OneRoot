@@ -169,6 +169,11 @@
         <strong>{{ customer_credit_queue|selectattr('isDueToday')|list|length }}</strong>
         <small>Collections to follow up today</small>
       </article>
+      <article class="metric-card {% if customer_credit_queue|selectattr('needsPhone')|list|length %}warning{% endif %}">
+        <span>Need Mobile Number</span>
+        <strong>{{ customer_credit_queue|selectattr('needsPhone')|list|length }}</strong>
+        <small>Complete these accounts before the next credit sale</small>
+      </article>
     </section>
 
     <section class="card">
@@ -177,19 +182,26 @@
           <p class="eyebrow">Collection Queue</p>
           <h3>Customers With Credit Still Unpaid</h3>
         </div>
-        <p class="muted list-summary">Each customer appears once with their current combined balance.</p>
+        <p class="muted list-summary">Each customer appears once. Their mobile number is their credit account ID, so payments always reduce the correct balance.</p>
       </div>
       <ul class="stack-list compact reminder-stack">
         {% for customer in customer_credit_queue %}
           <li class="stack-list-item-row">
             <div class="stack-list-copy">
-              <strong>{{ customer.customerName }}</strong>
-              <span>{{ customer.customerPhone or 'Phone not recorded' }} · {% if customer.isOverdue %}Overdue{% elif customer.isDueToday %}Due today{% else %}Open credit{% endif %}{% if customer.dueDate %} · Due {{ customer.dueDate }}{% endif %}</span>
+              <strong>{{ customer.customerName }} <span class="status-chip {% if customer.needsPhone %}is-warning{% else %}is-highlight{% endif %}">{{ customer.accountLabel }}</span></strong>
+              <span>{% if customer.customerPhone %}{{ customer.customerPhone }}{% else %}Mobile number missing - update this account before another credit sale{% endif %} · {% if customer.isOverdue %}Overdue{% elif customer.isDueToday %}Due today{% else %}Open credit{% endif %}{% if customer.dueDate %} · Due {{ customer.dueDate }}{% endif %}</span>
+              <span>{{ customer.saleCount }} credit sale{% if customer.saleCount != 1 %}s{% endif %} · {{ customer.paymentCount }} payment{% if customer.paymentCount != 1 %}s{% endif %}{% if customer.lastActivityDate %} · Last activity {{ customer.lastActivityDate }}{% endif %}</span>
+              {% if customer.aliases|length > 1 %}<span>Names captured: {{ customer.aliases|join(' / ') }}. All are now grouped under this mobile number.</span>{% endif %}
               {% if customer.itemSummary %}<span>{{ customer.itemSummary }}</span>{% endif %}
               <span>Balance to collect: {{ customer.balance|currency }}</span>
             </div>
             <div class="stack-list-actions">
-              <a class="button primary button-small" href="{{ url_for('module_form', module_key='customer_credit_accounts', creditAccountId=customer.sourceRecordId) }}">Receive {{ customer.balance|currency }}</a>
+              {% if customer.needsPhone %}
+                <a class="button subtle button-small" href="{{ url_for('module_form', module_key='customer_credit_accounts', record_id=customer.sourceRecordId) }}">Add Mobile Number</a>
+              {% else %}
+                <a class="button primary button-small" href="{{ url_for('module_form', module_key='customer_credit_accounts', creditAccountId=customer.sourceRecordId) }}">Receive {{ customer.balance|currency }}</a>
+              {% endif %}
+              <a class="button subtle button-small" href="{{ url_for('module_list', module_key='customer_credit_accounts', q=customer.customerPhone or customer.customerName) }}">View Account</a>
             </div>
           </li>
         {% else %}

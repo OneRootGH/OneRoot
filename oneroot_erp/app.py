@@ -13487,10 +13487,90 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return
 
     def customer_credit_key(payload: dict[str, Any]) -> str:
-        phone = normalize_text(payload.get("customerPhone")).lower()
+        # A mobile number is the durable customer-credit identity. Normalising it
+        # joins 024..., +23324..., and 23324... versions of the same number.
+        phone = normalize_phone(payload.get("customerPhone"))
         if phone:
             return f"phone:{phone}"
         return f"name:{normalize_text(payload.get('customerName')).lower()}"
+
+    def build_credit_customer_directory(
+        db_session,
+        credit_records: list[ModuleRecord] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Build stable customer identities from saved credit activity."""
+        records = credit_records
+        if records is None:
+            records = db_session.scalars(
+                select(ModuleRecord).where(ModuleRecord.module_key == "customer_credit_accounts")
+            ).all()
+        profiles: dict[str, dict[str, Any]] = {}
+
+        def add_identity(name: Any, phone: Any, recorded_at: Any = None) -> None:
+            clean_phone = normalize_phone(phone)
+            clean_name = normalize_text(name)
+            if not clean_phone or not clean_name:
+                return
+            profile = profiles.setdefault(
+                clean_phone,
+                {"customerPhone": clean_phone, "nameCounts": defaultdict(int), "lastSeen": {}},
+            )
+            profile["nameCounts"][clean_name] += 1
+            seen_value = recorded_at or datetime.min
+            current_seen = profile["lastSeen"].get(clean_name, datetime.min)
+            if seen_value > current_seen:
+                profile["lastSeen"][clean_name] = seen_value
+
+        for credit_record in records:
+            payload = dict(credit_record.payload or {})
+            add_identity(
+                payload.get("customerName"),
+                payload.get("customerPhone"),
+                credit_record.updated_at or credit_record.created_at,
+            )
+
+        directory: list[dict[str, Any]] = []
+        for phone, profile in profiles.items():
+            names = list(profile["nameCounts"])
+            canonical_name = max(
+                names,
+                key=lambda name: (
+                    profile["nameCounts"][name],
+                    profile["lastSeen"].get(name, datetime.min),
+                ),
+            )
+            directory.append(
+                {
+                    "customerName": canonical_name,
+                    "customerPhone": phone,
+                    "accountLabel": f"CR-{phone[-4:]}",
+                    "aliases": sorted(names, key=str.lower),
+                    "display": f"{canonical_name} · {phone}",
+                }
+            )
+        return sorted(directory, key=lambda item: (item["customerName"].lower(), item["customerPhone"]))
+
+    def resolve_credit_customer_identity(
+        db_session,
+        customer_name: Any,
+        customer_phone: Any,
+        *,
+        credit_records: list[ModuleRecord] | None = None,
+    ) -> dict[str, str]:
+        """Return the saved name for a known phone and a normalised phone number."""
+        clean_name = normalize_text(customer_name)
+        clean_phone = normalize_phone(customer_phone)
+        if not clean_phone:
+            return {"customerName": clean_name, "customerPhone": ""}
+        directory = build_credit_customer_directory(db_session, credit_records)
+        saved_profile = next(
+            (profile for profile in directory if profile["customerPhone"] == clean_phone),
+            None,
+        )
+        return {
+            "customerName": saved_profile["customerName"] if saved_profile else clean_name,
+            "customerPhone": clean_phone,
+        }
 
     def customer_credit_rollup_key(db_session, payload: dict[str, Any]) -> str:
         """Use a direct source link where available, then safely repair name-only repayments."""
@@ -13638,6 +13718,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def build_customer_credit_collection_queue(db_session, records: list[ModuleRecord]) -> list[dict[str, Any]]:
         """Group credit activity by customer so staff collect one clear balance."""
         customers: dict[str, dict[str, Any]] = {}
+        customer_directory = {
+            item["customerPhone"]: item
+            for item in build_credit_customer_directory(db_session, records)
+        }
         for record in sorted(records, key=lambda item: (item.record_date or date.min, item.created_at, item.id)):
             payload = dict(record.payload or {})
             # Kitchen production is an internal cost transfer, not a customer debt
@@ -13648,24 +13732,38 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not customer_key:
                 continue
             customer_name = normalize_text(payload.get("customerName")) or "Customer"
-            customer_phone = normalize_text(payload.get("customerPhone"))
+            customer_phone = normalize_phone(payload.get("customerPhone"))
+            saved_profile = customer_directory.get(customer_phone) if customer_phone else None
+            canonical_name = saved_profile["customerName"] if saved_profile else customer_name
             row = customers.setdefault(
                 customer_key,
                 {
-                    "customerName": customer_name,
+                    "customerName": canonical_name,
                     "customerPhone": customer_phone,
                     "balance": 0.0,
                     "creditSales": [],
+                    "paymentCount": 0,
                     "itemSummaries": [],
                     "dueDates": [],
+                    "aliases": set(),
+                    "lastActivityDate": None,
                 },
             )
-            if customer_name != "Customer":
-                row["customerName"] = customer_name
+            if canonical_name != "Customer":
+                row["customerName"] = canonical_name
             if customer_phone:
                 row["customerPhone"] = customer_phone
+            if customer_name != "Customer":
+                row["aliases"].add(customer_name)
+            if saved_profile:
+                row["aliases"].update(saved_profile["aliases"])
+            activity_date = record.record_date or (record.updated_at.date() if record.updated_at else None)
+            if activity_date and (not row["lastActivityDate"] or activity_date > row["lastActivityDate"]):
+                row["lastActivityDate"] = activity_date
             row["balance"] = round(row["balance"] + customer_credit_entry_effect(payload), 2)
             if normalize_text(payload.get("transactionType")) != "Credit Sale":
+                if normalize_text(payload.get("transactionType")) == "Payment Received":
+                    row["paymentCount"] += 1
                 continue
             row["creditSales"].append(record)
             item_summary = normalize_text(payload.get("itemSummary"))
@@ -13687,10 +13785,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 {
                     "customerName": row["customerName"],
                     "customerPhone": row["customerPhone"],
+                    "accountLabel": f"CR-{row['customerPhone'][-4:]}" if row["customerPhone"] else "Needs Phone",
                     "balance": balance,
                     "dueDate": due_date.isoformat() if due_date else "",
                     "isOverdue": bool(due_date and due_date < today),
                     "isDueToday": bool(due_date and due_date == today),
+                    "saleCount": len(row["creditSales"]),
+                    "paymentCount": row["paymentCount"],
+                    "lastActivityDate": row["lastActivityDate"].isoformat() if row["lastActivityDate"] else "",
+                    "aliases": sorted(row["aliases"], key=str.lower),
+                    "needsPhone": not bool(row["customerPhone"]),
                     "itemSummary": "; ".join(item_summaries[:2])
                     + (f" + {len(item_summaries) - 2} more" if len(item_summaries) > 2 else ""),
                     # Any sale for this customer can receive a payment; the
@@ -18356,6 +18460,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             elif module_key == "customer_credit_accounts":
                 payload["amount"] = round(abs(parse_amount(payload.get("amount"))), 2)
                 payload["outstandingBalance"] = 0.0
+                # Use the stored customer spelling whenever the mobile number is
+                # known, so manual collections do not create another debtor row.
+                resolved_customer = resolve_credit_customer_identity(
+                    g.db,
+                    payload.get("customerName"),
+                    payload.get("customerPhone"),
+                )
+                payload["customerName"] = resolved_customer["customerName"]
+                payload["customerPhone"] = resolved_customer["customerPhone"]
             elif module_key == "mobile_money_reconciliations":
                 payload["businessAreaId"] = "mobile-money"
                 provider_value = normalize_text(payload.get("provider")) or "MTN Mobile Money"
@@ -20520,6 +20633,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             category = normalize_text(product.category)
             if category:
                 pos_category_counts[category] += 1
+        credit_customer_directory = build_credit_customer_directory(g.db)
         return render_template(
             "pos.html",
             page_title=pos_desk_label(pos_desk),
@@ -20549,6 +20663,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             } if kitchen_batch else None,
             can_void_pos_orders=user_can_void_pos_orders(g.current_user),
             can_view_desk_profit=user_is_owner(g.current_user),
+            credit_customer_directory=credit_customer_directory,
         )
 
     @app.route("/app/pos/<order_id>/receipt")
@@ -20818,8 +20933,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         if not items:
             return jsonify({"ok": False, "error": "Add at least one item."}), 400
-        if payment_method.lower() == "credit" and not normalize_text(payload.get("customerName")):
+        requested_customer_name = normalize_text(payload.get("customerName"))
+        requested_customer_phone = normalize_phone(payload.get("customerPhone"))
+        if payment_method.lower() == "credit" and not requested_customer_name:
             return jsonify({"ok": False, "error": "Enter the customer name before saving a credit sale."}), 400
+        if payment_method.lower() == "credit" and not requested_customer_phone:
+            return jsonify({"ok": False, "error": "Enter the customer's mobile number before saving credit. The number keeps their account and payments together."}), 400
+        if payment_method.lower() == "credit":
+            resolved_customer = resolve_credit_customer_identity(
+                g.db,
+                requested_customer_name,
+                requested_customer_phone,
+            )
+            requested_customer_name = resolved_customer["customerName"]
+            requested_customer_phone = resolved_customer["customerPhone"]
 
         product_ids = [normalize_text(item.get("productId")) for item in items if normalize_text(item.get("productId"))]
         products = {
@@ -20880,8 +21007,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             business_area_ids=[],
             primary_business_area_id="",
             payment_method=payment_method,
-            customer_name=normalize_text(payload.get("customerName")),
-            customer_phone=normalize_text(payload.get("customerPhone")),
+            customer_name=requested_customer_name,
+            customer_phone=requested_customer_phone,
             notes=normalize_text(payload.get("notes")),
             created_at=datetime.utcnow(),
             updated_at=datetime.utcnow(),

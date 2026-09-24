@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-  <section class="card pos-workbench{% if kitchen_issue_mode %} kitchen-stock-issue-workbench{% endif %}" data-pos-desk="{{ pos_desk }}" data-kitchen-issue-mode="{{ 'yes' if kitchen_issue_mode else 'no' }}" data-kitchen-batch-id="{{ kitchen_batch.id if kitchen_batch else '' }}" data-can-void-orders="{{ 'yes' if can_void_pos_orders else 'no' }}">
+  <section class="card pos-workbench{% if kitchen_issue_mode %} kitchen-stock-issue-workbench{% endif %}" data-pos-desk="{{ pos_desk }}" data-kitchen-issue-mode="{{ 'yes' if kitchen_issue_mode else 'no' }}" data-kitchen-batch-id="{{ kitchen_batch.id if kitchen_batch else '' }}" data-can-void-orders="{{ 'yes' if can_void_pos_orders else 'no' }}" data-credit-customer-directory='{{ credit_customer_directory|tojson }}'>
     <div class="pos-workbench-bar">
       <div class="pos-workbench-title">
         <h3>{% if kitchen_issue_mode %}Kitchen Stock Issue{% elif food_pos_mode %}Cold Store & Kitchen Counter POS{% else %}Groceries & More Counter POS{% endif %}</h3>
@@ -223,8 +223,14 @@
         <details class="muted-box pos-customer-box pos-customer-box-compact" hidden>
           <summary>Customer details for credit sale</summary>
           <div class="form-grid single">
-            <label><span>Customer Name</span><input type="text" id="pos-customer-name" placeholder="Required for credit sale" autocomplete="name"></label>
-            <label><span>Customer Phone</span><input type="tel" id="pos-customer-phone" placeholder="Recommended to link the credit account" autocomplete="tel"></label>
+            <label><span>Customer Name</span><input type="text" id="pos-customer-name" list="pos-credit-customer-options" placeholder="Search existing customer or enter full name" autocomplete="name"></label>
+            <datalist id="pos-credit-customer-options">
+              {% for customer in credit_customer_directory %}
+                <option value="{{ customer.display }}">{{ customer.accountLabel }}</option>
+              {% endfor %}
+            </datalist>
+            <label><span>Mobile Number</span><input type="tel" id="pos-customer-phone" placeholder="Required for credit account" autocomplete="tel"></label>
+            <p class="helper-copy">For credit, the mobile number is the customer account ID. Select a saved customer to fill their number automatically, or record a new number once so every future payment stays on the same balance.</p>
             <label><span>Notes</span><textarea id="pos-notes" rows="3" placeholder="Optional credit note"></textarea></label>
           </div>
         </details>{% endif %}

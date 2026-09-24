@@ -329,6 +329,8 @@
             <small class="muted form-helper">Use the receipt number, MoMo reference, bank alert, or invoice number if you have one.</small>
           {% elif definition.key == 'customer_credit_accounts' and field.name == 'transactionType' %}
             <small class="muted form-helper">Use Credit Sale when the customer takes goods or receives a service without paying. For a repayment, use Receive Payment on the original credit sale so it reduces the correct balance. A recorded payment is shown in Cashbook and the POS closeout as a collection, not another sale.</small>
+          {% elif definition.key == 'customer_credit_accounts' and field.name == 'customerPhone' %}
+            <small class="muted form-helper">Use the customer's mobile number as their credit account ID. Enter the same number for every sale and payment so name spelling differences never split the balance.</small>
           {% elif definition.key == 'customer_credit_accounts' and field.name == 'itemSummary' %}
             <small class="muted form-helper">Describe the items or service supplied on credit. POS credit sales fill this automatically with the exact cart items.</small>
           {% elif definition.key == 'customer_credit_accounts' and field.name == 'outstandingBalance' %}

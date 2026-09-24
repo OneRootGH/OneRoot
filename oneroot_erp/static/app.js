@@ -67,6 +67,13 @@
   const kitchenBatchId = document.querySelector("[data-kitchen-batch-id]")?.dataset.kitchenBatchId || "";
   const kitchenMealInput = document.getElementById("pos-kitchen-meal-id");
   const canVoidOrders = document.querySelector("[data-can-void-orders]")?.dataset.canVoidOrders === "yes";
+  const posWorkbench = document.querySelector(".pos-workbench");
+  let creditCustomerDirectory = [];
+  try {
+    creditCustomerDirectory = JSON.parse(posWorkbench?.dataset.creditCustomerDirectory || "[]");
+  } catch (_error) {
+    creditCustomerDirectory = [];
+  }
 
   if (!searchInput || !resultsContainer || !cartContainer || !saveButton) {
     return;
@@ -144,20 +151,56 @@
     return (paymentMethodInput?.value || "").trim().toLowerCase() === "credit";
   }
 
+  function normalizeCreditPhone(value) {
+    const digits = String(value || "").replace(/\D/g, "");
+    return digits.startsWith("233") && digits.length === 12 ? `0${digits.slice(3)}` : digits;
+  }
+
+  function matchSavedCreditCustomer() {
+    if (!isCreditSale()) {
+      return;
+    }
+    const enteredName = (customerNameInput?.value || "").trim().toLowerCase();
+    const enteredPhone = normalizeCreditPhone(customerPhoneInput?.value);
+    const byPhone = enteredPhone
+      ? creditCustomerDirectory.find((customer) => normalizeCreditPhone(customer.customerPhone) === enteredPhone)
+      : null;
+    const matchingNames = enteredName
+      ? creditCustomerDirectory.filter((customer) => (
+        String(customer.display || "").trim().toLowerCase() === enteredName
+        || String(customer.customerName || "").trim().toLowerCase() === enteredName
+      ))
+      : [];
+    const matchedCustomer = byPhone || (matchingNames.length === 1 ? matchingNames[0] : null);
+    if (!matchedCustomer) {
+      return;
+    }
+    if (customerNameInput) {
+      customerNameInput.value = matchedCustomer.customerName || customerNameInput.value;
+    }
+    if (customerPhoneInput) {
+      customerPhoneInput.value = normalizeCreditPhone(matchedCustomer.customerPhone) || customerPhoneInput.value;
+    }
+  }
+
   function syncCreditCustomerFields() {
     const requiresCustomer = isCreditSale();
     if (customerNameInput) {
       customerNameInput.required = requiresCustomer;
-      customerNameInput.placeholder = requiresCustomer ? "Required for credit sale" : "Only if needed";
+      customerNameInput.placeholder = requiresCustomer ? "Search saved customer or enter full name" : "Only if needed";
     }
     if (customerPhoneInput) {
-      customerPhoneInput.placeholder = requiresCustomer ? "Recommended to link the credit account" : "Optional contact";
+      customerPhoneInput.required = requiresCustomer;
+      customerPhoneInput.placeholder = requiresCustomer ? "Required for credit account" : "Optional contact";
     }
     if (requiresCustomer && customerBox) {
       customerBox.open = true;
     }
     if (customerBox) {
       customerBox.hidden = !requiresCustomer;
+    }
+    if (requiresCustomer) {
+      matchSavedCreditCustomer();
     }
   }
 
@@ -829,6 +872,11 @@
     syncCreditCustomerFields();
   });
 
+  customerNameInput?.addEventListener("change", matchSavedCreditCustomer);
+  customerNameInput?.addEventListener("blur", matchSavedCreditCustomer);
+  customerPhoneInput?.addEventListener("change", matchSavedCreditCustomer);
+  customerPhoneInput?.addEventListener("blur", matchSavedCreditCustomer);
+
   paymentButtonNodes.forEach((button) => {
     button.addEventListener("click", () => {
       const paymentMethod = button.dataset.paymentMethod || "Cash";
@@ -920,6 +968,14 @@
       }
       setStatus("Enter the customer name before saving a credit sale.", "error");
       customerNameInput?.focus();
+      return;
+    }
+    if (isCreditSale() && !normalizeCreditPhone(customerPhoneInput?.value)) {
+      if (customerBox) {
+        customerBox.open = true;
+      }
+      setStatus("Enter the customer's mobile number. It keeps their credit balance and later payments together.", "error");
+      customerPhoneInput?.focus();
       return;
     }
 
