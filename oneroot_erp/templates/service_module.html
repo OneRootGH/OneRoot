@@ -322,7 +322,11 @@
                 <td>{{ row.status }}</td>
                 <td>
                   <div class="row-actions">
-                    <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                    {% if row.amountPaid > 0 and not can_edit_paid_equipment_rentals %}
+                      <span class="table-secondary">Payment recorded · Owner edits</span>
+                    {% else %}
+                      <a class="table-link" href="{{ url_for('module_form', module_key=definition.key, record_id=row.id) }}">Edit</a>
+                    {% endif %}
                     {% if row.balance > 0 %}
                       <a class="table-link table-link-primary" href="{{ url_for('service_payment_form', module_key=definition.key, record_id=row.id, amount=row.balance) }}">Collect {{ row.balance|currency }}</a>
                     {% else %}
@@ -331,14 +335,16 @@
                     {% if row.linkedOnlineOrderId %}
                       <a class="table-link" href="{{ url_for('online_orders_desk', order_id=row.linkedOnlineOrderId) }}">Order</a>
                     {% endif %}
-                    <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
-                      <input type="hidden" name="q" value="{{ search }}">
-                      <input type="hidden" name="status" value="{{ status_filter }}">
-                      <input type="hidden" name="category" value="{{ category_filter }}">
-                      <input type="hidden" name="date_from" value="{{ date_from }}">
-                      <input type="hidden" name="date_to" value="{{ date_to }}">
-                      <button class="text-button danger-text" type="submit">Delete</button>
-                    </form>
+                    {% if not (row.amountPaid > 0 and not can_edit_paid_equipment_rentals) %}
+                      <form method="post" action="{{ url_for('module_delete', module_key=definition.key, record_id=row.id) }}" onsubmit="return confirm('Delete this {{ definition.label|lower }} record?');">
+                        <input type="hidden" name="q" value="{{ search }}">
+                        <input type="hidden" name="status" value="{{ status_filter }}">
+                        <input type="hidden" name="category" value="{{ category_filter }}">
+                        <input type="hidden" name="date_from" value="{{ date_from }}">
+                        <input type="hidden" name="date_to" value="{{ date_to }}">
+                        <button class="text-button danger-text" type="submit">Delete</button>
+                      </form>
+                    {% endif %}
                   </div>
                 </td>
               </tr>

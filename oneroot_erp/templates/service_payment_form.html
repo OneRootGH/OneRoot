@@ -263,9 +263,13 @@
               <td>{{ payment.paymentReference or '—' }}</td>
               <td>{{ payment.profitAmount|currency }}</td>
               <td>
-                <form method="post" action="{{ url_for('service_payment_delete', module_key=definition.key, record_id=record.id, payment_id=payment.id) }}" onsubmit="return confirm('Delete this payment entry? This will also re-sync Daily Sales.');">
-                  <button class="text-button danger-text" type="submit">Delete</button>
-                </form>
+                {% if definition.key != 'equipment_rental_bookings' or can_approve_morning_return %}
+                  <form method="post" action="{{ url_for('service_payment_delete', module_key=definition.key, record_id=record.id, payment_id=payment.id) }}" onsubmit="return confirm('Delete this payment entry? This will also re-sync Daily Sales.');">
+                    <button class="text-button danger-text" type="submit">Delete</button>
+                  </form>
+                {% else %}
+                  <span class="table-secondary">Owner only</span>
+                {% endif %}
               </td>
             </tr>
           {% else %}

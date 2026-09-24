@@ -5502,6 +5502,17 @@ def user_is_owner(user: User | None) -> bool:
     return normalize_role_key(getattr(user, "role", "viewer")) == "owner"
 
 
+def equipment_rental_has_recorded_payment(record: ModuleRecord | None) -> bool:
+    """A rental with money collected is a controlled record, not a staff-editable draft."""
+    if not record or record.module_key != "equipment_rental_bookings":
+        return False
+    payload = record.payload or {}
+    if parse_amount(payload.get("amountPaid")) > 0:
+        return True
+    entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY)
+    return isinstance(entries, list) and any(parse_amount(entry.get("amountPaid")) > 0 for entry in entries if isinstance(entry, dict))
+
+
 def user_can_override_pos_price(user: User | None) -> bool:
     return normalize_role_key(getattr(user, "role", "viewer")) in {"owner", "admin", "operations"}
 
@@ -17079,6 +17090,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 ),
                 category_filter_label=module_filter_category_label(definition),
                 module_quick_actions=module_quick_actions,
+                can_edit_paid_equipment_rentals=user_is_owner(g.current_user),
             )
 
         area_filter = normalize_text(request.args.get("area"))
@@ -17542,6 +17554,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         record = g.db.get(ModuleRecord, record_id) if record_id else None
         if record and record.module_key != module_key:
             return redirect(url_for("module_list", module_key=module_key))
+        if record and equipment_rental_has_recorded_payment(record) and not user_is_owner(g.current_user):
+            flash("This equipment rental has a recorded payment. Only the Owner can edit the rental details after collection.", "warning")
+            return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
         if record and module_key == "cashbook_entries" and normalize_text((record.payload or {}).get("sourceType")) == "expense-payment":
             linked_expense_id = normalize_text((record.payload or {}).get("linkedExpenseId"))
             flash("This Cashbook movement is generated from Expenses. Edit the matching expense so the books stay aligned.", "warning")
@@ -18484,6 +18499,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             flash("That service request could not be found.", "error")
             return redirect(url_for("module_list", module_key=module_key))
 
+        if module_key == "equipment_rental_bookings" and not user_is_owner(g.current_user):
+            flash("Only the Owner can reverse or remove a recorded equipment-rental payment.", "error")
+            return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
+
         payload = dict(record.payload or {})
         entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY) if isinstance(payload.get(SERVICE_PAYMENT_ENTRIES_KEY), list) else []
         if not entries and normalize_text(payment_id) == "legacy" and parse_amount(payload.get("amountPaid")) > 0:
@@ -18546,6 +18565,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         record = g.db.get(ModuleRecord, record_id)
         if not record or record.module_key != module_key:
             flash("That record could not be found.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
+        if equipment_rental_has_recorded_payment(record) and not user_is_owner(g.current_user):
+            flash("This equipment rental has recorded payments. Only the Owner can delete or amend it.", "error")
             return redirect(url_for("module_list", module_key=module_key))
 
         deleted_credit_key = customer_credit_rollup_key(g.db, record.payload or {}) if module_key == "customer_credit_accounts" else ""
