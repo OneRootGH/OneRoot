@@ -33,6 +33,89 @@
     </article>
   </section>
 
+  <section class="split-grid inventory-demand-section">
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Ordering Guidance</p>
+          <h3>Best Sellers To Keep In Stock</h3>
+          <p class="helper-copy">Based on saved POS product lines from the last 30 days. Credit sales are included because the physical stock has left the business.</p>
+        </div>
+        <div class="status-stack">
+          <span class="status-chip is-highlight">{{ demand_fast_count }} fast</span>
+          <span class="status-chip">{{ demand_steady_count }} steady</span>
+        </div>
+      </div>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Item</th>
+              <th>Units Sold</th>
+              <th>In Stock</th>
+              <th>Cover</th>
+              <th>Order Guide</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for item in demand_fast_rows %}
+              <tr>
+                <td>
+                  <strong>{{ item.name }}</strong>
+                  <span class="table-secondary">{{ item.areaLabel }} · {{ item.category }} · {{ item.orderCount }} sale{% if item.orderCount != 1 %}s{% endif %}</span>
+                </td>
+                <td>
+                  <strong>{{ item.unitsSold|round(2) }}</strong>
+                  <span class="table-secondary">{{ item.revenue|currency }}</span>
+                </td>
+                <td>{{ item.quantityDisplay }}</td>
+                <td>{{ item.daysCover|round(1) if item.daysCover is not none else '—' }}{% if item.daysCover is not none %} days{% endif %}</td>
+                <td>
+                  <span class="status-chip {% if item.movementTone == 'highlight' %}is-highlight{% endif %}">{{ item.movement }}</span>
+                  <span class="table-secondary">{{ item.orderAction }}</span>
+                  <a class="table-link" href="{{ url_for('inventory', edit=item.productId, q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Review item</a>
+                </td>
+              </tr>
+            {% else %}
+              <tr><td colspan="5">No recent stock sales match this view yet. Save sales in POS to build the ordering guide.</td></tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </article>
+
+    <article class="card">
+      <div class="card-header">
+        <div>
+          <p class="eyebrow">Stock To Review</p>
+          <h3>Slow Or No-Movement Items</h3>
+          <p class="helper-copy">Do not tie up cash by reordering these items until their price, display, or customer demand has been reviewed.</p>
+        </div>
+        <div class="status-stack">
+          <span class="status-chip is-warning">{{ demand_slow_count }} slow</span>
+          <span class="status-chip is-danger">{{ demand_no_sale_count }} no recent sale</span>
+        </div>
+      </div>
+      <ul class="stack-list compact">
+        {% for item in demand_watch_rows %}
+          <li>
+            <div class="stack-list-item-row">
+              <div class="stack-list-copy">
+                <strong>{{ item.name }}</strong>
+                <span>{{ item.areaLabel }} · {{ item.category }} · {{ item.quantityDisplay }}</span>
+              </div>
+              <span class="status-chip {% if item.movementTone == 'danger' %}is-danger{% else %}is-warning{% endif %}">{{ item.movement }}</span>
+            </div>
+            <span class="table-secondary">{% if item.lastSaleDate %}Last sold {{ item.lastSaleDate }}{% if item.daysSinceSale is not none %} · {{ item.daysSinceSale }} days ago{% endif %}.{% else %}No saved POS sale recorded yet.{% endif %} {{ item.orderAction }}</span>
+            <a class="table-link" href="{{ url_for('inventory', edit=item.productId, q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Review item</a>
+          </li>
+        {% else %}
+          <li><strong>No slow stock in this view.</strong><span>Items with remaining stock and weak movement will appear here.</span></li>
+        {% endfor %}
+      </ul>
+    </article>
+  </section>
+
   <section class="split-grid">
     <article class="card">
       <div class="card-header">

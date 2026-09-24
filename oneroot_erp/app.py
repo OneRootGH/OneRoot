@@ -2781,6 +2781,149 @@ def build_inventory_risk_rows(products: list[Product], *, area_filter: str = "",
     return rows
 
 
+def build_inventory_demand_rows(
+    db_session,
+    products: list[Product],
+    *,
+    period_days: int = 30,
+    today_value: date | None = None,
+) -> list[dict[str, Any]]:
+    """Turn saved product sale lines into a practical stock-ordering guide."""
+    today_key = today_value or date.today()
+    period_days = max(int(period_days or 30), 1)
+    period_start = today_key - timedelta(days=period_days - 1)
+    physical_products = [
+        product
+        for product in products
+        if product.active and product_tracks_inventory(product) and not product_uses_shared_stock(product)
+    ]
+    stats: dict[str, dict[str, Any]] = {
+        product.id: {"unitsSold": 0.0, "revenue": 0.0, "orderIds": set(), "lastSaleDate": None}
+        for product in physical_products
+    }
+    if not stats:
+        return []
+
+    # A sales pack may consume the balance of another product (for example,
+    # Voltic bags consume sachet-water stock). Attribute movement to the item
+    # that physically needs replenishing, not to the sellable pack option.
+    sale_lines = db_session.execute(
+        select(PosOrderLine, PosOrder.order_date)
+        .join(PosOrder, PosOrderLine.order_id == PosOrder.id)
+        .where(
+            PosOrder.order_date <= today_key,
+            or_(
+                PosOrderLine.product_id.in_(list(stats)),
+                PosOrderLine.stock_source_product_id.in_(list(stats)),
+            ),
+        )
+    ).all()
+    for line, sale_date in sale_lines:
+        source_id = normalize_text(line.stock_source_product_id) or normalize_text(line.product_id)
+        if source_id not in stats or not sale_date:
+            continue
+        quantity = max(parse_amount(line.quantity), 0.0)
+        if quantity <= 0:
+            continue
+        units_per_sale = max(parse_amount(line.stock_units_per_sale), 1.0)
+        physical_units = round(quantity * units_per_sale, 4) if normalize_text(line.stock_source_product_id) else quantity
+        line_stats = stats[source_id]
+        if not line_stats["lastSaleDate"] or sale_date > line_stats["lastSaleDate"]:
+            line_stats["lastSaleDate"] = sale_date
+        if sale_date >= period_start:
+            line_stats["unitsSold"] = round(line_stats["unitsSold"] + physical_units, 4)
+            line_stats["revenue"] = round(line_stats["revenue"] + max(parse_amount(line.total_amount), 0.0), 2)
+            line_stats["orderIds"].add(line.order_id)
+
+    sold_quantities = sorted(stat["unitsSold"] for stat in stats.values() if stat["unitsSold"] > 0)
+    lower_quartile = sold_quantities[max(0, (len(sold_quantities) + 3) // 4 - 1)] if sold_quantities else 0.0
+    upper_quartile = sold_quantities[max(0, (len(sold_quantities) * 3 + 3) // 4 - 1)] if sold_quantities else 0.0
+    fast_threshold = max(3.0, upper_quartile)
+    slow_threshold = max(1.0, lower_quartile)
+
+    rows: list[dict[str, Any]] = []
+    for product in physical_products:
+        product_stats = stats[product.id]
+        units_sold = round(product_stats["unitsSold"], 2)
+        average_daily_units = round(units_sold / period_days, 3)
+        last_sale_date = product_stats["lastSaleDate"]
+        days_since_sale = (today_key - last_sale_date).days if last_sale_date else None
+        quantity_on_hand = max(parse_amount(product.quantity_on_hand), 0.0)
+        minimum_stock = max(product_min_stock_level(product), 0)
+        days_cover = round(quantity_on_hand / average_daily_units, 1) if average_daily_units > 0 else None
+        target_stock = max(minimum_stock, int(average_daily_units * 14 + 0.9999)) if average_daily_units > 0 else minimum_stock
+        reorder_units = max(int(target_stock - quantity_on_hand + 0.9999), 0)
+        expiry_meta = product_expiry_status(product, today_key)
+        stock_meta = product_stock_risk_status(product)
+
+        if units_sold <= 0:
+            movement = "No Recent Sales" if last_sale_date else "No Sales Recorded"
+            movement_tone = "danger" if quantity_on_hand > 0 else "warning"
+            movement_rank = 4
+        elif units_sold >= fast_threshold:
+            movement = "Fast Moving"
+            movement_tone = "highlight"
+            movement_rank = 1
+        elif units_sold <= slow_threshold:
+            movement = "Slow Moving"
+            movement_tone = "warning"
+            movement_rank = 3
+        else:
+            movement = "Steady Moving"
+            movement_tone = "ok"
+            movement_rank = 2
+
+        if expiry_meta["isExpired"]:
+            order_action = "Remove from sale and discard. Do not reorder this expired stock."
+        elif expiry_meta["isExpiringSoon"]:
+            order_action = "Sell through or markdown before expiry; do not reorder yet."
+        elif movement in {"No Recent Sales", "No Sales Recorded"}:
+            order_action = "Do not reorder. Review price, display, and demand before buying more."
+        elif stock_meta["isStockOut"]:
+            order_action = f"Order about {max(target_stock, 1)} units now to restore 14-day cover."
+        elif reorder_units > 0:
+            order_action = f"Order about {reorder_units} units to maintain 14-day cover."
+        elif days_cover is not None:
+            order_action = f"Stock covers about {days_cover:g} days at current sales speed."
+        else:
+            order_action = "Keep monitoring this item."
+
+        rows.append(
+            {
+                "productId": product.id,
+                "name": normalize_text(product.name) or "Unnamed Item",
+                "areaLabel": BUSINESS_AREA_SHORT.get(
+                    normalize_text(product.business_area_id),
+                    BUSINESS_AREA_LABELS.get(normalize_text(product.business_area_id), "Shared Operations"),
+                ),
+                "category": normalize_text(product.category) or "Uncategorized",
+                "unitsSold": units_sold,
+                "revenue": round(product_stats["revenue"], 2),
+                "orderCount": len(product_stats["orderIds"]),
+                "lastSaleDate": last_sale_date.isoformat() if last_sale_date else "",
+                "daysSinceSale": days_since_sale,
+                "quantityOnHand": round(quantity_on_hand, 2),
+                "quantityDisplay": format_product_stock_badge(product),
+                "daysCover": days_cover,
+                "reorderUnits": reorder_units,
+                "movement": movement,
+                "movementTone": movement_tone,
+                "movementRank": movement_rank,
+                "orderAction": order_action,
+            }
+        )
+
+    rows.sort(
+        key=lambda item: (
+            item["movementRank"],
+            -item["unitsSold"],
+            -(item["quantityOnHand"] * 0.01),
+            item["name"],
+        )
+    )
+    return rows
+
+
 def normalize_product_record(product: Product) -> bool:
     changed = False
     # Preserve the category selected by staff during an inventory edit.
@@ -19976,6 +20119,39 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ),
             2,
         )
+        # The inventory list is intentionally capped for speed. The demand
+        # guide instead evaluates every matching active stock item so ordering
+        # decisions use all available product and POS movement data.
+        demand_products = [
+            item
+            for item in all_products
+            if item.active
+            and (not area_filter or normalize_text(item.business_area_id) == area_filter)
+            and (not category_filter or normalize_text(item.category) == category_filter)
+            and (not location_filter or normalize_text(item.stock_location) == location_filter)
+            and (
+                not q
+                or q.lower() in normalize_text(item.name).lower()
+                or q.lower() in normalize_text(item.sku).lower()
+                or q.lower() in normalize_text(item.barcode).lower()
+                or q.lower() in normalize_text(item.category).lower()
+            )
+            and (not expiry_filter or product_matches_expiry_filter(item, expiry_filter))
+        ]
+        demand_rows = build_inventory_demand_rows(g.db, demand_products)
+        demand_fast_rows = [
+            item for item in demand_rows if item["movement"] in {"Fast Moving", "Steady Moving"}
+        ]
+        demand_fast_rows.sort(key=lambda item: (-item["unitsSold"], -item["revenue"], item["name"]))
+        demand_watch_rows = [
+            item
+            for item in demand_rows
+            if item["movement"] in {"Slow Moving", "No Recent Sales", "No Sales Recorded"}
+            and item["quantityOnHand"] > 0
+        ]
+        demand_watch_rows.sort(
+            key=lambda item: (item["movementRank"], -(item["quantityOnHand"]), item["name"])
+        )
         return render_template(
             "inventory.html",
             page_title="Inventory",
@@ -19999,6 +20175,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             expired_count=expired_count,
             expiring_soon_count=expiring_soon_count,
             discard_value=discard_value,
+            demand_fast_rows=demand_fast_rows[:8],
+            demand_watch_rows=demand_watch_rows[:8],
+            demand_fast_count=sum(1 for item in demand_rows if item["movement"] == "Fast Moving"),
+            demand_steady_count=sum(1 for item in demand_rows if item["movement"] == "Steady Moving"),
+            demand_slow_count=sum(1 for item in demand_rows if item["movement"] == "Slow Moving"),
+            demand_no_sale_count=sum(
+                1 for item in demand_rows if item["movement"] in {"No Recent Sales", "No Sales Recorded"}
+            ),
             product_image_src=product_image_src,
             product_tracks_inventory=product_tracks_inventory,
             format_product_stock_badge=format_product_stock_badge,
