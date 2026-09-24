@@ -1373,6 +1373,7 @@ GROCERY_GENERAL_MERCHANDISE_NAME_TOKENS = (
     "slipper",
     "hanger",
     "peg",
+    "pegs",
     "plastic cup",
     "takeaway",
     "playing card",
