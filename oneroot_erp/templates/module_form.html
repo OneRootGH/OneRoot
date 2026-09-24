@@ -9,7 +9,7 @@
           {% if definition.key in ['customer_crm', 'promotions', 'whatsapp_campaigns', 'campaign_roi'] %}
             Use this growth form to keep follow-up, promotions, WhatsApp, and Facebook-driven activity clean and easy to work with later.
           {% elif definition.key == 'kitchen_recipe_plans' %}
-            Add every meal being prepared in this session, then assign shared POS stock to the meal it is used for. Saving deducts stock once, records the ingredient cost to the internal OneRoot Kitchen credit account, calculates each meal's real cost, and updates the matching food items' future cost per serving.
+            Start with the food being prepared, add the ingredients taken, and save. OneRoot deducts stock once, records the internal OneRoot Kitchen credit at cost, and calculates your food profit automatically.
           {% elif definition.key == 'petty_cash' %}
             Use this only for float top-ups, returns, reimbursements, and count adjustments. Record actual purchases under Expenses so they are not counted twice.
           {% elif definition.key == 'forecast_plans' %}
@@ -104,6 +104,7 @@
       {% endif %}
       {% set kitchen_auto_fields = ['businessAreaId', 'recipeName', 'kitchenCategory', 'servingCount', 'sellingPricePerServing', 'ingredientCost', 'totalRecipeCost', 'costPerServing', 'projectedSales', 'projectedProfit', 'marginPercent', 'actualProduced', 'actualSold', 'wasteQuantity'] %}
       {% for field in definition.fields %}
+        {% if definition.key != 'kitchen_recipe_plans' or field.name not in ['recipeSummary', 'notes'] %}
         <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in kitchen_auto_fields %} kitchen-auto-field{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in ['recipeSummary', 'notes'] %} kitchen-optional-field{% endif %}">
           <span>{{ field.label }}</span>
           {% if field.field_type == 'textarea' %}
@@ -348,6 +349,7 @@
             <small class="muted form-helper">Track the same channel used in the real campaign so ROI remains easy to compare across WhatsApp and Facebook.</small>
           {% endif %}
         </label>
+        {% endif %}
       {% endfor %}
       {% if definition.key == 'kitchen_recipe_plans' %}
         <datalist id="kitchen-menu-options">
@@ -358,27 +360,41 @@
         <section class="span-2 kitchen-meal-builder">
           <div class="service-line-builder-head">
             <div>
-              <p class="eyebrow">Production Session</p>
-              <h3>Meals / Recipes Being Prepared</h3>
+              <p class="eyebrow">1. Food Being Prepared</p>
+              <h3>Add Today's Meals</h3>
             </div>
-            <p class="muted">Add every meal being prepared now. Each meal keeps its own servings, selling price, ingredient cost, and profit.</p>
+            <p class="muted">Choose each menu item and portions. The saved selling price fills automatically.</p>
           </div>
+          {% if kitchen_recent_sessions %}
+            <div class="kitchen-repeat-controls">
+              <label>
+                <span>Repeat A Recent Session</span>
+                <select id="kitchen-repeat-session">
+                  <option value="">Start a new session</option>
+                  {% for session in kitchen_recent_sessions %}
+                    <option value="{{ session.id }}">{{ session.label }}</option>
+                  {% endfor %}
+                </select>
+              </label>
+              <button class="button subtle" id="kitchen-load-session" type="button">Load Meals & Ingredients</button>
+            </div>
+          {% endif %}
           <div class="form-grid kitchen-meal-controls">
             <label class="span-2">
-              <span>Meal / Recipe Name</span>
+              <span>Find Meal</span>
               <input id="kitchen-meal-product" type="search" list="kitchen-menu-options" placeholder="Search a saved Kitchen menu item" autocomplete="off">
-              <small class="muted form-helper">Search by meal name, choose it, then add it to this production session.</small>
+              <small class="muted form-helper">Search the Kitchen menu and press Enter to add.</small>
             </label>
             <label>
-              <span>Planned Servings</span>
+              <span>Portions To Prepare</span>
               <input id="kitchen-meal-servings" type="number" min="1" step="1" value="1">
             </label>
             <label>
-              <span>Price / Serving</span>
+              <span>Selling Price</span>
               <input id="kitchen-meal-price" type="number" min="0" step="0.01" placeholder="Fills from menu">
             </label>
             <div class="form-actions">
-              <button class="button primary" id="kitchen-add-meal" type="button">Add Meal</button>
+              <button class="button primary" id="kitchen-add-meal" type="button">Add</button>
             </div>
           </div>
           <div id="kitchen-meal-preview" class="service-item-preview"></div>
@@ -387,61 +403,76 @@
         <section class="span-2 kitchen-production-summary" aria-live="polite">
           <div class="service-line-builder-head">
             <div>
-              <p class="eyebrow">Automatic Costing</p>
-              <h3>Session Cost & Profit</h3>
+              <p class="eyebrow">Live Session Position</p>
+              <h3>Cost, Sales & Profit</h3>
             </div>
-            <p class="muted">These totals update from the meal lines, ingredients issued, portions, and saved menu price. Staff do not need to type them.</p>
+            <p class="muted">Calculated from ingredients issued, portions, saved food prices, and closed sales.</p>
           </div>
           <div class="kitchen-production-metrics">
-            <div><span>Ingredient Cost</span><strong id="kitchen-summary-ingredient-cost">GH₵0.00</strong></div>
-            <div><span>Total Batch Cost</span><strong id="kitchen-summary-total-cost">GH₵0.00</strong></div>
-            <div><span>Cost / Serving</span><strong id="kitchen-summary-cost-per-serving">GH₵0.00</strong></div>
+            <div><span>Kitchen Credit / Cost</span><strong id="kitchen-summary-credit-cost">{{ payload.get('kitchenCreditAmount', payload.get('ingredientCost', 0))|currency }}</strong></div>
             <div><span>Projected Sales</span><strong id="kitchen-summary-projected-sales">GH₵0.00</strong></div>
             <div><span>Projected Profit</span><strong id="kitchen-summary-projected-profit">GH₵0.00</strong></div>
-            <div><span>Margin</span><strong id="kitchen-summary-margin">0.00%</strong></div>
-            <div><span>OneRoot Kitchen Credit</span><strong id="kitchen-summary-credit-cost">{{ payload.get('kitchenCreditAmount', payload.get('ingredientCost', 0))|currency }}</strong></div>
             <div><span>Actual Sales Declared</span><strong id="kitchen-summary-actual-sales">{{ payload.get('actualSalesDeclared', 0)|currency }}</strong></div>
             <div><span>Profit After Sales</span><strong id="kitchen-summary-declared-profit">{{ payload.get('declaredGrossProfit', 0)|currency }}</strong></div>
             <div><span>Internal Credit Balance</span><strong id="kitchen-summary-credit-balance">{{ payload.get('kitchenCreditBalance', 0)|currency }}</strong></div>
           </div>
-          <p class="muted form-helper">OneRoot Kitchen is an internal credit account for ingredients used at cost. When the production status is marked Completed, the app offsets this internal credit from declared food sales without creating a cash receipt.</p>
+          <p class="muted form-helper">The OneRoot Kitchen credit is internal only. It tracks ingredients taken at cost and never creates a customer debt or cash receipt.</p>
           <div id="kitchen-meal-profit-lines" class="kitchen-meal-profit-lines"></div>
         </section>
         <section class="span-2 kitchen-ingredient-builder">
           <div class="service-line-builder-head">
             <div>
-              <p class="eyebrow">Shared Stock Issue</p>
-              <h3>Ingredients Taken From POS Stock</h3>
+              <p class="eyebrow">2. Ingredients Used</p>
+              <h3>Take Stock For This Session</h3>
             </div>
-            <p class="muted">This is not a customer sale. Choose the meal first, then search by item name, SKU, or barcode and add the quantity taken from shared stock.</p>
+            <p class="muted">Search or scan an item, enter the quantity, then add it. Stock and cost update automatically when you save.</p>
           </div>
           <div class="form-grid kitchen-ingredient-controls">
-            <label>
-              <span>For Meal</span>
+            <label id="kitchen-ingredient-meal-wrap">
+              <span>Use For</span>
               <select id="kitchen-ingredient-meal">
                 <option value="">Add a meal first</option>
               </select>
             </label>
             <label class="span-2">
-              <span>Ingredient From Inventory</span>
+              <span>Find Ingredient</span>
               <input id="kitchen-ingredient-product" type="search" list="kitchen-ingredient-options" placeholder="Search item name, SKU, or barcode" autocomplete="off">
               <datalist id="kitchen-ingredient-options"></datalist>
-              <small class="muted form-helper">Select a matching inventory item, scan its barcode, or type its SKU.</small>
+              <small class="muted form-helper">Search by item name, SKU, or barcode.</small>
             </label>
             <label>
-              <span>Quantity Taken</span>
+              <span>Quantity</span>
               <input id="kitchen-ingredient-quantity" type="number" min="0.01" step="0.01" value="1">
             </label>
             <div class="form-actions">
-              <button class="button primary" id="kitchen-add-ingredient" type="button">Add Ingredient</button>
+              <button class="button primary" id="kitchen-add-ingredient" type="button">Add</button>
             </div>
           </div>
           <div id="kitchen-ingredient-preview" class="service-item-preview"></div>
           <div id="kitchen-ingredient-lines" class="service-line-items"></div>
         </section>
+        <details class="span-2 kitchen-optional-details" {% if payload.get('recipeSummary') or payload.get('notes') %}open{% endif %}>
+          <summary>Optional preparation notes</summary>
+          <div class="form-grid">
+            <label class="span-2">
+              <span>Preparation Notes</span>
+              <textarea name="recipeSummary" rows="2" placeholder="For example: special ingredients, cooking instructions, or preparation note">{{ payload.get('recipeSummary', '') }}</textarea>
+            </label>
+            <label class="span-2">
+              <span>Internal Notes</span>
+              <textarea name="notes" rows="2" placeholder="Optional manager note">{{ payload.get('notes', '') }}</textarea>
+            </label>
+          </div>
+        </details>
       {% endif %}
       <div class="form-actions span-2">
-        <button class="button primary" type="submit">Save Record</button>
+        <button class="button primary" type="submit">
+          {% if definition.key == 'kitchen_recipe_plans' %}
+            Save Production & Issue Stock
+          {% else %}
+            Save Record
+          {% endif %}
+        </button>
       </div>
     </form>
 
@@ -1138,6 +1169,7 @@
       (function () {
         const catalog = {{ kitchen_ingredient_catalog|tojson }};
         const menuCatalog = {{ kitchen_menu_options|tojson }};
+        const recentSessions = {{ kitchen_recent_sessions|tojson }};
         const lineItems = {{ kitchen_ingredient_items|tojson }}.map((item) => ({ ...item }));
         const mealItems = {{ kitchen_meal_items|tojson }}.map((item) => ({ ...item }));
         const productField = document.getElementById("kitchen-ingredient-product");
@@ -1155,6 +1187,9 @@
         const mealLines = document.getElementById("kitchen-meal-lines");
         const mealDataField = document.getElementById("kitchen-meal-items-json");
         const ingredientMealField = document.getElementById("kitchen-ingredient-meal");
+        const ingredientMealWrap = document.getElementById("kitchen-ingredient-meal-wrap");
+        const repeatSessionField = document.getElementById("kitchen-repeat-session");
+        const loadSessionButton = document.getElementById("kitchen-load-session");
         const ingredientCostField = document.querySelector('input[name="ingredientCost"]');
         const packagingCostField = document.querySelector('input[name="packagingCost"]');
         const overheadCostField = document.querySelector('input[name="overheadCost"]');
@@ -1322,21 +1357,23 @@
         function renderMealPreview() {
           const menuItem = findMenuItem(mealProductField.value);
           if (!menuItem) {
-            mealPreview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>No meal selected yet.</strong><p>Search for a saved OneRoot Kitchen menu item, then add the planned servings.</p></article>';
+            mealPreview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Choose the food to prepare.</strong><p>Search the saved Kitchen menu, enter portions, then add it to this session.</p></article>';
             return;
           }
           if (parseNumber(mealPriceField.value) <= 0) {
             mealPriceField.value = parseNumber(menuItem.salesPrice).toFixed(2);
           }
-          mealPreview.innerHTML = `<article class="service-item-preview-card"><div class="service-item-preview-copy"><strong>${escape(menuItem.name)}</strong><span>${escape(menuItem.category || "Kitchen menu")} · Saved selling price ${money.format(menuItem.salesPrice)}</span><span>Set servings and price, then add this meal to the production session.</span></div></article>`;
+          mealPreview.innerHTML = `<article class="service-item-preview-card"><div class="service-item-preview-copy"><strong>${escape(menuItem.name)}</strong><span>${escape(menuItem.category || "Kitchen menu")} · Saved price ${money.format(menuItem.salesPrice)}</span><span>Set portions, confirm the price if needed, and add.</span></div></article>`;
         }
 
         function renderMealSelector() {
-          const selectedValue = ingredientMealField.value;
+          const selectedValue = ingredientMealField.value || String(mealItems[mealItems.length - 1]?.mealId || "");
+          if (ingredientMealWrap) ingredientMealWrap.hidden = mealItems.length <= 1;
           ingredientMealField.innerHTML = "";
           if (!mealItems.length) {
             ingredientMealField.disabled = true;
             ingredientMealField.innerHTML = '<option value="">Add a meal first</option>';
+            if (ingredientMealWrap) ingredientMealWrap.hidden = false;
             return;
           }
           ingredientMealField.disabled = false;
@@ -1354,11 +1391,11 @@
           calculateMealFigures();
           const showActuals = readyForOutput();
           if (!mealItems.length) {
-            mealLines.innerHTML = '<article class="service-line-empty"><strong>No meals added yet.</strong><p>Search for every meal being prepared and add it to this production session.</p></article>';
+            mealLines.innerHTML = '<article class="service-line-empty"><strong>No food added yet.</strong><p>Search the Kitchen menu and add the meals being prepared today.</p></article>';
             updateFigures();
             return;
           }
-          mealLines.innerHTML = mealItems.map((meal, index) => `<article class="service-line-item kitchen-meal-line"><div class="kitchen-meal-line-copy"><strong>${escape(meal.recipeName)}</strong><span>${escape(meal.category || "Kitchen menu")} · Projected sales ${money.format(meal.projectedSales)}</span><span>Cost ${money.format(meal.totalRecipeCost)} · Profit ${money.format(meal.projectedProfit)} · ${displayNumber(meal.marginPercent)}% margin</span></div><div class="kitchen-meal-line-fields"><label><span>Servings</span><input type="number" min="1" step="1" value="${escape(meal.plannedServings)}" data-kitchen-meal-field="plannedServings" data-kitchen-meal-index="${index}"></label><label><span>Price</span><input type="number" min="0" step="0.01" value="${escape(meal.sellingPricePerServing)}" data-kitchen-meal-field="sellingPricePerServing" data-kitchen-meal-index="${index}"></label>${showActuals ? `<label><span>Produced</span><input type="number" min="0" step="1" value="${escape(meal.actualProduced)}" data-kitchen-meal-field="actualProduced" data-kitchen-meal-index="${index}"></label><label><span>Sold</span><input type="number" min="0" step="1" value="${escape(meal.actualSold)}" data-kitchen-meal-field="actualSold" data-kitchen-meal-index="${index}"></label><label><span>Waste</span><input type="number" min="0" step="1" value="${escape(meal.wasteQuantity)}" data-kitchen-meal-field="wasteQuantity" data-kitchen-meal-index="${index}"></label>` : ""}</div><button class="text-button danger-text" type="button" data-kitchen-meal-remove="${index}">Remove</button></article>`).join("");
+          mealLines.innerHTML = mealItems.map((meal, index) => `<article class="service-line-item kitchen-meal-line"><div class="kitchen-meal-line-copy"><strong>${escape(meal.recipeName)}</strong><span>${escape(meal.category || "Kitchen menu")} · Planned sales ${money.format(meal.projectedSales)}</span><span>Cost ${money.format(meal.totalRecipeCost)} · Projected profit ${money.format(meal.projectedProfit)}</span></div><div class="kitchen-meal-line-fields"><label><span>Portions</span><input type="number" min="1" step="1" value="${escape(meal.plannedServings)}" data-kitchen-meal-field="plannedServings" data-kitchen-meal-index="${index}"></label><label><span>Price</span><input type="number" min="0" step="0.01" value="${escape(meal.sellingPricePerServing)}" data-kitchen-meal-field="sellingPricePerServing" data-kitchen-meal-index="${index}"></label>${showActuals ? `<label><span>Produced</span><input type="number" min="0" step="1" value="${escape(meal.actualProduced)}" data-kitchen-meal-field="actualProduced" data-kitchen-meal-index="${index}"></label><label><span>Sold</span><input type="number" min="0" step="1" value="${escape(meal.actualSold)}" data-kitchen-meal-field="actualSold" data-kitchen-meal-index="${index}"></label><label><span>Waste</span><input type="number" min="0" step="1" value="${escape(meal.wasteQuantity)}" data-kitchen-meal-field="wasteQuantity" data-kitchen-meal-index="${index}"></label>` : ""}</div><button class="text-button danger-text" type="button" data-kitchen-meal-remove="${index}">Remove</button></article>`).join("");
           updateFigures();
         }
 
@@ -1393,8 +1430,37 @@
           mealPriceField.value = "";
           renderMealPreview();
           renderMealSelector();
+          ingredientMealField.value = String(mealItems[mealItems.length - 1]?.mealId || "");
           renderMealLines();
           renderLines();
+        }
+
+        function loadRecentSession() {
+          const session = recentSessions.find((item) => String(item.id) === String(repeatSessionField?.value || ""));
+          if (!session) {
+            mealPreview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Choose a session to repeat.</strong><p>This copies its meals and ingredients into the current form. Current stock and cost are checked when you save.</p></article>';
+            repeatSessionField?.focus();
+            return;
+          }
+          if (mealItems.length || lineItems.length) {
+            const confirmed = window.confirm("Replace the meals and ingredients currently in this form with the selected session?");
+            if (!confirmed) return;
+          }
+          mealItems.splice(0, mealItems.length, ...session.meals.map((meal) => ({
+            ...meal,
+            actualProduced: 0,
+            actualSold: 0,
+            wasteQuantity: 0,
+          })));
+          lineItems.splice(0, lineItems.length, ...session.ingredients.map((item) => ({
+            ...item,
+            lineCost: parseNumber(item.quantity) * parseNumber(item.unitCost),
+          })));
+          ingredientMealField.value = String(mealItems[mealItems.length - 1]?.mealId || "");
+          renderMealSelector();
+          renderMealLines();
+          renderLines();
+          mealPreview.innerHTML = `<article class="service-item-preview-card"><div class="service-item-preview-copy"><strong>${escape(session.label)}</strong><span>Meals and ingredients loaded. Confirm the quantities, then save to issue current stock.</span></div></article>`;
         }
 
         function renderPreview() {
@@ -1403,13 +1469,13 @@
             preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>No ingredient selected yet.</strong><p>Select an item from shared POS stock to see its current quantity and cost.</p></article>';
             return;
           }
-          const meal = mealForId(ingredientMealField.value);
+          const meal = mealForId(ingredientMealField.value) || mealItems[mealItems.length - 1] || null;
           preview.innerHTML = `<article class="service-item-preview-card"><img class="product-thumb product-thumb-large" src="${escape(product.imageUrl || '/assets/oneroot-icon-transparent.png')}" alt="${escape(product.name)}" onerror="this.src='/assets/oneroot-icon-transparent.png'"><div class="service-item-preview-copy"><strong>${escape(product.name)}</strong><span>${escape(product.category || 'Inventory')} · ${escape(product.sku || 'No SKU')}</span><span>For ${escape(meal?.recipeName || 'select a meal')} · Available ${product.quantityOnHand} · Unit cost ${money.format(product.costPrice)}</span></div></article>`;
         }
 
         function renderLines() {
           if (!lineItems.length) {
-            lines.innerHTML = '<article class="service-line-empty"><strong>No ingredients have been issued yet.</strong><p>Select a stock item, enter the quantity taken, and add it to this production batch.</p></article>';
+            lines.innerHTML = '<article class="service-line-empty"><strong>No ingredients added yet.</strong><p>Search or scan an inventory item, enter its quantity, and add it here.</p></article>';
             updateFigures();
             return;
           }
@@ -1420,9 +1486,9 @@
         function addIngredient() {
           const product = findProduct(productField.value);
           const quantity = Math.max(parseNumber(quantityField.value), 0);
-          const meal = mealForId(ingredientMealField.value);
+          const meal = mealForId(ingredientMealField.value) || mealItems[mealItems.length - 1] || null;
           if (!meal || !product || quantity <= 0) {
-            preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Choose a meal and matching inventory item first.</strong><p>Add the meal being prepared, select it here, then search by product name, SKU, or barcode and enter a quantity greater than zero.</p></article>';
+            preview.innerHTML = '<article class="service-item-preview-card is-empty"><strong>Add food and choose an inventory item first.</strong><p>Then enter the quantity taken and add it to this session.</p></article>';
             if (!meal) ingredientMealField.focus();
             productField.focus();
             return;
@@ -1470,6 +1536,7 @@
           addMeal();
         });
         addMealButton.addEventListener("click", addMeal);
+        loadSessionButton?.addEventListener("click", loadRecentSession);
         productionStatusField?.addEventListener("change", syncOutputFields);
         mealLines.addEventListener("click", (event) => {
           const button = event.target.closest("[data-kitchen-meal-remove]");

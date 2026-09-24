@@ -8199,6 +8199,11 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
     packaging_total = round(max(parse_amount(payload.get("packagingCost")), 0), 2)
     overhead_total = round(max(parse_amount(payload.get("overheadCost")), 0), 2)
     production_status = normalize_text(payload.get("productionStatus"))
+    # A saved ingredient issue is the reliable signal that preparation has begun.
+    # Move only an untouched draft forward; never override a user-selected stage.
+    if ingredient_items and production_status == "Planned":
+        production_status = "In Production"
+        payload["productionStatus"] = production_status
     rolled_meals: list[dict[str, Any]] = []
     for meal in meals:
         meal_id = normalize_text(meal.get("mealId"))
@@ -18402,6 +18407,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         supplier_directory_options = []
         kitchen_ingredient_catalog = []
         kitchen_menu_options = []
+        kitchen_recent_sessions = []
         if module_key == "kitchen_recipe_plans":
             kitchen_ingredient_catalog = [
                 {
@@ -18433,6 +18439,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     )
                     .order_by(Product.name.asc())
                 ).all()
+            ]
+            # Repeating a recent session is a fast starting point only. Product
+            # availability and the live cost are always revalidated on save.
+            recent_sessions = g.db.scalars(
+                select(ModuleRecord)
+                .where(ModuleRecord.module_key == "kitchen_recipe_plans")
+                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
+                .limit(8)
+            ).all()
+            kitchen_recent_sessions = [
+                {
+                    "id": item.id,
+                    "label": f"{item.title or 'Kitchen session'} · {(item.record_date or item.created_at.date()).strftime('%d %b %Y')}",
+                    "meals": kitchen_meal_items(dict(item.payload or {})),
+                    "ingredients": kitchen_ingredient_items(dict(item.payload or {})),
+                }
+                for item in recent_sessions
+                if not record or item.id != record.id
             ]
         if module_key in {"suppliers", "supplier_price_updates"}:
             supplier_directory_options = [
@@ -18467,6 +18491,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             kitchen_ingredient_items=kitchen_ingredient_items(record_payload) if module_key == "kitchen_recipe_plans" else [],
             kitchen_meal_items=kitchen_meal_items(record_payload) if module_key == "kitchen_recipe_plans" else [],
             kitchen_menu_options=kitchen_menu_options,
+            kitchen_recent_sessions=kitchen_recent_sessions,
             today_iso=date.today().isoformat(),
         )
 
