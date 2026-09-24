@@ -1133,6 +1133,10 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
         select(Product).where(Product.business_area_id == "water-equipment")
     ).all()
     for product in equipment_products:
+        # A staff member may deliberately keep an item in a particular area or
+        # category. Legacy repairs apply only to untouched imported catalogue rows.
+        if product.user_created:
+            continue
         if normalize_equipment_inventory_category(product):
             product.updated_at = datetime.utcnow()
             product.sku = generate_auto_product_sku(
@@ -1148,6 +1152,8 @@ def reclassify_legacy_inventory_products(db_session) -> bool:
         select(Product).where(Product.business_area_id == "shared-operations")
     ).all()
     for product in shared_operation_products:
+        if product.user_created:
+            continue
         name_key = normalize_text(product.name).lower()
         source_category_key = normalize_text(product.source_category).lower()
         category_key = normalize_text(product.category).lower()
@@ -1544,6 +1550,10 @@ def is_kitchen_menu_catalog_item(item: dict[str, Any]) -> bool:
 
 def reclassify_inventory_product(product: Product) -> bool:
     """Apply OneRoot's sellable catalogue structure without changing sales history."""
+    # Catalogue imports need one-off repairs, but never at the cost of a
+    # deliberate choice made later in the Inventory form.
+    if product.user_created:
+        return False
     changed = False
     area_id = normalize_text(product.business_area_id)
     category_key = normalize_text(product.category).lower()
@@ -1921,6 +1931,8 @@ def reclassify_cold_store_and_grocery_inventory(db_session) -> bool:
         select(Product).where(Product.business_area_id == "cold-store-groceries")
     ).all()
     for product in products:
+        if product.user_created:
+            continue
         category_key = normalize_text(product.category).lower()
         if category_key not in GROCERIES_MORE_CATEGORIES:
             continue
@@ -2771,7 +2783,8 @@ def build_inventory_risk_rows(products: list[Product], *, area_filter: str = "",
 
 def normalize_product_record(product: Product) -> bool:
     changed = False
-    if normalize_equipment_inventory_category(product):
+    # Preserve the category selected by staff during an inventory edit.
+    if not product.user_created and normalize_equipment_inventory_category(product):
         changed = True
     item_type = normalized_product_item_type(product.item_type, product.track_inventory)
     should_track_inventory = item_type != "service"

@@ -244,10 +244,14 @@
       }
       const currentValue = categorySelect.dataset.current || "";
 
-      function renderCategories() {
+      function renderCategories({ areaChanged = false } = {}) {
         const areaId = areaSelect.value || "";
         const options = areaId && categoryMap[areaId] ? categoryMap[areaId] : [];
-        const selectedValue = categorySelect.value || currentValue;
+        let selectedValue = categorySelect.value || currentValue;
+        // A transferred item needs a category accepted by its new business area.
+        if (areaChanged && selectedValue && !options.includes(selectedValue)) {
+          selectedValue = options[0] || "";
+        }
         categorySelect.innerHTML = '<option value="">Select Category</option>';
         options.forEach((category) => {
           const option = document.createElement("option");
@@ -258,7 +262,7 @@
           }
           categorySelect.appendChild(option);
         });
-        if (selectedValue && !options.includes(selectedValue)) {
+        if (!areaChanged && selectedValue && !options.includes(selectedValue)) {
           const customOption = document.createElement("option");
           customOption.value = selectedValue;
           customOption.textContent = selectedValue;
@@ -267,7 +271,7 @@
         }
       }
 
-      areaSelect.addEventListener("change", renderCategories);
+      areaSelect.addEventListener("change", () => renderCategories({ areaChanged: true }));
       renderCategories();
     })();
   </script>
