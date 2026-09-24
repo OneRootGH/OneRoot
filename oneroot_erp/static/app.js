@@ -42,6 +42,10 @@
   const equipmentCashNode = document.getElementById("pos-equipment-cash");
   const laundryCollectionsRibbonNode = document.getElementById("pos-laundry-collections-ribbon");
   const equipmentCollectionsRibbonNode = document.getElementById("pos-equipment-collections-ribbon");
+  const laundryCollectionsTotalNode = document.getElementById("pos-laundry-collection-total");
+  const equipmentCollectionsTotalNode = document.getElementById("pos-equipment-collection-total");
+  const laundryCollectionLinesNode = document.getElementById("pos-laundry-collection-lines");
+  const equipmentCollectionLinesNode = document.getElementById("pos-equipment-collection-lines");
   const expectedCashNode = document.getElementById("pos-expected-cash");
   const expectedCashRibbonNode = document.getElementById("pos-expected-cash-ribbon");
   const cashVarianceNode = document.getElementById("pos-cash-variance");
@@ -538,6 +542,21 @@
     if (equipmentCollectionsRibbonNode) {
       equipmentCollectionsRibbonNode.textContent = formatCurrency(summary.equipmentCollectionsTotal);
     }
+    if (laundryCollectionsTotalNode) {
+      laundryCollectionsTotalNode.textContent = formatCurrency(summary.laundryCollectionsTotal);
+    }
+    if (equipmentCollectionsTotalNode) {
+      equipmentCollectionsTotalNode.textContent = formatCurrency(summary.equipmentCollectionsTotal);
+    }
+    const renderRows = (node, rows, emptyMessage) => {
+      if (!node) return;
+      const safeRows = Array.isArray(rows) ? rows : [];
+      node.innerHTML = safeRows.length
+        ? safeRows.map((row) => `<li><span>${escapeHtml(row.customerName || "Customer")} · ${escapeHtml(row.serviceItem || "Service")} · ${escapeHtml(row.paymentMethod || "Payment")}</span><strong>${formatCurrency(row.amount)}</strong></li>`).join("")
+        : `<li><span>${escapeHtml(emptyMessage)}</span></li>`;
+    };
+    renderRows(laundryCollectionLinesNode, summary.laundryCollections, "No laundry payment has been received today.");
+    renderRows(equipmentCollectionLinesNode, summary.equipmentCollections, "No equipment payment has been received today.");
   }
 
   function renderMobileMoneyCounter(summary) {

@@ -9,7 +9,7 @@
           {% if definition.key in ['customer_crm', 'promotions', 'whatsapp_campaigns', 'campaign_roi'] %}
             Use this growth form to keep follow-up, promotions, WhatsApp, and Facebook-driven activity clean and easy to work with later.
           {% elif definition.key == 'kitchen_recipe_plans' %}
-            Add every meal being prepared in this session, then assign shared POS stock to the meal it is used for. Saving deducts stock once, calculates each meal's real cost, and updates the matching food items' future cost per serving.
+            Add every meal being prepared in this session, then assign shared POS stock to the meal it is used for. Saving deducts stock once, records the ingredient cost to the internal OneRoot Kitchen credit account, calculates each meal's real cost, and updates the matching food items' future cost per serving.
           {% elif definition.key == 'petty_cash' %}
             Use this only for float top-ups, returns, reimbursements, and count adjustments. Record actual purchases under Expenses so they are not counted twice.
           {% elif definition.key == 'forecast_plans' %}
@@ -399,7 +399,12 @@
             <div><span>Projected Sales</span><strong id="kitchen-summary-projected-sales">GH₵0.00</strong></div>
             <div><span>Projected Profit</span><strong id="kitchen-summary-projected-profit">GH₵0.00</strong></div>
             <div><span>Margin</span><strong id="kitchen-summary-margin">0.00%</strong></div>
+            <div><span>OneRoot Kitchen Credit</span><strong id="kitchen-summary-credit-cost">{{ payload.get('kitchenCreditAmount', payload.get('ingredientCost', 0))|currency }}</strong></div>
+            <div><span>Actual Sales Declared</span><strong id="kitchen-summary-actual-sales">{{ payload.get('actualSalesDeclared', 0)|currency }}</strong></div>
+            <div><span>Profit After Sales</span><strong id="kitchen-summary-declared-profit">{{ payload.get('declaredGrossProfit', 0)|currency }}</strong></div>
+            <div><span>Internal Credit Balance</span><strong id="kitchen-summary-credit-balance">{{ payload.get('kitchenCreditBalance', 0)|currency }}</strong></div>
           </div>
+          <p class="muted form-helper">OneRoot Kitchen is an internal credit account for ingredients used at cost. When the production status is marked Completed, the app offsets this internal credit from declared food sales without creating a cash receipt.</p>
           <div id="kitchen-meal-profit-lines" class="kitchen-meal-profit-lines"></div>
         </section>
         <section class="span-2 kitchen-ingredient-builder">
@@ -1168,6 +1173,10 @@
         const projectedSalesSummary = document.getElementById("kitchen-summary-projected-sales");
         const projectedProfitSummary = document.getElementById("kitchen-summary-projected-profit");
         const marginSummary = document.getElementById("kitchen-summary-margin");
+        const creditCostSummary = document.getElementById("kitchen-summary-credit-cost");
+        const actualSalesSummary = document.getElementById("kitchen-summary-actual-sales");
+        const declaredProfitSummary = document.getElementById("kitchen-summary-declared-profit");
+        const creditBalanceSummary = document.getElementById("kitchen-summary-credit-balance");
         const mealProfitLines = document.getElementById("kitchen-meal-profit-lines");
         const productionStatusField = document.querySelector('[name="productionStatus"]');
         const actualProducedField = document.querySelector('input[name="actualProduced"]');
@@ -1256,7 +1265,12 @@
           const totalCost = mealItems.reduce((sum, meal) => sum + parseNumber(meal.totalRecipeCost), 0);
           const projectedSales = mealItems.reduce((sum, meal) => sum + parseNumber(meal.projectedSales), 0);
           const projectedProfit = projectedSales - totalCost;
-          return { ingredientCost, totalCost, projectedSales, projectedProfit, servings };
+          const actualSales = mealItems.reduce(
+            (sum, meal) => sum + Math.max(parseNumber(meal.actualSold), 0) * Math.max(parseNumber(meal.sellingPricePerServing), 0),
+            0
+          );
+          const declaredProfit = actualSales - totalCost;
+          return { ingredientCost, totalCost, projectedSales, projectedProfit, actualSales, declaredProfit, servings };
         }
 
         function renderMealProfitLines() {
@@ -1269,7 +1283,7 @@
         }
 
         function updateFigures() {
-          const { ingredientCost, totalCost, projectedSales, projectedProfit, servings } = calculateMealFigures();
+          const { ingredientCost, totalCost, projectedSales, projectedProfit, actualSales, declaredProfit, servings } = calculateMealFigures();
           if (ingredientCostField) ingredientCostField.value = ingredientCost.toFixed(2);
           if (totalCostField) totalCostField.value = totalCost.toFixed(2);
           if (costPerServingField) costPerServingField.value = (servings > 0 ? totalCost / servings : 0).toFixed(2);
@@ -1282,6 +1296,14 @@
           if (projectedSalesSummary) projectedSalesSummary.textContent = money.format(projectedSales);
           if (projectedProfitSummary) projectedProfitSummary.textContent = money.format(projectedProfit);
           if (marginSummary) marginSummary.textContent = `${(projectedSales > 0 ? (projectedProfit / projectedSales) * 100 : 0).toFixed(2)}%`;
+          if (creditCostSummary) creditCostSummary.textContent = money.format(ingredientCost);
+          if (actualSalesSummary) actualSalesSummary.textContent = money.format(actualSales);
+          if (declaredProfitSummary) declaredProfitSummary.textContent = money.format(declaredProfit);
+          if (creditBalanceSummary) {
+            creditBalanceSummary.textContent = readyForOutput() && String(productionStatusField?.value || "") === "Completed"
+              ? money.format(Math.max(ingredientCost - actualSales, 0))
+              : money.format(ingredientCost);
+          }
           if (recipeNameField) recipeNameField.value = mealItems.map((meal) => meal.recipeName).filter(Boolean).join(" + ");
           if (servingsField) servingsField.value = servings.toFixed(2);
           if (sellingPriceField) sellingPriceField.value = (servings > 0 ? projectedSales / servings : 0).toFixed(2);

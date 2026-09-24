@@ -8180,6 +8180,9 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
         payload["projectedSales"] = 0.0
         payload["projectedProfit"] = 0.0
         payload["marginPercent"] = 0.0
+        payload["actualSalesDeclared"] = 0.0
+        payload["declaredGrossProfit"] = 0.0
+        payload["declaredMarginPercent"] = 0.0
         return
 
     meals_by_id = {normalize_text(item.get("mealId")): dict(item) for item in meals}
@@ -8233,6 +8236,14 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
     total_cost = round(sum(parse_amount(item.get("totalRecipeCost")) for item in rolled_meals), 2)
     projected_sales = round(sum(parse_amount(item.get("projectedSales")) for item in rolled_meals), 2)
     projected_profit = round(projected_sales - total_cost, 2)
+    actual_sales_declared = round(
+        sum(
+            parse_amount(item.get("actualSold")) * parse_amount(item.get("sellingPricePerServing"))
+            for item in rolled_meals
+        ),
+        2,
+    )
+    declared_gross_profit = round(actual_sales_declared - total_cost, 2)
     categories: list[str] = []
     for meal in rolled_meals:
         category = normalize_text(meal.get("category"))
@@ -8254,6 +8265,13 @@ def kitchen_recipe_rollup(payload: dict[str, Any]) -> None:
     payload["actualProduced"] = round(sum(parse_amount(item.get("actualProduced")) for item in rolled_meals), 2)
     payload["actualSold"] = round(sum(parse_amount(item.get("actualSold")) for item in rolled_meals), 2)
     payload["wasteQuantity"] = round(sum(parse_amount(item.get("wasteQuantity")) for item in rolled_meals), 2)
+    # A production batch carries its full issued cost. This makes the declared
+    # profit truthful once staff enter the actual servings sold after service.
+    payload["actualSalesDeclared"] = actual_sales_declared
+    payload["declaredGrossProfit"] = declared_gross_profit
+    payload["declaredMarginPercent"] = round(
+        (declared_gross_profit / actual_sales_declared) * 100, 2
+    ) if actual_sales_declared else 0.0
 
 
 def kitchen_recipe_issue_quantities(payload: dict[str, Any]) -> dict[str, float]:
@@ -13183,6 +13201,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         customers: dict[str, dict[str, Any]] = {}
         for record in sorted(records, key=lambda item: (item.record_date or date.min, item.created_at, item.id)):
             payload = dict(record.payload or {})
+            # Kitchen production is an internal cost transfer, not a customer debt
+            # that a cashier should chase in the public credit collection queue.
+            if payload.get("internalKitchenCredit"):
+                continue
             customer_key = customer_credit_rollup_key(db_session, payload)
             if not customer_key:
                 continue
@@ -13281,6 +13303,141 @@ def create_app(config: AppConfig | None = None) -> Flask:
             db.add(existing)
         set_module_record_metadata(existing, MODULES["customer_credit_accounts"], payload)
         rollup_customer_credit_account(db, customer_credit_rollup_key(db, payload))
+
+    def sync_kitchen_production_credit(
+        batch_record: ModuleRecord,
+        batch_payload: dict[str, Any],
+        db_session=None,
+    ) -> dict[str, Any]:
+        """Mirror Kitchen stock issues into one internal OneRoot Kitchen credit account.
+
+        The credit value uses live inventory *cost*, not the food selling price. It
+        therefore tracks ingredients used while the production session separately
+        records food revenue and the realised gross profit after staff declare sales.
+        """
+        db = db_session or g.db
+        batch_id = batch_record.id
+        credit_reference = f"kitchen-production-credit|{batch_id}"
+        settlement_reference = f"kitchen-production-settlement|{batch_id}"
+        existing_credit = db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "customer_credit_accounts",
+                ModuleRecord.reference == credit_reference,
+            )
+        )
+        existing_settlement = db.scalar(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "customer_credit_accounts",
+                ModuleRecord.reference == settlement_reference,
+            )
+        )
+        ingredients = kitchen_ingredient_items(batch_payload)
+        ingredient_cost = round(sum(parse_amount(item.get("lineCost")) for item in ingredients), 2)
+        production_status = normalize_text(batch_payload.get("productionStatus"))
+
+        if production_status == "Cancelled" or ingredient_cost <= 0:
+            if existing_credit:
+                db.delete(existing_credit)
+            if existing_settlement:
+                db.delete(existing_settlement)
+            return {
+                "kitchenCreditRecordId": "",
+                "kitchenCreditAmount": 0.0,
+                "kitchenCreditSettled": 0.0,
+                "kitchenCreditBalance": 0.0,
+                "kitchenCreditStatus": "No ingredients issued",
+            }
+
+        credit_payload = {
+            "id": existing_credit.id if existing_credit else uuid4().hex,
+            "entryDate": normalize_text(batch_payload.get("recipeDate")) or date.today().isoformat(),
+            "businessAreaId": COLD_STORE_KITCHEN_AREA_ID,
+            "customerName": "OneRoot Kitchen",
+            "customerPhone": "",
+            "itemSummary": "; ".join(
+                f"{item['name']} x {parse_amount(item['quantity']):g}" for item in ingredients
+            ),
+            "creditItems": [
+                {
+                    "name": item["name"],
+                    "category": "Kitchen ingredient from shared stock",
+                    "quantity": parse_amount(item["quantity"]),
+                    "unitPrice": parse_amount(item["unitCost"]),
+                    "totalAmount": parse_amount(item["lineCost"]),
+                    "businessAreaLabel": "Cold Store & Kitchen",
+                }
+                for item in ingredients
+            ],
+            "transactionType": "Credit Sale",
+            "amount": ingredient_cost,
+            "paymentMethod": "Internal Kitchen Credit",
+            "reference": credit_reference,
+            "dueDate": "",
+            "outstandingBalance": 0.0,
+            "status": "Open",
+            "creditAccountType": "Internal Kitchen Production",
+            "internalKitchenCredit": True,
+            "kitchenProductionBatchId": batch_id,
+            "notes": (
+                f"Automatic internal ingredient credit for Kitchen production session "
+                f"{normalize_text(batch_payload.get('recipeName')) or batch_record.title}. "
+                "This is stock used at cost, not a customer sale or cash collection."
+            ),
+        }
+        if not existing_credit:
+            existing_credit = ModuleRecord(
+                id=credit_payload["id"],
+                module_key="customer_credit_accounts",
+                created_at=datetime.utcnow(),
+            )
+            db.add(existing_credit)
+        set_module_record_metadata(existing_credit, MODULES["customer_credit_accounts"], credit_payload)
+
+        actual_sales = round(max(parse_amount(batch_payload.get("actualSalesDeclared")), 0), 2)
+        settlement_amount = min(ingredient_cost, actual_sales) if production_status == "Completed" else 0.0
+        if settlement_amount > 0:
+            settlement_payload = {
+                "id": existing_settlement.id if existing_settlement else uuid4().hex,
+                "entryDate": normalize_text(batch_payload.get("recipeDate")) or date.today().isoformat(),
+                "businessAreaId": COLD_STORE_KITCHEN_AREA_ID,
+                "customerName": "OneRoot Kitchen",
+                "customerPhone": "",
+                "itemSummary": f"Kitchen production settlement: {normalize_text(batch_payload.get('recipeName')) or batch_record.title}",
+                "transactionType": "Credit Note",
+                "amount": settlement_amount,
+                "paymentMethod": "Internal Production Settlement",
+                "reference": settlement_reference,
+                "dueDate": "",
+                "outstandingBalance": 0.0,
+                "status": "Settled",
+                "creditAccountType": "Internal Kitchen Production",
+                "internalKitchenCredit": True,
+                "kitchenProductionBatchId": batch_id,
+                "notes": (
+                    "Automatically offsets the ingredient credit once completed food sales are declared. "
+                    "It is not a cash collection."
+                ),
+            }
+            if not existing_settlement:
+                existing_settlement = ModuleRecord(
+                    id=settlement_payload["id"],
+                    module_key="customer_credit_accounts",
+                    created_at=datetime.utcnow(),
+                )
+                db.add(existing_settlement)
+            set_module_record_metadata(existing_settlement, MODULES["customer_credit_accounts"], settlement_payload)
+        elif existing_settlement:
+            db.delete(existing_settlement)
+
+        rollup_customer_credit_account(db, customer_credit_rollup_key(db, credit_payload))
+        credit_balance = round(max(ingredient_cost - settlement_amount, 0), 2)
+        return {
+            "kitchenCreditRecordId": existing_credit.id,
+            "kitchenCreditAmount": ingredient_cost,
+            "kitchenCreditSettled": settlement_amount,
+            "kitchenCreditBalance": credit_balance,
+            "kitchenCreditStatus": "Settled after declared sales" if credit_balance <= 0 else "Open internal kitchen credit",
+        }
 
     def upsert_pos_customer_crm_contact(order: PosOrder, db_session=None) -> None:
         """Capture a POS customer without rebuilding every CRM record at checkout."""
@@ -13977,7 +14134,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         credit_collections = customer_credit_collection_summary(
             g.db, order_date, selected_area, area_ids=scoped_area_ids
         )
-        service_counter_enabled = desk_key != "food"
+        # Laundry and equipment payments are received at the Cold Store & Kitchen
+        # service counter. Keeping one owner prevents the same cash appearing in
+        # both POS closeouts.
+        service_counter_enabled = desk_key == "food"
         equipment_collections = equipment_rental_collection_summary(order_date) if service_counter_enabled else {
             "total": 0.0, "cashTotal": 0.0, "count": 0, "paymentMix": {}, "rows": []
         }
@@ -14344,6 +14504,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 or f"Counter closeout for {summary['areaLabel']} on {summary['orderDate']}.",
             }
             set_module_record_metadata(record, MODULES["pos_closeouts"], closeout_payload)
+
+    def sync_service_collection_closeouts(
+        module_key: str,
+        payload: dict[str, Any],
+        previous_payload: dict[str, Any] | None = None,
+    ) -> None:
+        """Refresh the designated Cold Store & Kitchen closeout after service payments change."""
+        if module_key not in {"laundry_tickets", "equipment_rental_bookings"}:
+            return
+        payment_dates: set[date] = set()
+        for candidate_payload in (payload, previous_payload or {}):
+            for payment in service_payment_summary(module_key, candidate_payload).get("payments", []):
+                payment_date = parse_date(payment.get("paymentDate")) or parse_date(candidate_payload.get("paymentDate"))
+                if payment_date:
+                    payment_dates.add(payment_date)
+        for payment_date in payment_dates:
+            sync_existing_pos_closeouts(payment_date, desk="food")
 
     def sync_generated_sales_for_pos(order_date: date, area_ids: list[str], db_session=None) -> None:
         db = db_session or g.db
@@ -17107,6 +17284,22 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == module_key)
             .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
+        if module_key == "kitchen_recipe_plans":
+            # Catch up today's already-saved batches when the new internal Kitchen
+            # credit control is introduced. The operation is idempotent by batch.
+            credit_updates = False
+            for kitchen_record in all_records:
+                kitchen_payload = dict(kitchen_record.payload or {})
+                if parse_date(kitchen_payload.get("recipeDate")) != date.today():
+                    continue
+                if not kitchen_ingredient_items(kitchen_payload):
+                    continue
+                kitchen_recipe_rollup(kitchen_payload)
+                kitchen_payload.update(sync_kitchen_production_credit(kitchen_record, kitchen_payload, g.db))
+                set_module_record_metadata(kitchen_record, definition, kitchen_payload)
+                credit_updates = True
+            if credit_updates:
+                g.db.commit()
         customer_credit_queue: list[dict[str, Any]] = []
         if module_key == "customer_credit_accounts":
             customer_credit_queue = build_customer_credit_collection_queue(g.db, all_records)
@@ -17828,6 +18021,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if module_key == "kitchen_recipe_plans":
                     sync_kitchen_recipe_inventory(g.db, payload, record_payload)
                     sync_kitchen_menu_cost_from_recipe(g.db, payload)
+                    payload.update(sync_kitchen_production_credit(record, payload, g.db))
                 set_module_record_metadata(record, definition, payload)
                 if module_key == "expenses":
                     sync_expense_payment_to_finance_records(record, g.db)
@@ -17844,6 +18038,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     if linked_kitchen_order:
                         sync_generated_sales_for_module_record(linked_kitchen_order, g.db)
                 sync_generated_sales_for_module_record(record)
+                if module_key in {"laundry_tickets", "equipment_rental_bookings"}:
+                    sync_service_collection_closeouts(module_key, payload, record_payload)
                 if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "mobile_money_transactions", "catering_quotes", "customer_service_cases"}:
                     sync_customer_crm_automation(g.db)
                     sync_customer_loyalty_accounts(g.db)
@@ -18291,6 +18487,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("module_list", module_key=module_key))
 
         payload = dict(record.payload or {})
+        previous_payload = dict(payload)
         payment_summary = service_payment_summary(module_key, payload)
         if request.method == "POST":
             if module_key == "equipment_rental_bookings" and request.form.get("ownerApproveMorningReturn") == "yes":
@@ -18318,6 +18515,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     payload["updatedAt"] = datetime.utcnow().isoformat()
                     set_module_record_metadata(record, definition, payload)
                     sync_generated_sales_for_module_record(record)
+                    sync_service_collection_closeouts(module_key, payload, previous_payload)
                     audit(
                         module_key,
                         definition.label,
@@ -18436,6 +18634,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["updatedAt"] = datetime.utcnow().isoformat()
                 set_module_record_metadata(record, definition, payload)
                 sync_generated_sales_for_module_record(record)
+                sync_service_collection_closeouts(module_key, payload, previous_payload)
                 audit(
                     module_key,
                     definition.label,
@@ -18504,6 +18703,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
 
         payload = dict(record.payload or {})
+        previous_payload = dict(payload)
         entries = payload.get(SERVICE_PAYMENT_ENTRIES_KEY) if isinstance(payload.get(SERVICE_PAYMENT_ENTRIES_KEY), list) else []
         if not entries and normalize_text(payment_id) == "legacy" and parse_amount(payload.get("amountPaid")) > 0:
             payload[SERVICE_PAYMENT_ENTRIES_KEY] = []
@@ -18514,6 +18714,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload["updatedAt"] = datetime.utcnow().isoformat()
             set_module_record_metadata(record, definition, payload)
             sync_generated_sales_for_module_record(record)
+            sync_service_collection_closeouts(module_key, payload, previous_payload)
             audit(
                 module_key,
                 definition.label,
@@ -18539,6 +18740,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload["updatedAt"] = datetime.utcnow().isoformat()
         set_module_record_metadata(record, definition, payload)
         sync_generated_sales_for_module_record(record)
+        sync_service_collection_closeouts(module_key, payload, previous_payload)
         audit(
             module_key,
             definition.label,
@@ -20265,6 +20467,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 f"{normalize_text(kitchen_target_meal.get('recipeName'))}."
             )
             sync_kitchen_menu_cost_from_recipe(g.db, kitchen_batch_payload)
+            kitchen_batch_payload.update(
+                sync_kitchen_production_credit(kitchen_batch, kitchen_batch_payload, g.db)
+            )
             set_module_record_metadata(kitchen_batch, MODULES["kitchen_recipe_plans"], kitchen_batch_payload)
         else:
             sync_customer_credit_from_pos_order(order, g.db)
