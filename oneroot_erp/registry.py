@@ -43,13 +43,17 @@ INVENTORY_CATEGORY_LIBRARY = {
     ],
     "groceries": [
         "Groceries & Pantry",
+        "Bakery & Bread",
+        "Drinks & Refreshments",
+        "Snacks & Confectionery",
         "Household & Cleaning",
         "Personal Care",
         "Baby Care",
         "Sanitary & Tissue Care",
         "Stationery & School Supplies",
-        "Snacks & Confectionery",
         "General Merchandise",
+        "Gift Cards",
+        "Service Charges",
     ],
     "laundry-services": [
         "Laundry - Clothing",

@@ -1219,20 +1219,200 @@ PACKAGED_DRINK_NAME_TOKENS = (
     "bel aqua",
     "coca-cola",
     "coca cola",
+    "coca - cola",
     "bigoo",
     "malta",
     "kiki",
     "bel cola",
     "bel squeeze",
-    "drink",
     "malt",
     "cola",
     "sobolo",
     "juice",
     "energy",
-    "beverage",
-    "wheat",
+    "cocktail",
+    "mineral water",
+    "bottle water",
+    "power horse",
+    "rush energy",
+    "storm energy",
+    "banana pop",
+    "bb cocktail",
+    "perla",
+    "slem fit",
+    "venna",
+    "vita milk",
+    "vitamilk",
+    "fru telli",
 )
+
+# The imported catalogue mixed food, household goods, and service labels together.
+# These rules keep the counter categories practical without touching historical sales.
+GROCERY_SNACK_NAME_TOKENS = (
+    "biscuit",
+    "cookie",
+    "cracker",
+    "toffee",
+    "alpenliebe",
+    "choco chips",
+    "chocolate bite",
+    "chocolate cup",
+    "chocolate pop",
+    "chocolate ice cream",
+    "chocolate malt",
+    "orient chocolate",
+    "cream bar",
+    "prawn cracker",
+    "tomtom",
+    "rio pop",
+    "robb",
+    "nkatie",
+    "candy",
+    "sweet",
+)
+GROCERY_PANTRY_NAME_TOKENS = (
+    "rice",
+    "spaghetti",
+    "indomie",
+    "noodle",
+    "tomato paste",
+    "tasty tom",
+    "gino",
+    "lavonce",
+    "sardine",
+    "corned beef",
+    "beef pate",
+    "mackerel",
+    "seasoning",
+    "onga",
+    "kivo",
+    "curry",
+    "pepper",
+    "salt",
+    "oil",
+    "margarine",
+    "shea butter",
+    "groundnut",
+    "tombrown",
+    "wheat drink",
+    "hot chocolate",
+    "choco malt",
+    "milk care",
+    "gari chocolate",
+)
+GROCERY_BABY_NAME_TOKENS = ("baby", "diaper", "pampers", "wet wipes", "cerelac")
+GROCERY_SANITARY_NAME_TOKENS = (
+    "toilet roll",
+    "t - roll",
+    "t-roll",
+    "t roll",
+    "sanitary",
+    "menstrual",
+    "tissue",
+)
+GROCERY_STATIONERY_NAME_TOKENS = (
+    "pen",
+    "pencil",
+    "eraser",
+    "exercise book",
+    "glue",
+    "ruler",
+    "ruller",
+    "selotape",
+    "selo tape",
+    "sharpener",
+    "needle",
+    "safety pin",
+    "thread",
+)
+GROCERY_HOUSEHOLD_NAME_TOKENS = (
+    "detergent",
+    "washing powder",
+    "after wash",
+    "afterwash",
+    "handwash",
+    "hand wash",
+    "disinfectant",
+    "stain remover",
+    "spray",
+    "coil",
+    "sponge",
+    "air fresher",
+    "air freshener",
+    "washing soap",
+    "sunlight bar",
+    "jamaa bar",
+    "madar power",
+    "power zone",
+    "insect",
+    "kleesoft",
+)
+GROCERY_PERSONAL_CARE_NAME_TOKENS = (
+    "pepsodent",
+    "toothbrush",
+    "tooth paste",
+    "razor",
+    "blade",
+    "hair ",
+    "perfume",
+    "beauty soap",
+    "geisha",
+    "kampala soap",
+    "guardian carbolic",
+    "mabel ",
+    "juliet soap",
+    "antiseptic soap",
+    "baby oil",
+    "funbact",
+    "nazo",
+    "cotton swab",
+    "mosquito repellent",
+)
+GROCERY_GENERAL_MERCHANDISE_NAME_TOKENS = (
+    "balloon",
+    "slipper",
+    "hanger",
+    "peg",
+    "plastic cup",
+    "takeaway",
+    "playing card",
+    "handkerchief",
+    "socks",
+    "battery",
+    "torch",
+    "pad lock",
+    "candle",
+    "match",
+    "campher",
+    "camphor",
+    "incense",
+)
+SHELF_STABLE_COLD_STORE_NAMES = {
+    "abena beef pate",
+    "enapa mackerel small",
+    "ester canned beef",
+    "lele beef pate",
+    "lele corned beef 198g",
+    "remie chicken big",
+    "remie chicken seasoning",
+    "remie fish",
+    "sankofa beef",
+    "sister mackerel",
+}
+
+CATALOG_IMAGE_PATHS = {
+    "groceries": "/static/catalog-images/groceries.jpg",
+    "frozen-foods": "/static/catalog-images/frozen-foods.jpg",
+    "kitchen-meals": "/static/catalog-images/kitchen-meals.jpg",
+    "frozen-treats": "/static/catalog-images/frozen-treats.jpg",
+    "bakery-bread": "/static/catalog-images/bakery-bread.jpg",
+    "laundry": "/static/catalog-images/laundry.jpg",
+    "equipment": "/static/catalog-images/equipment.jpg",
+    "water": "/static/catalog-images/water.jpg",
+    "household": "/static/catalog-images/household.jpg",
+    "baby-care": "/static/catalog-images/baby-care.jpg",
+    "stationery": "/static/catalog-images/stationery.jpg",
+}
 
 
 def product_text_blob(product: Product) -> str:
@@ -1241,6 +1421,89 @@ def product_text_blob(product: Product) -> str:
         for value in (product.name, product.category, product.source_category, product.source_catalog_id)
         if normalize_text(value)
     )
+
+
+def contains_catalog_token(text: str, tokens: tuple[str, ...]) -> bool:
+    for token in tokens:
+        # Short single-word markers such as "pen" must match a word, otherwise
+        # a product like Alpenliebe is incorrectly treated as stationery.
+        if " " not in token and len(token) <= 4:
+            if re.search(rf"(?<![a-z0-9]){re.escape(token)}(?![a-z0-9])", text):
+                return True
+        elif token in text:
+            return True
+    return False
+
+
+def grocery_category_for_name(name: str) -> str:
+    """Return a practical Groceries & More shelf category from an item name."""
+    name_key = normalize_text(name).lower()
+    if contains_catalog_token(name_key, GROCERY_BABY_NAME_TOKENS):
+        return "Baby Care"
+    if contains_catalog_token(name_key, GROCERY_SANITARY_NAME_TOKENS):
+        return "Sanitary & Tissue Care"
+    if contains_catalog_token(name_key, GROCERY_STATIONERY_NAME_TOKENS):
+        return "Stationery & School Supplies"
+    if contains_catalog_token(name_key, GROCERY_PERSONAL_CARE_NAME_TOKENS):
+        return "Personal Care"
+    if contains_catalog_token(name_key, GROCERY_HOUSEHOLD_NAME_TOKENS):
+        return "Household & Cleaning"
+    if contains_catalog_token(name_key, GROCERY_GENERAL_MERCHANDISE_NAME_TOKENS):
+        return "General Merchandise"
+    if "bread" in name_key:
+        return "Bakery & Bread"
+    if contains_catalog_token(name_key, GROCERY_SNACK_NAME_TOKENS):
+        return "Snacks & Confectionery"
+    if contains_catalog_token(name_key, GROCERY_PANTRY_NAME_TOKENS):
+        return "Groceries & Pantry"
+    if contains_catalog_token(name_key, PACKAGED_DRINK_NAME_TOKENS):
+        return "Drinks & Refreshments"
+    return "Groceries & Pantry"
+
+
+def is_packaged_drink_product(product: Product) -> bool:
+    """Avoid treating cereal, biscuits, and chocolate snacks as cold drinks."""
+    name_key = normalize_text(product.name).lower()
+    source_key = normalize_text(product.source_category).lower()
+    if contains_catalog_token(name_key, GROCERY_BABY_NAME_TOKENS):
+        return False
+    if contains_catalog_token(name_key, GROCERY_SNACK_NAME_TOKENS):
+        return False
+    if contains_catalog_token(name_key, GROCERY_PANTRY_NAME_TOKENS):
+        return False
+    if source_key == KITCHEN_MENU_SOURCE_CATEGORY.lower() and normalize_text(product.category).lower() in {"drinks", "drinks & refreshments"}:
+        return True
+    return contains_catalog_token(name_key, PACKAGED_DRINK_NAME_TOKENS)
+
+
+def catalog_default_image_path(product: Product) -> str:
+    """Provide a locally hosted visual for catalog rows without a staff photo."""
+    area_id = normalize_text(product.business_area_id)
+    category_key = normalize_text(product.category).lower()
+    name_key = normalize_text(product.name).lower()
+    if area_id == "mobile-money":
+        return ""
+    if area_id == "laundry-services":
+        return CATALOG_IMAGE_PATHS["laundry"]
+    if area_id == "water-equipment":
+        return CATALOG_IMAGE_PATHS["water"] if "water" in name_key or "gallon" in name_key or "bucket" in name_key else CATALOG_IMAGE_PATHS["equipment"]
+    if area_id == COLD_STORE_KITCHEN_AREA_ID:
+        if category_key == "frozen treats":
+            return CATALOG_IMAGE_PATHS["frozen-treats"]
+        if category_key in {"main meals", "meal combos", "proteins & extras", "sides", "soups & stews", "prepared meals"}:
+            return CATALOG_IMAGE_PATHS["kitchen-meals"]
+        return CATALOG_IMAGE_PATHS["frozen-foods"]
+    if area_id == "groceries":
+        if category_key == "baby care":
+            return CATALOG_IMAGE_PATHS["baby-care"]
+        if category_key == "bakery & bread":
+            return CATALOG_IMAGE_PATHS["bakery-bread"]
+        if category_key == "stationery & school supplies":
+            return CATALOG_IMAGE_PATHS["stationery"]
+        if category_key in {"household & cleaning", "personal care", "sanitary & tissue care", "general merchandise"}:
+            return CATALOG_IMAGE_PATHS["household"]
+        return CATALOG_IMAGE_PATHS["groceries"]
+    return ""
 
 
 def compact_catalog_name_key(value: Any) -> str:
@@ -1306,7 +1569,7 @@ def reclassify_inventory_product(product: Product) -> bool:
             set_value("track_inventory", False)
             set_value("stock_location", "")
             set_value("shelf_location", "")
-        elif category_key in {"drinks", "drinks & refreshments"} or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS):
+        elif is_packaged_drink_product(product):
             set_value("business_area_id", "groceries")
             set_value("category", "Drinks & Refreshments")
             set_value("item_type", "stock")
@@ -1320,10 +1583,7 @@ def reclassify_inventory_product(product: Product) -> bool:
 
     # All packaged drinks belong to Groceries & More, even when historic imports
     # placed them under Cold Store, Kitchen, Laundry, Water, or Fresh Foods.
-    is_packaged_drink = (
-        category_key in {"drinks", "drinks & refreshments"}
-        or any(token in name_key for token in PACKAGED_DRINK_NAME_TOKENS)
-    )
+    is_packaged_drink = is_packaged_drink_product(product)
     if is_packaged_drink:
         set_value("business_area_id", "groceries")
         set_value("category", "Drinks & Refreshments")
@@ -1346,6 +1606,16 @@ def reclassify_inventory_product(product: Product) -> bool:
         set_value("track_inventory", True)
         return changed
 
+    # Shelf-stable tinned proteins, seasonings, and packet foods were imported
+    # into the freezer category. They belong on the Groceries & More shelves.
+    if area_id == COLD_STORE_KITCHEN_AREA_ID and name_key in SHELF_STABLE_COLD_STORE_NAMES:
+        set_value("business_area_id", "groceries")
+        set_value("category", grocery_category_for_name(product.name))
+        set_value("item_type", "stock")
+        set_value("track_inventory", True)
+        set_value("stock_location", "groceries-counter")
+        return changed
+
     # Laundry is a service desk, so all of its catalogue entries remain services.
     if area_id == "laundry-services" or category_key.startswith("laundry -"):
         set_value("business_area_id", "laundry-services")
@@ -1360,6 +1630,11 @@ def reclassify_inventory_product(product: Product) -> bool:
         set_value("business_area_id", "groceries")
     if area_id == "groceries" and category_key in COLD_STORE_CATEGORY_LABELS:
         set_value("business_area_id", "cold-store-groceries")
+
+    # Repair the broad import categories only for catalogue-imported products.
+    # Staff-created entries keep the category selected in the inventory form.
+    if area_id == "groceries" and not product.user_created and category_key not in {"gift cards", "service charges"}:
+        set_value("category", grocery_category_for_name(product.name))
 
     # Water refill, gallon, and bucket products stay under Water Supply. A named
     # packaged drink is deliberately excluded by the rule immediately above.
@@ -1398,16 +1673,18 @@ def reclassify_inventory_catalog(db_session) -> bool:
     """Repair legacy areas/categories and keep stock/service classification clean."""
     changed = False
     for product in db_session.scalars(select(Product)).all():
-        if not reclassify_inventory_product(product):
+        classification_changed = reclassify_inventory_product(product)
+        normalization_changed = normalize_product_record(product)
+        if not classification_changed and not normalization_changed:
             continue
         product.updated_at = datetime.utcnow()
-        product.sku = generate_auto_product_sku(
-            product_id=product.id,
-            name=product.name,
-            business_area_id=product.business_area_id,
-            category=product.category,
-        )
-        normalize_product_record(product)
+        if classification_changed:
+            product.sku = generate_auto_product_sku(
+                product_id=product.id,
+                name=product.name,
+                business_area_id=product.business_area_id,
+                category=product.category,
+            )
         changed = True
     return changed
 
@@ -2497,7 +2774,7 @@ def normalize_product_record(product: Product) -> bool:
         changed = True
     item_type = normalized_product_item_type(product.item_type, product.track_inventory)
     should_track_inventory = item_type != "service"
-    image_url = normalize_text(product.image_url)
+    image_url = normalize_text(product.image_url) or catalog_default_image_path(product)
     sku_value = ensure_product_sku(product)
     if normalize_text(product.item_type) != item_type:
         product.item_type = item_type
