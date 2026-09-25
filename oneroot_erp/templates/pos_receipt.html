@@ -58,4 +58,9 @@
       <p>Computer-generated receipt · {{ order.orderNumber }}</p>
     </footer>
   </section>
+  {% if auto_print %}
+    <script>
+      window.addEventListener("load", () => window.setTimeout(() => window.print(), 150));
+    </script>
+  {% endif %}
 {% endblock %}

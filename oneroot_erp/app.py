@@ -20829,6 +20829,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "pos_receipt.html",
             page_title=f"POS Receipt - {order.order_number}",
             back_url=url_for("pos_page"),
+            auto_print=normalize_text(request.args.get("autoprint")).lower() in {"1", "true", "yes"},
             order={
                 "orderNumber": order.order_number,
                 "orderDate": order.order_date.isoformat(),

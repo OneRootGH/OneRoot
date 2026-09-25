@@ -289,6 +289,32 @@
     }
   }
 
+  function shouldAutoPrintReceipt() {
+    // Groceries & More is the only counter with automatic receipt printing.
+    // Staff retain control of printing from the Cold Store & Kitchen counter.
+    return !kitchenIssueMode
+      && posDesk === "groceries"
+      && (isCreditSale() || getCartTotal() > 30);
+  }
+
+  function openAutomaticReceiptWindow() {
+    const receiptWindow = window.open("about:blank", "_blank", "popup=yes,width=420,height=760");
+    if (receiptWindow) {
+      receiptWindow.document.title = "Preparing OneRoot receipt";
+      receiptWindow.document.body.textContent = "Preparing receipt...";
+    }
+    return receiptWindow;
+  }
+
+  function sendReceiptToAutomaticPrint(receiptWindow, receiptUrl) {
+    if (!receiptWindow || receiptWindow.closed || !receiptUrl) {
+      return false;
+    }
+    const separator = receiptUrl.includes("?") ? "&" : "?";
+    receiptWindow.location.replace(`${receiptUrl}${separator}autoprint=1`);
+    return true;
+  }
+
   function renderCart() {
     const total = getCartTotal();
     const itemCount = getCartItemCount();
@@ -979,6 +1005,11 @@
       return;
     }
 
+    // Open the receipt tab while this click still has browser user activation.
+    // It is filled and printed only after the sale is confirmed by the server.
+    const automaticPrintRequested = shouldAutoPrintReceipt();
+    const automaticReceiptWindow = automaticPrintRequested ? openAutomaticReceiptWindow() : null;
+
     state.isSaving = true;
     saveButton.disabled = true;
     setStatus(kitchenIssueMode ? "Issuing ingredients to kitchen..." : "Saving sale...");
@@ -1017,6 +1048,7 @@
       const result = await readApiResponse(response);
 
       if (!response.ok || !result.ok) {
+        automaticReceiptWindow?.close();
         setStatus(result.error || "The sale could not be saved.", "error");
         return;
       }
@@ -1034,16 +1066,24 @@
         await refreshSummary();
       }
       const retryNote = result.alreadySaved ? " It was already saved and was not duplicated." : "";
+      const automaticPrintStarted = automaticPrintRequested
+        && sendReceiptToAutomaticPrint(automaticReceiptWindow, result.order?.receiptUrl);
+      const printNote = automaticPrintRequested
+        ? (automaticPrintStarted
+          ? " Receipt print opened automatically."
+          : " Receipt is ready. The print window was blocked, so use Last receipt to print it.")
+        : "";
       setStatus(
         kitchenIssueMode
           ? `${result.orderNumber} issued to ${kitchenMealInput?.selectedOptions?.[0]?.textContent || "the selected meal"} at ${formatCurrency(result.totalAmount)} cost. Food cost has been updated.${retryNote}`
-          : `${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.${retryNote}`
+          : `${result.orderNumber} saved at ${formatCurrency(result.totalAmount)}. Receipt is ready.${printNote}${retryNote}`
       );
       if (searchInput) {
         searchInput.focus();
         searchInput.select();
       }
     } catch (error) {
+      automaticReceiptWindow?.close();
       setStatus(
         saved
           ? "The sale was saved, but the counter summary could not refresh. Refresh the page when convenient."
