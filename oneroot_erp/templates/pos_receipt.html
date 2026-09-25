@@ -1,66 +1,61 @@
-{% extends "document_base.html" %}
+{% extends "thermal_receipt_base.html" %}
 {% set document_label = "POS Receipt" %}
 {% set document_title = "OneRoot POS Receipt" %}
 {% set document_subtitle = order.orderNumber ~ " · " ~ (order.orderDate|pretty_date) %}
 {% block document_body %}
-  <section class="summary-grid document-summary-grid">
-    <article class="mini-card">
-      <span>Order</span>
-      <strong>{{ order.orderNumber }}</strong>
-      <small>{{ order.orderDate|pretty_date }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Customer</span>
-      <strong>{{ order.customerName }}</strong>
-      <small>{{ order.customerPhone or 'Walk-in sale' }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Payment</span>
-      <strong>{{ order.paymentMethod }}</strong>
-      <small>{{ order.itemCount }} item(s)</small>
-    </article>
-    <article class="mini-card">
-      <span>Total</span>
-      <strong>{{ order.totalAmount|currency }}</strong>
-      <small>Created {{ order.createdAt[:16]|replace('T', ' ') }}</small>
-    </article>
-  </section>
+  <section class="thermal-receipt">
+    <header class="thermal-receipt-header">
+      <img src="{{ url_for('public_asset_files', filename='oneroot-logo.png') }}" alt="OneRoot Essentials" class="thermal-receipt-logo">
+      <h1>OneRoot Essentials</h1>
+      <p>Amasaman, Medie, Ghana</p>
+      <p>Call: 0544995005 · WhatsApp: 0242847065</p>
+      <p><strong>SALES RECEIPT</strong></p>
+    </header>
 
-  <div class="table-wrap">
-    <table>
+    <hr class="thermal-receipt-rule">
+    <div class="thermal-receipt-meta">
+      <div><span>Receipt</span><strong>{{ order.orderNumber }}</strong></div>
+      <div><span>Date</span><strong>{{ order.createdAt[:16]|replace('T', ' ') }}</strong></div>
+      <div><span>Payment</span><strong>{{ order.paymentMethod }}</strong></div>
+      <div><span>Items</span><strong>{{ order.itemCount|round(2) }}</strong></div>
+      {% if order.customerName and order.customerName != 'Walk-in Customer' %}
+        <div><span>Customer</span><strong>{{ order.customerName }}</strong></div>
+        {% if order.customerPhone %}<div><span>Phone</span><strong>{{ order.customerPhone }}</strong></div>{% endif %}
+      {% endif %}
+    </div>
+
+    <hr class="thermal-receipt-rule">
+    <table class="thermal-receipt-items">
       <thead>
         <tr>
-          <th>Item</th>
-          <th>Area</th>
-          <th>Qty</th>
-          <th>Unit</th>
-          <th>Total</th>
+          <th class="item-name">Item</th>
+          <th class="item-qty">Qty</th>
+          <th class="item-unit">Price</th>
+          <th class="item-total">Total</th>
         </tr>
       </thead>
       <tbody>
         {% for item in line_items %}
           <tr>
-            <td>{{ item.name }}{% if item.category %}<span class="table-secondary">{{ item.category }}</span>{% endif %}</td>
-            <td>{{ item.businessAreaLabel }}</td>
-            <td>{{ item.quantity }}</td>
-            <td>{{ item.unitPrice|currency }}</td>
-            <td>{{ item.totalAmount|currency }}</td>
+            <td class="item-name">{{ item.name }}{% if item.category %}<small>{{ item.category }}</small>{% endif %}</td>
+            <td class="item-qty">{{ item.quantity|round(2) }}</td>
+            <td class="item-unit">{{ item.unitPrice|currency }}</td>
+            <td class="item-total">{{ item.totalAmount|currency }}</td>
           </tr>
         {% endfor %}
       </tbody>
-      <tfoot>
-        <tr>
-          <th colspan="4">Grand Total</th>
-          <th>{{ order.totalAmount|currency }}</th>
-        </tr>
-      </tfoot>
     </table>
-  </div>
 
-  {% if order.notes %}
-    <section class="document-note">
-      <strong>Notes</strong>
-      <p>{{ order.notes }}</p>
-    </section>
-  {% endif %}
+    <div class="thermal-receipt-totals thermal-receipt-grand-total">
+      <div><span>TOTAL</span><strong>{{ order.totalAmount|currency }}</strong></div>
+    </div>
+
+    {% if order.notes %}<p class="thermal-receipt-note"><strong>Note:</strong> {{ order.notes }}</p>{% endif %}
+
+    <footer class="thermal-receipt-footer">
+      <p><strong>Thank you for choosing OneRoot Essentials.</strong></p>
+      <p>Please keep this receipt. Goods sold are checked at the counter.</p>
+      <p>Computer-generated receipt · {{ order.orderNumber }}</p>
+    </footer>
+  </section>
 {% endblock %}

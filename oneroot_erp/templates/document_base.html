@@ -5,8 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ page_title }} | OneRoot Essentials</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='app.css', v=static_asset_version) }}">
+    {% block document_head %}{% endblock %}
   </head>
-  <body class="document-body">
+  <body class="document-body {% block document_body_class %}{% endblock %}">
     <header class="document-toolbar">
       <div>
         <p class="eyebrow">{{ document_label }}</p>

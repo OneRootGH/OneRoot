@@ -1,85 +1,58 @@
-{% extends "document_base.html" %}
+{% extends "thermal_receipt_base.html" %}
 {% set document_label = "Apartment Receipt" %}
 {% set document_title = "OneRoot Apartment Receipt" %}
 {% set document_subtitle = profile.suite ~ " · " ~ (profile.month or "Current Month") %}
 {% block document_body %}
-  <section class="summary-grid document-summary-grid">
-    <article class="mini-card">
-      <span>Tenant</span>
-      <strong>{{ source.get('tenantName') or profile.tenant }}</strong>
-      <small>{{ source.get('tenantPhone') or 'No phone saved' }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Receipt Total</span>
-      <strong>{{ receipt_total|currency }}</strong>
-      <small>{{ profile.rentSummaryLabel }} {{ profile.rentPaid|currency }} · Bills {{ profile.billsPaid|currency }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Rent Payment</span>
-      <strong>{{ source.get('rentPaymentMethod') or 'Not saved' }}</strong>
-      <small>{{ source.get('rentPaymentDate')|pretty_date or 'No payment date saved' }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Bills Payment</span>
-      <strong>{{ source.get('billPaymentMethod') or 'Not saved' }}</strong>
-      <small>{{ source.get('billPaymentDate')|pretty_date or 'No bill payment date saved' }}</small>
-    </article>
-  </section>
+  <section class="thermal-receipt">
+    <header class="thermal-receipt-header">
+      <img src="{{ url_for('public_asset_files', filename='oneroot-logo.png') }}" alt="OneRoot Essentials" class="thermal-receipt-logo">
+      <h1>OneRoot Essentials</h1>
+      <p>Amasaman, Medie, Ghana</p>
+      <p><strong>APARTMENT PAYMENT RECEIPT</strong></p>
+    </header>
 
-  <div class="table-wrap">
-    <table>
+    <hr class="thermal-receipt-rule">
+    <div class="thermal-receipt-meta">
+      <div><span>Suite</span><strong>{{ profile.suite }}</strong></div>
+      <div><span>Month</span><strong>{{ profile.month or 'Current Month' }}</strong></div>
+      <div><span>Tenant</span><strong>{{ source.get('tenantName') or profile.tenant }}</strong></div>
+      {% if source.get('tenantPhone') %}<div><span>Phone</span><strong>{{ source.get('tenantPhone') }}</strong></div>{% endif %}
+      <div><span>Rent payment</span><strong>{{ source.get('rentPaymentMethod') or 'Not recorded' }}</strong></div>
+      <div><span>Bills payment</span><strong>{{ source.get('billPaymentMethod') or 'Not recorded' }}</strong></div>
+    </div>
+
+    <hr class="thermal-receipt-rule">
+    <table class="thermal-receipt-items">
       <thead>
         <tr>
-          <th>Charge / Receipt Item</th>
-          <th>Amount</th>
+          <th class="two-column-name">Charge / Receipt Item</th>
+          <th class="two-column-total">Amount</th>
         </tr>
       </thead>
       <tbody>
-        <tr><td>Suite Rent Due</td><td>{{ profile.suiteRentDue|currency }}</td></tr>
-        <tr><td>Suite Rent Paid</td><td>{{ profile.suiteRentPaid|currency }}</td></tr>
+        <tr><td class="two-column-name">Suite Rent Paid</td><td class="two-column-total">{{ profile.suiteRentPaid|currency }}</td></tr>
         {% for item in profile.additionalRentItems %}
-          <tr><td>{{ item.label }} Due</td><td>{{ item.due|currency }}</td></tr>
-          <tr><td>{{ item.label }} Paid</td><td>{{ item.paid|currency }}</td></tr>
+          {% if item.paid > 0 %}<tr><td class="two-column-name">{{ item.label }} Paid</td><td class="two-column-total">{{ item.paid|currency }}</td></tr>{% endif %}
         {% endfor %}
-        <tr><td>Total Rent Due</td><td>{{ profile.rentDue|currency }}</td></tr>
-        <tr><td>Total Rent Paid</td><td>{{ profile.rentPaid|currency }}</td></tr>
         {% for item in bill_items if item.amount > 0 %}
-          <tr><td>{{ item.label }}</td><td>{{ item.amount|currency }}</td></tr>
+          <tr><td class="two-column-name">{{ item.label }}</td><td class="two-column-total">{{ item.amount|currency }}</td></tr>
         {% endfor %}
-        <tr><td>Total Bills Due</td><td>{{ profile.billsDue|currency }}</td></tr>
-        <tr><td>Bills Paid</td><td>{{ profile.billsPaid|currency }}</td></tr>
-        <tr><td>Arrears Brought Forward</td><td>{{ profile.arrearsBroughtForward|currency }}</td></tr>
-        <tr><td>Late Fee</td><td>{{ profile.lateFee|currency }}</td></tr>
-        {% if profile.creditBroughtForward > 0 %}
-          <tr><td>Credit Applied</td><td>{{ profile.creditBroughtForward|currency }}</td></tr>
-        {% endif %}
+        {% if profile.billsPaid > 0 %}<tr><td class="two-column-name">Bills Paid</td><td class="two-column-total">{{ profile.billsPaid|currency }}</td></tr>{% endif %}
       </tbody>
-      <tfoot>
-        <tr>
-          <th>Balance Remaining</th>
-          <th>{{ profile.outstanding|currency }}</th>
-        </tr>
-      </tfoot>
     </table>
-  </div>
 
-  <section class="card-grid two document-detail-grid">
-    <article class="mini-card">
-      <span>References</span>
-      <strong>{{ source.get('rentPaymentReference') or 'No rent ref saved' }}</strong>
-      <small>Bill ref: {{ source.get('billPaymentReference') or 'No bill ref saved' }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Received By</span>
-      <strong>{{ source.get('rentReceivedBy') or 'Not saved' }}</strong>
-      <small>Bill receiver: {{ source.get('billReceivedBy') or 'Not saved' }}</small>
-    </article>
+    <div class="thermal-receipt-totals thermal-receipt-grand-total">
+      <div><span>PAYMENT RECEIVED</span><strong>{{ receipt_total|currency }}</strong></div>
+      <div><span>RENT BALANCE</span><strong>{{ profile.rentBalance|currency }}</strong></div>
+      <div><span>BILLS BALANCE</span><strong>{{ profile.billsBalance|currency }}</strong></div>
+      <div><span>TOTAL OUTSTANDING</span><strong>{{ profile.outstanding|currency }}</strong></div>
+    </div>
+
+    <p class="thermal-receipt-note"><strong>Rent ref:</strong> {{ source.get('rentPaymentReference') or 'Not recorded' }}<br><strong>Bills ref:</strong> {{ source.get('billPaymentReference') or 'Not recorded' }}<br><strong>Received by:</strong> {{ source.get('rentReceivedBy') or source.get('billReceivedBy') or 'Not recorded' }}{% if profile.notes %}<br>{{ profile.notes }}{% endif %}</p>
+
+    <footer class="thermal-receipt-footer">
+      <p>Keep this receipt for your tenancy records.</p>
+      <p>For account help, contact OneRoot on 0244620860.</p>
+    </footer>
   </section>
-
-  {% if profile.notes %}
-    <section class="document-note">
-      <strong>Notes</strong>
-      <p>{{ profile.notes }}</p>
-    </section>
-  {% endif %}
 {% endblock %}

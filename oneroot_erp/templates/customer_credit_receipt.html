@@ -1,72 +1,65 @@
-{% extends "document_base.html" %}
+{% extends "thermal_receipt_base.html" %}
 {% set document_label = "Customer Credit Receipt" %}
 {% set document_title = "OneRoot Customer Credit Receipt" %}
 {% set document_subtitle = credit.receiptNumber ~ " · " ~ (credit.entryDate|pretty_date) %}
 {% block document_body %}
-  <section class="summary-grid document-summary-grid">
-    <article class="mini-card">
-      <span>Customer</span>
-      <strong>{{ credit.customerName }}</strong>
-      <small>{{ credit.customerPhone or 'Phone not recorded' }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Transaction</span>
-      <strong>{{ credit.transactionType }}</strong>
-      <small>{{ credit.businessArea }}</small>
-    </article>
-    <article class="mini-card">
-      <span>{% if credit.transactionType == 'Credit Sale' %}Amount Owed{% else %}Amount{% endif %}</span>
-      <strong>{{ credit.amount|currency }}</strong>
-      <small>{{ credit.paymentMethod or 'Payment method not recorded' }}</small>
-    </article>
-    <article class="mini-card">
-      <span>Balance After Entry</span>
-      <strong>{{ credit.balance|currency }}</strong>
-      <small>{% if credit.dueDate %}Due {{ credit.dueDate|pretty_date }}{% else %}Due date not set{% endif %}</small>
-    </article>
-  </section>
+  <section class="thermal-receipt">
+    <header class="thermal-receipt-header">
+      <img src="{{ url_for('public_asset_files', filename='oneroot-logo.png') }}" alt="OneRoot Essentials" class="thermal-receipt-logo">
+      <h1>OneRoot Essentials</h1>
+      <p>Amasaman, Medie, Ghana</p>
+      <p><strong>CUSTOMER CREDIT RECEIPT</strong></p>
+    </header>
+
+    <hr class="thermal-receipt-rule">
+    <div class="thermal-receipt-meta">
+      <div><span>Receipt</span><strong>{{ credit.receiptNumber }}</strong></div>
+      <div><span>Date</span><strong>{{ credit.entryDate|pretty_date }}</strong></div>
+      <div><span>Customer</span><strong>{{ credit.customerName }}</strong></div>
+      {% if credit.customerPhone %}<div><span>Phone</span><strong>{{ credit.customerPhone }}</strong></div>{% endif %}
+      <div><span>Transaction</span><strong>{{ credit.transactionType }}</strong></div>
+      <div><span>Payment</span><strong>{{ credit.paymentMethod or 'Not recorded' }}</strong></div>
+      {% if credit.dueDate %}<div><span>Due date</span><strong>{{ credit.dueDate|pretty_date }}</strong></div>{% endif %}
+    </div>
 
   {% if line_items %}
-    <div class="table-wrap">
-      <table>
+    <hr class="thermal-receipt-rule">
+      <table class="thermal-receipt-items">
         <thead>
           <tr>
-            <th>Item / Service</th>
-            <th>Area</th>
-            <th>Qty</th>
-            <th>Unit</th>
-            <th>Total</th>
+            <th class="item-name">Item / Service</th>
+            <th class="item-qty">Qty</th>
+            <th class="item-unit">Price</th>
+            <th class="item-total">Total</th>
           </tr>
         </thead>
         <tbody>
           {% for item in line_items %}
             <tr>
-              <td>{{ item.name }}{% if item.category %}<span class="table-secondary">{{ item.category }}</span>{% endif %}</td>
-              <td>{{ item.businessAreaLabel }}</td>
-              <td>{{ item.quantity }}</td>
-              <td>{{ item.unitPrice|currency }}</td>
-              <td>{{ item.totalAmount|currency }}</td>
+              <td class="item-name">{{ item.name }}{% if item.category %}<small>{{ item.category }}</small>{% endif %}</td>
+              <td class="item-qty">{{ item.quantity|round(2) }}</td>
+              <td class="item-unit">{{ item.unitPrice|currency }}</td>
+              <td class="item-total">{{ item.totalAmount|currency }}</td>
             </tr>
           {% endfor %}
         </tbody>
-        <tfoot>
-          <tr>
-            <th colspan="4">{{ 'Total Credit Supplied' if credit.transactionType == 'Credit Sale' else 'Transaction Amount' }}</th>
-            <th>{{ credit.amount|currency }}</th>
-          </tr>
-        </tfoot>
       </table>
-    </div>
   {% endif %}
 
-  <section class="document-note">
-    <strong>Reference</strong>
-    <p>{{ credit.reference or credit.receiptNumber }}</p>
-    {% if credit.notes %}<p>{{ credit.notes }}</p>{% endif %}
+    <div class="thermal-receipt-totals thermal-receipt-grand-total">
+      <div><span>{{ 'CREDIT SUPPLIED' if credit.transactionType == 'Credit Sale' else 'AMOUNT RECEIVED' }}</span><strong>{{ credit.amount|currency }}</strong></div>
+      <div><span>BALANCE AFTER ENTRY</span><strong>{{ credit.balance|currency }}</strong></div>
+    </div>
+
+    <p class="thermal-receipt-note"><strong>Reference:</strong> {{ credit.reference or credit.receiptNumber }}{% if credit.notes %}<br>{{ credit.notes }}{% endif %}</p>
+
+    <footer class="thermal-receipt-footer">
     {% if credit.transactionType == 'Credit Sale' %}
-      <p>This receipt confirms that the listed goods or services were supplied on credit. The balance shown is the amount remaining on the customer account after this entry.</p>
+      <p>This receipt confirms goods or services supplied on credit. The balance above is still owed.</p>
     {% elif credit.transactionType == 'Payment Received' %}
-      <p>This receipt confirms payment received against the customer's OneRoot credit account. The balance shown is what remains after this payment.</p>
+      <p>This receipt confirms payment received against the customer's OneRoot credit account.</p>
     {% endif %}
+      <p>Keep this receipt for your records.</p>
+    </footer>
   </section>
 {% endblock %}

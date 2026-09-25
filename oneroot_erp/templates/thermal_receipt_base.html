@@ -1,0 +1,5 @@
+{% extends "document_base.html" %}
+{% block document_body_class %}thermal-receipt-body{% endblock %}
+{% block document_head %}
+  <link rel="stylesheet" href="{{ url_for('static', filename='thermal-receipt.css', v=static_asset_version) }}">
+{% endblock %}
