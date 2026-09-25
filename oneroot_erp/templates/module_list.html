@@ -182,18 +182,22 @@
           <p class="eyebrow">Collection Queue</p>
           <h3>Customers With Credit Still Unpaid</h3>
         </div>
-        <p class="muted list-summary">Each customer appears once. Their mobile number is their credit account ID, so payments always reduce the correct balance.</p>
+        <p class="muted list-summary">Each customer appears once. The amount marked <strong>Still Owes</strong> is the live balance after all linked credit sales and payments.</p>
       </div>
       <ul class="stack-list compact reminder-stack">
         {% for customer in customer_credit_queue %}
-          <li class="stack-list-item-row">
+          <li class="stack-list-item-row credit-collection-row">
             <div class="stack-list-copy">
               <strong>{{ customer.customerName }} <span class="status-chip {% if customer.needsPhone %}is-warning{% else %}is-highlight{% endif %}">{{ customer.accountLabel }}</span></strong>
               <span>{% if customer.customerPhone %}{{ customer.customerPhone }}{% else %}Mobile number missing - update this account before another credit sale{% endif %} · {% if customer.isOverdue %}Overdue{% elif customer.isDueToday %}Due today{% else %}Open credit{% endif %}{% if customer.dueDate %} · Due {{ customer.dueDate }}{% endif %}</span>
-              <span>{{ customer.saleCount }} credit sale{% if customer.saleCount != 1 %}s{% endif %} · {{ customer.paymentCount }} payment{% if customer.paymentCount != 1 %}s{% endif %}{% if customer.lastActivityDate %} · Last activity {{ customer.lastActivityDate }}{% endif %}</span>
+              <div class="credit-account-figures" aria-label="Credit account totals">
+                <span><small>Credit supplied</small><strong>{{ customer.creditSupplied|currency }}</strong></span>
+                <span><small>Paid so far</small><strong>{{ customer.paymentsReceived|currency }}</strong></span>
+                <span class="credit-balance-figure"><small>Still owes</small><strong>{{ customer.balance|currency }}</strong></span>
+              </div>
+              <span>{{ customer.saleCount }} credit sale{% if customer.saleCount != 1 %}s{% endif %} · {{ customer.paymentCount }} payment{% if customer.paymentCount != 1 %}s{% endif %}{% if customer.lastPaymentDate %} · Last payment {{ customer.lastPaymentDate }}{% elif customer.lastActivityDate %} · Last activity {{ customer.lastActivityDate }}{% endif %}</span>
               {% if customer.aliases|length > 1 %}<span>Names captured: {{ customer.aliases|join(' / ') }}. All are now grouped under this mobile number.</span>{% endif %}
               {% if customer.itemSummary %}<span>{{ customer.itemSummary }}</span>{% endif %}
-              <span>Balance to collect: {{ customer.balance|currency }}</span>
             </div>
             <div class="stack-list-actions">
               {% if customer.needsPhone %}

@@ -1014,6 +1014,44 @@ th {
 .reminder-stack .button {
   white-space: nowrap;
 }
+.credit-collection-row {
+  align-items: stretch;
+}
+.credit-account-figures {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.28rem 0 0.12rem;
+}
+.credit-account-figures > span {
+  display: grid;
+  gap: 0.04rem;
+  min-width: 8.1rem;
+  padding: 0.48rem 0.62rem;
+  border: 1px solid #e2d7c5;
+  border-radius: 0.72rem;
+  background: #fffdf8;
+  color: var(--ink);
+}
+.credit-account-figures small {
+  color: var(--muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+.credit-account-figures strong {
+  color: var(--ink);
+  font-size: 1rem;
+}
+.credit-account-figures > .credit-balance-figure {
+  border-color: #e8b86b;
+  background: #fff1d9;
+}
+.credit-account-figures > .credit-balance-figure strong {
+  color: #9a5f08;
+  font-size: 1.18rem;
+}
 .dashboard-subsection + .dashboard-subsection {
   margin-top: 1rem;
 }

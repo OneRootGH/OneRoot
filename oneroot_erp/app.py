@@ -7534,7 +7534,10 @@ def build_module_overview(definition: ModuleDefinition, records: list[ModuleReco
         for record in records:
             payload = record.payload or {}
             customer_name = normalize_text(payload.get("customerName")) or "Unnamed customer"
-            customer_phone = normalize_text(payload.get("customerPhone")).lower()
+            # A phone number is the credit-account identity. Use the normalized
+            # Ghana number here too, so totals do not split 024..., 23324...,
+            # and +23324... into separate customer balances.
+            customer_phone = normalize_phone(payload.get("customerPhone"))
             customer_key = f"phone:{customer_phone}" if customer_phone else f"name:{customer_name.lower()}"
             amount = abs(parse_amount(payload.get("amount")))
             if normalize_text(payload.get("transactionType")) == "Credit Sale":
@@ -13741,8 +13744,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "customerName": canonical_name,
                     "customerPhone": customer_phone,
                     "balance": 0.0,
+                    "creditSupplied": 0.0,
+                    "paymentsReceived": 0.0,
                     "creditSales": [],
                     "paymentCount": 0,
+                    "lastPaymentDate": None,
                     "itemSummaries": [],
                     "dueDates": [],
                     "aliases": set(),
@@ -13764,8 +13770,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if normalize_text(payload.get("transactionType")) != "Credit Sale":
                 if normalize_text(payload.get("transactionType")) == "Payment Received":
                     row["paymentCount"] += 1
+                    row["paymentsReceived"] = round(
+                        row["paymentsReceived"] + abs(parse_amount(payload.get("amount"))),
+                        2,
+                    )
+                    if activity_date and (
+                        not row["lastPaymentDate"] or activity_date > row["lastPaymentDate"]
+                    ):
+                        row["lastPaymentDate"] = activity_date
                 continue
             row["creditSales"].append(record)
+            row["creditSupplied"] = round(
+                row["creditSupplied"] + abs(parse_amount(payload.get("amount"))),
+                2,
+            )
             item_summary = normalize_text(payload.get("itemSummary"))
             if item_summary and item_summary not in row["itemSummaries"]:
                 row["itemSummaries"].append(item_summary)
@@ -13787,12 +13805,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "customerPhone": row["customerPhone"],
                     "accountLabel": f"CR-{row['customerPhone'][-4:]}" if row["customerPhone"] else "Needs Phone",
                     "balance": balance,
+                    "creditSupplied": round(row["creditSupplied"], 2),
+                    "paymentsReceived": round(row["paymentsReceived"], 2),
                     "dueDate": due_date.isoformat() if due_date else "",
                     "isOverdue": bool(due_date and due_date < today),
                     "isDueToday": bool(due_date and due_date == today),
                     "saleCount": len(row["creditSales"]),
                     "paymentCount": row["paymentCount"],
                     "lastActivityDate": row["lastActivityDate"].isoformat() if row["lastActivityDate"] else "",
+                    "lastPaymentDate": row["lastPaymentDate"].isoformat() if row["lastPaymentDate"] else "",
                     "aliases": sorted(row["aliases"], key=str.lower),
                     "needsPhone": not bool(row["customerPhone"]),
                     "itemSummary": "; ".join(item_summaries[:2])
@@ -17862,6 +17883,35 @@ def create_app(config: AppConfig | None = None) -> Flask:
             date_to=date_to,
         )
         module_overview = build_module_overview(definition, records)
+        if module_key == "customer_credit_accounts":
+            # The credit queue is the source of truth for one balance per person.
+            # Keep the summary cards aligned with the amount staff see beside each
+            # customer, even when historical entries used different name spellings.
+            total_credit_issued = round(sum(item["creditSupplied"] for item in customer_credit_queue), 2)
+            total_collected = round(sum(item["paymentsReceived"] for item in customer_credit_queue), 2)
+            total_outstanding = round(sum(item["balance"] for item in customer_credit_queue), 2)
+            module_overview["cards"] = [
+                {
+                    "label": "Customers Owing",
+                    "value": f"{len(customer_credit_queue)}",
+                    "note": "One customer account per mobile number",
+                },
+                {
+                    "label": "Total Still Owed",
+                    "value": format_currency(total_outstanding),
+                    "note": "Current unpaid balance across all customer accounts",
+                },
+                {
+                    "label": "Credit Supplied",
+                    "value": format_currency(total_credit_issued),
+                    "note": "Goods and services supplied on credit to open accounts",
+                },
+                {
+                    "label": "Payments Received",
+                    "value": format_currency(total_collected),
+                    "note": "Collections already received from these open accounts",
+                },
+            ]
         module_quick_actions = []
         mobile_money_reconciliation_summary = None
         mobile_money_live_snapshot = None
