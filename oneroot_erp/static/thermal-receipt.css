@@ -3,7 +3,7 @@
 
 .thermal-receipt-body {
   background: #edf1ee;
-  color: #111;
+  color: #000;
   font-family: "Courier New", Courier, monospace;
 }
 
@@ -24,45 +24,46 @@
   box-shadow: 0 5px 18px rgba(0, 0, 0, .14);
 }
 
-.thermal-receipt { width: 100%; font-size: 11px; line-height: 1.35; }
+.thermal-receipt { width: 100%; color: #000; font-size: 13px; font-weight: 600; line-height: 1.4; }
 .thermal-receipt-header { text-align: center; }
-.thermal-receipt-logo { display: block; width: 28mm; height: 15mm; margin: 0 auto 1.5mm; object-fit: contain; }
-.thermal-receipt-header h1 { margin: 0; font-family: Arial, sans-serif; font-size: 15px; letter-spacing: .05em; text-transform: uppercase; }
-.thermal-receipt-header p { margin: 1mm 0 0; }
-.thermal-receipt-rule { margin: 3mm 0; border: 0; border-top: 1px dashed #111; }
+.thermal-receipt-logo { display: block; width: 30mm; height: 17mm; margin: 0 auto 2mm; object-fit: contain; }
+.thermal-receipt-header h1 { margin: 0; color: #000; font-family: Arial, sans-serif; font-size: 17px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; }
+.thermal-receipt-header p { margin: 1.2mm 0 0; color: #000; font-size: 12px; font-weight: 700; }
+.thermal-receipt-rule { margin: 3mm 0; border: 0; border-top: 1.2px dashed #000; }
 .thermal-receipt-meta, .thermal-receipt-totals { display: grid; gap: 1mm; }
 .thermal-receipt-meta > div, .thermal-receipt-totals > div { display: flex; justify-content: space-between; gap: 3mm; }
-.thermal-receipt-meta strong, .thermal-receipt-totals strong { text-align: right; overflow-wrap: anywhere; }
+.thermal-receipt-meta span, .thermal-receipt-totals span { color: #000; font-weight: 700; }
+.thermal-receipt-meta strong, .thermal-receipt-totals strong { color: #000; font-weight: 800; text-align: right; overflow-wrap: anywhere; }
 
 .thermal-receipt-items { width: 100%; border-collapse: collapse; table-layout: fixed; }
 .thermal-receipt-items th, .thermal-receipt-items td {
-  padding: 1.6mm 0;
+  padding: 2mm 0;
   border: 0;
-  border-bottom: 1px dashed #777;
-  color: #111;
-  font: inherit;
+  border-bottom: 1px dashed #000;
+  color: #000;
+  font-size: 12px;
+  font-weight: 700;
   vertical-align: top;
 }
-.thermal-receipt-items th { font-weight: 700; text-align: left; }
+.thermal-receipt-items th { color: #000; font-size: 12px; font-weight: 800; text-align: left; }
 .thermal-receipt-items .item-name { width: 49%; padding-right: 2mm; overflow-wrap: anywhere; }
 .thermal-receipt-items .item-qty { width: 12%; text-align: center; }
 .thermal-receipt-items .item-unit { width: 18%; text-align: right; }
 .thermal-receipt-items .item-total { width: 21%; text-align: right; }
 .thermal-receipt-items .two-column-name { width: 68%; padding-right: 2mm; overflow-wrap: anywhere; }
 .thermal-receipt-items .two-column-total { width: 32%; text-align: right; }
-.thermal-receipt-items small { display: block; color: #4d4d4d; font-size: 9px; line-height: 1.25; }
-
 .thermal-receipt-grand-total {
   margin-top: 2mm;
   padding-top: 2mm;
-  border-top: 2px solid #111;
+  border-top: 2px solid #000;
+  color: #000;
   font-family: Arial, sans-serif;
-  font-size: 15px;
-  font-weight: 800;
+  font-size: 16px;
+  font-weight: 900;
 }
 .thermal-receipt-grand-total strong { white-space: nowrap; }
-.thermal-receipt-note { margin: 3mm 0 0; padding: 2mm; background: #f1f1f1; font-size: 10px; white-space: pre-line; }
-.thermal-receipt-footer { margin-top: 4mm; text-align: center; font-size: 9px; }
+.thermal-receipt-note { margin: 3mm 0 0; padding: 2mm; background: #fff; border: 1px solid #000; color: #000; font-size: 12px; font-weight: 700; white-space: pre-line; }
+.thermal-receipt-footer { margin-top: 4mm; color: #000; text-align: center; font-size: 11px; font-weight: 700; }
 .thermal-receipt-footer p { margin: 1mm 0; }
 
 @media print {

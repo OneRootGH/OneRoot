@@ -37,7 +37,7 @@
       <tbody>
         {% for item in line_items %}
           <tr>
-            <td class="item-name">{{ item.name }}{% if item.category %}<small>{{ item.category }}</small>{% endif %}</td>
+            <td class="item-name">{{ item.name }}</td>
             <td class="item-qty">{{ item.quantity|round(2) }}</td>
             <td class="item-unit">{{ item.unitPrice|currency }}</td>
             <td class="item-total">{{ item.totalAmount|currency }}</td>
