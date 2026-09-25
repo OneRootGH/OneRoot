@@ -44,6 +44,7 @@
         <div class="status-stack">
           <span class="status-chip is-highlight">{{ demand_fast_count }} fast</span>
           <span class="status-chip">{{ demand_steady_count }} steady</span>
+          <a class="button subtle button-small" href="{{ url_for('inventory_demand_export', kind='best-sellers', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Export Best Sellers</a>
         </div>
       </div>
       <div class="table-wrap">
@@ -94,6 +95,7 @@
         <div class="status-stack">
           <span class="status-chip is-warning">{{ demand_slow_count }} slow</span>
           <span class="status-chip is-danger">{{ demand_no_sale_count }} no recent sale</span>
+          <a class="button subtle button-small" href="{{ url_for('inventory_demand_export', kind='slow-stock', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Export Slow Items</a>
         </div>
       </div>
       <ul class="stack-list compact">

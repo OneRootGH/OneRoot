@@ -11939,6 +11939,44 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
     return headers, rows
 
 
+def build_inventory_demand_export_rows(demand_rows: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]]]:
+    """Create an Excel-friendly ordering or slow-stock download from live POS movement."""
+    headers = [
+        "productName",
+        "businessArea",
+        "category",
+        "movement",
+        "unitsSoldLast30Days",
+        "salesRevenueLast30Days",
+        "saleCount",
+        "quantityOnHand",
+        "daysOfStockCover",
+        "suggestedReorderUnits",
+        "lastSaleDate",
+        "daysSinceLastSale",
+        "recommendedAction",
+    ]
+    rows = [
+        {
+            "productName": item["name"],
+            "businessArea": item["areaLabel"],
+            "category": item["category"],
+            "movement": item["movement"],
+            "unitsSoldLast30Days": item["unitsSold"],
+            "salesRevenueLast30Days": item["revenue"],
+            "saleCount": item["orderCount"],
+            "quantityOnHand": item["quantityOnHand"],
+            "daysOfStockCover": item["daysCover"] if item["daysCover"] is not None else "",
+            "suggestedReorderUnits": item["reorderUnits"],
+            "lastSaleDate": item["lastSaleDate"],
+            "daysSinceLastSale": item["daysSinceSale"] if item["daysSinceSale"] is not None else "",
+            "recommendedAction": item["orderAction"],
+        }
+        for item in demand_rows
+    ]
+    return headers, rows
+
+
 def build_online_order_export_rows(orders: list[dict[str, Any]]) -> tuple[list[str], list[dict[str, Any]]]:
     headers = [
         "orderNumber",
@@ -20607,6 +20645,55 @@ def create_app(config: AppConfig | None = None) -> Flask:
             headers,
             rows,
         )
+
+    @app.route("/app/inventory/demand-export.csv")
+    @access_required("inventory")
+    def inventory_demand_export():
+        """Export the live best-seller or slow-stock guide for ordering decisions."""
+        q = normalize_text(request.args.get("q"))
+        area_filter = normalize_text(request.args.get("area"))
+        category_filter = normalize_text(request.args.get("category"))
+        expiry_filter = normalize_text(request.args.get("expiry")).lower()
+        location_filter = normalize_text(request.args.get("location"))
+        export_kind = normalize_text(request.args.get("kind")).lower()
+
+        products = g.db.scalars(
+            select(Product).order_by(Product.business_area_id.asc(), Product.category.asc(), Product.name.asc())
+        ).all()
+        demand_products = [
+            item
+            for item in products
+            if item.active
+            and (not area_filter or normalize_text(item.business_area_id) == area_filter)
+            and (not category_filter or normalize_text(item.category) == category_filter)
+            and (not location_filter or normalize_text(item.stock_location) == location_filter)
+            and (
+                not q
+                or q.lower() in normalize_text(item.name).lower()
+                or q.lower() in normalize_text(item.sku).lower()
+                or q.lower() in normalize_text(item.barcode).lower()
+                or q.lower() in normalize_text(item.category).lower()
+            )
+            and (not expiry_filter or product_matches_expiry_filter(item, expiry_filter))
+        ]
+        demand_rows = build_inventory_demand_rows(g.db, demand_products)
+        if export_kind == "best-sellers":
+            selected_rows = [
+                item for item in demand_rows if item["movement"] in {"Fast Moving", "Steady Moving"}
+            ]
+            selected_rows.sort(key=lambda item: (-item["unitsSold"], -item["revenue"], item["name"]))
+            filename = f"oneroot-best-sellers-to-keep-in-stock-{date.today().isoformat()}.csv"
+        else:
+            selected_rows = [
+                item
+                for item in demand_rows
+                if item["movement"] in {"Slow Moving", "No Recent Sales", "No Sales Recorded"}
+                and item["quantityOnHand"] > 0
+            ]
+            selected_rows.sort(key=lambda item: (item["movementRank"], -item["quantityOnHand"], item["name"]))
+            filename = f"oneroot-slow-or-no-movement-items-{date.today().isoformat()}.csv"
+        headers, rows = build_inventory_demand_export_rows(selected_rows)
+        return csv_download(filename, headers, rows)
 
     @app.route("/app/food-pos")
     @access_required("pos")
