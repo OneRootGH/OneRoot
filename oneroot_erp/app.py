@@ -6,6 +6,7 @@ import csv
 import hashlib
 import html
 import json
+import os
 import re
 import time
 from collections import defaultdict
@@ -60,8 +61,8 @@ STAFF_DOCUMENT_PACK_PATH = Path(__file__).resolve().parent.parent / "staff_docum
 TENANCY_PROPERTY_LOCATION = "Medie New City (Parks and Gardens), Accra, Ghana"
 TENANCY_PLACEHOLDER_LINE = "_______________________________"
 APARTMENT_ACTIVE_STATUSES = {"Occupied", "Reserved"}
-DATABASE_INIT_RETRIES = 1
-DATABASE_INIT_DELAY_SECONDS = 1
+DATABASE_INIT_RETRIES = 3
+DATABASE_INIT_DELAY_SECONDS = 2
 DATABASE_RETRY_COOLDOWN_SECONDS = 15
 SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
@@ -974,24 +975,28 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
             Base.metadata.create_all(engine)
             ensure_schema_columns(engine)
             with session_factory() as bootstrap_session:
-                bootstrap_database(bootstrap_session, app_config)
-                migrate_planning_workspace(bootstrap_session)
-                sync_kitchen_menu_catalog(bootstrap_session)
-                merge_kitchen_into_cold_store(bootstrap_session)
-                sync_equipment_service_catalog(bootstrap_session, app_config)
-                reclassify_legacy_inventory_products(bootstrap_session)
-                reclassify_cold_store_and_grocery_inventory(bootstrap_session)
-                reclassify_inventory_catalog(bootstrap_session)
-                restructure_voltic_shared_stock(bootstrap_session)
-                deduplicate_kitchen_drink_catalog(bootstrap_session)
-                deduplicate_zero_stock_catalog_items(bootstrap_session)
-                link_bread_stock_to_food_pos(bootstrap_session)
-                assign_default_warehouse_locations(bootstrap_session)
-                normalize_product_catalog(bootstrap_session)
-                backfill_pos_line_costs(bootstrap_session)
-                ensure_default_job_vacancies(bootstrap_session, app_config)
-                ensure_default_staff_meal_schedule(bootstrap_session)
-                repair_staff_access_roles(bootstrap_session)
+                created_workspace = bootstrap_database(bootstrap_session, app_config)
+                run_data_repairs = normalize_text(os.getenv("ONEROOT_RUN_STARTUP_DATA_REPAIRS")).lower() in {"1", "true", "yes", "on"}
+                # Historical repair work rewrites large tables. Restrict it to a new
+                # workspace or an explicit maintenance deployment, never each restart.
+                if created_workspace or run_data_repairs:
+                    migrate_planning_workspace(bootstrap_session)
+                    sync_kitchen_menu_catalog(bootstrap_session)
+                    merge_kitchen_into_cold_store(bootstrap_session)
+                    sync_equipment_service_catalog(bootstrap_session, app_config)
+                    reclassify_legacy_inventory_products(bootstrap_session)
+                    reclassify_cold_store_and_grocery_inventory(bootstrap_session)
+                    reclassify_inventory_catalog(bootstrap_session)
+                    restructure_voltic_shared_stock(bootstrap_session)
+                    deduplicate_kitchen_drink_catalog(bootstrap_session)
+                    deduplicate_zero_stock_catalog_items(bootstrap_session)
+                    link_bread_stock_to_food_pos(bootstrap_session)
+                    assign_default_warehouse_locations(bootstrap_session)
+                    normalize_product_catalog(bootstrap_session)
+                    backfill_pos_line_costs(bootstrap_session)
+                    ensure_default_job_vacancies(bootstrap_session, app_config)
+                    ensure_default_staff_meal_schedule(bootstrap_session)
+                    repair_staff_access_roles(bootstrap_session)
                 bootstrap_session.commit()
             session_factory.remove()
             return
@@ -1000,7 +1005,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
             last_error = error
             if attempt >= retries:
                 raise
-            time.sleep(DATABASE_INIT_DELAY_SECONDS)
+            time.sleep(DATABASE_INIT_DELAY_SECONDS * attempt)
 
     if last_error:
         raise last_error
@@ -6217,6 +6222,7 @@ def cashbook_entry_preview(payload: dict[str, Any]) -> dict[str, Any]:
 SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
     "owner_briefing": ("Owner Daily Briefing", "owner_daily_briefing", None),
+    "ai_growth_assistant": ("AI Growth Assistant", "ai_growth_assistant", None),
     "profits": ("Profit Center", "profits_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
@@ -11598,6 +11604,66 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
     }
 
 
+def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, Any]:
+    """Prepare review-only work for the system AI employee from live OneRoot records."""
+    briefing = owner_daily_briefing_context(db_session, briefing_date)
+    growth = build_growth_automation_context(db_session)
+    tasks: list[dict[str, str]] = [
+        {
+            "title": item["label"],
+            "note": item["note"],
+            "href": item["href"],
+            "workstream": "Controls",
+        }
+        for item in briefing["actionItems"]
+    ]
+    for playbook in growth.get("playbooks", [])[:4]:
+        tasks.append(
+            {
+                "title": playbook["title"],
+                "note": f'{playbook["audience"]}. {playbook["note"]}',
+                "href": playbook["href"],
+                "workstream": "Customer Growth",
+            }
+        )
+    if not tasks:
+        tasks.append(
+            {
+                "title": "Review today’s trading position",
+                "note": "No urgent records were detected. Confirm the daily sales and cash closeout before the counter closes.",
+                "href": "/app/sales-summary",
+                "workstream": "Daily Review",
+            }
+        )
+    return {
+        "briefing": briefing,
+        "growth": growth,
+        "tasks": tasks[:10],
+        "workstreams": [
+            {
+                "title": "Daily owner brief",
+                "frequency": "Every day",
+                "note": "Prepare sales, profit, expenses, credit, tenant, and cash-control signals for review.",
+            },
+            {
+                "title": "Customer follow-up",
+                "frequency": "Daily",
+                "note": "Prepare WhatsApp-ready follow-up and cross-sell opportunities from actual customer activity.",
+            },
+            {
+                "title": "Stock decisions",
+                "frequency": "Daily",
+                "note": "Flag expired, low-stock, fast-moving, and slow-moving items so purchasing decisions are timely.",
+            },
+            {
+                "title": "Control exceptions",
+                "frequency": "Daily",
+                "note": "Highlight customer credit, rent and bill balances, supplier balances, and wallet warnings.",
+            },
+        ],
+    }
+
+
 def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: str = "") -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for record in records:
@@ -16158,9 +16224,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/")
     @access_required("dashboard")
     def dashboard():
-        if user_has_access(g.current_user, "customer_crm"):
-            sync_customer_crm_automation(g.db)
-            g.db.commit()
         all_records = g.db.scalars(select(ModuleRecord)).all()
         current_month = date.today().strftime("%Y-%m")
         people_alerts = build_staff_people_alerts(all_records)
@@ -16515,6 +16578,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             page_title="Owner Daily Briefing",
             briefing_date=briefing_date,
             briefing=owner_daily_briefing_context(g.db, briefing_date),
+        )
+
+    @app.route("/app/ai-growth-assistant")
+    @access_required("ai_growth_assistant")
+    def ai_growth_assistant():
+        briefing_date = parse_date(request.args.get("date")) or date.today()
+        return render_template(
+            "ai_growth_assistant.html",
+            page_title="AI Growth Assistant",
+            briefing_date=briefing_date,
+            assistant=ai_growth_assistant_context(g.db, briefing_date),
         )
 
     @app.route("/app/export/backup.json")

@@ -522,6 +522,8 @@ for _role_key in ("owner", "admin", "operations", "finance", "operations-control
     ROLE_ACCESS_KEYS[_role_key].add("wallet_control")
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead", "finance-hr-controls"):
     ROLE_ACCESS_KEYS[_role_key].add("owner_briefing")
+for _role_key in ("owner", "admin", "operations"):
+    ROLE_ACCESS_KEYS[_role_key].add("ai_growth_assistant")
 for _role_key in ("owner", "admin", "operations", "finance", "operations-controls-lead", "finance-hr-controls"):
     ROLE_ACCESS_KEYS[_role_key].add("supplier_directory")
 for _role_key in ("owner", "admin", "operations", "finance", "frontline-service-lead", "sales-stock-operator", "cashier"):
@@ -2418,6 +2420,7 @@ MENU_GROUPS = [
     (
         "Growth",
         [
+            ("AI Growth", ["ai_growth_assistant"]),
             ("Customers & Marketing", ["customer_crm", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
         ],
     ),

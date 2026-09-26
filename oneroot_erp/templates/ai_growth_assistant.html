@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="dashboard-hero compact-hero">
+    <div>
+      <p class="eyebrow">System Employee · Owner Review</p>
+      <h3>OneRoot AI Growth Assistant</h3>
+      <p class="muted">A controlled business assistant that turns today’s OneRoot records into clear next actions. It never sends messages, changes stock, moves money, or edits customer accounts without a staff member reviewing the action.</p>
+    </div>
+    <div class="toolbar">
+      <a class="button subtle" href="{{ url_for('owner_daily_briefing', date=briefing_date|date_value) }}">Owner Briefing</a>
+      <a class="button primary" href="{{ url_for('module_list', module_key='customer_crm') }}">Open Customer Growth</a>
+    </div>
+  </section>
+
+  <section class="card compact-filter-card">
+    <form class="toolbar" method="get">
+      <label class="compact-field"><span>Review Date</span><input type="date" name="date" value="{{ briefing_date|date_value }}"></label>
+      <button class="button primary" type="submit">Refresh Work Queue</button>
+      <a class="button subtle" href="{{ url_for('ai_growth_assistant') }}">Today</a>
+    </form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card"><span>Priority Actions</span><strong>{{ assistant.tasks|length }}</strong><small>Prepared from today’s live records</small></article>
+    <article class="metric-card"><span>Customer Follow-Ups</span><strong>{{ assistant.growth.counts.contacts }}</strong><small>{{ assistant.growth.counts.pendingOrders }} pending-order follow-up{{ '' if assistant.growth.counts.pendingOrders == 1 else 's' }}</small></article>
+    <article class="metric-card warning"><span>Open Customer Credit</span><strong>{{ assistant.briefing.creditOutstanding|currency }}</strong><small>{{ assistant.briefing.overdueCreditCount }} overdue account{{ '' if assistant.briefing.overdueCreditCount == 1 else 's' }}</small></article>
+    <article class="metric-card {% if assistant.briefing.lowStockCount or assistant.briefing.expiredCount %}warning{% endif %}"><span>Stock Signals</span><strong>{{ assistant.briefing.lowStockCount + assistant.briefing.expiredCount + assistant.briefing.expiringCount }}</strong><small>{{ assistant.briefing.lowStockCount }} low · {{ assistant.briefing.expiringCount }} expiring · {{ assistant.briefing.expiredCount }} expired</small></article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Assigned Work</p><h3>Today’s AI Priority Queue</h3></div></div>
+      <ul class="stack-list compact">
+        {% for task in assistant.tasks %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy"><small>{{ task.workstream }}</small><strong>{{ task.title }}</strong><span>{{ task.note }}</span></div>
+            <a class="button subtle button-small" href="{{ task.href }}">Review</a>
+          </li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Operating Position</p><h3>What The Assistant Is Watching</h3></div></div>
+      <ul class="stack-list compact">
+        <li class="stack-list-item-row"><div class="stack-list-copy"><strong>Paid sales today</strong><span>Recorded paid business sales only</span></div><strong>{{ assistant.briefing.sales.total_sales|currency }}</strong></li>
+        <li class="stack-list-item-row"><div class="stack-list-copy"><strong>Daily operating position</strong><span>Gross profit less expenses and payroll paid</span></div><strong class="{% if assistant.briefing.operatingPosition < 0 %}negative-text{% endif %}">{{ assistant.briefing.operatingPosition|currency }}</strong></li>
+        <li class="stack-list-item-row"><div class="stack-list-copy"><strong>Tenant balances</strong><span>Rent and monthly bills still open</span></div><strong>{{ assistant.briefing.tenantOutstanding|currency }}</strong></li>
+        <li class="stack-list-item-row"><div class="stack-list-copy"><strong>Supplier balances</strong><span>Payables that need a payment plan</span></div><strong>{{ assistant.briefing.supplierOutstanding|currency }}</strong></li>
+      </ul>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header compact"><div><p class="eyebrow">Work Scope</p><h3>AI Employee Responsibilities</h3></div></div>
+    <div class="card-grid four">
+      {% for item in assistant.workstreams %}
+        <article class="metric-card"><span>{{ item.frequency }}</span><strong>{{ item.title }}</strong><small>{{ item.note }}</small></article>
+      {% endfor %}
+    </div>
+    <p class="muted compact-copy">The AI assistant is visible in User Accounts as <strong>OneRoot AI Growth Assistant</strong>. It has no password, cannot sign in, and cannot approve or execute transactions. It prepares work for the owner or operations manager to review and act on.</p>
+  </section>
+{% endblock %}

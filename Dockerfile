@@ -14,6 +14,7 @@ COPY . .
 
 EXPOSE 8080
 
-# Keep concurrency deliberately bounded for the 0.5 GB App Platform container.  Request
-# recycling prevents a long-running worker from becoming the single point of failure.
-CMD ["gunicorn", "--workers", "1", "--threads", "4", "--timeout", "90", "--graceful-timeout", "30", "--keep-alive", "5", "--max-requests", "500", "--max-requests-jitter", "50", "--bind", "0.0.0.0:8080", "wsgi:app"]
+# Keep concurrency deliberately bounded for the two 1 GB App Platform instances. Workers
+# are recycled occasionally, but not so frequently that normal counter activity triggers
+# repeated cold starts and temporary 503 responses.
+CMD ["gunicorn", "--workers", "1", "--threads", "4", "--timeout", "90", "--graceful-timeout", "30", "--keep-alive", "5", "--max-requests", "5000", "--max-requests-jitter", "500", "--bind", "0.0.0.0:8080", "wsgi:app"]

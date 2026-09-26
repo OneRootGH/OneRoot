@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any
@@ -515,7 +516,45 @@ def _load_online_orders(config: AppConfig) -> list[dict[str, Any]]:
         return []
 
 
-def bootstrap_database(session: Session, config: AppConfig) -> None:
+def _startup_legacy_refresh_enabled() -> bool:
+    """Allow a deliberate one-off legacy refresh without doing it on every worker boot."""
+    return _normalize_text(os.getenv("ONEROOT_RUN_STARTUP_DATA_REPAIRS")).lower() in {"1", "true", "yes", "on"}
+
+
+def _ensure_ai_growth_assistant_profile(session: Session) -> None:
+    """Create the visible system assistant profile once; it is never able to sign in."""
+    assistant = session.scalar(select(User).where(User.username == "oneroot-ai"))
+    if assistant:
+        assistant.full_name = "OneRoot AI Growth Assistant"
+        assistant.role = "viewer"
+        assistant.staff_role = "AI Business Growth Assistant"
+        assistant.active = True
+        assistant.login_enabled = False
+        assistant.notes = (
+            "System employee. Reviews OneRoot data and prepares owner-approved growth, stock, "
+            "customer follow-up, and control actions. It cannot sign in, move money, alter stock, "
+            "or contact customers automatically."
+        )
+        return
+    session.add(
+        User(
+            id="oneroot-ai-growth-assistant",
+            username="oneroot-ai",
+            full_name="OneRoot AI Growth Assistant",
+            role="viewer",
+            staff_role="AI Business Growth Assistant",
+            active=True,
+            login_enabled=False,
+            notes=(
+                "System employee. Reviews OneRoot data and prepares owner-approved growth, stock, "
+                "customer follow-up, and control actions. It cannot sign in, move money, alter stock, "
+                "or contact customers automatically."
+            ),
+        )
+    )
+
+
+def bootstrap_database(session: Session, config: AppConfig) -> bool:
     users_count = session.scalar(select(func.count()).select_from(User)) or 0
     products_count = session.scalar(select(func.count()).select_from(Product)) or 0
     records_count = session.scalar(select(func.count()).select_from(ModuleRecord)) or 0
@@ -524,6 +563,8 @@ def bootstrap_database(session: Session, config: AppConfig) -> None:
     snapshot_path = _pick_latest_snapshot(config)
     workspace = _load_workspace_payload(snapshot_path) if snapshot_path else {}
     snapshot_users = workspace.get("userProfiles", []) if isinstance(workspace.get("userProfiles", []), list) else []
+
+    _ensure_ai_growth_assistant_profile(session)
 
     if users_count == 0 and not snapshot_users:
         session.add(
@@ -542,9 +583,10 @@ def bootstrap_database(session: Session, config: AppConfig) -> None:
         )
 
     if products_count or records_count or pos_orders_count:
-        _refresh_existing_module_records(session)
+        if _startup_legacy_refresh_enabled():
+            _refresh_existing_module_records(session)
         session.commit()
-        return
+        return False
 
     for user_payload in workspace.get("userProfiles", []):
         username = _normalize_text(user_payload.get("username")).lower()
@@ -682,3 +724,4 @@ def bootstrap_database(session: Session, config: AppConfig) -> None:
 
     _refresh_existing_module_records(session)
     session.commit()
+    return True
