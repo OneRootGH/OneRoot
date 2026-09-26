@@ -17,6 +17,8 @@ const businessAreas = [
   "OneRoot Water & Equipment Rentals",
   "OneRoot Cold Store & Kitchen",
   "OneRoot Groceries & More",
+  "OneRoot Phone Accessories & Charging",
+  "OneRoot Construction Consumables Express",
   "OneRoot Laundry Services",
   "OneRoot Mobile Money Services",
   "OneRoot Rentals & Apartments",

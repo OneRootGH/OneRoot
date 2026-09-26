@@ -1596,6 +1596,10 @@
         return "Cold-store food, prepared meals, cold drinks, bread, and kitchen-ready essentials.";
       case "groceries":
         return "Pantry goods, household essentials, personal care, baby care, and everyday retail stock.";
+      case "phone-accessories-charging":
+        return "Chargers, cables, earphones, screen protection, power banks, and convenient phone charging.";
+      case "construction-consumables":
+        return "Nails, fasteners, fittings, sealants, safety supplies, and quick repair essentials.";
       case "laundry-services":
         return "Normal and express laundry requests with pickup, delivery, or special notes.";
       case "mobile-money":
@@ -1653,6 +1657,10 @@
         return "#1f6b5b";
       case "groceries":
         return "#307a4a";
+      case "phone-accessories-charging":
+        return "#2459a6";
+      case "construction-consumables":
+        return "#b56720";
       case "laundry-services":
         return "#5f6fd8";
       case "mobile-money":

@@ -70,7 +70,13 @@ KITCHEN_MEAL_ITEMS_KEY = "mealItems"
 # Food POS includes prepared meals plus cold-store items sold alongside food.
 # Groceries & More remains a separate retail counter and closeout.
 POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries"}
-POS_GROCERIES_MORE_AREA_IDS = {"groceries", "fresh-foods-drinks", "water-equipment"}
+POS_GROCERIES_MORE_AREA_IDS = {
+    "groceries",
+    "fresh-foods-drinks",
+    "water-equipment",
+    "phone-accessories-charging",
+    "construction-consumables",
+}
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
 WAREHOUSE_LOCATION_OPTIONS = [
@@ -131,6 +137,8 @@ PRODUCT_IMAGE_AREA_COLORS = {
     "mobile-money": "#9a6a19",
     "rentals-apartments": "#8a4f74",
     "fresh-foods-drinks": "#ca5d27",
+    "phone-accessories-charging": "#2459a6",
+    "construction-consumables": "#b56720",
     "shared-operations": "#50606f",
 }
 ICONIFY_API_BASE = "https://api.iconify.design"
@@ -176,6 +184,7 @@ EQUIPMENT_SERVICE_KEYWORDS = (
 )
 EQUIPMENT_BUY_KEYWORDS = (
     "nail",
+    "nails",
     "fastener",
     "screw",
     "bolt",
@@ -183,6 +192,50 @@ EQUIPMENT_BUY_KEYWORDS = (
     "binding wire",
     "cutting disc",
     "drill bit",
+)
+PHONE_ACCESSORY_KEYWORDS = (
+    "charger",
+    "charging cable",
+    "usb cable",
+    "type c",
+    "usb-c",
+    "lightning cable",
+    "earphone",
+    "headset",
+    "headphone",
+    "earpiece",
+    "screen protector",
+    "phone case",
+    "phone cover",
+    "power bank",
+    "memory card",
+    "sim card",
+    "phone charging",
+)
+CONSTRUCTION_CONSUMABLE_KEYWORDS = (
+    "nail",
+    "nails",
+    "fastener",
+    "screw",
+    "bolt",
+    "nut",
+    "binding wire",
+    "cutting disc",
+    "drill bit",
+    "cement glue",
+    "tile adhesive",
+    "sealant",
+    "silicone",
+    "electrical tape",
+    "plug top",
+    "socket",
+    "switch",
+    "pvc",
+    "plumbing",
+    "paint brush",
+    "sandpaper",
+    "safety gloves",
+    "safety goggles",
 )
 PUBLIC_JOB_VACANCY_STATUSES = {
     status for status, _label in JOB_VACANCY_STATUSES if status not in {"Draft", "Filled", "Closed"}
@@ -1468,6 +1521,44 @@ def grocery_category_for_name(name: str) -> str:
     return "Groceries & Pantry"
 
 
+def phone_accessory_category_for_name(name: str) -> str:
+    """Return a useful shelf category for phone accessories and charging stock."""
+    name_key = normalize_text(name).lower()
+    if any(token in name_key for token in ("charger", "charging cable", "usb cable", "type c", "usb-c", "lightning")):
+        return "Chargers & Cables"
+    if any(token in name_key for token in ("earphone", "headset", "headphone", "earpiece", "speaker")):
+        return "Earphones & Audio"
+    if any(token in name_key for token in ("case", "cover", "screen protector", "screen guard", "pouch")):
+        return "Cases & Screen Protection"
+    if any(token in name_key for token in ("power bank", "battery")):
+        return "Power Banks & Batteries"
+    if any(token in name_key for token in ("memory", "sd card", "flash drive", "storage")):
+        return "Memory & Storage"
+    if any(token in name_key for token in ("sim", "airtime", "data bundle")):
+        return "SIM, Airtime & Data"
+    return "Phone Charging Service" if "charging" in name_key else "Chargers & Cables"
+
+
+def construction_consumable_category_for_name(name: str) -> str:
+    """Return a practical category for small construction and repair consumables."""
+    name_key = normalize_text(name).lower()
+    if any(token in name_key for token in ("nail", "screw", "bolt", "nut", "fastener", "binding wire", "anchor")):
+        return "Fasteners & Fixings"
+    if any(token in name_key for token in ("glue", "adhesive", "sealant", "silicone", "putty", "epoxy")):
+        return "Adhesives & Sealants"
+    if any(token in name_key for token in ("plug", "socket", "switch", "electrical tape", "bulb", "wire")):
+        return "Electrical Accessories"
+    if any(token in name_key for token in ("pvc", "pipe", "elbow", "tee", "tap", "plumbing", "hose")):
+        return "Plumbing & Fittings"
+    if any(token in name_key for token in ("paint", "brush", "roller", "sandpaper", "thinner")):
+        return "Painting & Surface Prep"
+    if any(token in name_key for token in ("glove", "goggle", "mask", "helmet", "safety")):
+        return "Safety & PPE"
+    if any(token in name_key for token in ("disc", "drill bit", "blade", "chisel")):
+        return "Small Tools & Consumables"
+    return "Repair & Hardware"
+
+
 def is_packaged_drink_product(product: Product) -> bool:
     """Avoid treating cereal, biscuits, and chocolate snacks as cold drinks."""
     name_key = normalize_text(product.name).lower()
@@ -1494,6 +1585,10 @@ def catalog_default_image_path(product: Product) -> str:
         return CATALOG_IMAGE_PATHS["laundry"]
     if area_id == "water-equipment":
         return CATALOG_IMAGE_PATHS["water"] if "water" in name_key or "gallon" in name_key or "bucket" in name_key else CATALOG_IMAGE_PATHS["equipment"]
+    if area_id == "phone-accessories-charging":
+        return CATALOG_IMAGE_PATHS["stationery"]
+    if area_id == "construction-consumables":
+        return CATALOG_IMAGE_PATHS["equipment"]
     if area_id == COLD_STORE_KITCHEN_AREA_ID:
         if category_key == "frozen treats":
             return CATALOG_IMAGE_PATHS["frozen-treats"]
@@ -1634,6 +1729,26 @@ def reclassify_inventory_product(product: Product) -> bool:
             set_value("category", "Laundry - General Items")
         set_value("item_type", "service")
         return changed
+
+    # Phone accessories and fast-moving construction consumables sell through
+    # Groceries & More, but retain their own business areas for stock control,
+    # profitability, and online-shop filtering.
+    if area_id in {"groceries", "water-equipment", "shared-operations", "cold-store-groceries"}:
+        if contains_catalog_token(text_blob, PHONE_ACCESSORY_KEYWORDS):
+            is_charging_service = any(token in text_blob for token in ("phone charging", "charging service", "charge phone"))
+            set_value("business_area_id", "phone-accessories-charging")
+            set_value("category", phone_accessory_category_for_name(product.name))
+            set_value("item_type", "service" if is_charging_service else "stock")
+            set_value("track_inventory", not is_charging_service)
+            set_value("stock_location", "" if is_charging_service else "groceries-counter")
+            return changed
+        if contains_catalog_token(text_blob, CONSTRUCTION_CONSUMABLE_KEYWORDS):
+            set_value("business_area_id", "construction-consumables")
+            set_value("category", construction_consumable_category_for_name(product.name))
+            set_value("item_type", "stock")
+            set_value("track_inventory", True)
+            set_value("stock_location", "warehouse-equipment-water")
+            return changed
 
     # General retail was historically loaded under the old combined Cold Store
     # area. Keep cold-chain products there, and move everyday merchandise out.
@@ -1830,6 +1945,10 @@ def default_warehouse_location(product: Product) -> str:
         if category in {"drinks & refreshments", "snacks & confectionery", "bakery & bread"}:
             return "groceries-counter"
         return "groceries-shelves"
+    if area_id == "phone-accessories-charging":
+        return "groceries-counter"
+    if area_id == "construction-consumables":
+        return "warehouse-equipment-water"
     if area_id == "fresh-foods-drinks":
         return "cold-store-freezer" if category == "frozen treats" else "groceries-counter"
     if area_id == "water-equipment":
@@ -12095,6 +12214,8 @@ def is_orderable_area(area_id: str) -> bool:
         "water-equipment",
         "cold-store-groceries",
         "groceries",
+        "phone-accessories-charging",
+        "construction-consumables",
         "laundry-services",
         "mobile-money",
         "rentals-apartments",

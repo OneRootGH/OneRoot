@@ -234,7 +234,9 @@ function normalizeProductRow(row) {
   const sourceCategory = row.sourceCategory || "Uncategorized";
   const businessAreaId = classifyBusinessArea(name, sourceCategory);
   const category = classifyNormalizedCategory(name, sourceCategory, businessAreaId);
-  const itemType = businessAreaId === "laundry-services" || businessAreaId === "mobile-money" ? "service" : "stock";
+  const itemType = businessAreaId === "laundry-services" || businessAreaId === "mobile-money" || (businessAreaId === "phone-accessories-charging" && /phone charging|charging service|charge phone/i.test(name))
+    ? "service"
+    : "stock";
   const trackInventory = itemType === "stock" && businessAreaId !== "mobile-money";
   const quantityKnown = row.quantityOnHand !== null;
   const quantityOnHand = quantityKnown ? row.quantityOnHand : 0;
@@ -312,7 +314,15 @@ function classifyBusinessArea(name, sourceCategory) {
     return "laundry-services";
   }
 
-  if (/gallon|galon|bucket water|yellow galon|yellow gallon|water\b|impact drill|vibrator|wheelbarrow|shovel|head pan|cutting machine|nails/.test(haystack) || sourceCategory.toLowerCase() === "equipment rental and sales") {
+  if (/charger|charging cable|usb cable|type c|usb-c|lightning cable|earphone|headset|headphone|earpiece|screen protector|phone case|phone cover|power bank|memory card|sim card|phone charging/.test(haystack) || sourceCategory.toLowerCase() === "phone accessories") {
+    return "phone-accessories-charging";
+  }
+
+  if (/nails?|fastener|screw|bolt|nut|binding wire|cutting disc|drill bit|cement glue|tile adhesive|sealant|silicone|electrical tape|plug top|socket|switch|pvc|plumbing|paint brush|sandpaper|safety gloves|safety goggles/.test(haystack) || sourceCategory.toLowerCase() === "construction consumables") {
+    return "construction-consumables";
+  }
+
+  if (/gallon|galon|bucket water|yellow galon|yellow gallon|water\b|impact drill|vibrator|wheelbarrow|shovel|head pan|cutting machine/.test(haystack) || sourceCategory.toLowerCase() === "equipment rental and sales") {
     return /(awake mineral water|mineral water|power horse|energy drink|juice|malt|cocktail|sobolo|ice cream|ice kenkey|banana pop|creamy pop|joy strawberry)/.test(haystack)
       ? "fresh-foods-drinks"
       : "water-equipment";
@@ -365,9 +375,30 @@ function classifyNormalizedCategory(name, sourceCategory, businessAreaId) {
   }
 
   if (businessAreaId === "water-equipment") {
-    return /nails|impact drill|vibrator|wheelbarrow|shovel|head pan|cutting machine/.test(haystack)
+    return /impact drill|vibrator|wheelbarrow|shovel|head pan|cutting machine/.test(haystack)
       ? "Equipment & Construction Consumables"
       : "Water Supply";
+  }
+
+  if (businessAreaId === "phone-accessories-charging") {
+    if (/charger|charging cable|usb cable|type c|usb-c|lightning/.test(haystack)) return "Chargers & Cables";
+    if (/earphone|headset|headphone|earpiece|speaker/.test(haystack)) return "Earphones & Audio";
+    if (/case|cover|screen protector|screen guard|pouch/.test(haystack)) return "Cases & Screen Protection";
+    if (/power bank|battery/.test(haystack)) return "Power Banks & Batteries";
+    if (/memory|sd card|flash drive|storage/.test(haystack)) return "Memory & Storage";
+    if (/sim|airtime|data bundle/.test(haystack)) return "SIM, Airtime & Data";
+    return "Phone Charging Service";
+  }
+
+  if (businessAreaId === "construction-consumables") {
+    if (/nails?|screw|bolt|nut|fastener|binding wire|anchor/.test(haystack)) return "Fasteners & Fixings";
+    if (/glue|adhesive|sealant|silicone|putty|epoxy/.test(haystack)) return "Adhesives & Sealants";
+    if (/plug|socket|switch|electrical tape|bulb|wire/.test(haystack)) return "Electrical Accessories";
+    if (/pvc|pipe|elbow|tee|tap|plumbing|hose/.test(haystack)) return "Plumbing & Fittings";
+    if (/paint|brush|roller|sandpaper|thinner/.test(haystack)) return "Painting & Surface Prep";
+    if (/glove|goggle|mask|helmet|safety/.test(haystack)) return "Safety & PPE";
+    if (/disc|drill bit|blade|chisel/.test(haystack)) return "Small Tools & Consumables";
+    return "Repair & Hardware";
   }
 
   if (businessAreaId === "mobile-money") {
@@ -514,6 +545,8 @@ function getBusinessAreaLabel(areaId) {
     "water-equipment": "OneRoot Water & Equipment Rentals",
     "cold-store-groceries": "OneRoot Cold Store & Kitchen",
     groceries: "OneRoot Groceries & More",
+    "phone-accessories-charging": "OneRoot Phone Accessories & Charging",
+    "construction-consumables": "OneRoot Construction Consumables Express",
     "laundry-services": "OneRoot Laundry Services",
     "mobile-money": "OneRoot Mobile Money Services",
     "rentals-apartments": "OneRoot Rentals & Apartments",
