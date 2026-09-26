@@ -67,15 +67,14 @@ SERVICE_PAYMENT_ENTRIES_KEY = "paymentEntries"
 SERVICE_LINE_ITEMS_KEY = "lineItems"
 KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
 KITCHEN_MEAL_ITEMS_KEY = "mealItems"
-# Food POS includes prepared meals plus cold-store items sold alongside food.
-# Groceries & More remains a separate retail counter and closeout.
-POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries"}
+# Cold Store & Kitchen handles its food range and the fast-moving construction
+# consumables counter. Groceries & More remains the retail home for phone stock.
+POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables"}
 POS_GROCERIES_MORE_AREA_IDS = {
     "groceries",
     "fresh-foods-drinks",
     "water-equipment",
     "phone-accessories-charging",
-    "construction-consumables",
 }
 POS_LAUNDRY_SALES_AREA_IDS = {"laundry-services"}
 POS_EQUIPMENT_SALES_AREA_IDS = {"water-equipment"}
