@@ -9,7 +9,7 @@ published under the Unsplash License:
 
 - `groceries.jpg`: Grocery shelves by Nathalia Rosa, https://unsplash.com/photos/grocery-store-aisle-with-stocked-shelves-rWMIbqmOxrY
 - `frozen-foods.jpg`: Fresh catch by Emanuel Haas, https://unsplash.com/photos/fisherman-sorting-fresh-catch-on-a-boat-aolFd60BHXQ
-- `kitchen-meals.jpg`: Fried rice meal by Mohammad Fahim, https://unsplash.com/photos/fried-rice-with-chicken-and-vegetables-on-plate-gpkRa3elzrI
+- `kitchen-meals-oneroot.png`: OneRoot's professional kitchen-meal display image, used for the live kitchen catalogue.
 - `frozen-treats.jpg`: Ice cream service by Grace Anne Bobadilla, https://unsplash.com/photos/a-smiling-woman-serves-ice-cream-in-a-store-I0C7qT_R1oI
 - `bakery-bread.jpg`: Baked breads by Magnus S, https://unsplash.com/photos/baked-breads-qLcSBmaebR8
 - `laundry.jpg`: Washing machine by Emily Chung, https://unsplash.com/photos/white-front-load-washing-machine-vX1K-q7F6IM

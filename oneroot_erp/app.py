@@ -1410,7 +1410,7 @@ SHELF_STABLE_COLD_STORE_NAMES = {
 CATALOG_IMAGE_PATHS = {
     "groceries": "/static/catalog-images/groceries.jpg",
     "frozen-foods": "/static/catalog-images/frozen-foods.jpg",
-    "kitchen-meals": "/static/catalog-images/kitchen-meals.jpg",
+    "kitchen-meals": "/static/catalog-images/kitchen-meals-oneroot.png",
     "frozen-treats": "/static/catalog-images/frozen-treats.jpg",
     "bakery-bread": "/static/catalog-images/bakery-bread.jpg",
     "laundry": "/static/catalog-images/laundry.jpg",
