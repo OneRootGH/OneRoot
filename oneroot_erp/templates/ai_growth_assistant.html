@@ -29,6 +29,55 @@
 
   <section class="card">
     <div class="card-header compact">
+      <div><p class="eyebrow">OneRoot Data Analysis</p><h3>AI Growth Recommendations</h3></div>
+      <span class="metric-chip">Last {{ assistant.intelligence.periodDays }} days</span>
+    </div>
+    <p class="muted compact-copy">{{ assistant.intelligence.summary }} The recommendations below are calculated from your recorded sales, POS item lines, inventory balance, services, customer activity, and online-order data. They are suggestions for review, not automatic actions.</p>
+    <section class="card-grid four">
+      <article class="metric-card"><span>Paid Sales</span><strong>{{ assistant.intelligence.recentSales|currency }}</strong><small>Since {{ assistant.intelligence.periodStart }}</small></article>
+      <article class="metric-card {% if assistant.intelligence.salesChange < 0 %}warning{% endif %}"><span>7-Day Sales Trend</span><strong>{% if assistant.intelligence.priorWeekSales %}{{ '{:+g}'.format(assistant.intelligence.salesChangePercent) }}%{% else %}New{% endif %}</strong><small>This week {{ assistant.intelligence.currentWeekSales|currency }} · previous {{ assistant.intelligence.priorWeekSales|currency }}</small></article>
+      <article class="metric-card"><span>Gross Profit</span><strong>{{ assistant.intelligence.recentProfit|currency }}</strong><small>Before overheads, payroll, and expenses</small></article>
+      <article class="metric-card"><span>Leading Area</span><strong>{{ assistant.intelligence.topArea.label if assistant.intelligence.topArea else 'No sales yet' }}</strong><small>{% if assistant.intelligence.topArea %}{{ assistant.intelligence.topArea.sales|currency }} sales · {{ assistant.intelligence.topArea.margin }}% margin{% else %}Capture sales to build analysis{% endif %}</small></article>
+    </section>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">What To Do Next</p><h3>Priority Growth Actions</h3></div></div>
+      <ul class="stack-list compact">
+        {% for item in assistant.intelligence.recommendations %}
+          <li class="stack-list-item-row">
+            <div class="stack-list-copy"><small>{{ item.type }}</small><strong>{{ item.title }}</strong><span>{{ item.note }}</span></div>
+            <a class="button subtle button-small" href="{{ item.href }}">Open</a>
+          </li>
+        {% else %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><strong>Build the first recommendation</strong><span>Save paid sales and inventory consistently for a few days. The adviser will then identify the strongest action from your own data.</span></div></li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Demand Signals</p><h3>Recent Top Products</h3></div><a class="button subtle button-small" href="{{ url_for('inventory') }}">Stock Guide</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th>Area</th><th>Units</th><th>Sales</th><th>Gross Profit</th></tr></thead><tbody>{% for item in assistant.intelligence.topProducts %}<tr><td>{{ item.name }}</td><td>{{ item.areaLabel }}</td><td>{{ '{:g}'.format(item.units) }}</td><td>{{ item.sales|currency }}</td><td>{{ item.profit|currency }}</td></tr>{% else %}<tr><td colspan="5">No paid POS product sales were found in this period.</td></tr>{% endfor %}</tbody></table></div>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Expansion Ideas</p><h3>Low-Risk Business Tests</h3></div></div>
+      <ul class="stack-list compact">
+        {% for idea in assistant.intelligence.opportunities %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><strong>{{ idea.title }}</strong><span>{{ idea.note }}</span><small><strong>First test:</strong> {{ idea.test }}</small></div></li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Capital At Risk</p><h3>Slow Or Unsold Stock</h3></div><a class="button subtle button-small" href="{{ url_for('inventory') }}">Review Stock</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th>Area</th><th>Stock</th><th>Cost Value</th></tr></thead><tbody>{% for item in assistant.intelligence.slowStock %}<tr><td>{{ item.name }}</td><td>{{ item.areaLabel }}</td><td>{{ item.stock }}</td><td>{{ item.value|currency }}</td></tr>{% else %}<tr><td colspan="4">No unsold stock with a positive quantity was found in this period.</td></tr>{% endfor %}</tbody></table></div>
+    </article>
+  </section>
+
+  <section class="card">
+    <div class="card-header compact">
       <div><p class="eyebrow">Live Kitchen Profit</p><h3>Jollof Rice Credit Cost Cycle</h3></div>
       {% if assistant.jollofCycle.active %}<span class="metric-chip">Started {{ assistant.jollofCycle.sourceDate }}</span>{% endif %}
     </div>

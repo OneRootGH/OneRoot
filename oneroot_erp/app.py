@@ -22,7 +22,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
-from sqlalchemy import create_engine, desc, inspect, or_, select
+from sqlalchemy import create_engine, desc, func, inspect, or_, select
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
@@ -11744,11 +11744,268 @@ def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
     }
 
 
+def ai_business_intelligence_context(db_session, as_of_date: date) -> dict[str, Any]:
+    """Turn recent OneRoot records into explainable owner growth recommendations.
+
+    This intentionally uses OneRoot's own saved sales, POS and inventory records.
+    It is an advisory layer: no suggestion writes to the database or contacts a
+    customer without a staff member choosing the next action.
+    """
+    period_days = 28
+    period_start = as_of_date - timedelta(days=period_days - 1)
+    current_start = as_of_date - timedelta(days=6)
+    prior_start = current_start - timedelta(days=7)
+    prior_end = current_start - timedelta(days=1)
+
+    sales_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "sales",
+            ModuleRecord.record_date >= period_start,
+            ModuleRecord.record_date <= as_of_date,
+        )
+        .order_by(ModuleRecord.record_date.asc())
+    ).all()
+    area_totals: dict[str, dict[str, Any]] = {}
+    current_sales = 0.0
+    prior_sales = 0.0
+    recent_sales = 0.0
+    recent_profit = 0.0
+    for record in sales_records:
+        if is_mobile_money_daily_sales_record(record):
+            continue
+        payload = record.payload or {}
+        area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
+        amount = max(parse_amount(record.amount), 0.0)
+        profit = module_record_profit_amount(record)
+        row = area_totals.setdefault(
+            area_id,
+            {
+                "areaId": area_id,
+                "label": BUSINESS_AREA_SHORT.get(area_id, BUSINESS_AREA_LABELS.get(area_id, area_id)),
+                "sales": 0.0,
+                "profit": 0.0,
+                "records": 0,
+            },
+        )
+        row["sales"] += amount
+        row["profit"] += profit
+        row["records"] += 1
+        recent_sales += amount
+        recent_profit += profit
+        if record.record_date and record.record_date >= current_start:
+            current_sales += amount
+        elif record.record_date and prior_start <= record.record_date <= prior_end:
+            prior_sales += amount
+
+    area_rows = []
+    for row in area_totals.values():
+        row["sales"] = round(row["sales"], 2)
+        row["profit"] = round(row["profit"], 2)
+        row["margin"] = round((row["profit"] / row["sales"]) * 100, 1) if row["sales"] else 0.0
+        area_rows.append(row)
+    area_rows.sort(key=lambda row: (row["sales"], row["profit"]), reverse=True)
+    top_area = next((row for row in area_rows if row["sales"] > 0), None)
+    sales_change = round(current_sales - prior_sales, 2)
+    sales_change_percent = round((sales_change / prior_sales) * 100, 1) if prior_sales else 0.0
+
+    product_sales: dict[str, dict[str, Any]] = {}
+    recent_orders = db_session.scalars(
+        select(PosOrder)
+        .options(selectinload(PosOrder.lines))
+        .where(PosOrder.order_date >= period_start, PosOrder.order_date <= as_of_date)
+        .order_by(PosOrder.order_date.desc(), PosOrder.created_at.desc())
+    ).all()
+    for order in recent_orders:
+        if normalize_text(order.payment_method).casefold() == "credit" or is_kitchen_stock_issue(order):
+            continue
+        for line in order.lines:
+            key = normalize_text(line.product_id) or normalize_text(line.name).casefold()
+            if not key:
+                continue
+            row = product_sales.setdefault(
+                key,
+                {
+                    "name": normalize_text(line.name) or "Unnamed item",
+                    "productId": normalize_text(line.product_id),
+                    "areaId": normalize_text(line.business_area_id),
+                    "areaLabel": BUSINESS_AREA_SHORT.get(normalize_text(line.business_area_id), "Counter"),
+                    "category": normalize_text(line.category) or "Uncategorized",
+                    "units": 0.0,
+                    "sales": 0.0,
+                    "profit": 0.0,
+                    "orders": set(),
+                },
+            )
+            row["units"] += max(parse_amount(line.quantity), 0.0)
+            row["sales"] += max(parse_amount(line.total_amount), 0.0)
+            row["profit"] += max(parse_amount(line.total_amount) - parse_amount(line.cost_amount), 0.0)
+            row["orders"].add(order.id)
+
+    product_rows = []
+    for row in product_sales.values():
+        row["units"] = round(row["units"], 2)
+        row["sales"] = round(row["sales"], 2)
+        row["profit"] = round(row["profit"], 2)
+        row["orderCount"] = len(row.pop("orders"))
+        product_rows.append(row)
+    product_rows.sort(key=lambda row: (row["sales"], row["units"], row["profit"]), reverse=True)
+    top_products = product_rows[:5]
+
+    products = db_session.scalars(
+        select(Product).where(Product.active.is_(True), Product.track_inventory.is_(True))
+    ).all()
+    sold_product_ids = {row["productId"] for row in product_rows if row["productId"]}
+    low_stock_top_sellers = []
+    for row in top_products:
+        product = next((item for item in products if item.id == row["productId"]), None)
+        if not product:
+            continue
+        stock_risk = product_stock_risk_status(product)
+        if stock_risk["isStockOut"] or stock_risk["isNearStockOut"]:
+            low_stock_top_sellers.append({**row, "stock": format_product_stock_badge(product)})
+    slow_stock = [
+        {
+            "name": normalize_text(product.name),
+            "areaLabel": BUSINESS_AREA_SHORT.get(normalize_text(product.business_area_id), "Stock"),
+            "stock": format_product_stock_badge(product),
+            "value": round(max(parse_amount(product.quantity_on_hand), 0.0) * max(parse_amount(product.cost_price), 0.0), 2),
+        }
+        for product in products
+        if product.id not in sold_product_ids
+        and not product_uses_shared_stock(product)
+        and parse_amount(product.quantity_on_hand) > 0
+    ]
+    slow_stock.sort(key=lambda row: (row["value"], row["name"]), reverse=True)
+
+    online_order_count = db_session.scalar(
+        select(func.count()).select_from(ModuleRecord).where(
+            ModuleRecord.module_key == "online_orders",
+            ModuleRecord.record_date >= period_start,
+            ModuleRecord.record_date <= as_of_date,
+        )
+    ) or 0
+    category_names = {normalize_text(product.category).casefold() for product in products}
+    recommendations: list[dict[str, str]] = []
+    if top_area:
+        recommendations.append(
+            {
+                "title": f"Scale what is already working in {top_area['label']}",
+                "note": f"This area produced {format_currency(top_area['sales'])} in the last {period_days} days. Put its best sellers at the counter, include them in WhatsApp Status, and cross-sell one complementary item with each purchase.",
+                "type": "Sales action",
+                "href": "/app/category-performance",
+            }
+        )
+    if prior_sales and sales_change < 0:
+        recommendations.append(
+            {
+                "title": "Recover the weekly sales pace",
+                "note": f"Paid sales are down {abs(sales_change_percent):g}% versus the previous seven days. Run a three-day WhatsApp offer around a proven fast seller and contact recent customers with a clear pickup or delivery offer.",
+                "type": "Sales recovery",
+                "href": "/app/modules/whatsapp_campaigns",
+            }
+        )
+    elif current_sales > 0 and prior_sales:
+        recommendations.append(
+            {
+                "title": "Repeat the current winning sales pattern",
+                "note": f"Paid sales are up {sales_change_percent:g}% versus the previous seven days. Reorder the leading items early and repeat the promotion, display, or service activity that drove the increase.",
+                "type": "Growth action",
+                "href": "/app/inventory",
+            }
+        )
+    if low_stock_top_sellers:
+        leading = low_stock_top_sellers[0]
+        recommendations.append(
+            {
+                "title": f"Protect sales of {leading['name']}",
+                "note": f"It is one of the recent top sellers but is {leading['stock']}. Replenish before promoting it further so demand does not become lost sales.",
+                "type": "Stock protection",
+                "href": "/app/inventory?stock=low",
+            }
+        )
+    if slow_stock:
+        slow = slow_stock[0]
+        recommendations.append(
+            {
+                "title": f"Release cash tied up in {slow['name']}",
+                "note": f"This item has {slow['stock']} on hand but no recorded POS sale in the last {period_days} days. Check the shelf position and price, then bundle, discount, or pause reordering rather than buying more.",
+                "type": "Margin protection",
+                "href": "/app/inventory",
+            }
+        )
+
+    opportunities: list[dict[str, str]] = []
+    if area_totals.get("cold-store-groceries", {}).get("sales", 0) > 0:
+        opportunities.append(
+            {
+                "title": "OneRoot Breakfast & Quick Bites",
+                "note": "Test a morning menu of tea, Tom Brown, bread, eggs, and simple breakfast combos. Your existing Cold Store & Kitchen stock and food counter can support a low-risk pilot without a new shop.",
+                "test": "Offer a seven-day breakfast combo at the counter and through WhatsApp Status; keep only items that sell repeatedly.",
+            }
+        )
+    if "stationery & school supplies" in category_names:
+        opportunities.append(
+            {
+                "title": "OneRoot School & Office Essentials",
+                "note": "Build a focused school-and-office display around stationery, printing accessories, batteries, water, snacks, and phone charging. This creates a useful daily-needs basket without major new infrastructure.",
+                "test": "Create one small display near the Groceries & More cashier and promote school-term bundles before buying deeper stock.",
+            }
+        )
+    if area_totals.get("water-equipment", {}).get("sales", 0) > 0 or area_totals.get("construction-consumables", {}).get("sales", 0) > 0:
+        opportunities.append(
+            {
+                "title": "OneRoot Contractor Convenience Pack",
+                "note": "Package equipment rental with fast-moving consumables such as nails, gloves, tape, water, and delivery. It makes each rental customer more valuable without adding a separate operation.",
+                "test": "Offer one optional add-on pack whenever an equipment rental is booked and measure take-up for four weeks.",
+            }
+        )
+    if online_order_count > 0:
+        opportunities.append(
+            {
+                "title": "OneRoot Repeat Delivery Club",
+                "note": "Use the customers already ordering online to test weekly water, groceries, food, or laundry pickup schedules. Repeat delivery turns occasional orders into predictable revenue.",
+                "test": "Invite the last ten online customers to choose a weekly pickup or delivery reminder through WhatsApp.",
+            }
+        )
+    if not opportunities:
+        opportunities.append(
+            {
+                "title": "OneRoot Essentials Neighbourhood Basket",
+                "note": "Before opening a new business area, bundle existing fast-moving groceries, drinks, household essentials, and service bookings for repeat customers. Use the results to identify the strongest next expansion.",
+                "test": "Offer a simple three-item essentials bundle for one week and track the sales in POS.",
+            }
+        )
+
+    summary = (
+        f"{format_currency(recent_sales)} paid sales and {format_currency(recent_profit)} gross profit were recorded over the last {period_days} days."
+        if recent_sales
+        else f"No paid sales records were found in the last {period_days} days. Record sales consistently in POS and service desks so the adviser can learn from them."
+    )
+    return {
+        "periodDays": period_days,
+        "periodStart": period_start.isoformat(),
+        "summary": summary,
+        "recentSales": round(recent_sales, 2),
+        "recentProfit": round(recent_profit, 2),
+        "currentWeekSales": round(current_sales, 2),
+        "priorWeekSales": round(prior_sales, 2),
+        "salesChange": sales_change,
+        "salesChangePercent": sales_change_percent,
+        "topArea": top_area,
+        "topProducts": top_products,
+        "slowStock": slow_stock[:5],
+        "recommendations": recommendations[:6],
+        "opportunities": opportunities[:4],
+    }
+
+
 def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, Any]:
     """Prepare review-only work for the system AI employee from live OneRoot records."""
     briefing = owner_daily_briefing_context(db_session, briefing_date)
     growth = build_growth_automation_context(db_session)
     jollof_cycle = jollof_credit_cycle_context(db_session, briefing_date)
+    intelligence = ai_business_intelligence_context(db_session, briefing_date)
     tasks: list[dict[str, str]] = [
         {
             "title": item["label"],
@@ -11791,6 +12048,7 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
         "growth": growth,
         "tasks": tasks[:10],
         "jollofCycle": jollof_cycle,
+        "intelligence": intelligence,
         "workstreams": [
             {
                 "title": "Daily owner brief",
