@@ -29,6 +29,7 @@
   const areaLabelNode = document.getElementById("pos-area-label");
   const paymentMixNode = document.getElementById("pos-payment-mix");
   const momoCommissionRibbonNode = document.getElementById("pos-momo-commission-ribbon");
+  const momoHandledRibbonNode = document.getElementById("pos-momo-handled-ribbon");
   const paymentLabelNode = document.getElementById("pos-payment-label");
   const summaryDateNode = document.getElementById("pos-summary-date");
   const summaryTotalNode = document.getElementById("pos-summary-total");
@@ -633,6 +634,9 @@
   function renderMobileMoneyCounter(summary) {
     if (momoCommissionRibbonNode) {
       momoCommissionRibbonNode.textContent = formatCurrency(summary.mobileMoneyCommissionEarned);
+    }
+    if (momoHandledRibbonNode) {
+      momoHandledRibbonNode.textContent = formatCurrency(summary.mobileMoneyHandledValue);
     }
   }
 

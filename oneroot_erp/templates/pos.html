@@ -69,8 +69,9 @@
         <strong id="pos-equipment-collections-ribbon">{{ counter_summary.equipmentCollectionsTotal|currency }}</strong>
       </article>{% endif %}
       {% if not food_pos_mode %}<article class="pos-counter-pill pos-counter-pill-highlight">
-        <span class="pos-counter-label">MoMo Commission</span>
-        <strong id="pos-momo-commission-ribbon">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</strong>
+        <span class="pos-counter-label">MoMo Handled</span>
+        <strong id="pos-momo-handled-ribbon">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong>
+        <small>Commission <b id="pos-momo-commission-ribbon">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</b></small>
       </article>{% endif %}
       {% if food_pos_mode %}<article class="pos-counter-pill pos-counter-pill-highlight">
         <span class="pos-counter-label">Service Collections</span>
