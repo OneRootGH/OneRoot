@@ -11839,7 +11839,8 @@ def ai_business_intelligence_context(db_session, as_of_date: date) -> dict[str, 
             )
             row["units"] += max(parse_amount(line.quantity), 0.0)
             row["sales"] += max(parse_amount(line.total_amount), 0.0)
-            row["profit"] += max(parse_amount(line.total_amount) - parse_amount(line.cost_amount), 0.0)
+            # Preserve negative margins so the adviser can flag an item sold below cost.
+            row["profit"] += parse_amount(line.total_amount) - parse_amount(line.cost_amount)
             row["orders"].add(order.id)
 
     product_rows = []
@@ -11878,6 +11879,43 @@ def ai_business_intelligence_context(db_session, as_of_date: date) -> dict[str, 
     ]
     slow_stock.sort(key=lambda row: (row["value"], row["name"]), reverse=True)
 
+    product_by_id = {product.id: product for product in products}
+    reorder_plan: list[dict[str, Any]] = []
+    margin_watch: list[dict[str, Any]] = []
+    for row in product_rows:
+        product = product_by_id.get(row["productId"])
+        if not product:
+            continue
+        units_per_day = row["units"] / period_days
+        target_units = max(product_min_stock_level(product), int((units_per_day * 14) + 0.9999))
+        reorder_units = max(target_units - int(max(parse_amount(product.quantity_on_hand), 0.0)), 0)
+        stock_risk = product_stock_risk_status(product)
+        margin_percent = round((row["profit"] / row["sales"]) * 100, 1) if row["sales"] else 0.0
+        if reorder_units > 0 or stock_risk["isStockOut"] or stock_risk["isNearStockOut"]:
+            reorder_plan.append(
+                {
+                    "name": row["name"],
+                    "areaLabel": row["areaLabel"],
+                    "unitsSold": row["units"],
+                    "stock": format_product_stock_badge(product),
+                    "suggestedUnits": max(reorder_units, 1 if stock_risk["isStockOut"] else 0),
+                    "reason": "Stock out" if stock_risk["isStockOut"] else "Near minimum" if stock_risk["isNearStockOut"] else "14-day demand cover",
+                }
+            )
+        if row["sales"] > 0 and margin_percent < 15:
+            margin_watch.append(
+                {
+                    "name": row["name"],
+                    "areaLabel": row["areaLabel"],
+                    "sales": row["sales"],
+                    "profit": row["profit"],
+                    "margin": margin_percent,
+                    "suggestion": "Check supplier cost and price. Consider a bundle only if it protects margin.",
+                }
+            )
+    reorder_plan.sort(key=lambda row: (0 if row["reason"] == "Stock out" else 1, -row["unitsSold"], -row["suggestedUnits"]))
+    margin_watch.sort(key=lambda row: (row["margin"], -row["sales"]))
+
     online_order_count = db_session.scalar(
         select(func.count()).select_from(ModuleRecord).where(
             ModuleRecord.module_key == "online_orders",
@@ -11885,6 +11923,22 @@ def ai_business_intelligence_context(db_session, as_of_date: date) -> dict[str, 
             ModuleRecord.record_date <= as_of_date,
         )
     ) or 0
+    online_order_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "online_orders",
+            ModuleRecord.record_date >= period_start,
+            ModuleRecord.record_date <= as_of_date,
+        )
+        .order_by(desc(ModuleRecord.updated_at))
+        .limit(100)
+    ).all()
+    online_follow_up_count = sum(
+        1
+        for record in online_order_records
+        if normalize_text((record.payload or {}).get("status")).casefold()
+        not in {"delivered", "completed", "cancelled"}
+    )
     category_names = {normalize_text(product.category).casefold() for product in products}
     recommendations: list[dict[str, str]] = []
     if top_area:
@@ -11992,12 +12046,202 @@ def ai_business_intelligence_context(db_session, as_of_date: date) -> dict[str, 
         "priorWeekSales": round(prior_sales, 2),
         "salesChange": sales_change,
         "salesChangePercent": sales_change_percent,
+        "nextWeekForecast": round((recent_sales / period_days) * 7, 2),
+        "nextMonthForecast": round((recent_sales / period_days) * 30, 2),
         "topArea": top_area,
         "topProducts": top_products,
         "slowStock": slow_stock[:5],
+        "reorderPlan": reorder_plan[:8],
+        "marginWatch": margin_watch[:6],
+        "onlineOrderCount": online_order_count,
+        "onlineFollowUpCount": online_follow_up_count,
         "recommendations": recommendations[:6],
         "opportunities": opportunities[:4],
     }
+
+
+def ai_operations_workbench_context(
+    db_session,
+    as_of_date: date,
+    *,
+    briefing: dict[str, Any],
+    growth: dict[str, Any],
+    intelligence: dict[str, Any],
+) -> dict[str, Any]:
+    """Build owner-review work for growth, controls, people, and collections."""
+    period_start = as_of_date - timedelta(days=27)
+    records = db_session.scalars(
+        select(ModuleRecord).where(
+            ModuleRecord.module_key.in_(
+                [
+                    "workforce_attendance",
+                    "apartments",
+                    "suppliers",
+                    "pos_closeouts",
+                    "online_orders",
+                ]
+            )
+        )
+    ).all()
+
+    staff_rows: dict[str, dict[str, Any]] = {}
+    tenant_records: list[ModuleRecord] = []
+    supplier_rows: list[dict[str, Any]] = []
+    closeout_variances: list[dict[str, Any]] = []
+    online_followups: list[dict[str, Any]] = []
+    for record in records:
+        payload = dict(record.payload or {})
+        if record.module_key == "workforce_attendance":
+            shift_date = parse_date(payload.get("attendanceDate")) or record.record_date
+            if not shift_date or shift_date < period_start or shift_date > as_of_date:
+                continue
+            staff_name = normalize_text(payload.get("staffName")) or normalize_text(payload.get("employeeName")) or record.title or "Staff member"
+            row = staff_rows.setdefault(staff_name, {"name": staff_name, "hours": 0.0, "late": 0, "completed": 0})
+            row["hours"] += parse_amount(payload.get("workedHours"))
+            row["late"] += 1 if parse_amount(payload.get("lateMinutes")) > 0 else 0
+            row["completed"] += 1 if normalize_text(payload.get("attendanceStatus")) == "Checked Out" else 0
+        elif record.module_key == "apartments":
+            tenant_records.append(record)
+        elif record.module_key == "suppliers":
+            outstanding = supplier_outstanding(payload)
+            if outstanding > 0:
+                supplier_rows.append(
+                    {
+                        "name": normalize_text(payload.get("supplierName")) or record.title or "Supplier",
+                        "amount": outstanding,
+                        "areaLabel": BUSINESS_AREA_SHORT.get(normalize_text(record.business_area_id), "Shared Operations"),
+                    }
+                )
+        elif record.module_key == "pos_closeouts":
+            variance = parse_amount(payload.get("cashVariance"))
+            if abs(variance) > 0.009:
+                closeout_variances.append(
+                    {
+                        "date": normalize_text(payload.get("orderDate")) or (record.record_date.isoformat() if record.record_date else ""),
+                        "area": normalize_text(payload.get("areaLabel")) or "POS Counter",
+                        "variance": variance,
+                    }
+                )
+        elif record.module_key == "online_orders":
+            status = normalize_text(payload.get("status")) or "New"
+            if status.casefold() not in {"delivered", "completed", "cancelled"}:
+                online_followups.append(
+                    {
+                        "number": normalize_text(payload.get("orderNumber")) or record.reference or "Online order",
+                        "customer": normalize_text(payload.get("customerName")) or "Customer",
+                        "status": status,
+                        "amount": parse_amount(payload.get("quotedTotal")),
+                    }
+                )
+
+    tenant_profiles = latest_apartment_suite_profiles(tenant_records)
+    tenant_queue = build_tenant_reminder_queue(tenant_profiles)[:6]
+    staff_summary = [
+        {
+            "name": row["name"],
+            "hours": round(row["hours"], 1),
+            "late": row["late"],
+            "completed": row["completed"],
+        }
+        for row in staff_rows.values()
+    ]
+    staff_summary.sort(key=lambda row: (-row["hours"], row["late"], row["name"]))
+    supplier_rows.sort(key=lambda row: (-row["amount"], row["name"]))
+    closeout_variances.sort(key=lambda row: (row["date"], abs(row["variance"])), reverse=True)
+    online_followups.sort(key=lambda row: (-row["amount"], row["number"]))
+
+    audit_alerts = db_session.scalars(
+        select(AuditLog)
+        .where(
+            AuditLog.created_at >= datetime.combine(period_start, datetime.min.time()),
+            AuditLog.action.in_(["delete", "void"]),
+        )
+        .order_by(desc(AuditLog.created_at))
+        .limit(12)
+    ).all()
+    control_alerts = [
+        {
+            "title": f"{len(closeout_variances)} counter variance(s) need review",
+            "note": "A variance is a control signal, not proof of loss. Compare the count, receipts, credit repayments, service collections, and cashbook before closing the review.",
+            "href": "/app/modules/pos_closeouts",
+        }
+    ] if closeout_variances else []
+    if audit_alerts:
+        control_alerts.append(
+            {
+                "title": f"{len(audit_alerts)} void or deletion action(s) recorded",
+                "note": "Review the audit trail with the receipt and reason before treating any difference as a loss.",
+                "href": "/app/audit",
+            }
+        )
+    if briefing["creditOutstanding"] > 0:
+        control_alerts.append(
+            {
+                "title": "Protect cash tied up in customer credit",
+                "note": f"Open customer credit is {format_currency(briefing['creditOutstanding'])}. Follow up through the saved customer account before issuing further credit.",
+                "href": "/app/modules/customer_credit_accounts",
+            }
+        )
+
+    automation_cards = [
+        {"title": "Morning Owner Briefing", "status": "Ready", "note": "Daily sales, gross profit, cash controls, credit, tenant and stock exceptions.", "href": "/app/owner-daily-briefing"},
+        {"title": "Smart Reorder Assistant", "status": f"{len(intelligence['reorderPlan'])} item(s) to review", "note": "Uses recent POS movement and stock on hand to suggest a 14-day cover.", "href": "/app/inventory"},
+        {"title": "Price & Margin Adviser", "status": f"{len(intelligence['marginWatch'])} margin watch", "note": "Flags low-margin products using saved sale price and item cost.", "href": "/app/category-performance"},
+        {"title": "Sales Forecasting", "status": "Ready", "note": "Uses recent paid sales pace to forecast the next week and month.", "href": "/app/sales-summary"},
+        {"title": "Customer Follow-Up", "status": f"{len(growth['followUps'])} queued", "note": "Prepares customer, credit, laundry, and repeat-sales follow-up without sending automatically.", "href": "/app/modules/customer_crm"},
+        {"title": "WhatsApp & Campaign Writer", "status": "Drafts ready", "note": "Builds messages and Facebook ideas from current stock, offers, and customer segments.", "href": "/app/modules/whatsapp_campaigns"},
+        {"title": "Promotion & Bundle Builder", "status": "Ready", "note": "Uses top products and business areas to propose profitable bundles and small tests.", "href": "/app/modules/promotions"},
+        {"title": "Fraud & Leakage Watch", "status": f"{len(control_alerts)} review signal(s)", "note": "Watches variances, voids, deletions, and unpaid credit as review signals only.", "href": "/app/audit"},
+        {"title": "Kitchen Profit Coach", "status": "Ready", "note": "Tracks meal sales against internal ingredient credits, beginning with the active Jollof cycle.", "href": "/app/ai-growth-assistant"},
+        {"title": "Staff Performance Coach", "status": f"{len(staff_summary)} staff record(s)", "note": "Uses saved attendance and work hours; role KPIs remain a manager review.", "href": "/app/modules/workforce_attendance"},
+        {"title": "Tenant Collection Assistant", "status": f"{len(tenant_queue)} reminder(s)", "note": "Prioritises consented tenant reminders by due date, balance, and rent/bill risk.", "href": "/app/modules/apartments"},
+        {"title": "Business Expansion Adviser", "status": f"{len(intelligence['opportunities'])} test(s)", "note": "Suggests small, low-risk business tests using current demand, stock, and service data.", "href": "/app/ai-growth-assistant"},
+        {"title": "Online Order Conversion", "status": f"{len(online_followups)} follow-up(s)", "note": "Identifies online orders needing confirmation, payment, dispatch, or delivery follow-up.", "href": "/app/modules/online_orders"},
+        {"title": "Supplier Negotiation Assistant", "status": f"{len(supplier_rows)} balance(s)", "note": "Highlights supplier exposure so orders, prices, and payment plans can be reviewed together.", "href": "/app/modules/suppliers"},
+        {"title": "Owner Chat Assistant", "status": "Ready", "note": "Answers common owner questions from saved sales, stock, credit, tenant, staff, and order data.", "href": "/app/ai-growth-assistant"},
+    ]
+    return {
+        "automationCards": automation_cards,
+        "staffSummary": staff_summary[:6],
+        "tenantQueue": tenant_queue,
+        "supplierRows": supplier_rows[:6],
+        "closeoutVariances": closeout_variances[:6],
+        "onlineFollowUps": online_followups[:6],
+        "controlAlerts": control_alerts,
+    }
+
+
+def ai_owner_question_answer(question: str, assistant: dict[str, Any]) -> str:
+    """Answer common owner questions from live OneRoot metrics without external AI access."""
+    clean_question = normalize_text(question)
+    if not clean_question:
+        return "Ask about sales, profit, stock, credit, customers, tenants, Mobile Money, staff, online orders, or what to reorder."
+    query = clean_question.casefold()
+    intelligence = assistant["intelligence"]
+    briefing = assistant["briefing"]
+    operations = assistant["operations"]
+    if any(word in query for word in {"profit", "margin", "made"}):
+        return f"Over the last {intelligence['periodDays']} days, recorded paid sales were {format_currency(intelligence['recentSales'])} and gross profit was {format_currency(intelligence['recentProfit'])}, before overheads, payroll, and expenses."
+    if any(word in query for word in {"reorder", "stock", "buy"}):
+        rows = intelligence["reorderPlan"]
+        if not rows:
+            return "No fast-selling item is currently below the suggested 14-day stock cover. Continue recording stock updates and POS sales for stronger reorder guidance."
+        row = rows[0]
+        return f"Start with {row['name']}: it sold {row['unitsSold']:g} units recently, is currently {row['stock']}, and the adviser suggests about {row['suggestedUnits']:g} more unit(s) for {row['reason'].lower()}."
+    if any(word in query for word in {"credit", "owe", "debt"}):
+        return f"Customer credit currently outstanding is {format_currency(briefing['creditOutstanding'])} across {briefing['openCreditCount']} account(s), with {briefing['overdueCreditCount']} overdue. Use Customer Credit Accounts to follow up with the saved phone-linked customer records."
+    if any(word in query for word in {"tenant", "rent", "bill"}):
+        return f"Tenant rent and bills currently outstanding total {format_currency(briefing['tenantOutstanding'])}. The assistant has {len(operations['tenantQueue'])} consented tenant reminder(s) prioritised for follow-up."
+    if any(word in query for word in {"online", "order", "delivery"}):
+        return f"There are {len(operations['onlineFollowUps'])} online order(s) needing confirmation, payment, dispatch, or delivery follow-up in the current review queue."
+    if any(word in query for word in {"staff", "attendance", "worker"}):
+        return f"The adviser found attendance activity for {len(operations['staffSummary'])} staff member(s) in the current review period. Open Staff Performance Coach to compare worked hours, completed shifts, lateness, and role KPIs."
+    if any(word in query for word in {"momo", "mobile money", "float"}):
+        return "Mobile Money handled value, commission, physical cash, e-cash, and reconciliation remain in the separate MoMo Counter. They are intentionally excluded from normal POS sales and All Daily Sales."
+    top_area = intelligence.get("topArea")
+    if top_area:
+        return f"The strongest recorded area in the last {intelligence['periodDays']} days is {top_area['label']} with {format_currency(top_area['sales'])} sales and a {top_area['margin']}% gross margin. Start by protecting its stock and offering a related add-on."
+    return "I can advise from the current OneRoot records, but more paid sales, stock updates, customer contacts, and service payments will make the recommendations more specific."
 
 
 def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, Any]:
@@ -12006,6 +12250,13 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
     growth = build_growth_automation_context(db_session)
     jollof_cycle = jollof_credit_cycle_context(db_session, briefing_date)
     intelligence = ai_business_intelligence_context(db_session, briefing_date)
+    operations = ai_operations_workbench_context(
+        db_session,
+        briefing_date,
+        briefing=briefing,
+        growth=growth,
+        intelligence=intelligence,
+    )
     tasks: list[dict[str, str]] = [
         {
             "title": item["label"],
@@ -12049,6 +12300,7 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
         "tasks": tasks[:10],
         "jollofCycle": jollof_cycle,
         "intelligence": intelligence,
+        "operations": operations,
         "workstreams": [
             {
                 "title": "Daily owner brief",
@@ -17000,11 +17252,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @access_required("ai_growth_assistant")
     def ai_growth_assistant():
         briefing_date = parse_date(request.args.get("date")) or date.today()
+        assistant = ai_growth_assistant_context(g.db, briefing_date)
+        ai_question = normalize_text(request.args.get("ask"))
         return render_template(
             "ai_growth_assistant.html",
             page_title="AI Growth Assistant",
             briefing_date=briefing_date,
-            assistant=ai_growth_assistant_context(g.db, briefing_date),
+            assistant=assistant,
+            ai_question=ai_question,
+            ai_answer=ai_owner_question_answer(ai_question, assistant),
         )
 
     @app.route("/app/export/backup.json")

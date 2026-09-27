@@ -15,10 +15,20 @@
   <section class="card compact-filter-card">
     <form class="toolbar" method="get">
       <label class="compact-field"><span>Review Date</span><input type="date" name="date" value="{{ briefing_date|date_value }}"></label>
+      <label class="compact-field grow"><span>Ask OneRoot AI</span><input name="ask" value="{{ ai_question }}" placeholder="What should I reorder or follow up today?"></label>
       <button class="button primary" type="submit">Refresh Work Queue</button>
       <a class="button subtle" href="{{ url_for('ai_growth_assistant') }}">Today</a>
     </form>
   </section>
+
+  {% if ai_question %}
+    <section class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Owner Data Question</p><h3>OneRoot AI Answer</h3></div><span class="metric-chip">Review before acting</span></div>
+      <p><strong>{{ ai_question }}</strong></p>
+      <p class="compact-copy">{{ ai_answer }}</p>
+      <p class="muted compact-copy">This answer uses saved OneRoot records. The assistant can recommend work, but it cannot send a message, move money, change a price, adjust stock, or edit a customer account.</p>
+    </section>
+  {% endif %}
 
   <section class="card-grid four">
     <article class="metric-card"><span>Priority Actions</span><strong>{{ assistant.tasks|length }}</strong><small>Prepared from today’s live records</small></article>
@@ -39,6 +49,28 @@
       <article class="metric-card"><span>Gross Profit</span><strong>{{ assistant.intelligence.recentProfit|currency }}</strong><small>Before overheads, payroll, and expenses</small></article>
       <article class="metric-card"><span>Leading Area</span><strong>{{ assistant.intelligence.topArea.label if assistant.intelligence.topArea else 'No sales yet' }}</strong><small>{% if assistant.intelligence.topArea %}{{ assistant.intelligence.topArea.sales|currency }} sales · {{ assistant.intelligence.topArea.margin }}% margin{% else %}Capture sales to build analysis{% endif %}</small></article>
     </section>
+  </section>
+
+  <section class="card">
+    <div class="card-header compact"><div><p class="eyebrow">AI Operations Centre</p><h3>Forecast, Reorder And Follow-Up</h3></div><span class="metric-chip">Owner approval required</span></div>
+    <p class="muted compact-copy">These recommendations are built from recent paid sales, inventory, POS item costs, customer credit, service activity, tenants, staff, suppliers, closeouts, and online orders. They prepare the next action; they never perform it automatically.</p>
+    <section class="card-grid four">
+      <article class="metric-card"><span>Next 7 Days Forecast</span><strong>{{ assistant.intelligence.nextWeekForecast|currency }}</strong><small>Recent paid-sales pace</small></article>
+      <article class="metric-card"><span>Next 30 Days Forecast</span><strong>{{ assistant.intelligence.nextMonthForecast|currency }}</strong><small>Planning guide, not a guarantee</small></article>
+      <article class="metric-card {% if assistant.intelligence.reorderPlan %}warning{% endif %}"><span>Reorder Review</span><strong>{{ assistant.intelligence.reorderPlan|length }}</strong><small>Item{{ '' if assistant.intelligence.reorderPlan|length == 1 else 's' }} needing a stock decision</small></article>
+      <article class="metric-card {% if assistant.operations.onlineFollowUps %}warning{% endif %}"><span>Online Follow-Ups</span><strong>{{ assistant.operations.onlineFollowUps|length }}</strong><small>Order{{ '' if assistant.operations.onlineFollowUps|length == 1 else 's' }} still needing attention</small></article>
+    </section>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Stock And Pricing</p><h3>Smart Reorder Assistant</h3></div><a class="button subtle button-small" href="{{ url_for('inventory') }}">Open Inventory</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th>Area</th><th>Recent Units</th><th>On Hand</th><th>Suggested</th></tr></thead><tbody>{% for item in assistant.intelligence.reorderPlan %}<tr><td><strong>{{ item.name }}</strong><small>{{ item.reason }}</small></td><td>{{ item.areaLabel }}</td><td>{{ '{:g}'.format(item.unitsSold) }}</td><td>{{ item.stock }}</td><td>{{ '{:g}'.format(item.suggestedUnits) }}</td></tr>{% else %}<tr><td colspan="5">No item is currently below the suggested reorder cover. Keep recording stock updates and sales.</td></tr>{% endfor %}</tbody></table></div>
+    </article>
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Protect Margin</p><h3>Price &amp; Margin Watch</h3></div><a class="button subtle button-small" href="{{ url_for('category_performance') }}">Review Performance</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Item</th><th>Area</th><th>Sales</th><th>Profit</th><th>Margin</th></tr></thead><tbody>{% for item in assistant.intelligence.marginWatch %}<tr><td><strong>{{ item.name }}</strong><small>{{ item.suggestion }}</small></td><td>{{ item.areaLabel }}</td><td>{{ item.sales|currency }}</td><td class="{% if item.profit < 0 %}negative-text{% endif %}">{{ item.profit|currency }}</td><td class="{% if item.margin < 0 %}negative-text{% endif %}">{{ item.margin }}%</td></tr>{% else %}<tr><td colspan="5">No low-margin item was found in recent saved POS sales.</td></tr>{% endfor %}</tbody></table></div>
+    </article>
   </section>
 
   <section class="split-grid">
@@ -73,6 +105,60 @@
     <article class="card">
       <div class="card-header compact"><div><p class="eyebrow">Capital At Risk</p><h3>Slow Or Unsold Stock</h3></div><a class="button subtle button-small" href="{{ url_for('inventory') }}">Review Stock</a></div>
       <div class="table-wrap"><table><thead><tr><th>Item</th><th>Area</th><th>Stock</th><th>Cost Value</th></tr></thead><tbody>{% for item in assistant.intelligence.slowStock %}<tr><td>{{ item.name }}</td><td>{{ item.areaLabel }}</td><td>{{ item.stock }}</td><td>{{ item.value|currency }}</td></tr>{% else %}<tr><td colspan="4">No unsold stock with a positive quantity was found in this period.</td></tr>{% endfor %}</tbody></table></div>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Customer Growth</p><h3>Follow-Up, Campaigns And Bundles</h3></div><a class="button subtle button-small" href="{{ url_for('module_list', module_key='customer_crm') }}">Open Growth</a></div>
+      <ul class="stack-list compact">
+        {% for item in assistant.growth.followUps[:5] %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><small>{{ item.automationLabel }}</small><strong>{{ item.customerName }}</strong><span>{{ item.recommendedOffer or 'Review the customer record and prepare the next helpful follow-up.' }}</span></div><a class="button subtle button-small" href="{{ url_for('module_list', module_key='customer_crm') }}">Review</a></li>
+        {% else %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><strong>No customer follow-up is queued</strong><span>Add customer contacts, paid sales, service dates, and consent to build targeted follow-up work.</span></div></li>
+        {% endfor %}
+        {% for post in assistant.growth.facebookPosts[:2] %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><small>Facebook idea · {{ post.scheduledLabel }}</small><strong>{{ post.title }}</strong><span>{{ post.message }}</span></div><a class="button subtle button-small" href="{{ post.launchHref }}">Draft</a></li>
+        {% endfor %}
+      </ul>
+    </article>
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Control Review</p><h3>Fraud &amp; Leakage Watch</h3></div><a class="button subtle button-small" href="{{ url_for('audit_page') }}">Audit Trail</a></div>
+      <ul class="stack-list compact">
+        {% for alert in assistant.operations.controlAlerts %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><strong>{{ alert.title }}</strong><span>{{ alert.note }}</span></div><a class="button subtle button-small" href="{{ alert.href }}">Review</a></li>
+        {% else %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><strong>No control exception is queued</strong><span>Continue saving receipts, closeouts, stock movements, and approved corrections to keep this review meaningful.</span></div></li>
+        {% endfor %}
+        {% for closeout in assistant.operations.closeoutVariances[:3] %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><small>{{ closeout.date }} · {{ closeout.area }}</small><strong>Cash variance {{ closeout.variance|currency }}</strong><span>Compare counted cash against receipts, credit repayments, service collections, and cashbook entries.</span></div></li>
+        {% endfor %}
+      </ul>
+    </article>
+  </section>
+
+  <section class="split-grid">
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Collections And Delivery</p><h3>Tenant, Supplier And Online Follow-Up</h3></div></div>
+      <ul class="stack-list compact">
+        {% for item in assistant.operations.tenantQueue[:3] %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><small>{{ item.suite }} · {{ item.primaryDueLabel or 'Payment follow-up' }}</small><strong>{{ item.tenant or 'Tenant' }}</strong><span>Outstanding {{ item.outstanding|currency }}. Draft reminder is ready only where consent and WhatsApp contact are saved.</span></div><a class="button subtle button-small" href="{{ url_for('module_list', module_key='apartments') }}">Review</a></li>
+        {% endfor %}
+        {% for item in assistant.operations.supplierRows[:2] %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><small>{{ item.areaLabel }}</small><strong>{{ item.name }}</strong><span>Supplier balance {{ item.amount|currency }}. Confirm stock need, price, and payment plan together.</span></div><a class="button subtle button-small" href="{{ url_for('module_list', module_key='suppliers') }}">Review</a></li>
+        {% endfor %}
+        {% for item in assistant.operations.onlineFollowUps[:2] %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><small>{{ item.number }} · {{ item.status }}</small><strong>{{ item.customer }}</strong><span>Quoted total {{ item.amount|currency }}. Confirm payment, dispatch, or delivery before closing.</span></div><a class="button subtle button-small" href="{{ url_for('module_list', module_key='online_orders') }}">Review</a></li>
+        {% endfor %}
+        {% if not assistant.operations.tenantQueue and not assistant.operations.supplierRows and not assistant.operations.onlineFollowUps %}
+          <li class="stack-list-item-row"><div class="stack-list-copy"><strong>No priority collection or delivery follow-up</strong><span>Save tenant contacts, supplier bills, and online-order status to build a fuller queue.</span></div></li>
+        {% endif %}
+      </ul>
+    </article>
+    <article class="card">
+      <div class="card-header compact"><div><p class="eyebrow">People Coach</p><h3>Attendance Signals</h3></div><a class="button subtle button-small" href="{{ url_for('module_list', module_key='workforce_attendance') }}">Open Attendance</a></div>
+      <div class="table-wrap"><table><thead><tr><th>Staff Member</th><th>Hours</th><th>Completed</th><th>Late</th></tr></thead><tbody>{% for item in assistant.operations.staffSummary %}<tr><td>{{ item.name }}</td><td>{{ item.hours }}</td><td>{{ item.completed }}</td><td>{{ item.late }}</td></tr>{% else %}<tr><td colspan="4">No attendance record is available in this review period.</td></tr>{% endfor %}</tbody></table></div>
+      <p class="muted compact-copy">Attendance is a coaching signal. Confirm any missing check-in, check-out, leave, or approved schedule change with the staff member before acting.</p>
     </article>
   </section>
 
@@ -125,6 +211,7 @@
         <article class="metric-card"><span>{{ item.frequency }}</span><strong>{{ item.title }}</strong><small>{{ item.note }}</small></article>
       {% endfor %}
     </div>
+    <div class="table-wrap"><table><thead><tr><th>AI Work Area</th><th>Current Position</th><th>What It Prepares</th><th></th></tr></thead><tbody>{% for item in assistant.operations.automationCards %}<tr><td><strong>{{ item.title }}</strong></td><td>{{ item.status }}</td><td>{{ item.note }}</td><td><a class="button subtle button-small" href="{{ item.href }}">Open</a></td></tr>{% endfor %}</tbody></table></div>
     <p class="muted compact-copy">The AI assistant is visible in User Accounts as <strong>OneRoot AI Growth Assistant</strong>. It has no password, cannot sign in, and cannot approve or execute transactions. It prepares work for the owner or operations manager to review and act on.</p>
   </section>
 {% endblock %}
