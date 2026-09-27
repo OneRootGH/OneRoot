@@ -11617,17 +11617,16 @@ def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
         .where(ModuleRecord.module_key == "customer_credit_accounts")
         .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.created_at))
     ).all()
-    source_record = next(
-        (
-            record
-            for record in credit_records
-            if normalize_text((record.payload or {}).get("transactionType")) == "Credit Sale"
-            and normalize_text((record.payload or {}).get("customerName")).casefold() in kitchen_names
+    def is_internal_kitchen_credit(record: ModuleRecord) -> bool:
+        payload = record.payload or {}
+        return (
+            normalize_text(payload.get("transactionType")) == "Credit Sale"
+            and normalize_text(payload.get("customerName")).casefold() in kitchen_names
             and normalize_text(record.reference).startswith("pos-credit|")
-            and (record.record_date or parse_date((record.payload or {}).get("entryDate")) or date.min) <= as_of_date
-        ),
-        None,
-    )
+            and (record.record_date or parse_date(payload.get("entryDate")) or date.min) <= as_of_date
+        )
+
+    source_record = next((record for record in credit_records if is_internal_kitchen_credit(record)), None)
     if not source_record:
         return {
             "active": False,
@@ -11641,33 +11640,52 @@ def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
 
     source_payload = dict(source_record.payload or {})
     source_date = source_record.record_date or parse_date(source_payload.get("entryDate")) or as_of_date
-    source_order_id = normalize_text(source_record.reference).removeprefix("pos-credit|")
-    source_order = db_session.scalar(
+    source_customer_name = normalize_text(source_payload.get("customerName")).casefold()
+    # One kitchen batch may be entered as several POS credit transactions. Include
+    # every internal credit saved for that customer on the active purchase date.
+    source_records = [
+        record
+        for record in credit_records
+        if is_internal_kitchen_credit(record)
+        and (record.record_date or parse_date((record.payload or {}).get("entryDate")) or date.min) == source_date
+        and normalize_text((record.payload or {}).get("customerName")).casefold() == source_customer_name
+    ]
+    source_order_ids = [
+        normalize_text(record.reference).removeprefix("pos-credit|")
+        for record in source_records
+    ]
+    source_orders = db_session.scalars(
         select(PosOrder)
         .options(selectinload(PosOrder.lines))
-        .where(PosOrder.id == source_order_id)
-    )
+        .where(PosOrder.id.in_(source_order_ids))
+    ).all() if source_order_ids else []
+    source_orders_by_id = {order.id: order for order in source_orders}
+    has_original_pos_orders = len(source_orders_by_id) == len(source_records)
+    batch_started_at = min(record.created_at for record in source_records)
     ingredient_rows: list[dict[str, Any]] = []
     ingredient_cost = 0.0
-    if source_order:
-        for line in source_order.lines:
-            line_cost = round(
-                parse_amount(line.cost_amount)
-                or (parse_amount(line.unit_cost) * parse_amount(line.quantity)),
-                2,
-            )
-            ingredient_cost += line_cost
-            ingredient_rows.append(
-                {
-                    "name": line.name,
-                    "quantity": parse_amount(line.quantity),
-                    "cost": line_cost,
-                }
-            )
-    else:
+    for credit_record in source_records:
+        source_order_id = normalize_text(credit_record.reference).removeprefix("pos-credit|")
+        source_order = source_orders_by_id.get(source_order_id)
+        if source_order:
+            for line in source_order.lines:
+                line_cost = round(
+                    parse_amount(line.cost_amount)
+                    or (parse_amount(line.unit_cost) * parse_amount(line.quantity)),
+                    2,
+                )
+                ingredient_cost += line_cost
+                ingredient_rows.append(
+                    {
+                        "name": line.name,
+                        "quantity": parse_amount(line.quantity),
+                        "cost": line_cost,
+                    }
+                )
+            continue
         # Older imported credit records may no longer have their POS order. Retain
-        # visibility using the saved credit detail rather than dropping the cycle.
-        for item in source_payload.get("creditItems", []):
+        # visibility using saved credit detail rather than dropping that transaction.
+        for item in (credit_record.payload or {}).get("creditItems", []):
             if not isinstance(item, dict):
                 continue
             item_cost = parse_amount(item.get("totalAmount"))
@@ -11692,7 +11710,7 @@ def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
     for order in orders:
         if normalize_text(order.payment_method).casefold() == "credit" or is_kitchen_stock_issue(order):
             continue
-        if order.order_date == source_date and order.created_at < source_record.created_at:
+        if order.order_date == source_date and order.created_at < batch_started_at:
             continue
         order_has_jollof = False
         for line in order.lines:
@@ -11711,9 +11729,9 @@ def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
         "active": True,
         "sourceDate": source_date.isoformat(),
         "sourceReference": normalize_text(source_record.reference),
-        "sourceCreditValue": round(parse_amount(source_payload.get("amount")), 2),
+        "sourceCreditValue": round(sum(parse_amount((record.payload or {}).get("amount")) for record in source_records), 2),
         "ingredientCost": ingredient_cost,
-        "costSource": "Actual POS stock cost" if source_order else "Saved credit value (historical fallback)",
+        "costSource": "Actual POS stock cost" if has_original_pos_orders else "Saved credit value (historical fallback)",
         "items": ingredient_rows,
         "itemCount": len(ingredient_rows),
         "salesTotal": jollof_sales,
@@ -11722,7 +11740,7 @@ def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
         "grossProfit": gross_profit,
         "marginPercent": round((gross_profit / jollof_sales) * 100, 2) if jollof_sales else 0.0,
         "status": "Profit building from Jollof sales" if jollof_sales else "Waiting for Jollof sales",
-        "cycleNote": "This active cost cycle automatically resets when the next OneRoot Essentials or OneRoot Kitchen POS credit purchase is saved.",
+        "cycleNote": "This cycle includes every OneRoot Essentials or OneRoot Kitchen POS credit saved on its active purchase date. It automatically resets when a new internal kitchen credit purchase is saved on a later date.",
     }
 
 
