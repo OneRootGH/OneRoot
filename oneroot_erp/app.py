@@ -1000,7 +1000,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 bootstrap_session.commit()
             session_factory.remove()
             return
-        except OperationalError as error:
+        except (OperationalError, IntegrityError) as error:
             session_factory.remove()
             last_error = error
             if attempt >= retries:
@@ -15453,7 +15453,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
             try:
                 initialize_database(engine, SessionLocal, app_config)
-            except OperationalError:
+            except (OperationalError, IntegrityError):
                 SessionLocal.remove()
                 mark_database_unavailable()
                 return False
@@ -16224,13 +16224,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/")
     @access_required("dashboard")
     def dashboard():
-        all_records = g.db.scalars(select(ModuleRecord)).all()
+        # Keep the first page after sign-in deliberately light. Detailed CRM,
+        # reporting, and AI analysis are opened from their own desks.
+        dashboard_record_keys = {
+            "sales",
+            "apartments",
+            "recurring_controls",
+            "maintenance_records",
+            "staff_onboarding_profiles",
+            "salary_records",
+            "online_orders",
+        }
+        all_records = g.db.scalars(
+            select(ModuleRecord).where(ModuleRecord.module_key.in_(dashboard_record_keys))
+        ).all()
         current_month = date.today().strftime("%Y-%m")
         people_alerts = build_staff_people_alerts(all_records)
         latest_suite_profiles = latest_apartment_suite_profiles(all_records, support_phone=app_config.support_phone)
         tenant_reminders = build_tenant_reminder_queue(latest_suite_profiles)
-        growth_context = build_growth_automation_context(g.db)
-        target_progress_rows = build_target_progress_rows(all_records, current_month)
         low_stock_items = g.db.scalars(
             select(Product)
             .where(Product.track_inventory.is_(True), Product.active.is_(True), Product.quantity_on_hand <= Product.min_stock_level)
@@ -16326,14 +16337,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     if record.module_key == "sales" and record.record_date == sales_date
                 ), 2),
             })
-        dashboard_area_rows = [
-            row
-            for row in report_area_rows(all_records, current_month)
-            if any(
-                abs(parse_amount(row.get(metric)))
-                for metric in ("salesTotal", "profitTotal", "expenseTotal", "salaryTotal", "pettyCashTotal", "maintenanceTotal", "depreciationTotal", "supplierBalance", "netTotal")
-            )
-        ]
         online_orders = [
             serialize_online_order(record) for record in all_records if record.module_key == "online_orders"
         ]
@@ -16377,7 +16380,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
             salary_due_alerts=people_alerts["salaryDue"],
             birthday_today_alerts=people_alerts["birthdayToday"],
             birthday_upcoming_alerts=people_alerts["birthdayUpcoming"],
-            growth_context=growth_context,
             monthly_sales_by_area=monthly_sales_by_area,
             month_sales_total=month_sales_total,
             month_profit_total=month_profit_total,
@@ -16411,26 +16413,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 short_key="short",
                 positive_color="var(--green)",
             ),
-            dashboard_net_chart=build_chart_rows(
-                [
-                    {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["netTotal"]}
-                    for row in dashboard_area_rows
-                    if abs(parse_amount(row["netTotal"])) > 0
-                ],
-                label_key="label",
-                value_key="amount",
-                short_key="short",
-                positive_color="var(--accent)",
-            ),
             online_order_follow_up=len(order_follow_up),
             online_balance_total=online_balance_total,
             low_stock_count=len(low_stock_items),
             low_stock=low_stock,
             latest_audit=latest_audit,
-            target_progress_rows=target_progress_rows,
-            target_total=round(sum(row["target"] for row in target_progress_rows), 2),
-            target_actual_total=round(sum(row["actual"] for row in target_progress_rows), 2),
-            target_areas_on_track=sum(1 for row in target_progress_rows if row["isOnTarget"]),
             recent_pos_orders=g.db.scalars(
                 select(PosOrder).order_by(desc(PosOrder.order_date), desc(PosOrder.updated_at)).limit(8)
             ).all(),

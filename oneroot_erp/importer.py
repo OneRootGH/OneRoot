@@ -525,16 +525,8 @@ def _ensure_ai_growth_assistant_profile(session: Session) -> None:
     """Create the visible system assistant profile once; it is never able to sign in."""
     assistant = session.scalar(select(User).where(User.username == "oneroot-ai"))
     if assistant:
-        assistant.full_name = "OneRoot AI Growth Assistant"
-        assistant.role = "viewer"
-        assistant.staff_role = "AI Business Growth Assistant"
-        assistant.active = True
-        assistant.login_enabled = False
-        assistant.notes = (
-            "System employee. Reviews OneRoot data and prepares owner-approved growth, stock, "
-            "customer follow-up, and control actions. It cannot sign in, move money, alter stock, "
-            "or contact customers automatically."
-        )
+        # Existing workspaces must not receive an unnecessary user-table write at
+        # every worker boot. The profile is created once and remains non-login.
         return
     session.add(
         User(
