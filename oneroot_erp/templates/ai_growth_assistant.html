@@ -27,6 +27,25 @@
     <article class="metric-card {% if assistant.briefing.lowStockCount or assistant.briefing.expiredCount %}warning{% endif %}"><span>Stock Signals</span><strong>{{ assistant.briefing.lowStockCount + assistant.briefing.expiredCount + assistant.briefing.expiringCount }}</strong><small>{{ assistant.briefing.lowStockCount }} low · {{ assistant.briefing.expiringCount }} expiring · {{ assistant.briefing.expiredCount }} expired</small></article>
   </section>
 
+  <section class="card">
+    <div class="card-header compact">
+      <div><p class="eyebrow">Live Kitchen Profit</p><h3>Jollof Rice Credit Cost Cycle</h3></div>
+      {% if assistant.jollofCycle.active %}<span class="metric-chip">Started {{ assistant.jollofCycle.sourceDate }}</span>{% endif %}
+    </div>
+    {% if assistant.jollofCycle.active %}
+      <section class="card-grid four">
+        <article class="metric-card"><span>Jollof Sales</span><strong>{{ assistant.jollofCycle.salesTotal|currency }}</strong><small>{{ '{:g}'.format(assistant.jollofCycle.quantitySold) }} serving(s) in {{ assistant.jollofCycle.orderCount }} paid order{{ '' if assistant.jollofCycle.orderCount == 1 else 's' }}</small></article>
+        <article class="metric-card"><span>Ingredient Cost</span><strong>{{ assistant.jollofCycle.ingredientCost|currency }}</strong><small>{{ assistant.jollofCycle.costSource }}</small></article>
+        <article class="metric-card {% if assistant.jollofCycle.grossProfit < 0 %}warning{% endif %}"><span>Gross Profit So Far</span><strong>{{ assistant.jollofCycle.grossProfit|currency }}</strong><small>{{ assistant.jollofCycle.marginPercent }}% gross margin</small></article>
+        <article class="metric-card"><span>Credit Purchase Value</span><strong>{{ assistant.jollofCycle.sourceCreditValue|currency }}</strong><small>{{ assistant.jollofCycle.itemCount }} ingredient item{{ '' if assistant.jollofCycle.itemCount == 1 else 's' }} purchased on credit</small></article>
+      </section>
+      <div class="table-wrap"><table><thead><tr><th>Ingredient From Credit Purchase</th><th>Quantity</th><th>Actual Stock Cost</th></tr></thead><tbody>{% for item in assistant.jollofCycle.items %}<tr><td>{{ item.name }}</td><td>{{ '{:g}'.format(item.quantity) }}</td><td>{{ item.cost|currency }}</td></tr>{% else %}<tr><td colspan="3">No item lines were saved with this older credit record.</td></tr>{% endfor %}</tbody></table></div>
+      <p class="muted compact-copy">{{ assistant.jollofCycle.cycleNote }} This is food gross profit: Jollof paid sales less the cost of the credited ingredients. It excludes kitchen staff wages and other overheads unless they are added to a Kitchen Production Session.</p>
+    {% else %}
+      <p class="muted">{{ assistant.jollofCycle.message }}</p>
+    {% endif %}
+  </section>
+
   <section class="split-grid">
     <article class="card">
       <div class="card-header compact"><div><p class="eyebrow">Assigned Work</p><h3>Today’s AI Priority Queue</h3></div></div>

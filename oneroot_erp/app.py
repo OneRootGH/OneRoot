@@ -11604,10 +11604,133 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
     }
 
 
+def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
+    """Track Jollof sales against the latest internal OneRoot ingredient credit lot.
+
+    Kitchen ingredients may be taken from the POS on credit before a meal is sold.
+    This keeps the active lot open from that credit purchase until another OneRoot
+    Essentials kitchen credit purchase is saved, when the next lot naturally starts.
+    """
+    kitchen_names = {"oneroot essentials", "oneroot kitchen"}
+    credit_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "customer_credit_accounts")
+        .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.created_at))
+    ).all()
+    source_record = next(
+        (
+            record
+            for record in credit_records
+            if normalize_text((record.payload or {}).get("transactionType")) == "Credit Sale"
+            and normalize_text((record.payload or {}).get("customerName")).casefold() in kitchen_names
+            and normalize_text(record.reference).startswith("pos-credit|")
+            and (record.record_date or parse_date((record.payload or {}).get("entryDate")) or date.min) <= as_of_date
+        ),
+        None,
+    )
+    if not source_record:
+        return {
+            "active": False,
+            "message": "No OneRoot Essentials kitchen credit purchase has been found yet. Save the ingredients through POS with Credit and customer name OneRoot Essentials to begin the Jollof cost cycle.",
+            "salesTotal": 0.0,
+            "ingredientCost": 0.0,
+            "grossProfit": 0.0,
+            "marginPercent": 0.0,
+            "items": [],
+        }
+
+    source_payload = dict(source_record.payload or {})
+    source_date = source_record.record_date or parse_date(source_payload.get("entryDate")) or as_of_date
+    source_order_id = normalize_text(source_record.reference).removeprefix("pos-credit|")
+    source_order = db_session.scalar(
+        select(PosOrder)
+        .options(selectinload(PosOrder.lines))
+        .where(PosOrder.id == source_order_id)
+    )
+    ingredient_rows: list[dict[str, Any]] = []
+    ingredient_cost = 0.0
+    if source_order:
+        for line in source_order.lines:
+            line_cost = round(
+                parse_amount(line.cost_amount)
+                or (parse_amount(line.unit_cost) * parse_amount(line.quantity)),
+                2,
+            )
+            ingredient_cost += line_cost
+            ingredient_rows.append(
+                {
+                    "name": line.name,
+                    "quantity": parse_amount(line.quantity),
+                    "cost": line_cost,
+                }
+            )
+    else:
+        # Older imported credit records may no longer have their POS order. Retain
+        # visibility using the saved credit detail rather than dropping the cycle.
+        for item in source_payload.get("creditItems", []):
+            if not isinstance(item, dict):
+                continue
+            item_cost = parse_amount(item.get("totalAmount"))
+            ingredient_cost += item_cost
+            ingredient_rows.append(
+                {
+                    "name": normalize_text(item.get("name")) or "Kitchen ingredient",
+                    "quantity": parse_amount(item.get("quantity")),
+                    "cost": item_cost,
+                }
+            )
+
+    jollof_sales = 0.0
+    jollof_quantity = 0.0
+    jollof_order_count = 0
+    orders = db_session.scalars(
+        select(PosOrder)
+        .options(selectinload(PosOrder.lines))
+        .where(PosOrder.order_date >= source_date, PosOrder.order_date <= as_of_date)
+        .order_by(PosOrder.order_date.asc(), PosOrder.created_at.asc())
+    ).all()
+    for order in orders:
+        if normalize_text(order.payment_method).casefold() == "credit" or is_kitchen_stock_issue(order):
+            continue
+        if order.order_date == source_date and order.created_at < source_record.created_at:
+            continue
+        order_has_jollof = False
+        for line in order.lines:
+            if "jollof" not in normalize_text(line.name).casefold():
+                continue
+            jollof_sales += parse_amount(line.total_amount)
+            jollof_quantity += parse_amount(line.quantity)
+            order_has_jollof = True
+        if order_has_jollof:
+            jollof_order_count += 1
+
+    ingredient_cost = round(ingredient_cost, 2)
+    jollof_sales = round(jollof_sales, 2)
+    gross_profit = round(jollof_sales - ingredient_cost, 2)
+    return {
+        "active": True,
+        "sourceDate": source_date.isoformat(),
+        "sourceReference": normalize_text(source_record.reference),
+        "sourceCreditValue": round(parse_amount(source_payload.get("amount")), 2),
+        "ingredientCost": ingredient_cost,
+        "costSource": "Actual POS stock cost" if source_order else "Saved credit value (historical fallback)",
+        "items": ingredient_rows,
+        "itemCount": len(ingredient_rows),
+        "salesTotal": jollof_sales,
+        "quantitySold": round(jollof_quantity, 2),
+        "orderCount": jollof_order_count,
+        "grossProfit": gross_profit,
+        "marginPercent": round((gross_profit / jollof_sales) * 100, 2) if jollof_sales else 0.0,
+        "status": "Profit building from Jollof sales" if jollof_sales else "Waiting for Jollof sales",
+        "cycleNote": "This active cost cycle automatically resets when the next OneRoot Essentials or OneRoot Kitchen POS credit purchase is saved.",
+    }
+
+
 def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, Any]:
     """Prepare review-only work for the system AI employee from live OneRoot records."""
     briefing = owner_daily_briefing_context(db_session, briefing_date)
     growth = build_growth_automation_context(db_session)
+    jollof_cycle = jollof_credit_cycle_context(db_session, briefing_date)
     tasks: list[dict[str, str]] = [
         {
             "title": item["label"],
@@ -11635,10 +11758,21 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
                 "workstream": "Daily Review",
             }
         )
+    if jollof_cycle["active"]:
+        tasks.insert(
+            0,
+            {
+                "title": "Review the active Jollof cost cycle",
+                "note": f'{jollof_cycle["quantitySold"]:g} Jollof serving(s) sold for {format_currency(jollof_cycle["salesTotal"])}. Current gross profit: {format_currency(jollof_cycle["grossProfit"])}.',
+                "href": "/app/ai-growth-assistant",
+                "workstream": "Kitchen Profit",
+            },
+        )
     return {
         "briefing": briefing,
         "growth": growth,
         "tasks": tasks[:10],
+        "jollofCycle": jollof_cycle,
         "workstreams": [
             {
                 "title": "Daily owner brief",
