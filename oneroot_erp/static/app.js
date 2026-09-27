@@ -38,6 +38,7 @@
   const closingCashInput = document.getElementById("pos-closing-cash");
   const cashSalesNode = document.getElementById("pos-cash-sales");
   const creditCashNode = document.getElementById("pos-credit-cash");
+  const creditCashRibbonNode = document.getElementById("pos-credit-cash-ribbon");
   const laundryCashNode = document.getElementById("pos-laundry-cash");
   const equipmentCashNode = document.getElementById("pos-equipment-cash");
   const laundryCollectionsRibbonNode = document.getElementById("pos-laundry-collections-ribbon");
@@ -48,6 +49,7 @@
   const equipmentCollectionLinesNode = document.getElementById("pos-equipment-collection-lines");
   const expectedCashNode = document.getElementById("pos-expected-cash");
   const expectedCashRibbonNode = document.getElementById("pos-expected-cash-ribbon");
+  const totalCashToCountNode = document.getElementById("pos-total-cash-to-count");
   const cashVarianceNode = document.getElementById("pos-cash-variance");
   const orderDateInput = document.getElementById("pos-order-date");
   const areaFilterInput = document.getElementById("pos-area-filter");
@@ -715,6 +717,9 @@
     if (creditCashNode) {
       creditCashNode.textContent = formatCurrency(summary.creditCashCollectionsTotal);
     }
+    if (creditCashRibbonNode) {
+      creditCashRibbonNode.textContent = formatCurrency(summary.creditCashCollectionsTotal);
+    }
     renderServiceCollections(summary);
     syncMoneyInput(openingCashInput, summary.openingCash);
     syncMoneyInput(closingCashInput, summary.closingCashCounted);
@@ -738,14 +743,19 @@
     }
     const openingCash = parseMoneyInput(openingCashInput);
     const countedClose = parseMoneyInput(closingCashInput);
-    const cashCollections = Number(summary.cashCollectionsTotal ?? summary.cashSalesTotal ?? 0);
-    const expectedClose = openingCash + cashCollections;
-    const variance = countedClose - expectedClose;
+    const salesAndServiceCash = Number(summary.salesAndServiceCashTotal ?? summary.cashSalesTotal ?? 0);
+    const creditCash = Number(summary.creditCashCollectionsTotal ?? 0);
+    const salesCashExpected = openingCash + salesAndServiceCash;
+    const totalCashToCount = salesCashExpected + creditCash;
+    const variance = countedClose - totalCashToCount;
     if (expectedCashNode) {
-      expectedCashNode.textContent = formatCurrency(expectedClose);
+      expectedCashNode.textContent = formatCurrency(salesCashExpected);
     }
     if (expectedCashRibbonNode) {
-      expectedCashRibbonNode.textContent = formatCurrency(expectedClose);
+      expectedCashRibbonNode.textContent = formatCurrency(salesCashExpected);
+    }
+    if (totalCashToCountNode) {
+      totalCashToCountNode.textContent = formatCurrency(totalCashToCount);
     }
     if (cashVarianceNode) {
       cashVarianceNode.textContent = formatCurrency(variance);

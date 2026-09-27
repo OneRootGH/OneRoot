@@ -15495,15 +15495,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         closeout_payload = serialize_module_record(closeout_record) if closeout_record else None
         cash_sales_total = pos_cash_sales_total(counter_payment_mix)
-        cash_collections_total = round(
+        # Customer credit repayments are real cash received, but they are not
+        # new POS sales. Keep their expected cash separate for a clear closeout.
+        sales_and_service_cash_total = round(
             cash_sales_total
-            + credit_collections["cashTotal"]
             + laundry_collections["cashTotal"]
             + equipment_collections["cashTotal"],
             2,
         )
+        cash_collections_total = round(
+            sales_and_service_cash_total + credit_collections["cashTotal"],
+            2,
+        )
         opening_cash = parse_amount(closeout_payload.get("openingCash")) if closeout_payload else 0.0
         closing_cash_counted = parse_amount(closeout_payload.get("closingCashCounted")) if closeout_payload else 0.0
+        sales_cash_expected = pos_expected_closing_cash(opening_cash, sales_and_service_cash_total)
         expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_collections_total)
         cash_variance = pos_cash_variance(opening_cash, closing_cash_counted, cash_collections_total)
         if closeout_payload is not None:
@@ -15518,7 +15524,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             closeout_payload["equipmentCashCollectionsTotal"] = equipment_collections["cashTotal"]
             closeout_payload["equipmentCollectionCount"] = equipment_collections["count"]
             closeout_payload["equipmentCollections"] = equipment_collections["rows"]
+            closeout_payload["salesAndServiceCashTotal"] = sales_and_service_cash_total
+            closeout_payload["salesCashExpected"] = sales_cash_expected
             closeout_payload["cashCollectionsTotal"] = cash_collections_total
+            closeout_payload["totalCashExpected"] = expected_closing_cash
             closeout_payload["openingCash"] = opening_cash
             closeout_payload["closingCashCounted"] = closing_cash_counted
             closeout_payload["expectedClosingCash"] = expected_closing_cash
@@ -15563,7 +15572,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "paymentMix": {key: round(value, 2) for key, value in sorted(payment_mix.items())},
             "counterPaymentMix": {key: round(value, 2) for key, value in sorted(counter_payment_mix.items())},
             "cashSalesTotal": cash_sales_total,
+            "salesAndServiceCashTotal": sales_and_service_cash_total,
+            "salesCashExpected": sales_cash_expected,
             "cashCollectionsTotal": cash_collections_total,
+            "totalCashExpected": expected_closing_cash,
             "openingCash": opening_cash,
             "closingCashCounted": closing_cash_counted,
             "expectedClosingCash": expected_closing_cash,
@@ -15651,13 +15663,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             opening_cash = parse_amount(existing_payload.get("openingCash"))
             closing_cash_counted = parse_amount(existing_payload.get("closingCashCounted"))
             cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
-            cash_collections_total = round(
+            sales_and_service_cash_total = round(
                 cash_sales_total
-                + summary["creditCashCollectionsTotal"]
                 + summary["laundryCashCollectionsTotal"]
                 + summary["equipmentCashCollectionsTotal"],
                 2,
             )
+            cash_collections_total = round(
+                sales_and_service_cash_total + summary["creditCashCollectionsTotal"],
+                2,
+            )
+            sales_cash_expected = pos_expected_closing_cash(opening_cash, sales_and_service_cash_total)
             expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_collections_total)
             closeout_payload = {
                 "id": record.id,
@@ -15690,7 +15706,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
                 "paymentMix": summary["counterPaymentMix"],
                 "cashSalesTotal": cash_sales_total,
+                "salesAndServiceCashTotal": sales_and_service_cash_total,
+                "salesCashExpected": sales_cash_expected,
                 "cashCollectionsTotal": cash_collections_total,
+                "totalCashExpected": expected_closing_cash,
                 "openingCash": opening_cash,
                 "closingCashCounted": closing_cash_counted,
                 "expectedClosingCash": expected_closing_cash,
@@ -22020,13 +22039,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
         is_existing = record is not None
         existing_payload = dict(record.payload or {}) if record else {}
         cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
-        cash_collections_total = round(
+        sales_and_service_cash_total = round(
             cash_sales_total
-            + summary["creditCashCollectionsTotal"]
             + summary["laundryCashCollectionsTotal"]
             + summary["equipmentCashCollectionsTotal"],
             2,
         )
+        cash_collections_total = round(
+            sales_and_service_cash_total + summary["creditCashCollectionsTotal"],
+            2,
+        )
+        sales_cash_expected = pos_expected_closing_cash(opening_cash_raw, sales_and_service_cash_total)
         expected_closing_cash = pos_expected_closing_cash(opening_cash_raw, cash_collections_total)
         closeout_payload = {
             "id": record.id if record else uuid4().hex,
@@ -22059,7 +22082,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "allDailySalesBreakdown": summary["allDailySalesBreakdown"],
             "paymentMix": summary["counterPaymentMix"],
             "cashSalesTotal": cash_sales_total,
+            "salesAndServiceCashTotal": sales_and_service_cash_total,
+            "salesCashExpected": sales_cash_expected,
             "cashCollectionsTotal": cash_collections_total,
+            "totalCashExpected": expected_closing_cash,
             "openingCash": opening_cash_raw,
             "closingCashCounted": closing_cash_counted_raw,
             "expectedClosingCash": expected_closing_cash,
