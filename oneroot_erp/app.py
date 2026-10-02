@@ -6222,6 +6222,7 @@ def cashbook_entry_preview(payload: dict[str, Any]) -> dict[str, Any]:
 SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
     "owner_briefing": ("Owner Daily Briefing", "owner_daily_briefing", None),
+    "analytics": ("Business Analytics", "analytics_page", None),
     "ai_growth_assistant": ("AI Growth Assistant", "ai_growth_assistant", None),
     "profits": ("Profit Center", "profits_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
@@ -12640,6 +12641,266 @@ def category_performance_rows(db_session, month_value: str, area_id: str = "") -
     return rows
 
 
+def business_analytics_context(db_session, month_value: str) -> dict[str, Any]:
+    """Build decision views without mixing sales, debt, production, and float."""
+    month_start = month_anchor_date(month_value) or date.today().replace(day=1)
+    last_day = calendar.monthrange(month_start.year, month_start.month)[1]
+    month_end = month_start.replace(day=last_day)
+    month_key = month_start.strftime("%Y-%m")
+
+    def in_selected_month(value: date | None) -> bool:
+        return bool(value and month_start <= value <= month_end)
+
+    day_map: dict[date, dict[str, Any]] = {
+        month_start + timedelta(days=offset): {
+            "day": month_start + timedelta(days=offset),
+            "posSales": 0.0,
+            "otherSales": 0.0,
+            "salesTotal": 0.0,
+        }
+        for offset in range(last_day)
+    }
+    hour_map: dict[int, float] = {hour: 0.0 for hour in range(24)}
+    pos_sales_total = pos_cost_total = 0.0
+    food_counter_sales = food_counter_cost = 0.0
+
+    pos_orders = db_session.scalars(
+        select(PosOrder)
+        .options(selectinload(PosOrder.lines))
+        .where(PosOrder.order_date >= month_start, PosOrder.order_date <= month_end)
+        .order_by(PosOrder.order_date.asc(), PosOrder.created_at.asc())
+    ).all()
+    for order in pos_orders:
+        # Credit is a receivable, while internal kitchen stock issue is a cost transfer.
+        if is_kitchen_stock_issue(order) or normalize_text(order.payment_method).lower() == "credit":
+            continue
+        order_total = round(max(parse_amount(order.total_amount), 0), 2)
+        order_cost = round(sum(max(parse_amount(line.cost_amount), 0) for line in order.lines), 2)
+        pos_sales_total = round(pos_sales_total + order_total, 2)
+        pos_cost_total = round(pos_cost_total + order_cost, 2)
+        if order.order_date in day_map:
+            day_map[order.order_date]["posSales"] = round(day_map[order.order_date]["posSales"] + order_total, 2)
+        if order.created_at:
+            hour_map[order.created_at.hour] = round(hour_map[order.created_at.hour] + order_total, 2)
+        for line in order.lines:
+            if normalize_text(line.business_area_id) == COLD_STORE_KITCHEN_AREA_ID:
+                food_counter_sales = round(food_counter_sales + max(parse_amount(line.total_amount), 0), 2)
+                food_counter_cost = round(food_counter_cost + max(parse_amount(line.cost_amount), 0), 2)
+
+    other_paid_sales = other_paid_cost = 0.0
+    sales_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(
+            ModuleRecord.module_key == "sales",
+            ModuleRecord.record_date >= month_start,
+            ModuleRecord.record_date <= month_end,
+        )
+        .order_by(ModuleRecord.record_date.asc(), ModuleRecord.created_at.asc())
+    ).all()
+    for record in sales_records:
+        payload = dict(record.payload or {})
+        if normalize_text(payload.get("sourceType")).lower() == "pos-summary" or is_mobile_money_daily_sales_record(record):
+            continue
+        amount = round(max(parse_amount(record.amount), 0), 2)
+        cost = round(max(module_record_cost_amount(record), 0), 2)
+        other_paid_sales = round(other_paid_sales + amount, 2)
+        other_paid_cost = round(other_paid_cost + cost, 2)
+        if record.record_date in day_map:
+            day_map[record.record_date]["otherSales"] = round(day_map[record.record_date]["otherSales"] + amount, 2)
+
+    for row in day_map.values():
+        row["salesTotal"] = round(row["posSales"] + row["otherSales"], 2)
+        row["dayLabel"] = row["day"].strftime("%a %d %b")
+        row["dayKey"] = row["day"].isoformat()
+    sales_day_rows = sorted((row for row in day_map.values() if row["salesTotal"] > 0), key=lambda item: item["day"])
+    hour_rows = [
+        {"hourLabel": f"{hour:02d}:00-{hour:02d}:59", "salesTotal": amount}
+        for hour, amount in hour_map.items()
+        if amount > 0
+    ]
+    peak_day = max(sales_day_rows, key=lambda item: item["salesTotal"], default=None)
+    peak_hour = max(hour_rows, key=lambda item: item["salesTotal"], default=None)
+
+    # Use all activity for current balances, but only the selected month for movement metrics.
+    credit_map: dict[str, dict[str, Any]] = {}
+    credit_issued_month = credit_collected_month = 0.0
+    credit_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "customer_credit_accounts")
+        .order_by(ModuleRecord.record_date.asc(), ModuleRecord.created_at.asc(), ModuleRecord.id.asc())
+    ).all()
+    for record in credit_records:
+        payload = dict(record.payload or {})
+        if payload.get("internalKitchenCredit"):
+            continue
+        customer_name = normalize_text(payload.get("customerName")) or "Customer"
+        customer_phone = normalize_phone(payload.get("customerPhone"))
+        customer_key = customer_phone or customer_name.casefold() or f"unidentified-{record.id}"
+        row = credit_map.setdefault(
+            customer_key,
+            {
+                "customerName": customer_name,
+                "customerPhone": customer_phone,
+                "balance": 0.0,
+                "creditSupplied": 0.0,
+                "paymentsReceived": 0.0,
+                "dueDates": [],
+                "lastPaymentDate": None,
+                "aliases": set(),
+            },
+        )
+        if customer_name != "Customer":
+            row["aliases"].add(customer_name)
+            if row["customerName"] == "Customer":
+                row["customerName"] = customer_name
+        if customer_phone:
+            row["customerPhone"] = customer_phone
+        entry_date = record.record_date or (record.updated_at.date() if record.updated_at else None)
+        transaction_type = normalize_text(payload.get("transactionType"))
+        amount = round(abs(parse_amount(payload.get("amount"))), 2)
+        row["balance"] = round(row["balance"] + customer_credit_balance_effect(payload), 2)
+        if transaction_type == "Credit Sale":
+            row["creditSupplied"] = round(row["creditSupplied"] + amount, 2)
+            due_date = parse_date(payload.get("dueDate"))
+            if due_date:
+                row["dueDates"].append(due_date)
+            if in_selected_month(entry_date):
+                credit_issued_month = round(credit_issued_month + amount, 2)
+        elif transaction_type == "Payment Received":
+            row["paymentsReceived"] = round(row["paymentsReceived"] + amount, 2)
+            if entry_date and (not row["lastPaymentDate"] or entry_date > row["lastPaymentDate"]):
+                row["lastPaymentDate"] = entry_date
+            if in_selected_month(entry_date):
+                credit_collected_month = round(credit_collected_month + amount, 2)
+
+    credit_open_rows: list[dict[str, Any]] = []
+    for row in credit_map.values():
+        balance = round(max(parse_amount(row["balance"]), 0), 2)
+        if balance <= 0:
+            continue
+        due_date = min(row["dueDates"]) if row["dueDates"] else None
+        credit_open_rows.append(
+            {
+                "customerName": row["customerName"],
+                "customerPhone": row["customerPhone"] or "Phone not saved",
+                "creditSupplied": row["creditSupplied"],
+                "paymentsReceived": row["paymentsReceived"],
+                "balance": balance,
+                "dueDate": due_date.isoformat() if due_date else "No due date",
+                "isOverdue": bool(due_date and due_date < date.today()),
+                "lastPaymentDate": row["lastPaymentDate"].isoformat() if row["lastPaymentDate"] else "No payment yet",
+                "aliases": ", ".join(sorted(row["aliases"], key=str.lower)[:3]),
+            }
+        )
+    credit_open_rows.sort(key=lambda item: (not item["isOverdue"], -item["balance"], item["customerName"].lower()))
+
+    kitchen_meals: dict[str, dict[str, Any]] = {}
+    production_declared_sales = production_declared_profit = production_cost = 0.0
+    production_servings = production_sold = production_waste = 0.0
+    production_batches = 0
+    kitchen_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "kitchen_orders")
+        .order_by(ModuleRecord.record_date.asc(), ModuleRecord.created_at.asc())
+    ).all()
+    for record in kitchen_records:
+        if not record_in_month_scope(record, month_key):
+            continue
+        payload = dict(record.payload or {})
+        if normalize_text(payload.get("productionStatus")) == "Cancelled":
+            continue
+        meals = kitchen_meal_items(payload)
+        if not meals:
+            continue
+        production_batches += 1
+        for meal in meals:
+            name = normalize_text(meal.get("recipeName")) or "Kitchen Meal"
+            total_cost = parse_amount(meal.get("totalRecipeCost"))
+            actual_produced = parse_amount(meal.get("actualProduced"))
+            actual_sold = parse_amount(meal.get("actualSold"))
+            waste = parse_amount(meal.get("wasteQuantity"))
+            declared_sales = round(actual_sold * parse_amount(meal.get("sellingPricePerServing")), 2)
+            declared_profit = round(declared_sales - total_cost, 2)
+            entry = kitchen_meals.setdefault(name, {"meal": name, "batches": 0, "produced": 0.0, "sold": 0.0, "waste": 0.0, "cost": 0.0, "declaredSales": 0.0, "declaredProfit": 0.0})
+            entry["batches"] += 1
+            for key, value in (("produced", actual_produced), ("sold", actual_sold), ("waste", waste), ("cost", total_cost), ("declaredSales", declared_sales), ("declaredProfit", declared_profit)):
+                entry[key] = round(entry[key] + value, 2)
+            production_declared_sales = round(production_declared_sales + declared_sales, 2)
+            production_declared_profit = round(production_declared_profit + declared_profit, 2)
+            production_cost = round(production_cost + total_cost, 2)
+            production_servings = round(production_servings + actual_produced, 2)
+            production_sold = round(production_sold + actual_sold, 2)
+            production_waste = round(production_waste + waste, 2)
+    kitchen_meal_rows = sorted(kitchen_meals.values(), key=lambda item: (item["declaredProfit"], item["declaredSales"]), reverse=True)
+    for row in kitchen_meal_rows:
+        row["marginPercent"] = round((row["declaredProfit"] / row["declaredSales"]) * 100, 2) if row["declaredSales"] else 0.0
+
+    apartment_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "apartments")
+        .order_by(ModuleRecord.record_date.asc(), ModuleRecord.updated_at.asc())
+    ).all()
+    rent_billed = rent_paid = bills_billed = bills_paid = 0.0
+    for record in apartment_records:
+        if not record_in_month_scope(record, month_key):
+            continue
+        profile = apartment_profile(record)
+        rent_billed = round(rent_billed + profile["rentDue"], 2)
+        rent_paid = round(rent_paid + profile["rentPaid"], 2)
+        bills_billed = round(bills_billed + profile["billsDue"], 2)
+        bills_paid = round(bills_paid + profile["billsPaid"], 2)
+    latest_suites = latest_apartment_suite_profiles(apartment_records)
+    occupied_suites = sum(1 for profile in latest_suites if profile["occupancyKey"] == "occupied")
+    reserved_suites = sum(1 for profile in latest_suites if profile["occupancyKey"] == "reserved")
+    apartment_open_rows = [
+        {
+            "suite": profile["suite"], "tenant": profile["tenant"], "status": profile["occupancyStatus"],
+            "rentBalance": profile["rentBalance"], "billsBalance": profile["billsBalance"],
+            "outstanding": profile["outstanding"], "nextDue": profile["primaryDueDate"] or "No due date",
+            "isOverdue": "Overdue" in profile["alertLabel"],
+        }
+        for profile in latest_suites
+        if parse_amount(profile["outstanding"]) > 0 or profile["occupancyKey"] in {"occupied", "reserved"}
+    ]
+    apartment_open_rows.sort(key=lambda item: (not item["isOverdue"], -item["outstanding"], item["suite"]))
+    total_suites = len(SUITE_NAMES)
+
+    return {
+        "month": month_key,
+        "sales": {
+            "paidTotal": round(pos_sales_total + other_paid_sales, 2),
+            "paidProfit": round((pos_sales_total + other_paid_sales) - (pos_cost_total + other_paid_cost), 2),
+            "posSales": pos_sales_total, "otherSales": other_paid_sales, "peakDay": peak_day, "peakHour": peak_hour,
+            "dayRows": list(reversed(sales_day_rows[-12:])),
+            "dayChart": build_chart_rows([{"label": row["dayLabel"], "short": row["dayKey"][8:], "amount": row["salesTotal"]} for row in sales_day_rows], label_key="label", value_key="amount", short_key="short", positive_color="var(--green)"),
+            "hourChart": build_chart_rows([{"label": row["hourLabel"], "short": row["hourLabel"], "amount": row["salesTotal"]} for row in hour_rows], label_key="label", value_key="amount", short_key="short", positive_color="var(--accent)"),
+        },
+        "credit": {
+            "issuedMonth": credit_issued_month, "collectedMonth": credit_collected_month,
+            "outstanding": round(sum(row["balance"] for row in credit_open_rows), 2), "openCustomers": len(credit_open_rows),
+            "overdueCustomers": sum(1 for row in credit_open_rows if row["isOverdue"]),
+            "collectionRate": round((credit_collected_month / credit_issued_month) * 100, 2) if credit_issued_month else 0.0,
+            "rows": credit_open_rows[:12],
+            "balanceChart": build_chart_rows([{"label": row["customerName"], "short": row["customerName"], "amount": row["balance"]} for row in credit_open_rows[:10]], label_key="label", value_key="amount", short_key="short", positive_color="var(--danger)"),
+        },
+        "kitchen": {
+            "foodCounterSales": food_counter_sales, "foodCounterProfit": round(food_counter_sales - food_counter_cost, 2),
+            "productionSales": production_declared_sales, "productionProfit": production_declared_profit, "productionCost": production_cost,
+            "batches": production_batches, "produced": production_servings, "sold": production_sold, "waste": production_waste,
+            "wasteRate": round((production_waste / production_servings) * 100, 2) if production_servings else 0.0,
+            "rows": kitchen_meal_rows[:12],
+            "profitChart": build_chart_rows([{"label": row["meal"], "short": row["meal"], "amount": row["declaredProfit"]} for row in kitchen_meal_rows[:10]], label_key="label", value_key="amount", short_key="short", positive_color="var(--accent)"),
+        },
+        "apartments": {
+            "totalSuites": total_suites, "occupied": occupied_suites, "reserved": reserved_suites,
+            "occupancyRate": round(((occupied_suites + reserved_suites) / total_suites) * 100, 2) if total_suites else 0.0,
+            "rentBilled": rent_billed, "rentPaid": rent_paid, "billsBilled": bills_billed, "billsPaid": bills_paid,
+            "outstanding": round(sum(parse_amount(profile["outstanding"]) for profile in latest_suites), 2), "rows": apartment_open_rows[:12],
+            "balanceChart": build_chart_rows([{"label": row["suite"], "short": row["suite"], "amount": row["outstanding"]} for row in apartment_open_rows[:10] if row["outstanding"] > 0], label_key="label", value_key="amount", short_key="short", positive_color="var(--danger)"),
+        },
+    }
+
+
 def month_anchor_date(month_value: Any) -> date | None:
     month_text = parse_month(month_value)
     if not month_text:
@@ -12907,7 +13168,12 @@ def build_sidebar(user: User | None = None):
             for key in keys:
                 if key == "dashboard" and not user_can_view_dashboard(user):
                     continue
-                access_key = "inventory" if key == "warehouse" else "pos" if key == "food_pos" else key
+                access_key = (
+                    "inventory" if key == "warehouse"
+                    else "pos" if key == "food_pos"
+                    else "reports" if key == "analytics"
+                    else key
+                )
                 if allowed_keys and access_key not in allowed_keys:
                     continue
                 if key in SIDEBAR_LINK_LABELS:
@@ -17668,6 +17934,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
             f"oneroot-category-performance-{month_filter}{'-' + area_filter if area_filter else ''}.csv",
             headers,
             rows,
+        )
+
+    @app.route("/app/analytics")
+    @access_required("reports")
+    def analytics_page():
+        month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
+        return render_template(
+            "analytics.html",
+            page_title="Business Analytics",
+            month_filter=month_filter,
+            analytics=business_analytics_context(g.db, month_filter),
         )
 
     @app.route("/app/reports")

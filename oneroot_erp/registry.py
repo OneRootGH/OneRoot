@@ -2390,7 +2390,7 @@ MENU_GROUPS = [
     (
         "Workspace",
         [
-            ("Overview", ["dashboard", "owner_briefing", "reports"]),
+            ("Overview", ["dashboard", "owner_briefing", "analytics", "reports"]),
             ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Stock", ["inventory", "warehouse", "inventory_barcode"]),
         ],

@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% block content %}
+  <section class="card">
+    <div class="card-header">
+      <div><p class="eyebrow">Decision View</p><h3>Business Analytics</h3><p class="muted">A clear monthly view of paid sales, customer credit recovery, kitchen production, and apartment exposure.</p></div>
+      <div class="toolbar"><a class="button subtle" href="{{ url_for('sales_summary_page') }}">Daily Sales Review</a><a class="button subtle" href="{{ url_for('reports_page', month=month_filter) }}">Management Reporting</a></div>
+    </div>
+    <form class="form-grid"><label><span>Month</span><input type="month" name="month" value="{{ month_filter }}"></label><div class="form-actions"><button class="button primary" type="submit">Apply Month</button><a class="button subtle" href="{{ url_for('analytics_page') }}">Current Month</a></div></form>
+  </section>
+
+  <section class="card-grid four">
+    <article class="metric-card"><span>Paid Sales</span><strong>{{ analytics.sales.paidTotal|currency }}</strong><small>{{ analytics.sales.paidProfit|currency }} direct gross profit before operating expenses</small></article>
+    <article class="metric-card warning"><span>Customer Credit Owed</span><strong>{{ analytics.credit.outstanding|currency }}</strong><small>{{ analytics.credit.openCustomers }} customer account{{ '' if analytics.credit.openCustomers == 1 else 's' }} still open</small></article>
+    <article class="metric-card"><span>Kitchen Declared Profit</span><strong>{{ analytics.kitchen.productionProfit|currency }}</strong><small>{{ analytics.kitchen.batches }} production batch{{ '' if analytics.kitchen.batches == 1 else 'es' }} recorded</small></article>
+    <article class="metric-card warning"><span>Apartment Outstanding</span><strong>{{ analytics.apartments.outstanding|currency }}</strong><small>{{ analytics.apartments.occupied + analytics.apartments.reserved }}/{{ analytics.apartments.totalSuites }} suites occupied or reserved</small></article>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><p class="eyebrow">Counter Pattern</p><h3>Sales By Hour And Day</h3><p class="muted">Hourly figures use paid POS checkouts at the time saved. Daily figures combine paid POS and other paid sales records. Credit sales and MoMo handled value are excluded.</p></div></div>
+    <section class="card-grid four">
+      <article class="metric-card"><span>Paid POS Sales</span><strong>{{ analytics.sales.posSales|currency }}</strong><small>Customer counter sales only</small></article>
+      <article class="metric-card"><span>Other Paid Sales</span><strong>{{ analytics.sales.otherSales|currency }}</strong><small>Paid services and non-POS sales</small></article>
+      <article class="metric-card"><span>Best Sales Day</span><strong>{{ analytics.sales.peakDay.dayLabel if analytics.sales.peakDay else '—' }}</strong><small>{% if analytics.sales.peakDay %}{{ analytics.sales.peakDay.salesTotal|currency }} collected{% else %}No paid sales in this month yet{% endif %}</small></article>
+      <article class="metric-card"><span>Busiest Counter Hour</span><strong>{{ analytics.sales.peakHour.hourLabel if analytics.sales.peakHour else '—' }}</strong><small>{% if analytics.sales.peakHour %}{{ analytics.sales.peakHour.salesTotal|currency }} paid POS sales{% else %}No POS sales in this month yet{% endif %}</small></article>
+    </section>
+    <section class="split-grid">
+      <article class="card inset-card"><div class="card-header"><div><p class="eyebrow">By Hour</p><h3>Paid POS Sales</h3></div></div>{% if analytics.sales.hourChart %}<div class="chart-stack">{% for row in analytics.sales.hourChart %}<div class="chart-row"><div class="chart-row-header"><strong>{{ row.chartLabel }}</strong><span>{{ row.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span></div></div>{% endfor %}</div>{% else %}<p class="muted">Paid counter activity will create the hourly pattern automatically.</p>{% endif %}</article>
+      <article class="card inset-card"><div class="card-header"><div><p class="eyebrow">By Day</p><h3>Paid Sales Trend</h3></div></div>{% if analytics.sales.dayChart %}<div class="chart-stack">{% for row in analytics.sales.dayChart %}<div class="chart-row"><div class="chart-row-header"><strong>{{ row.chartLabel }}</strong><span>{{ row.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span></div></div>{% endfor %}</div>{% else %}<p class="muted">Paid sales will create the daily trend automatically.</p>{% endif %}</article>
+    </section>
+    <div class="table-wrap"><table><thead><tr><th>Recent Sales Day</th><th>Paid POS</th><th>Other Paid Sales</th><th>Total Paid Sales</th></tr></thead><tbody>{% for row in analytics.sales.dayRows %}<tr><td>{{ row.dayLabel }}</td><td>{{ row.posSales|currency }}</td><td>{{ row.otherSales|currency }}</td><td>{{ row.salesTotal|currency }}</td></tr>{% else %}<tr><td colspan="4">No paid sales were saved for this month yet.</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><p class="eyebrow">Collections</p><h3>Credit Collection Dashboard</h3><p class="muted">Customer credit only. Internal OneRoot Kitchen stock issues are excluded from this collection queue.</p></div><a class="button subtle" href="{{ url_for('module_list', module_key='customer_credit_accounts') }}">Open Credit Accounts</a></div>
+    <section class="card-grid four">
+      <article class="metric-card"><span>Credit Issued</span><strong>{{ analytics.credit.issuedMonth|currency }}</strong><small>New customer credit in {{ month_filter }}</small></article>
+      <article class="metric-card"><span>Collected</span><strong>{{ analytics.credit.collectedMonth|currency }}</strong><small>{{ analytics.credit.collectionRate }}% of new credit issued this month</small></article>
+      <article class="metric-card warning"><span>Still Owed</span><strong>{{ analytics.credit.outstanding|currency }}</strong><small>All currently open customer balances</small></article>
+      <article class="metric-card warning"><span>Overdue Customers</span><strong>{{ analytics.credit.overdueCustomers }}</strong><small>Based on a saved credit due date</small></article>
+    </section>
+    <section class="split-grid">
+      <article class="card inset-card"><div class="card-header"><div><p class="eyebrow">Open Balances</p><h3>Largest Customer Balances</h3></div></div>{% if analytics.credit.balanceChart %}<div class="chart-stack">{% for row in analytics.credit.balanceChart %}<div class="chart-row"><div class="chart-row-header"><strong>{{ row.chartLabel }}</strong><span>{{ row.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span></div></div>{% endfor %}</div>{% else %}<p class="muted">No customer credit balances are open.</p>{% endif %}</article>
+      <article class="card inset-card"><p class="eyebrow">Collection Rule</p><h3>What Changes The Balance</h3><p class="muted">A credit sale raises the named customer's balance. A payment received lowers the same customer's balance. Saving the customer phone number keeps the account together even when names are entered differently.</p></article>
+    </section>
+    <div class="table-wrap tall"><table><thead><tr><th>Customer</th><th>Phone</th><th>Credit Supplied</th><th>Received</th><th>Still Owes</th><th>Due / Status</th><th>Last Payment</th></tr></thead><tbody>{% for row in analytics.credit.rows %}<tr><td><strong>{{ row.customerName }}</strong>{% if row.aliases %}<br><small class="muted">{{ row.aliases }}</small>{% endif %}</td><td>{{ row.customerPhone }}</td><td>{{ row.creditSupplied|currency }}</td><td>{{ row.paymentsReceived|currency }}</td><td class="{% if row.isOverdue %}negative-text{% endif %}">{{ row.balance|currency }}</td><td>{% if row.isOverdue %}Overdue · {% endif %}{{ row.dueDate }}</td><td>{{ row.lastPaymentDate }}</td></tr>{% else %}<tr><td colspan="7">No customer credit balance is currently open.</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><p class="eyebrow">Kitchen Control</p><h3>Food And Kitchen Profitability</h3><p class="muted">Food counter profit and kitchen production declarations stay separate. They can refer to the same prepared meal, so they are shown side by side and are not added together.</p></div><a class="button subtle" href="{{ url_for('module_list', module_key='kitchen_orders') }}">Open Kitchen Production</a></div>
+    <section class="card-grid four">
+      <article class="metric-card"><span>Cold Store & Kitchen Counter</span><strong>{{ analytics.kitchen.foodCounterSales|currency }}</strong><small>{{ analytics.kitchen.foodCounterProfit|currency }} direct gross profit from paid counter lines</small></article>
+      <article class="metric-card"><span>Production Declared Sales</span><strong>{{ analytics.kitchen.productionSales|currency }}</strong><small>Actual servings declared sold by kitchen staff</small></article>
+      <article class="metric-card"><span>Production Declared Profit</span><strong>{{ analytics.kitchen.productionProfit|currency }}</strong><small>After ingredient, packaging, and recorded production cost</small></article>
+      <article class="metric-card warning"><span>Waste / Spoilage</span><strong>{{ analytics.kitchen.waste }} servings</strong><small>{{ analytics.kitchen.wasteRate }}% of {{ analytics.kitchen.produced }} produced servings</small></article>
+    </section>
+    <section class="split-grid">
+      <article class="card inset-card"><div class="card-header"><div><p class="eyebrow">Meal Margin</p><h3>Declared Profit By Meal</h3></div></div>{% if analytics.kitchen.profitChart %}<div class="chart-stack">{% for row in analytics.kitchen.profitChart %}<div class="chart-row"><div class="chart-row-header"><strong>{{ row.chartLabel }}</strong><span class="{% if row.chartNegative %}negative-text{% endif %}">{{ row.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill {% if row.chartNegative %}negative{% endif %}" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span></div></div>{% endfor %}</div>{% else %}<p class="muted">Complete kitchen production sessions to see meal-level profitability.</p>{% endif %}</article>
+      <article class="card inset-card"><p class="eyebrow">Production Snapshot</p><h3>Kitchen Output</h3><p><strong>{{ analytics.kitchen.batches }}</strong> batch{{ '' if analytics.kitchen.batches == 1 else 'es' }} · <strong>{{ analytics.kitchen.sold }}</strong> servings declared sold · <strong>{{ analytics.kitchen.waste }}</strong> waste servings.</p><p class="muted">The production declaration helps control ingredient usage, while the food counter confirms paid customer checkout.</p></article>
+    </section>
+    <div class="table-wrap tall"><table><thead><tr><th>Meal</th><th>Batches</th><th>Produced</th><th>Sold</th><th>Waste</th><th>Cost</th><th>Declared Sales</th><th>Declared Profit</th><th>Margin</th></tr></thead><tbody>{% for row in analytics.kitchen.rows %}<tr><td>{{ row.meal }}</td><td>{{ row.batches }}</td><td>{{ row.produced }}</td><td>{{ row.sold }}</td><td>{{ row.waste }}</td><td>{{ row.cost|currency }}</td><td>{{ row.declaredSales|currency }}</td><td class="{% if row.declaredProfit < 0 %}negative-text{% endif %}">{{ row.declaredProfit|currency }}</td><td>{{ row.marginPercent }}%</td></tr>{% else %}<tr><td colspan="9">No kitchen production session is available for this month.</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+
+  <section class="card">
+    <div class="card-header"><div><p class="eyebrow">Property Position</p><h3>Tenant And Apartment Analytics</h3><p class="muted">Monthly billed and paid figures use apartment records issued for {{ month_filter }}. Current balances use each suite's latest saved record.</p></div><a class="button subtle" href="{{ url_for('module_list', module_key='apartments') }}">Open Apartments</a></div>
+    <section class="card-grid four">
+      <article class="metric-card"><span>Occupancy</span><strong>{{ analytics.apartments.occupancyRate }}%</strong><small>{{ analytics.apartments.occupied }} occupied · {{ analytics.apartments.reserved }} reserved · {{ analytics.apartments.totalSuites }} suites</small></article>
+      <article class="metric-card"><span>Rent Billed / Paid</span><strong>{{ analytics.apartments.rentBilled|currency }}</strong><small>{{ analytics.apartments.rentPaid|currency }} received in records issued this month</small></article>
+      <article class="metric-card"><span>Bills Billed / Paid</span><strong>{{ analytics.apartments.billsBilled|currency }}</strong><small>{{ analytics.apartments.billsPaid|currency }} received in records issued this month</small></article>
+      <article class="metric-card warning"><span>Current Open Balance</span><strong>{{ analytics.apartments.outstanding|currency }}</strong><small>Rent and bills still open across the latest suite records</small></article>
+    </section>
+    <section class="split-grid">
+      <article class="card inset-card"><div class="card-header"><div><p class="eyebrow">Outstanding By Suite</p><h3>Tenant Follow-Up Priority</h3></div></div>{% if analytics.apartments.balanceChart %}<div class="chart-stack">{% for row in analytics.apartments.balanceChart %}<div class="chart-row"><div class="chart-row-header"><strong>{{ row.chartLabel }}</strong><span>{{ row.chartValue|currency }}</span></div><div class="chart-track"><span class="chart-fill" style="width: {{ row.chartWidth }}%; background: {{ row.chartColor }};"></span></div></div>{% endfor %}</div>{% else %}<p class="muted">No current suite balance is open.</p>{% endif %}</article>
+      <article class="card inset-card"><p class="eyebrow">Portfolio Reminder</p><h3>How To Read This</h3><p class="muted">A suite can have rent owing, bills owing, or both. Use the tenant portal and reminder queue for the itemised payment position before sending a payment follow-up.</p></article>
+    </section>
+    <div class="table-wrap tall"><table><thead><tr><th>Suite</th><th>Tenant</th><th>Status</th><th>Rent Owed</th><th>Bills Owed</th><th>Total Owed</th><th>Next Due</th></tr></thead><tbody>{% for row in analytics.apartments.rows %}<tr><td>{{ row.suite }}</td><td>{{ row.tenant }}</td><td>{{ row.status }}</td><td>{{ row.rentBalance|currency }}</td><td>{{ row.billsBalance|currency }}</td><td class="{% if row.isOverdue %}negative-text{% endif %}">{{ row.outstanding|currency }}</td><td>{% if row.isOverdue %}Overdue · {% endif %}{{ row.nextDue }}</td></tr>{% else %}<tr><td colspan="7">No apartment records are available yet.</td></tr>{% endfor %}</tbody></table></div>
+  </section>
+{% endblock %}
