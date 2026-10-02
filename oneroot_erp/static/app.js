@@ -293,11 +293,11 @@
   }
 
   function shouldAutoPrintReceipt() {
-    // Groceries & More is the only counter with automatic receipt printing.
-    // Staff retain control of printing from the Cold Store & Kitchen counter.
+    // Both retail counters automatically print credit receipts and sales of GH₵30 or more.
+    // Kitchen stock issues are internal movements, not customer sales receipts.
     return !kitchenIssueMode
-      && posDesk === "groceries"
-      && (isCreditSale() || getCartTotal() > 30);
+      && ["groceries", "food"].includes(posDesk)
+      && (isCreditSale() || getCartTotal() >= 30);
   }
 
   function openAutomaticReceiptWindow() {
