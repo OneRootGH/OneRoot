@@ -1628,6 +1628,10 @@ def is_kitchen_menu_product(product: Product) -> bool:
     return (
         normalize_text(product.source_catalog_id) == KITCHEN_MENU_SOURCE_ID
         or normalize_text(product.source_category) == KITCHEN_MENU_SOURCE_CATEGORY
+        or (
+            normalize_text(product.business_area_id) == COLD_STORE_KITCHEN_AREA_ID
+            and normalize_text(product.category).lower() in {"breakfast", "breakfast combos", "meal plans"}
+        )
     )
 
 
@@ -1644,6 +1648,10 @@ def is_kitchen_menu_catalog_item(item: dict[str, Any]) -> bool:
         normalize_text(item.get("businessAreaId")) == LEGACY_KITCHEN_AREA_ID
         or normalize_text(item.get("sourceCatalogId")) == KITCHEN_MENU_SOURCE_ID
         or normalize_text(item.get("sourceCategory")) == KITCHEN_MENU_SOURCE_CATEGORY
+        or (
+            normalize_text(item.get("businessAreaId")) == COLD_STORE_KITCHEN_AREA_ID
+            and category_key in {"breakfast", "breakfast combos", "meal plans"}
+        )
     )
 
 
@@ -6411,6 +6419,11 @@ SERVICE_MODULE_SECTIONS = {
             "Track what is being prepared, what is ready, and what has been fully served or delivered.",
             ["readyDate", "status", "notes"],
         ),
+        (
+            "OneRoot Breakfast & Meal Plans",
+            "For recurring meals, record the agreed dates, schedule and serving time. Select the total portions being booked in Items & Pricing; record money only when received.",
+            ["planStartDate", "planEndDate", "planFrequency", "planServingTime", "planDeliveryAddress", "dietaryRequirements"],
+        ),
     ],
     "equipment_rental_bookings": [
         (
@@ -7066,14 +7079,14 @@ def filter_module_records(
     return filtered_records
 
 
-def build_target_progress_rows(records: list[ModuleRecord], month_value: str, *, area_filter: str = "") -> list[dict[str, Any]]:
+def build_target_progress_rows(records: list[ModuleRecord], month_value: str, *, area_filter: str = "", area_rows: list[dict[str, Any]] | None = None) -> list[dict[str, Any]]:
     month_key = parse_month(month_value)
     if not month_key:
         return []
 
     sales_lookup = {
         row["areaId"]: round(parse_amount(row["salesTotal"]), 2)
-        for row in report_area_rows(records, month_key)
+        for row in (area_rows if area_rows is not None else report_area_rows(records, month_key))
     }
     target_lookup: dict[str, float] = defaultdict(float)
     expense_budget_lookup: dict[str, float] = defaultdict(float)
@@ -10716,6 +10729,26 @@ def record_in_area_scope(record: ModuleRecord, area_id: str) -> bool:
     if not selected_area:
         return True
     return normalize_text(record.business_area_id) == selected_area
+
+
+def management_report_records(db_session, month_value: str, *, include_exposure: bool = False) -> list[ModuleRecord]:
+    """Load complete report inputs without unrelated operational JSON histories."""
+    month_key = parse_month(month_value)
+    start = date.fromisoformat(f"{month_key}-01")
+    end = date(start.year + (start.month == 12), start.month % 12 + 1, 1)
+    monthly_keys = ["sales", "expenses", "salary_records", "petty_cash", "maintenance_records", "forecast_plans"]
+    if include_exposure:
+        monthly_keys += ["apartments", "online_orders"]
+    # Assets depreciate across months; supplier balances include earlier bills.
+    monthly_scope = or_(
+        ModuleRecord.month == month_key,
+        (or_(ModuleRecord.month.is_(None), ModuleRecord.month == ""))
+        & (ModuleRecord.record_date >= start) & (ModuleRecord.record_date < end),
+    )
+    return list(db_session.scalars(select(ModuleRecord).where(or_(
+        ModuleRecord.module_key.in_(["asset_records", "suppliers"]),
+        ModuleRecord.module_key.in_(monthly_keys) & monthly_scope,
+    ))).all())
 
 
 def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict[str, Any]]:
@@ -18277,7 +18310,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def reports_page():
         month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
         area_filter = normalize_text(request.args.get("area"))
-        all_records = g.db.scalars(select(ModuleRecord).order_by(desc(ModuleRecord.updated_at))).all()
+        all_records = management_report_records(g.db, month_filter, include_exposure=True)
         filtered_records = [
             record
             for record in all_records
@@ -18343,7 +18376,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if recurring_control_status(record.payload or {}) in {"Due Soon", "Overdue"}
             and record_in_area_scope(record, area_filter)
         ][:12]
-        target_progress_rows = build_target_progress_rows(all_records, month_filter, area_filter=area_filter)
+        target_progress_rows = build_target_progress_rows(all_records, month_filter, area_filter=area_filter, area_rows=area_rows)
 
         return render_template(
             "reports.html",
@@ -18430,7 +18463,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def reports_export():
         month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
         area_filter = normalize_text(request.args.get("area"))
-        all_records = g.db.scalars(select(ModuleRecord)).all()
+        all_records = management_report_records(g.db, month_filter)
         area_rows = report_area_rows(all_records, month_filter)
         if area_filter:
             area_rows = [row for row in area_rows if row["areaId"] == area_filter]

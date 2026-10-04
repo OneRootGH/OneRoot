@@ -32,6 +32,9 @@ INVENTORY_CATEGORY_LIBRARY = {
         "Frozen Treats",
         "Cold Store Supplies",
         "Meal Combos",
+        "Breakfast",
+        "Breakfast Combos",
+        "Meal Plans",
         "Main Meals",
         "Proteins & Extras",
         "Sides",
@@ -676,6 +679,8 @@ EQUIPMENT_RENTAL_CATEGORY_OPTIONS = [
 EQUIPMENT_RENTAL_STATUSES = ["Booked", "Out", "Returned", "Cancelled"]
 EQUIPMENT_CONDITIONS = ["Good", "Fair", "Damaged"]
 KITCHEN_ORDER_TYPES = [
+    ("Breakfast", "Breakfast"),
+    ("Meal Plan", "Meal Plan"),
     ("Walk-in", "Walk-in"),
     ("Takeaway", "Takeaway"),
     ("Delivery", "Delivery"),
@@ -683,6 +688,9 @@ KITCHEN_ORDER_TYPES = [
     ("Online", "Online"),
 ]
 KITCHEN_ORDER_CATEGORY_OPTIONS = [
+    ("Breakfast", "Breakfast"),
+    ("Breakfast Combos", "Breakfast Combos"),
+    ("Meal Plans", "Meal Plans"),
     ("Meal Combos", "Meal Combos"),
     ("Main Meals", "Main Meals"),
     ("Proteins & Extras", "Proteins & Extras"),
@@ -1409,7 +1417,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "kitchen_orders": ModuleDefinition(
         key="kitchen_orders",
-        label="Kitchen Orders",
+        label="Kitchen, Breakfast & Meal Plans",
         legacy_collection="kitchenOrders",
         menu_group="Services",
         amount_field="amountDue",
@@ -1426,6 +1434,12 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("kitchenCategory", "Kitchen Category", "select", False, KITCHEN_ORDER_CATEGORY_OPTIONS),
             FieldDefinition("kitchenItem", "Kitchen Item", "text", True),
             FieldDefinition("itemSummary", "Additional Details", "textarea"),
+            FieldDefinition("planStartDate", "Meal Plan Start Date", "date"),
+            FieldDefinition("planEndDate", "Meal Plan End Date", "date"),
+            FieldDefinition("planFrequency", "Meal Schedule", "select", False, [(item, item) for item in ["One-off", "Every Day", "Weekdays", "Selected Days"]]),
+            FieldDefinition("planServingTime", "Preferred Serving Time", "text"),
+            FieldDefinition("planDeliveryAddress", "Delivery Address / Pickup Details", "textarea"),
+            FieldDefinition("dietaryRequirements", "Allergies / Dietary Requirements", "textarea"),
             FieldDefinition("itemQuantity", "Quantity", "number", False, step="1"),
             FieldDefinition("amountDue", "Amount Due", "number", True),
             FieldDefinition("costAmount", "Kitchen Cost", "number"),
