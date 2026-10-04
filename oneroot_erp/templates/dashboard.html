@@ -13,7 +13,7 @@
   </section>
 
   <section class="card-grid four dashboard-key-metrics">
-    <article class="metric-card"><span>Sales Today</span><strong>{{ today_sales_total|currency }}</strong><small>{{ counts.get('sales', 0) }} paid sales captured</small></article>
+    <article class="metric-card"><span>Sales Today</span><strong>{{ today_sales_total|currency }}</strong><small>Paid sales from both POS counters and services; credit and MoMo are excluded.</small></article>
     <article class="metric-card"><span>This Month Sales</span><strong>{{ month_sales_total|currency }}</strong><small>Sales across active business areas</small></article>
     <article class="metric-card"><span>This Month Gross Profit</span><strong>{{ month_profit_total|currency }}</strong><small>Before overheads and operating costs</small></article>
     <article class="metric-card {% if apartment_due > 0 %}warning{% endif %}"><span>Open Customer & Tenant Balances</span><strong>{{ apartment_due|currency }}</strong><small>Apartment balances needing follow-up</small></article>

@@ -16384,18 +16384,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
             area_id: {"totalAmount": 0.0, "totalCost": 0.0, "orderCount": 0.0}
             for area_id in unique_area_ids
         }
+        bread_totals: dict[str, dict[str, float]] = {
+            area_id: {"totalAmount": 0.0, "totalCost": 0.0, "orderCount": 0.0}
+            for area_id in unique_area_ids
+        }
 
         for order in orders:
             # Do not recognize customer debt or internal stock use as POS/Daily Sales revenue.
             if normalize_text(order.payment_method).lower() == "credit" or is_kitchen_stock_issue(order):
                 continue
             order_area_totals: dict[str, dict[str, float]] = defaultdict(lambda: {"amount": 0.0, "cost": 0.0})
+            bread_order_area_totals: dict[str, dict[str, float]] = defaultdict(lambda: {"amount": 0.0, "cost": 0.0})
             for line in order.lines:
                 area_id = normalize_text(line.business_area_id)
-                if area_id not in area_totals or pos_line_is_bread(line):
+                if area_id not in area_totals:
                     continue
-                order_area_totals[area_id]["amount"] += parse_amount(line.total_amount)
-                order_area_totals[area_id]["cost"] += parse_amount(line.cost_amount)
+                line_totals = bread_order_area_totals if pos_line_is_bread(line) else order_area_totals
+                line_totals[area_id]["amount"] += parse_amount(line.total_amount)
+                line_totals[area_id]["cost"] += parse_amount(line.cost_amount)
 
             for area_id, totals in order_area_totals.items():
                 if totals["amount"] <= 0:
@@ -16403,14 +16409,26 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 area_totals[area_id]["totalAmount"] += totals["amount"]
                 area_totals[area_id]["totalCost"] += totals["cost"]
                 area_totals[area_id]["orderCount"] += 1
+            for area_id, totals in bread_order_area_totals.items():
+                if totals["amount"] <= 0:
+                    continue
+                bread_totals[area_id]["totalAmount"] += totals["amount"]
+                bread_totals[area_id]["totalCost"] += totals["cost"]
+                bread_totals[area_id]["orderCount"] += 1
 
-        for area_id in unique_area_ids:
-            totals = area_totals.get(area_id) or {}
+        def sync_summary_record(
+            area_id: str,
+            totals: dict[str, float],
+            *,
+            reference: str,
+            source_type: str,
+            source_label: str,
+            category: str = "",
+        ) -> None:
             total_amount = round(parse_amount(totals.get("totalAmount")), 2)
             total_cost = round(parse_amount(totals.get("totalCost")), 2)
             order_count = int(parse_amount(totals.get("orderCount")))
 
-            reference = f"pos-summary|{order_date.isoformat()}|{area_id}"
             record = db.scalar(
                 select(ModuleRecord).where(
                     ModuleRecord.module_key == "sales",
@@ -16421,7 +16439,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if total_amount <= 0:
                 if record:
                     db.delete(record)
-                continue
+                return
 
             payload = {
                 "id": record.id if record else uuid4().hex,
@@ -16430,9 +16448,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "amount": total_amount,
                 "costAmount": total_cost,
                 "profitAmount": round(total_amount - total_cost, 2),
-                "notes": f"[POS Sync] {order_count} order{'s' if order_count != 1 else ''} captured in POS for {BUSINESS_AREA_SHORT.get(area_id, area_id)}.",
-                "sourceType": "pos-summary",
-                "sourceLabel": "POS Sync",
+                "category": category,
+                "reference": reference,
+                "notes": f"[{source_label}] {order_count} order{'s' if order_count != 1 else ''} captured for {BUSINESS_AREA_SHORT.get(area_id, area_id)}.",
+                "sourceType": source_type,
+                "sourceLabel": source_label,
                 "transactionCount": max(order_count, 1),
                 "linkedGeneratedSalesKey": reference,
                 "linkedPosAreaDateKey": f"{order_date.isoformat()}|{area_id}",
@@ -16445,6 +16465,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
                 db.add(record)
             set_module_record_metadata(record, MODULES["sales"], payload)
+
+        for area_id in unique_area_ids:
+            sync_summary_record(
+                area_id,
+                area_totals.get(area_id) or {},
+                reference=f"pos-summary|{order_date.isoformat()}|{area_id}",
+                source_type="pos-summary",
+                source_label="POS Sync",
+            )
+            # Bread is reported separately, while remaining paid retail revenue.
+            sync_summary_record(
+                area_id,
+                bread_totals.get(area_id) or {},
+                reference=f"bread-pos-summary|{order_date.isoformat()}|{area_id}",
+                source_type="bread-pos-summary",
+                source_label="Bread POS",
+                category="Bakery & Bread",
+            )
 
     def refresh_pos_generated_sales_for_date(order_date: date, db_session=None) -> None:
         """Rebuild a day's POS summaries from saved orders before reporting figures."""
@@ -16461,6 +16499,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if normalize_text(area_id)
             }
         )
+        generated_records = db.scalars(
+            select(ModuleRecord).where(
+                ModuleRecord.module_key == "sales",
+                ModuleRecord.record_date == order_date,
+                or_(
+                    ModuleRecord.reference.like(f"pos-summary|{order_date.isoformat()}|%"),
+                    ModuleRecord.reference.like(f"bread-pos-summary|{order_date.isoformat()}|%"),
+                ),
+            )
+        ).all()
+        for record in generated_records:
+            record_area_id = normalize_text(record.reference).rsplit("|", 1)[-1]
+            if record_area_id not in area_ids:
+                db.delete(record)
         if area_ids:
             sync_generated_sales_for_pos(order_date, area_ids, db_session=db)
 
@@ -17347,6 +17399,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def dashboard():
         # Keep the first page after sign-in deliberately light. Detailed CRM,
         # reporting, and AI analysis are opened from their own desks.
+        today = date.today()
+        # POS sales are derived from saved counter orders. Refresh both desks so
+        # the dashboard agrees with the counter even after a browser reload.
+        refresh_pos_generated_sales_for_date(today)
+        g.db.commit()
         dashboard_record_keys = {
             "sales",
             "apartments",
@@ -17359,7 +17416,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         all_records = g.db.scalars(
             select(ModuleRecord).where(ModuleRecord.module_key.in_(dashboard_record_keys))
         ).all()
-        current_month = date.today().strftime("%Y-%m")
+        current_month = today.strftime("%Y-%m")
         people_alerts = build_staff_people_alerts(all_records)
         latest_suite_profiles = latest_apartment_suite_profiles(all_records, support_phone=app_config.support_phone)
         tenant_reminders = build_tenant_reminder_queue(latest_suite_profiles)
@@ -17369,16 +17426,21 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .order_by(Product.quantity_on_hand.asc(), Product.name.asc())
         ).all()
         low_stock = low_stock_items[:10]
+        paid_sales_records = [
+            record
+            for record in all_records
+            if record.module_key == "sales" and not is_mobile_money_daily_sales_record(record)
+        ]
         expenses_total = sum(record.amount for record in all_records if record.module_key == "expenses")
-        sales_total = sum(record.amount for record in all_records if record.module_key == "sales")
-        profit_total = sum(module_record_profit_amount(record) for record in all_records if record.module_key == "sales")
+        sales_total = sum(record.amount for record in paid_sales_records)
+        profit_total = sum(module_record_profit_amount(record) for record in paid_sales_records)
         today_sales_total = sum(
-            record.amount for record in all_records if record.module_key == "sales" and record.record_date == date.today()
+            record.amount for record in paid_sales_records if record.record_date == today
         )
         today_profit_total = sum(
             module_record_profit_amount(record)
-            for record in all_records
-            if record.module_key == "sales" and record.record_date == date.today()
+            for record in paid_sales_records
+            if record.record_date == today
         )
         petty_cash_total = sum(record.amount for record in all_records if record.module_key == "petty_cash")
         apartment_due = round(sum(parse_amount(profile["outstanding"]) for profile in latest_suite_profiles), 2)
@@ -17415,8 +17477,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         ][:8]
         sales_by_area_map: dict[str, float] = defaultdict(float)
         profit_by_area_map: dict[str, float] = defaultdict(float)
-        for record in all_records:
-            if record.module_key == "sales" and record.record_date and record.record_date.strftime("%Y-%m") == current_month:
+        for record in paid_sales_records:
+            if record.record_date and record.record_date.strftime("%Y-%m") == current_month:
                 sales_by_area_map[record.business_area_id or "shared-operations"] += record.amount
                 profit_by_area_map[record.business_area_id or "shared-operations"] += module_record_profit_amount(record)
         monthly_sales_by_area = sorted(
@@ -17449,13 +17511,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
         sales_mix_style = f"conic-gradient({', '.join(mix_stops)})" if mix_stops else "conic-gradient(#e9e3d7 0 100%)"
         daily_sales_rows = []
         for days_ago in range(6, -1, -1):
-            sales_date = date.today() - timedelta(days=days_ago)
+            sales_date = today - timedelta(days=days_ago)
             daily_sales_rows.append({
                 "label": sales_date.strftime("%a"),
                 "short": sales_date.strftime("%d"),
                 "amount": round(sum(
-                    record.amount for record in all_records
-                    if record.module_key == "sales" and record.record_date == sales_date
+                    record.amount for record in paid_sales_records
+                    if record.record_date == sales_date
                 ), 2),
             })
         online_orders = [
