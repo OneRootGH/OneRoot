@@ -4488,10 +4488,13 @@ def build_growth_action_templates(*, as_of: date | None = None) -> list[dict[str
 def build_growth_automation_context(db_session, *, area_filter: str = "") -> dict[str, Any]:
     crm_records = latest_customer_crm_records(
         db_session.scalars(
-        select(ModuleRecord)
-        .where(ModuleRecord.module_key == "customer_crm")
-        .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
-    ).all()
+            select(ModuleRecord)
+            .where(ModuleRecord.module_key == "customer_crm")
+            .order_by(desc(ModuleRecord.updated_at), desc(ModuleRecord.created_at))
+            # Growth work needs current customer profiles, not every historic
+            # CRM snapshot in one page request.
+            .limit(1200)
+        ).all()
     )
     if area_filter:
         crm_records = [
@@ -4534,14 +4537,24 @@ def build_growth_automation_context(db_session, *, area_filter: str = "") -> dic
             }
         )
 
-    promotion_records = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "promotions")).all()
+    promotion_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "promotions")
+        .order_by(desc(ModuleRecord.updated_at))
+        .limit(500)
+    ).all()
     for record in promotion_records:
         if area_filter and normalize_text((record.payload or {}).get("businessAreaId")) != normalize_text(area_filter):
             continue
         if normalize_text((record.payload or {}).get("status")) in {"Running", "Scheduled"}:
             active_promo_count += 1
 
-    campaign_records = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "whatsapp_campaigns")).all()
+    campaign_records = db_session.scalars(
+        select(ModuleRecord)
+        .where(ModuleRecord.module_key == "whatsapp_campaigns")
+        .order_by(desc(ModuleRecord.updated_at))
+        .limit(500)
+    ).all()
     for record in campaign_records:
         if area_filter and normalize_text((record.payload or {}).get("businessAreaId")) != normalize_text(area_filter):
             continue
@@ -11569,7 +11582,21 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
     sales = daily_sales_summary_context(db_session, briefing_date)
     accountability = daily_sales_accountability_context(db_session, briefing_date)
     wallet = wallet_control_context(db_session, briefing_date)
-    records = db_session.scalars(select(ModuleRecord)).all()
+    # The briefing does not use POS, audit, CRM, or document history directly.
+    # Keeping this query narrow prevents a growing workspace from timing out.
+    records = db_session.scalars(
+        select(ModuleRecord).where(
+            ModuleRecord.module_key.in_(
+                [
+                    "expenses",
+                    "salary_records",
+                    "customer_credit_accounts",
+                    "apartments",
+                    "suppliers",
+                ]
+            )
+        )
+    ).all()
     daily_expenses = round(
         sum(
             abs(parse_amount(record.amount))
@@ -11605,9 +11632,10 @@ def owner_daily_briefing_context(db_session, briefing_date: date) -> dict[str, A
     credit_outstanding = round(sum(row["balance"] for row in open_credit), 2)
     overdue_credit = [row for row in open_credit if parse_date(row["dueDate"]) and parse_date(row["dueDate"]) < briefing_date]
 
-    latest_profiles = latest_apartment_suite_profiles(records)
+    apartment_records = [record for record in records if record.module_key == "apartments"]
+    latest_profiles = latest_apartment_suite_profiles(apartment_records)
     tenant_outstanding = round(sum(parse_amount(profile["outstanding"]) for profile in latest_profiles), 2)
-    advance_rent_alerts = build_tenant_advance_bill_watchlist(records)
+    advance_rent_alerts = build_tenant_advance_bill_watchlist(apartment_records)
     supplier_outstanding_total = round(
         sum(supplier_outstanding(record.payload or {}) for record in records if record.module_key == "suppliers"),
         2,
@@ -11676,6 +11704,7 @@ def jollof_credit_cycle_context(db_session, as_of_date: date) -> dict[str, Any]:
         select(ModuleRecord)
         .where(ModuleRecord.module_key == "customer_credit_accounts")
         .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.created_at))
+        .limit(500)
     ).all()
     def is_internal_kitchen_credit(record: ModuleRecord) -> bool:
         payload = record.payload or {}
@@ -11875,6 +11904,7 @@ def ai_business_intelligence_context(db_session, as_of_date: date) -> dict[str, 
         .options(selectinload(PosOrder.lines))
         .where(PosOrder.order_date >= period_start, PosOrder.order_date <= as_of_date)
         .order_by(PosOrder.order_date.desc(), PosOrder.created_at.desc())
+        .limit(2000)
     ).all()
     for order in recent_orders:
         if normalize_text(order.payment_method).casefold() == "credit" or is_kitchen_stock_issue(order):
@@ -12142,6 +12172,10 @@ def ai_operations_workbench_context(
                 ]
             )
         )
+        .order_by(desc(ModuleRecord.updated_at))
+        # A current review queue is more useful here than a complete historic
+        # archive, and keeps the AI workbench within a web request budget.
+        .limit(1600)
     ).all()
 
     staff_rows: dict[str, dict[str, Any]] = {}
