@@ -4100,6 +4100,65 @@ def sync_customer_crm_automation(db_session) -> None:
     sync_customer_loyalty_accounts(db_session)
 
 
+def sync_mobile_money_customer_contact(db_session, transaction_record: ModuleRecord) -> None:
+    """Capture the current MoMo customer without rebuilding every CRM record at the counter."""
+    transaction = dict(transaction_record.payload or {})
+    if not mobile_money_transaction_is_completed(transaction):
+        return
+    customer_name = normalize_text(transaction.get("customerName"))
+    customer_phone = normalize_phone(transaction.get("customerPhone"))
+    if not customer_name or not customer_phone:
+        return
+
+    reference = customer_reference_key(customer_name, customer_phone, "")
+    if not reference:
+        return
+    customer_record = db_session.scalar(
+        select(ModuleRecord).where(
+            ModuleRecord.module_key == "customer_crm",
+            ModuleRecord.reference == reference,
+        )
+    )
+    payload = dict(customer_record.payload or {}) if customer_record else {}
+    recorded_transaction_ids = {
+        normalize_text(item)
+        for item in (payload.get("mobileMoneyTransactionIds") or [])
+        if normalize_text(item)
+    }
+    transaction_is_new = transaction_record.id not in recorded_transaction_ids
+    recorded_transaction_ids.add(transaction_record.id)
+    fee_amount = round(parse_amount(transaction.get("salesAmount")), 2)
+    payload.update(
+        {
+            "id": customer_record.id if customer_record else uuid4().hex,
+            "captureDate": normalize_text(payload.get("captureDate")) or normalize_text(transaction.get("date")) or date.today().isoformat(),
+            "businessAreaId": normalize_text(payload.get("businessAreaId")) or "mobile-money",
+            "customerName": normalize_text(payload.get("customerName")) or customer_name,
+            "customerPhone": customer_phone,
+            "preferredContact": normalize_text(payload.get("preferredContact")) or "WhatsApp",
+            "leadSource": normalize_text(payload.get("leadSource")) or "Mobile Money",
+            "mobileMoneyServiceCount": int(parse_amount(payload.get("mobileMoneyServiceCount"))) + (1 if transaction_is_new else 0),
+            "mobileMoneyFeeEarned": round(parse_amount(payload.get("mobileMoneyFeeEarned")) + (fee_amount if transaction_is_new else 0), 2),
+            "lastMobileMoneyDate": normalize_text(transaction.get("date")) or date.today().isoformat(),
+            "mobileMoneyTransactionIds": sorted(recorded_transaction_ids)[-40:],
+            "status": normalize_text(payload.get("status")) or "Follow Up",
+            "notes": normalize_text(payload.get("notes")) or "Captured from a completed Mobile Money transaction.",
+            "updatedAt": datetime.utcnow().isoformat(),
+        }
+    )
+    consent = normalize_text(transaction.get("marketingConsent"))
+    if consent in {"Opted In", "Opted Out"}:
+        payload["marketingConsent"] = consent
+    if not customer_record:
+        customer_record = ModuleRecord(
+            id=payload["id"],
+            module_key="customer_crm",
+            created_at=datetime.utcnow(),
+        )
+        db_session.add(customer_record)
+    set_module_record_metadata(customer_record, MODULES["customer_crm"], payload)
+
+
 def sync_marketing_campaign_automation(db_session, *, as_of: date | None = None) -> None:
     """Create one consent-aware campaign draft per actionable customer segment each day."""
     today = as_of or date.today()
@@ -16560,6 +16619,19 @@ def create_app(config: AppConfig | None = None) -> Flask:
             db_session.rollback()
         return database_unavailable_response()
 
+    @app.errorhandler(IntegrityError)
+    def handle_database_integrity_error(error):
+        """Turn duplicate references into a recoverable form message, never a 503."""
+        db_session = getattr(g, "db", None)
+        if db_session:
+            db_session.rollback()
+        app.logger.warning("Database integrity error while saving OneRoot entry: %s", error)
+        message = "This entry was not saved because its reference already exists. Check the reference or open the earlier entry to edit it."
+        if request.headers.get("X-OneRoot-Offline-Sync") == "1":
+            return jsonify({"ok": False, "error": message}), 409
+        flash(message, "error")
+        return redirect(request.referrer or url_for("dashboard"))
+
     @app.route("/website/<path:filename>")
     def website_files(filename: str):
         return send_from_directory(Path(app_config.root_dir) / "website", filename, max_age=0)
@@ -19824,6 +19896,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["businessAreaId"] = "mobile-money"
                 payload["floatImpact"] = normalize_text(payload.get("floatImpact")) or mobile_money_default_float_impact(payload.get("serviceType"))
                 payload["profitAmount"] = round(parse_amount(payload.get("salesAmount")) - parse_amount(payload.get("costAmount")), 2)
+                supplied_reference = normalize_text(payload.get("reference"))
+                if not supplied_reference:
+                    transaction_date = parse_date(payload.get("date")) or date.today()
+                    payload["reference"] = f"MOMO-{transaction_date.strftime('%Y%m%d')}-{uuid4().hex[:8].upper()}"
             elif module_key == "sales":
                 payload["sourceType"] = normalize_text(payload.get("sourceType")) or "manual-sale"
                 payload["profitAmount"] = round(parse_amount(payload.get("amount")) - parse_amount(payload.get("costAmount")), 2)
@@ -19872,6 +19948,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["documentAttachmentType"] = document_attachment_type
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
+            if module_key == "mobile_money_transactions":
+                matching_reference = normalize_text(payload.get("reference"))
+                existing_reference_record = g.db.scalar(
+                    select(ModuleRecord).where(
+                        ModuleRecord.module_key == "mobile_money_transactions",
+                        ModuleRecord.reference == matching_reference,
+                    )
+                ) if matching_reference else None
+                if existing_reference_record and existing_reference_record.id != (record.id if record else ""):
+                    form_errors.append("This Mobile Money reference was already saved. Use the original transaction reference only once, or open the earlier entry to edit it.")
             if (
                 module_key == "equipment_rental_bookings"
                 and is_next_day_morning_return(payload, payload.get("returnDate"), payload.get("returnTime"))
@@ -19925,7 +20011,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 sync_generated_sales_for_module_record(record)
                 if module_key in {"laundry_tickets", "equipment_rental_bookings"}:
                     sync_service_collection_closeouts(module_key, payload, record_payload)
-                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "mobile_money_transactions", "catering_quotes", "customer_service_cases"}:
+                if module_key == "mobile_money_transactions":
+                    sync_mobile_money_customer_contact(g.db, record)
+                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "catering_quotes", "customer_service_cases"}:
                     sync_customer_crm_automation(g.db)
                     sync_customer_loyalty_accounts(g.db)
                     sync_marketing_campaign_automation(g.db)
