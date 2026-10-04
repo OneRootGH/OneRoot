@@ -145,6 +145,7 @@
       </main>
     </div>
     <script src="/website/pwa.js?v=20261004b"></script>
+    <script src="{{ url_for('static', filename='deletion-reasons.js', v=static_asset_version) }}" defer></script>
     {% if current_user and 'online_orders' in current_access_keys %}
       <script src="{{ url_for('static', filename='order-alerts.js', v=static_asset_version) }}" defer></script>
     {% endif %}

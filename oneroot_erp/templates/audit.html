@@ -16,6 +16,7 @@
             <th>Action</th>
             <th>Title</th>
             <th>Actor</th>
+            <th>Reason &amp; Details</th>
           </tr>
         </thead>
         <tbody>
@@ -24,8 +25,9 @@
               <td>{{ item.created_at }}</td>
               <td>{{ item.module_label }}</td>
               <td>{{ item.action }}</td>
-              <td>{{ item.title }}</td>
-              <td>{{ item.actor_name }}</td>
+              <td>{{ item.title }}<span class="table-secondary">Record: {{ item.record_id or '—' }}</span></td>
+              <td>{{ item.actor_name }}<span class="table-secondary">{{ item.actor_role }}</span></td>
+              <td style="white-space: pre-wrap; min-width: 260px; max-width: 500px; overflow-wrap: anywhere;">{{ item.detail or ('Reason was not recorded for this older deletion.' if item.action == 'delete' else '—') }}</td>
             </tr>
           {% endfor %}
         </tbody>

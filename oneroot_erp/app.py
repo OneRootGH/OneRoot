@@ -13429,6 +13429,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     def audit(module_key: str, module_label: str, action: str, title: str, record_id: str = "", detail: str = "") -> None:
         actor = getattr(g, "current_user", None)
+        deletion_context = getattr(g, "deletion_audit_context", "")
+        if deletion_context and action in {"delete", "update"}:
+            detail = f"{detail}\n{deletion_context}".strip()
         g.db.add(
             AuditLog(
                 id=uuid4().hex,
@@ -16635,6 +16638,58 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not g.current_user or not g.current_user.active:
                 session.clear()
                 g.current_user = None
+
+    @app.before_request
+    def require_deletion_reason():
+        deletion_endpoints = {"module_delete", "inventory_delete", "user_delete", "service_payment_delete"}
+        if request.method != "POST" or request.endpoint not in deletion_endpoints:
+            return None
+        if not getattr(g, "current_user", None):
+            return None
+        reason = normalize_text(request.form.get("deletion_reason"))
+        if not reason or len(reason) > 1000:
+            flash("Enter a deletion reason (up to 1,000 characters) before deleting this entry.", "error")
+            return redirect(safe_next_path(request.referrer, url_for("dashboard")))
+        args = request.view_args or {}
+        details = [f"Reason: {reason}"]
+        if request.endpoint in {"module_delete", "service_payment_delete"}:
+            record = g.db.get(ModuleRecord, args.get("record_id"))
+            if record:
+                details.extend([
+                    f"Reference: {record.reference or record.id}",
+                    f"Record date: {record.record_date or record.month or 'Not recorded'}",
+                    f"Business area: {BUSINESS_AREA_LABELS.get(record.business_area_id, record.business_area_id)}",
+                    f"Record amount: {format_currency(record.amount)}",
+                    f"Status: {record.status}",
+                ])
+                if request.endpoint == "service_payment_delete":
+                    payment_id = normalize_text(args.get("payment_id"))
+                    payments = service_payment_entries(record.module_key, record.payload or {})
+                    payment = next((entry for entry in payments if normalize_text(entry.get("id")) == payment_id), {})
+                    if payment_id == "legacy":
+                        payment = record.payload or {}
+                    details.extend([
+                        f"Payment ID: {payment_id}",
+                        f"Payment removed: {format_currency(payment.get('amountPaid'))}",
+                        f"Payment date: {normalize_text(payment.get('paymentDate'))}",
+                        f"Payment reference: {normalize_text(payment.get('paymentReference'))}",
+                    ])
+        elif request.endpoint == "inventory_delete":
+            product = find_inventory_product(g.db, args.get("product_id"))
+            if product:
+                details.extend([
+                    f"SKU: {product.sku}", f"Category: {product.category}",
+                    f"Business area: {BUSINESS_AREA_LABELS.get(product.business_area_id, product.business_area_id)}",
+                    f"Stock at deletion: {product.quantity_on_hand:g}",
+                    f"Selling price: {format_currency(product.sales_price)}",
+                    f"Cost price: {format_currency(product.cost_price)}",
+                ])
+        elif request.endpoint == "user_delete":
+            user = g.db.get(User, args.get("user_id"))
+            if user:
+                details.extend([f"Username: {user.username}", f"Role: {user.role}", f"Staff role: {user.staff_role}"])
+        g.deletion_audit_context = "\n".join(details)
+        return None
 
     @app.before_request
     def prevent_duplicate_offline_submission():
@@ -23059,7 +23114,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def current_static_asset_version() -> str:
         static_dir = Path(app.static_folder or "")
         version_parts: list[str] = []
-        for asset_name in ("app.css", "app.js"):
+        for asset_name in ("app.css", "app.js", "deletion-reasons.js"):
             asset_path = static_dir / asset_name
             if asset_path.exists():
                 version_parts.append(str(int(asset_path.stat().st_mtime)))
