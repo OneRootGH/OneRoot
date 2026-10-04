@@ -63,6 +63,7 @@
   const clearButton = document.getElementById("pos-clear");
   const historyBody = document.getElementById("pos-history-body");
   const statusNode = document.getElementById("pos-status");
+  const offlineNoteNode = document.getElementById("pos-offline-note");
   const lastOrderNode = document.getElementById("pos-last-order-number");
   const lastReceiptLink = document.getElementById("pos-last-receipt");
   const posDesk = document.querySelector("[data-pos-desk]")?.dataset.posDesk || "general";
@@ -92,6 +93,8 @@
     resultPage: 0,
     currentSummary: null,
     isSaving: false,
+    isSyncingOfflineSales: false,
+    offlineCatalog: [],
     pendingSaleRequestId: "",
     pendingSaleFingerprint: ""
   };
@@ -458,7 +461,7 @@
         return `
           <button class="pos-product-tile" type="button" data-product='${JSON.stringify(product).replaceAll("'", "&apos;")}'>
             <span class="pos-product-top">
-              <img class="product-thumb pos-product-thumb" src="${escapeHtml(product.imageUrl || "")}" alt="${escapeHtml(product.name)}">
+              <img class="product-thumb pos-product-thumb" src="${escapeHtml(product.imageUrl || "/assets/oneroot-icon-transparent.png")}" alt="${escapeHtml(product.name)}" onerror="this.onerror=null;this.src='/assets/oneroot-icon-transparent.png'">
               <span class="pos-product-meta">
                 <small class="pos-product-stock">${escapeHtml(product.stockLabel || (product.trackInventory ? `Stock ${product.quantityOnHand ?? 0}` : "Service"))}</small>
                 <small class="pos-product-area">${escapeHtml(product.category || "General")}</small>
@@ -481,6 +484,174 @@
         addProduct(product);
       });
     });
+  }
+
+  function offlineStore() {
+    return window.OneRootOffline?.isAvailable?.() ? window.OneRootOffline : null;
+  }
+
+  function searchableProductText(product) {
+    return [
+      product?.name,
+      product?.sku,
+      product?.barcode,
+      product?.category,
+      product?.businessAreaLabel,
+      product?.businessAreaId
+    ].join(" ").toLowerCase();
+  }
+
+  function filterOfflineCatalog(products, query) {
+    const needle = String(query || "").trim().toLowerCase();
+    const selectedArea = getSelectedArea();
+    const selectedCategory = getSelectedCategory();
+    return (products || []).filter((product) => {
+      if (selectedArea && String(product.businessAreaId || "") !== selectedArea) return false;
+      if (selectedCategory && String(product.category || "") !== selectedCategory) return false;
+      return !needle || searchableProductText(product).includes(needle);
+    });
+  }
+
+  async function loadOfflineCatalog() {
+    const store = offlineStore();
+    if (!store || kitchenIssueMode) return [];
+    if (state.offlineCatalog.length) return state.offlineCatalog;
+    try {
+      state.offlineCatalog = await store.getCatalog(posDesk);
+    } catch (_error) {
+      state.offlineCatalog = [];
+    }
+    return state.offlineCatalog;
+  }
+
+  async function cacheOfflineCatalog() {
+    const store = offlineStore();
+    if (!store || kitchenIssueMode || !navigator.onLine) return;
+    const url = new URL("/app/api/pos/products", window.location.origin);
+    url.searchParams.set("desk", posDesk);
+    url.searchParams.set("offline", "1");
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin"
+      });
+      const payload = await response.json();
+      if (!response.ok || !payload.ok || !Array.isArray(payload.products)) return;
+      state.offlineCatalog = payload.products;
+      await store.putCatalog(posDesk, payload.products);
+    } catch (_error) {
+      // A failed refresh must not remove the last known catalogue.
+    }
+  }
+
+  async function renderOfflineStatus() {
+    const store = offlineStore();
+    if (!offlineNoteNode || !store || kitchenIssueMode) return;
+    let pendingSales = [];
+    try {
+      pendingSales = await store.pendingSales(posDesk);
+    } catch (_error) {
+      pendingSales = [];
+    }
+    const waiting = pendingSales.length;
+    const needsAttention = pendingSales.filter((sale) => sale.status === "needs-attention").length;
+    offlineNoteNode.hidden = navigator.onLine && waiting === 0;
+    if (offlineNoteNode.hidden) return;
+    if (!navigator.onLine) {
+      offlineNoteNode.textContent = waiting
+        ? `Offline: ${waiting} standard counter sale${waiting === 1 ? " is" : "s are"} waiting to sync. Keep this POS screen open and reconnect when you can.`
+        : "Offline: search the saved product catalogue and save standard counter sales. They will sync when the internet returns.";
+      return;
+    }
+    offlineNoteNode.textContent = needsAttention
+      ? `${waiting} counter sale${waiting === 1 ? " is" : "s are"} stored on this device. ${needsAttention} needs a live review before it can be posted; the rest will retry automatically.`
+      : `${waiting} counter sale${waiting === 1 ? " is" : "s are"} waiting to sync. OneRoot is retrying automatically.`;
+  }
+
+  function canQueueOfflineSale(payload) {
+    const method = String(payload?.paymentMethod || "").trim().toLowerCase();
+    return !kitchenIssueMode && ["cash", "mobile money", "bank transfer", "card"].includes(method);
+  }
+
+  async function queueOfflineSale(payload, reason) {
+    const store = offlineStore();
+    if (!store || !canQueueOfflineSale(payload)) {
+      const explanation = kitchenIssueMode
+        ? "Kitchen stock issues require a live connection so production cost and inventory remain correct."
+        : "Offline POS can save Cash, Mobile Money, Bank Transfer, or Card sales only. Credit and unpaid sales require a live connection.";
+      setStatus(explanation, "error");
+      return false;
+    }
+    const queuedTotal = getCartTotal();
+    await store.queueSale(posDesk, payload);
+    state.pendingSaleRequestId = "";
+    state.pendingSaleFingerprint = "";
+    state.cart = [];
+    renderCart();
+    resetDraftFields();
+    setLastReceipt(null);
+    await renderOfflineStatus();
+    setStatus(`Saved offline at ${formatCurrency(queuedTotal)}. It has no final receipt yet and will sync automatically when OneRoot reconnects.${reason ? ` ${reason}` : ""}`);
+    return true;
+  }
+
+  async function syncOfflineSales({ announce = false } = {}) {
+    const store = offlineStore();
+    if (!store || kitchenIssueMode || !navigator.onLine || state.isSyncingOfflineSales) return;
+    const savedSales = await store.pendingSales(posDesk);
+    const pendingSales = savedSales.filter((sale) => sale.status !== "needs-attention");
+    if (!pendingSales.length) {
+      await renderOfflineStatus();
+      return;
+    }
+    state.isSyncingOfflineSales = true;
+    let synced = 0;
+    let needsAttention = 0;
+    try {
+      for (const queuedSale of pendingSales) {
+        let response;
+        let result;
+        try {
+          response = await fetch("/app/api/pos/orders", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", Accept: "application/json" },
+            body: JSON.stringify(queuedSale.payload)
+          });
+          result = await readApiResponse(response);
+        } catch (_error) {
+          break;
+        }
+        if (response.ok && result.ok) {
+          await store.removeQueuedSale(queuedSale.id);
+          synced += 1;
+          continue;
+        }
+        if (response.status >= 400 && response.status < 500) {
+          await store.updateQueuedSale(queuedSale.id, {
+            status: "needs-attention",
+            lastError: result.error || "This sale needs a live review before it can sync."
+          });
+          needsAttention += 1;
+          continue;
+        }
+        break;
+      }
+      if (synced) {
+        await refreshSummary();
+        await cacheOfflineCatalog();
+      }
+    } finally {
+      state.isSyncingOfflineSales = false;
+      await renderOfflineStatus();
+    }
+    if (synced || (announce && needsAttention)) {
+      setStatus(
+        needsAttention
+          ? `${synced} offline sale${synced === 1 ? "" : "s"} synced. ${needsAttention} needs live review before it can be posted.`
+          : `${synced} offline sale${synced === 1 ? "" : "s"} synced to the live counter.`
+      );
+    }
   }
 
   async function fetchProducts(query) {
@@ -509,6 +680,18 @@
       return state.productSearchCache.get(cacheKey);
     }
 
+    if (!navigator.onLine && !kitchenIssueMode) {
+      const catalogue = await loadOfflineCatalog();
+      if (!catalogue.length) {
+        setStatus("No saved catalogue is available on this device yet. Reconnect once to prepare offline POS.", "error");
+        return [];
+      }
+      const products = filterOfflineCatalog(catalogue, query);
+      state.productSearchCache.set(cacheKey, products);
+      setStatus("Offline catalogue in use. Standard sales will wait safely to sync.");
+      return products;
+    }
+
     let response;
     let payload;
     try {
@@ -521,6 +704,15 @@
     } catch (error) {
       if (error?.name === "AbortError") {
         return null;
+      }
+      if (!kitchenIssueMode) {
+        const catalogue = await loadOfflineCatalog();
+        if (catalogue.length) {
+          const products = filterOfflineCatalog(catalogue, query);
+          state.productSearchCache.set(cacheKey, products);
+          setStatus("The live product search is unavailable. Showing the saved catalogue while OneRoot reconnects.");
+          return products;
+        }
       }
       setStatus("Products could not be loaded right now.", "error");
       return null;
@@ -773,6 +965,10 @@
   }
 
   async function refreshSummary() {
+    if (!navigator.onLine) {
+      await renderOfflineStatus();
+      return;
+    }
     const url = new URL("/app/api/pos/summary", window.location.origin);
     url.searchParams.set("orderDate", getOrderDate());
     const area = getSelectedArea();
@@ -781,16 +977,21 @@
       url.searchParams.set("area", area);
     }
 
-    const response = await fetch(url, {
-      headers: { Accept: "application/json" },
-      credentials: "same-origin"
-    });
-    const payload = await response.json();
-    if (!response.ok || !payload.ok) {
-      setStatus(payload.error || "POS summary could not be loaded.", "error");
-      return;
+    try {
+      const response = await fetch(url, {
+        headers: { Accept: "application/json" },
+        credentials: "same-origin"
+      });
+      const payload = await readApiResponse(response);
+      if (!response.ok || !payload.ok) {
+        setStatus(payload.error || "POS summary could not be loaded.", "error");
+        return;
+      }
+      renderSummary(payload.summary);
+    } catch (_error) {
+      await renderOfflineStatus();
+      setStatus("Live totals cannot be refreshed right now. Your queued counter sales remain safe on this device.", "error");
     }
-    renderSummary(payload.summary);
   }
 
   function resetDraftFields() {
@@ -946,6 +1147,10 @@
   });
 
   closeoutButton?.addEventListener("click", async () => {
+    if (!navigator.onLine) {
+      setStatus("Reconnect before closing the counter so all live sales and cash controls are confirmed.", "error");
+      return;
+    }
     closeoutButton.disabled = true;
     setStatus("Saving counter closeout...");
     const response = await fetch("/app/api/pos/closeout", {
@@ -1024,11 +1229,6 @@
       return;
     }
 
-    // Open the receipt tab while this click still has browser user activation.
-    // It is filled and printed only after the sale is confirmed by the server.
-    const automaticPrintRequested = shouldAutoPrintReceipt();
-    const automaticReceiptWindow = automaticPrintRequested ? openAutomaticReceiptWindow() : null;
-
     state.isSaving = true;
     saveButton.disabled = true;
     setStatus(kitchenIssueMode ? "Issuing ingredients to kitchen..." : "Saving sale...");
@@ -1054,7 +1254,18 @@
     };
 
     let saved = false;
+    let automaticPrintRequested = false;
+    let automaticReceiptWindow = null;
     try {
+      if (!navigator.onLine) {
+        await queueOfflineSale(payload);
+        return;
+      }
+
+      // Open the receipt tab while this click still has browser user activation.
+      // It is filled and printed only after the sale is confirmed by the server.
+      automaticPrintRequested = shouldAutoPrintReceipt();
+      automaticReceiptWindow = automaticPrintRequested ? openAutomaticReceiptWindow() : null;
       const response = await fetch("/app/api/pos/orders", {
         method: "POST",
         credentials: "same-origin",
@@ -1068,6 +1279,10 @@
 
       if (!response.ok || !result.ok) {
         automaticReceiptWindow?.close();
+        if (response.status >= 500 || !navigator.onLine) {
+          const queued = await queueOfflineSale(payload, "The live server did not confirm it yet.");
+          if (queued) return;
+        }
         setStatus(result.error || "The sale could not be saved.", "error");
         return;
       }
@@ -1103,6 +1318,14 @@
       }
     } catch (error) {
       automaticReceiptWindow?.close();
+      if (!saved) {
+        try {
+          const queued = await queueOfflineSale(payload, "The connection dropped before live confirmation.");
+          if (queued) return;
+        } catch (_queueError) {
+          // Preserve the normal error message below when device storage is unavailable.
+        }
+      }
       setStatus(
         saved
           ? "The sale was saved, but the counter summary could not refresh. Refresh the page when convenient."
@@ -1142,8 +1365,28 @@
   }
   syncCategoryPills();
 
+  document.addEventListener("oneroot:connection", (event) => {
+    void renderOfflineStatus();
+    if (event.detail?.online) {
+      void syncOfflineSales();
+    }
+  });
+  document.addEventListener("oneroot:sync-request", () => {
+    void syncOfflineSales({ announce: true });
+  });
+  window.addEventListener("focus", () => {
+    if (navigator.onLine) {
+      void syncOfflineSales();
+      void cacheOfflineCatalog();
+    }
+  });
+
   setLastReceipt(null);
   renderCart();
   void searchProducts(searchInput.value.trim());
   void refreshSummary();
+  void loadOfflineCatalog();
+  void cacheOfflineCatalog();
+  void renderOfflineStatus();
+  void syncOfflineSales();
 })();

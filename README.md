@@ -109,6 +109,12 @@ Database settings:
 - [website/track-order.html](/Users/philipboakye/Documents/OneRoot Expense Register/website/track-order.html)
 - [website/app.js](/Users/philipboakye/Documents/OneRoot Expense Register/website/app.js)
 
+## Offline counter use
+
+The installed staff app keeps a signed-in cashier's current POS catalogue on that device. If the internet drops while the POS screen is already open, staff can still search products and save normal Cash, Mobile Money, Bank Transfer, and Card counter sales. Those sales are marked as waiting, do not receive a final receipt until confirmed, and automatically sync to the same shared database when the connection returns. Every queued sale keeps its original request ID, so a retry cannot reduce stock twice.
+
+Credit sales, unpaid orders, counter closeouts, kitchen stock issues, rentals, laundry payments, mobile-money float entries, inventory adjustments, and tenant payments remain live-only. These actions need the current shared balance, stock, or approval data to stay accurate across all devices. Signing out clears the locally cached catalogue; unsynced sales remain tied to the signed-in user until OneRoot confirms them.
+
 ## DigitalOcean App Platform
 
 The project includes a starter App Platform spec at [.do/app.yaml](/Users/philipboakye/Documents/OneRoot Expense Register/.do/app.yaml).

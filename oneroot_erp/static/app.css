@@ -209,6 +209,50 @@ a { color: inherit; text-decoration: none; }
   flex-wrap: wrap;
   justify-content: flex-end;
 }
+.connection-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.38rem;
+  padding: 0.36rem 0.58rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: rgba(241, 249, 241, 0.88);
+  color: #2d6749;
+  font-size: 0.75rem;
+  font-weight: 800;
+  white-space: nowrap;
+}
+.connection-status-dot {
+  width: 0.48rem;
+  height: 0.48rem;
+  border-radius: 50%;
+  background: #48a56e;
+  box-shadow: 0 0 0 3px rgba(72, 165, 110, 0.14);
+}
+.connection-status.is-offline {
+  color: #974632;
+  border-color: #e7b6a6;
+  background: #fff4ef;
+}
+.connection-status.is-offline .connection-status-dot {
+  background: #cc6648;
+  box-shadow: 0 0 0 3px rgba(204, 102, 72, 0.14);
+}
+.connection-status.has-pending:not(.is-offline) {
+  color: #85540d;
+  border-color: #e9cc88;
+  background: #fff9e9;
+}
+.connection-status.has-pending:not(.is-offline) .connection-status-dot {
+  background: #d49c2c;
+  box-shadow: 0 0 0 3px rgba(212, 156, 44, 0.14);
+}
+.connection-sync-button {
+  color: inherit;
+  font-weight: 900;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
 .utility-menu {
   position: relative;
 }
@@ -1328,6 +1372,17 @@ textarea { resize: vertical; }
 .pos-workbench-tools .button {
   padding: 0.58rem 0.88rem;
   border-radius: 0.9rem;
+}
+.pos-offline-note {
+  margin: -0.1rem 0 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid #e4bd76;
+  border-radius: 0.8rem;
+  background: #fff8e7;
+  color: #785218;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.4;
 }
 .pos-layout-enhanced {
   align-items: start;
@@ -2653,6 +2708,9 @@ thead th {
   .utility-menu summary,
   .utility-panel {
     width: 100%;
+  }
+  .connection-status {
+    justify-content: center;
   }
   .utility-panel {
     position: static;

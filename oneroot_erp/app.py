@@ -22064,6 +22064,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def pos_products_api():
         q = normalize_text(request.args.get("q"))
         kitchen_issue_mode = normalize_text(request.args.get("mode")) == "kitchen-issue"
+        offline_catalog_requested = normalize_text(request.args.get("offline")).lower() in {"1", "true", "yes"}
         pos_desk = normalize_pos_desk(request.args.get("desk"))
         requested_area = normalize_text(request.args.get("area"))
         area = "" if kitchen_issue_mode else (requested_area if requested_area in pos_desk_area_ids(pos_desk) else "")
@@ -22080,7 +22081,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         [product.name, normalize_text(product.sku), normalize_text(product.barcode), normalize_text(product.category)]
                     ).lower()
                 )
-            ][:60]
+            ][:1000 if offline_catalog_requested else 60]
         else:
             products = load_pos_products(
                 g.db,
@@ -22088,7 +22089,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 area_filter=area,
                 category_filter=category,
                 search=q,
-            )[:60]
+            )[:1000 if offline_catalog_requested else 60]
         return jsonify(
             {
                 "ok": True,

@@ -2,17 +2,16 @@
   "name": "OneRoot Essentials Platform",
   "short_name": "OneRoot",
   "description": "Installable OneRoot platform for operations, POS, apartments, services, stock, and customer ordering.",
-  "id": "/operations/",
-  "start_url": "/operations/",
+  "id": "/app/",
+  "start_url": "/app/",
   "scope": "/",
   "display": "standalone",
   "background_color": "#f7f2ea",
   "theme_color": "#214131",
   "icons": [
     {
-      "src": "./icon.svg",
-      "sizes": "any",
-      "type": "image/svg+xml",
+      "src": "/assets/oneroot-icon-transparent.png",
+      "type": "image/png",
       "purpose": "any maskable"
     }
   ]

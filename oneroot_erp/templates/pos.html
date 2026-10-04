@@ -20,6 +20,10 @@
       </div>
     </div>
 
+    {% if not kitchen_issue_mode %}
+      <div class="pos-offline-note" id="pos-offline-note" hidden aria-live="polite"></div>
+    {% endif %}
+
     {% if kitchen_issue_mode %}
       <section class="kitchen-stock-issue-banner">
         <div>
