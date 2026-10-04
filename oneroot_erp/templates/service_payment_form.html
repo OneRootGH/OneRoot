@@ -163,7 +163,7 @@
         </div>
       </div>
       {% if service_row.balance > 0 %}
-        <form method="post" class="form-grid service-collection-form">
+        <form method="post" class="form-grid service-collection-form" data-offline-queue data-offline-label="{{ definition.label }} payment" data-offline-reset="amountPaid,paymentReference,receivedBy,notes">
           {% if definition.key == 'equipment_rental_bookings' %}
             <div class="span-2 rental-payment-shortcuts">
               <p><strong>Fast collection:</strong> choose one rental day for a part-payment today, or use the full current balance. The rental stays open until the equipment is returned and the balance is cleared.</p>

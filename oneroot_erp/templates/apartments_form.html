@@ -168,6 +168,7 @@
         <div class="dashboard-subsection">
           <p class="eyebrow">Documents</p>
           <div class="toolbar">
+            <a class="button primary" href="{{ url_for('apartment_payment_form', record_id=record.id) }}">Record Payment</a>
             <a class="button subtle" href="{{ url_for('apartment_receipt', record_id=record.id) }}" target="_blank" rel="noopener">Receipt</a>
             <a class="button subtle" href="{{ url_for('apartment_statement', record_id=record.id) }}" target="_blank" rel="noopener">Statement</a>
             <a class="button subtle" href="{{ url_for('apartment_bill_notice', record_id=record.id) }}" target="_blank" rel="noopener">Bill Notice</a>

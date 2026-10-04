@@ -182,6 +182,18 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
 
 
+class OfflineSubmission(Base):
+    """Idempotency marker for a form first stored in the device offline queue."""
+
+    __tablename__ = "offline_submissions"
+
+    request_id: Mapped[str] = mapped_column(String(100), primary_key=True)
+    request_path: Mapped[str] = mapped_column(String(255), default="")
+    actor_id: Mapped[str] = mapped_column(String(64), default="", index=True)
+    actor_name: Mapped[str] = mapped_column(String(200), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utcnow, index=True)
+
+
 class AppSetting(Base):
     __tablename__ = "app_settings"
 

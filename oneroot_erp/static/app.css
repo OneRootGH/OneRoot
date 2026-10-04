@@ -1384,6 +1384,16 @@ textarea { resize: vertical; }
   font-weight: 700;
   line-height: 1.4;
 }
+.offline-form-message {
+  grid-column: 1 / -1;
+  margin: 0;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid #e4bd76;
+  border-radius: 0.8rem;
+  background: #fff7e7;
+  color: #654500;
+  font-weight: 700;
+}
 .pos-layout-enhanced {
   align-items: start;
 }

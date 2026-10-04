@@ -94,7 +94,7 @@
       </section>
     {% endif %}
 
-    <form method="post" enctype="multipart/form-data" class="form-grid module-form-grid" id="generic-module-form">
+    <form method="post" enctype="multipart/form-data" class="form-grid module-form-grid" id="generic-module-form"{% if definition.key in ['mobile_money_transactions', 'customer_credit_accounts'] %} data-offline-queue data-offline-label="{{ definition.label }}"{% if definition.key == 'mobile_money_transactions' %} data-offline-reset="salesAmount,costAmount,reference,notes"{% else %} data-offline-reset="amount,reference,notes"{% endif %}{% endif %}>
       {% if definition.key == 'kitchen_recipe_plans' %}
         <input type="hidden" name="ingredientItemsJson" id="kitchen-ingredient-items-json">
         <input type="hidden" name="mealItemsJson" id="kitchen-meal-items-json">

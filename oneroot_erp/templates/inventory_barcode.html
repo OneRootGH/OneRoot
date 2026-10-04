@@ -44,7 +44,7 @@
           <h3>Fast Update</h3>
         </div>
       </div>
-      <form method="post" class="form-grid barcode-stock-form">
+      <form method="post" class="form-grid barcode-stock-form" data-offline-queue data-offline-label="Barcode stock update" data-offline-reset="barcode,note">
         <label class="span-2">
           <span>Barcode / SKU</span>
           <input type="text" name="barcode" value="{{ barcode_value }}" placeholder="Scan or type barcode and press save" autofocus autocomplete="off">

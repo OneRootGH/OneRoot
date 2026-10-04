@@ -570,7 +570,7 @@
 
   function canQueueOfflineSale(payload) {
     const method = String(payload?.paymentMethod || "").trim().toLowerCase();
-    return !kitchenIssueMode && ["cash", "mobile money", "bank transfer", "card"].includes(method);
+    return !kitchenIssueMode && ["cash", "mobile money", "bank transfer", "card", "credit"].includes(method);
   }
 
   async function queueOfflineSale(payload, reason) {
@@ -578,7 +578,7 @@
     if (!store || !canQueueOfflineSale(payload)) {
       const explanation = kitchenIssueMode
         ? "Kitchen stock issues require a live connection so production cost and inventory remain correct."
-        : "Offline POS can save Cash, Mobile Money, Bank Transfer, or Card sales only. Credit and unpaid sales require a live connection.";
+        : "Offline POS can save Cash, Mobile Money, Bank Transfer, Card, or Credit sales only. Unpaid sales require a live connection.";
       setStatus(explanation, "error");
       return false;
     }

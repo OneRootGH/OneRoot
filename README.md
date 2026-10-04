@@ -109,11 +109,13 @@ Database settings:
 - [website/track-order.html](/Users/philipboakye/Documents/OneRoot Expense Register/website/track-order.html)
 - [website/app.js](/Users/philipboakye/Documents/OneRoot Expense Register/website/app.js)
 
-## Offline counter use
+## Offline entry use
 
-The installed staff app keeps a signed-in cashier's current POS catalogue on that device. If the internet drops while the POS screen is already open, staff can still search products and save normal Cash, Mobile Money, Bank Transfer, and Card counter sales. Those sales are marked as waiting, do not receive a final receipt until confirmed, and automatically sync to the same shared database when the connection returns. Every queued sale keeps its original request ID, so a retry cannot reduce stock twice.
+The installed staff app keeps a signed-in user's current POS catalogue on that device. If the internet drops while the app is already open, staff can still search products and save Cash, Mobile Money, Bank Transfer, Card, and Credit POS sales. The same one-time offline queue also holds equipment-rental payments, laundry payments, barcode stock updates, mobile-money transaction and float records, mobile-money reconciliation, customer-credit entries, and apartment payments entered with the **Record Payment** action.
 
-Credit sales, unpaid orders, counter closeouts, kitchen stock issues, rentals, laundry payments, mobile-money float entries, inventory adjustments, and tenant payments remain live-only. These actions need the current shared balance, stock, or approval data to stay accurate across all devices. Signing out clears the locally cached catalogue; unsynced sales remain tied to the signed-in user until OneRoot confirms them.
+Every queued entry is visibly marked as waiting on that device and automatically posts to the shared database once the signed-in staff member reconnects. Each entry carries a unique request ID, so a retry cannot reduce stock, collect a payment, or create a credit record twice. A queued transaction is not final until it syncs; receipts and final balances should therefore be reviewed after the connection returns.
+
+Attachments, full inventory item edits, full apartment profile edits, counter closeouts, kitchen stock issues, and unpaid order workflows remain live-only. They need current shared records or files to remain safe across devices. Signing out clears the locally cached catalogue; unsynced entries remain tied to the signed-in user until OneRoot confirms them.
 
 ## DigitalOcean App Platform
 

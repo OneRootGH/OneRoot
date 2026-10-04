@@ -137,6 +137,7 @@
       if (existing) return existing;
       const record = {
         id: requestId,
+        kind: "pos-sale",
         userId,
         desk,
         payload,
@@ -153,8 +154,41 @@
       if (!userId) return [];
       const records = await allStoreValues(QUEUE_STORE);
       return records
-        .filter((record) => record?.userId === userId && (!desk || record.desk === desk))
+        .filter((record) => record?.userId === userId && record?.kind !== "form" && (!desk || record.desk === desk))
         .sort((first, second) => String(first.createdAt).localeCompare(String(second.createdAt)));
+    },
+    async queueFormSubmission({ path, fields, label }) {
+      if (!userId) {
+        throw new Error("Sign in before using offline forms.");
+      }
+      const requestId = window.crypto?.randomUUID?.() || `offline-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      const record = {
+        id: requestId,
+        kind: "form",
+        userId,
+        path,
+        fields: [...(fields || []), ["offlineRequestId", requestId]],
+        label: label || "OneRoot entry",
+        status: "queued",
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        lastError: ""
+      };
+      await writeStore(QUEUE_STORE, record);
+      await emitConnectionState();
+      return record;
+    },
+    async pendingForms() {
+      if (!userId) return [];
+      const records = await allStoreValues(QUEUE_STORE);
+      return records
+        .filter((record) => record?.userId === userId && record?.kind === "form")
+        .sort((first, second) => String(first.createdAt).localeCompare(String(second.createdAt)));
+    },
+    async pendingEntries() {
+      if (!userId) return [];
+      const records = await allStoreValues(QUEUE_STORE);
+      return records.filter((record) => record?.userId === userId);
     },
     async removeQueuedSale(id) {
       await deleteStoreValue(QUEUE_STORE, id);
@@ -172,7 +206,7 @@
   async function emitConnectionState() {
     let pendingCount = 0;
     try {
-      pendingCount = (await offlineStore.pendingSales()).length;
+      pendingCount = (await offlineStore.pendingEntries()).length;
     } catch (_error) {
       pendingCount = 0;
     }
@@ -183,9 +217,9 @@
     }
     if (connectionText) {
       connectionText.textContent = !online
-        ? `Offline${pendingCount ? ` · ${pendingCount} sale${pendingCount === 1 ? "" : "s"} waiting` : ""}`
+        ? `Offline${pendingCount ? ` · ${pendingCount} entr${pendingCount === 1 ? "y" : "ies"} waiting` : ""}`
         : pendingCount
-          ? `${pendingCount} sale${pendingCount === 1 ? "" : "s"} waiting to sync`
+          ? `${pendingCount} entr${pendingCount === 1 ? "y" : "ies"} waiting to sync`
           : "Online";
     }
     syncButtons.forEach((button) => {
@@ -212,6 +246,104 @@
     });
   });
 
+  function showFormQueueMessage(form, message, type = "info") {
+    let node = form.querySelector("[data-offline-form-message]");
+    if (!node) {
+      node = document.createElement("p");
+      node.dataset.offlineFormMessage = "true";
+      node.className = "offline-form-message";
+      form.prepend(node);
+    }
+    node.textContent = message;
+    node.classList.toggle("danger-text", type === "error");
+  }
+
+  function resetQueuedFormFields(form) {
+    String(form.dataset.offlineReset || "").split(",").map((name) => name.trim()).filter(Boolean).forEach((name) => {
+      Array.from(form.elements).filter((field) => field.name === name).forEach((field) => {
+        if (field.type === "checkbox" || field.type === "radio") {
+          field.checked = false;
+        } else {
+          field.value = "";
+        }
+      });
+    });
+  }
+
+  async function queueOfflineForm(form) {
+    if (!form.reportValidity()) return;
+    const fileInput = Array.from(form.querySelectorAll('input[type="file"]')).find((input) => input.files?.length);
+    if (fileInput) {
+      showFormQueueMessage(form, "Reconnect before saving an attachment. Photos and receipts cannot be queued offline yet.", "error");
+      return;
+    }
+    const fields = [];
+    new FormData(form).forEach((value, name) => {
+      if (typeof value === "string") fields.push([name, value]);
+    });
+    const target = new URL(form.action || window.location.href, window.location.origin);
+    await offlineStore.queueFormSubmission({
+      path: `${target.pathname}${target.search}`,
+      fields,
+      label: form.dataset.offlineLabel || "OneRoot entry"
+    });
+    resetQueuedFormFields(form);
+    showFormQueueMessage(form, "Saved on this device. It will be posted to OneRoot automatically when the internet returns.");
+  }
+
+  async function syncQueuedForms({ announce = false } = {}) {
+    if (!navigator.onLine || !offlineStore.isAvailable()) return;
+    const savedForms = await offlineStore.pendingForms();
+    const pendingForms = savedForms.filter((entry) => entry.status !== "needs-attention");
+    let synced = 0;
+    let needsAttention = 0;
+    for (const entry of pendingForms) {
+      try {
+        const response = await fetch(entry.path, {
+          method: "POST",
+          credentials: "same-origin",
+          redirect: "manual",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded;charset=UTF-8",
+            Accept: "application/json",
+            "X-OneRoot-Offline-Sync": "1"
+          },
+          body: new URLSearchParams(entry.fields)
+        });
+        const result = await response.json();
+        if (response.ok && result.ok) {
+          await offlineStore.removeQueuedSale(entry.id);
+          synced += 1;
+          continue;
+        }
+        if (response.status >= 400 && response.status < 500) {
+          await offlineStore.updateQueuedSale(entry.id, {
+            status: "needs-attention",
+            lastError: result.error || "This saved entry needs live review."
+          });
+          needsAttention += 1;
+          continue;
+        }
+        break;
+      } catch (_error) {
+        break;
+      }
+    }
+    if (synced || (announce && needsAttention)) {
+      await emitConnectionState();
+      document.dispatchEvent(new CustomEvent("oneroot:offline-forms-synced", { detail: { synced, needsAttention } }));
+    }
+  }
+
+  document.addEventListener("submit", (event) => {
+    const form = event.target.closest("form[data-offline-queue]");
+    if (!form || navigator.onLine) return;
+    event.preventDefault();
+    void queueOfflineForm(form).catch(() => {
+      showFormQueueMessage(form, "This device could not store the entry. Reconnect and try again.", "error");
+    });
+  });
+
   window.OneRootOffline = offlineStore;
   window.addEventListener("beforeinstallprompt", (event) => {
     event.preventDefault();
@@ -224,6 +356,8 @@
   });
   window.addEventListener("online", () => void emitConnectionState());
   window.addEventListener("offline", () => void emitConnectionState());
+  window.addEventListener("online", () => void syncQueuedForms());
+  document.addEventListener("oneroot:sync-request", () => void syncQueuedForms({ announce: true }));
   toggleInstallButtons(false);
   void emitConnectionState();
 

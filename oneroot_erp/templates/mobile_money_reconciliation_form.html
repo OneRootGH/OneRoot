@@ -68,7 +68,7 @@
   </section>
 
   <section class="mobile-money-reconciliation-layout">
-    <form method="post" class="card mobile-money-reconciliation-form" id="mobile-money-reconciliation-form">
+    <form method="post" class="card mobile-money-reconciliation-form" id="mobile-money-reconciliation-form" data-offline-queue data-offline-label="Mobile money reconciliation" data-offline-reset="closingCashCounted,closingECashCounted,notes">
       <input type="hidden" name="cashInValue" id="momo-cash-in-hidden" value="{{ payload.get('cashInValue', 0) }}">
       <input type="hidden" name="cashOutValue" id="momo-cash-out-hidden" value="{{ payload.get('cashOutValue', 0) }}">
       <input type="hidden" name="serviceFees" id="momo-fees-hidden" value="{{ payload.get('serviceFees', 0) }}">

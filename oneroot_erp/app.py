@@ -28,7 +28,7 @@ from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
 from .config import AppConfig, load_config
 from .importer import bootstrap_database
-from .models import AuditLog, Base, ModuleRecord, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
+from .models import AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .registry import (
     BUSINESS_AREA_LABELS,
     BUSINESS_AREA_OPTIONS,
@@ -14473,6 +14473,59 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if record.module_key == "apartments":
             suite = normalize_text(payload.get("suite")) or "Suite"
             tenant = normalize_text(payload.get("tenantName")) or "Tenant"
+            payment_entries = payload.get("apartmentPaymentEntries")
+            if isinstance(payment_entries, list) and payment_entries:
+                rent_prefix = f"apartment-rent-payment|{record.id}"
+                bills_prefix = f"apartment-bill-payment|{record.id}"
+                kept_references: set[str] = set()
+                for index, payment in enumerate(payment_entries, start=1):
+                    if not isinstance(payment, dict):
+                        continue
+                    payment_id = normalize_text(payment.get("id"))
+                    if not payment_id:
+                        continue
+                    payment_date = parse_date(payment.get("paymentDate")) or record.record_date
+                    rent_reference = f"{rent_prefix}|{payment_id}"
+                    bills_reference = f"{bills_prefix}|{payment_id}"
+                    kept_references.update({rent_reference, bills_reference})
+                    payment_note = normalize_text(payment.get("paymentReference"))
+                    note_suffix = f" Reference: {payment_note}." if payment_note else ""
+                    upsert_generated_sale(
+                        db,
+                        reference=rent_reference,
+                        sale_date=payment_date,
+                        business_area_id="rentals-apartments",
+                        amount=payment.get("rentAmount", 0),
+                        source_type="apartment-rent-payment",
+                        source_label="Apartment Rent Payment",
+                        note=f"[Apartment Sync] Rent payment {index} for {tenant} in {suite}.{note_suffix}",
+                    )
+                    upsert_generated_sale(
+                        db,
+                        reference=bills_reference,
+                        sale_date=payment_date,
+                        business_area_id="rentals-apartments",
+                        amount=payment.get("billsAmount", 0),
+                        source_type="apartment-bill-payment",
+                        source_label="Apartment Bills Payment",
+                        note=f"[Apartment Sync] Bills payment {index} for {tenant} in {suite}.{note_suffix}",
+                    )
+
+                stale_records = db.scalars(
+                    select(ModuleRecord).where(
+                        ModuleRecord.module_key == "sales",
+                        or_(
+                            ModuleRecord.reference == rent_prefix,
+                            ModuleRecord.reference == bills_prefix,
+                            ModuleRecord.reference.ilike(f"{rent_prefix}|%"),
+                            ModuleRecord.reference.ilike(f"{bills_prefix}|%"),
+                        ),
+                    )
+                ).all()
+                for stale_record in stale_records:
+                    if stale_record.reference not in kept_references:
+                        db.delete(stale_record)
+                return
             upsert_generated_sale(
                 db,
                 reference=f"apartment-rent-payment|{record.id}",
@@ -16437,6 +16490,55 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not g.current_user or not g.current_user.active:
                 session.clear()
                 g.current_user = None
+
+    @app.before_request
+    def prevent_duplicate_offline_submission():
+        """Return a stable success response when a queued form reaches the server twice."""
+        if request.method != "POST" or not request.path.startswith("/app/"):
+            return None
+        request_id = normalize_text(request.form.get("offlineRequestId"))[:100]
+        if not request_id or not getattr(g, "current_user", None) or not getattr(g, "db", None):
+            return None
+        existing = g.db.get(OfflineSubmission, request_id)
+        if existing:
+            if request.headers.get("X-OneRoot-Offline-Sync") == "1":
+                return jsonify({"ok": True, "alreadySaved": True})
+            flash("This offline entry was already saved and was not duplicated.", "info")
+            return redirect(request.referrer or url_for("dashboard"))
+        g.offline_submission_request_id = request_id
+        return None
+
+    def mark_offline_submission_saved() -> None:
+        """Allow the post-response marker only after a supported form really saves."""
+        if normalize_text(getattr(g, "offline_submission_request_id", "")):
+            g.offline_submission_saved = True
+
+    @app.after_request
+    def confirm_offline_submission(response):
+        request_id = normalize_text(getattr(g, "offline_submission_request_id", ""))
+        if not request_id or not getattr(g, "current_user", None) or not getattr(g, "db", None):
+            return response
+        if getattr(g, "offline_submission_saved", False) and response.status_code in {302, 303}:
+            g.db.add(
+                OfflineSubmission(
+                    request_id=request_id,
+                    request_path=request.path,
+                    actor_id=g.current_user.id,
+                    actor_name=g.current_user.full_name or g.current_user.username,
+                )
+            )
+            g.db.commit()
+            if request.headers.get("X-OneRoot-Offline-Sync") == "1":
+                return jsonify({"ok": True})
+        elif request.headers.get("X-OneRoot-Offline-Sync") == "1":
+            # Form validation errors normally return an HTML form with status 200.
+            # Keep the queue until a staff member can review the saved entry live.
+            validation_response = jsonify(
+                {"ok": False, "error": "OneRoot could not validate this queued entry. Review it when connected."}
+            )
+            validation_response.status_code = 400
+            return validation_response
+        return response
 
     @app.teardown_request
     def close_session(exception):
@@ -19828,6 +19930,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     sync_customer_loyalty_accounts(g.db)
                     sync_marketing_campaign_automation(g.db)
                 audit(module_key, definition.label, "update" if record_id else "create", record.title, record.id)
+                if module_key in {"customer_credit_accounts", "mobile_money_transactions", "mobile_money_reconciliations"}:
+                    mark_offline_submission_saved()
                 g.db.commit()
                 flash(f"{definition.label} saved.", "success")
                 return redirect(url_for("module_list", module_key=module_key))
@@ -20452,6 +20556,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         else f"Payment captured: {format_currency(amount_paid)} on {payment_date}."
                     ),
                 )
+                mark_offline_submission_saved()
                 g.db.commit()
                 flash("Service payment captured.", "success")
                 return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
@@ -20959,6 +21064,103 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload=payload,
             generated_on=date.today().isoformat(),
             payroll_month=record.month or parse_month(payload.get("month")),
+        )
+
+    @app.route("/app/apartments/<record_id>/payment", methods=["GET", "POST"])
+    @access_required("apartments")
+    def apartment_payment_form(record_id: str):
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != "apartments":
+            flash("That apartment record could not be found.", "error")
+            return redirect(url_for("module_list", module_key="apartments"))
+
+        payload = dict(record.payload or {})
+        profile = apartment_profile(record)
+        if request.method == "POST":
+            rent_amount = round(max(parse_amount(request.form.get("rentAmount")), 0), 2)
+            bills_amount = round(max(parse_amount(request.form.get("billsAmount")), 0), 2)
+            payment_date = normalize_text(request.form.get("paymentDate")) or date.today().isoformat()
+            payment_method = normalize_text(request.form.get("paymentMethod"))
+            payment_reference = normalize_text(request.form.get("paymentReference"))
+            received_by = normalize_text(request.form.get("receivedBy")) or g.current_user.full_name or g.current_user.username
+            notes = normalize_text(request.form.get("notes"))
+            if rent_amount + bills_amount <= 0:
+                flash("Enter the rent amount, bills amount, or both before saving.", "error")
+            elif not payment_method:
+                flash("Choose the payment method before saving.", "error")
+            else:
+                entries = payload.get("apartmentPaymentEntries") if isinstance(payload.get("apartmentPaymentEntries"), list) else []
+                if not entries:
+                    # Preserve payments already captured on the older monthly form
+                    # before adding payment-by-payment records going forward.
+                    existing_rent = apartment_total_rent_paid(payload)
+                    existing_bills = parse_amount(payload.get("billAmountPaid"))
+                    if existing_rent > 0 or existing_bills > 0:
+                        entries.append(
+                            {
+                                "id": "opening-balance",
+                                "paymentDate": normalize_text(payload.get("rentPaymentDate")) or normalize_text(payload.get("billPaymentDate")) or date.today().isoformat(),
+                                "rentAmount": existing_rent,
+                                "billsAmount": existing_bills,
+                                "paymentMethod": normalize_text(payload.get("rentPaymentMethod")) or normalize_text(payload.get("billPaymentMethod")),
+                                "paymentReference": normalize_text(payload.get("rentPaymentReference")) or normalize_text(payload.get("billPaymentReference")),
+                                "receivedBy": normalize_text(payload.get("rentReceivedBy")) or normalize_text(payload.get("billReceivedBy")),
+                                "notes": "Balance captured before payment-by-payment records were enabled.",
+                            }
+                        )
+                entries.append(
+                    {
+                        "id": uuid4().hex,
+                        "paymentDate": payment_date,
+                        "rentAmount": rent_amount,
+                        "billsAmount": bills_amount,
+                        "paymentMethod": payment_method,
+                        "paymentReference": payment_reference,
+                        "receivedBy": received_by,
+                        "notes": notes,
+                        "recordedAt": datetime.utcnow().isoformat(),
+                    }
+                )
+                payload["apartmentPaymentEntries"] = entries
+                payload["rentPaid"] = round(parse_amount(payload.get("rentPaid")) + rent_amount, 2)
+                payload["billAmountPaid"] = round(parse_amount(payload.get("billAmountPaid")) + bills_amount, 2)
+                if rent_amount > 0:
+                    payload["rentPaymentDate"] = payment_date
+                    payload["rentPaymentMethod"] = payment_method
+                    payload["rentPaymentReference"] = payment_reference
+                    payload["rentReceivedBy"] = received_by
+                if bills_amount > 0:
+                    payload["billPaymentDate"] = payment_date
+                    payload["billPaymentMethod"] = payment_method
+                    payload["billPaymentReference"] = payment_reference
+                    payload["billReceivedBy"] = received_by
+                payload["updatedAt"] = datetime.utcnow().isoformat()
+                set_module_record_metadata(record, MODULES["apartments"], payload)
+                sync_generated_sales_for_module_record(record)
+                sync_customer_crm_automation(g.db)
+                sync_customer_loyalty_accounts(g.db)
+                sync_marketing_campaign_automation(g.db)
+                audit(
+                    "apartments",
+                    "Apartments",
+                    "payment",
+                    record.title,
+                    record.id,
+                    f"Apartment collection captured: rent {format_currency(rent_amount)} and bills {format_currency(bills_amount)} on {payment_date}.",
+                )
+                mark_offline_submission_saved()
+                g.db.commit()
+                flash("Apartment payment captured.", "success")
+                return redirect(url_for("apartment_payment_form", record_id=record.id))
+            profile = apartment_profile(record)
+
+        return render_template(
+            "apartment_payment_form.html",
+            page_title=f"Apartment Payment - {profile['suite']}",
+            record=record,
+            profile=profile,
+            payment_methods=PAYMENT_METHODS,
+            today_iso=date.today().isoformat(),
         )
 
     @app.route("/app/apartments/<record_id>/receipt")
@@ -21699,6 +21901,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     matching_product.id,
                     f"Barcode stock update {action_label} {quantity_value:,.2f} ({physical_quantity:,.2f} pieces). {previous_quantity:,.2f} -> {new_quantity:,.2f}. {note_value}".strip(),
                 )
+                mark_offline_submission_saved()
                 g.db.commit()
                 flash(
                     f"{source_product.name} updated from {previous_quantity:,.2f} to {new_quantity:,.2f} pieces.",

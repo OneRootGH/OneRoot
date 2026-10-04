@@ -144,7 +144,7 @@
         {% block content %}{% endblock %}
       </main>
     </div>
-    <script src="/website/pwa.js?v=20261004a"></script>
+    <script src="/website/pwa.js?v=20261004b"></script>
     {% if current_user and 'online_orders' in current_access_keys %}
       <script src="{{ url_for('static', filename='order-alerts.js', v=static_asset_version) }}" defer></script>
     {% endif %}
