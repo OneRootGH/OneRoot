@@ -23108,8 +23108,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/audit")
     @access_required("audit")
     def audit_page():
-        audits = g.db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(250)).all()
-        return render_template("audit.html", page_title="Audit Trail", audits=audits)
+        action_filter = normalize_text(request.args.get("action"))
+        action_options = g.db.scalars(
+            select(AuditLog.action).distinct().order_by(AuditLog.action)
+        ).all()
+        query = select(AuditLog)
+        if action_filter:
+            query = query.where(AuditLog.action == action_filter)
+        audits = g.db.scalars(query.order_by(desc(AuditLog.created_at)).limit(250)).all()
+        return render_template(
+            "audit.html", page_title="Audit Trail", audits=audits,
+            action_filter=action_filter, action_options=action_options,
+        )
 
     def current_static_asset_version() -> str:
         static_dir = Path(app.static_folder or "")
