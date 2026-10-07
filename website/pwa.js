@@ -268,6 +268,10 @@
         }
       });
     });
+    const collectionToken = form.elements.namedItem("collectionRequestId");
+    if (collectionToken) {
+      collectionToken.value = Array.from(crypto.getRandomValues(new Uint8Array(16)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+    }
   }
 
   async function queueOfflineForm(form) {

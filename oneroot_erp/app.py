@@ -21675,7 +21675,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/app/apartments/<record_id>/payment", methods=["GET", "POST"])
     @access_required("apartments")
     def apartment_payment_form(record_id: str):
-        record = g.db.get(ModuleRecord, record_id)
+        record = g.db.scalar(select(ModuleRecord).where(ModuleRecord.id == record_id).with_for_update()) if request.method == "POST" else g.db.get(ModuleRecord, record_id)
         if not record or record.module_key != "apartments":
             flash("That apartment record could not be found.", "error")
             return redirect(url_for("module_list", module_key="apartments"))
@@ -21683,6 +21683,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = dict(record.payload or {})
         profile = apartment_profile(record)
         if request.method == "POST":
+            collection_request_id = normalize_text(request.form.get("collectionRequestId"))
+            existing_entries = payload.get("apartmentPaymentEntries") if isinstance(payload.get("apartmentPaymentEntries"), list) else []
+            if collection_request_id and any(isinstance(entry, dict) and entry.get("collectionRequestId") == collection_request_id for entry in existing_entries):
+                g.db.rollback()
+                flash("This collection was already saved. It has not been added again.", "success")
+                return redirect(url_for("apartment_payment_form", record_id=record.id))
             rent_amount = round(max(parse_amount(request.form.get("rentAmount")), 0), 2)
             bills_amount = round(max(parse_amount(request.form.get("billsAmount")), 0), 2)
             payment_date = normalize_text(request.form.get("paymentDate")) or date.today().isoformat()
@@ -21690,9 +21696,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_reference = normalize_text(request.form.get("paymentReference"))
             received_by = normalize_text(request.form.get("receivedBy")) or g.current_user.full_name or g.current_user.username
             notes = normalize_text(request.form.get("notes"))
-            if rent_amount + bills_amount <= 0:
+            if not math.isfinite(rent_amount + bills_amount):
+                flash("Enter valid rent and bills amounts.", "error")
+            elif not parse_date(payment_date):
+                flash("Enter a valid payment date.", "error")
+            elif collection_request_id and not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", collection_request_id):
+                flash("Reload the collection form before saving.", "error")
+            elif rent_amount + bills_amount <= 0:
                 flash("Enter the rent amount, bills amount, or both before saving.", "error")
-            elif not payment_method:
+            elif payment_method not in PAYMENT_METHODS:
                 flash("Choose the payment method before saving.", "error")
             else:
                 entries = payload.get("apartmentPaymentEntries") if isinstance(payload.get("apartmentPaymentEntries"), list) else []
@@ -21717,6 +21729,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 entries.append(
                     {
                         "id": uuid4().hex,
+                        "collectionRequestId": collection_request_id,
                         "paymentDate": payment_date,
                         "rentAmount": rent_amount,
                         "billsAmount": bills_amount,
@@ -21743,9 +21756,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["updatedAt"] = datetime.utcnow().isoformat()
                 set_module_record_metadata(record, MODULES["apartments"], payload)
                 sync_generated_sales_for_module_record(record)
-                sync_customer_crm_automation(g.db)
-                sync_customer_loyalty_accounts(g.db)
-                sync_marketing_campaign_automation(g.db)
+                # Save the receipt and linked revenue only. Whole-business CRM,
+                # loyalty and campaign rebuilds must not delay a cash collection.
                 audit(
                     "apartments",
                     "Apartments",
@@ -21767,6 +21779,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             profile=profile,
             payment_methods=PAYMENT_METHODS,
             today_iso=date.today().isoformat(),
+            collection_request_id=normalize_text(request.form.get("collectionRequestId")) or uuid4().hex,
             collector_name=g.current_user.full_name or g.current_user.username,
             payment_month_records=[row for row in g.db.scalars(select(ModuleRecord).where(
                 ModuleRecord.module_key == "apartments", ModuleRecord.reference == record.reference,
