@@ -1041,6 +1041,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
             with session_factory() as bootstrap_session:
                 created_workspace = bootstrap_database(bootstrap_session, app_config)
                 run_data_repairs = normalize_text(os.getenv("ONEROOT_RUN_STARTUP_DATA_REPAIRS")).lower() in {"1", "true", "yes", "on"}
+                sync_kitchen_menu_catalog(bootstrap_session, breakfast_only=True)
                 # Historical repair work rewrites large tables. Restrict it to a new
                 # workspace or an explicit maintenance deployment, never each restart.
                 if created_workspace or run_data_repairs:
@@ -4852,8 +4853,10 @@ def normalize_product_catalog(db_session) -> None:
         normalize_product_record(product)
 
 
-def sync_kitchen_menu_catalog(db_session) -> None:
+def sync_kitchen_menu_catalog(db_session, *, breakfast_only: bool = False) -> None:
     for seed in KITCHEN_MENU_PRODUCTS:
+        if breakfast_only and not seed.get("ownerPriced"):
+            continue
         product = db_session.get(Product, seed["id"])
         is_new = product is None
         if not product:
