@@ -1,6 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
   <section class="card-grid four">
+    <article class="metric-card warning">
+      <span>Zero / Negative Stock</span>
+      <strong>{{ zero_stock_count }}</strong>
+      <small><a href="{{ url_for('inventory', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter, stock='zero') }}">Show out-of-stock items</a></small>
+    </article>
     <article class="metric-card">
       <span>Items In View</span>
       <strong>{{ products|length }}</strong>
@@ -32,6 +37,14 @@
       <small>{{ service_count }} service item{% if service_count != 1 %}s{% endif %} in view</small>
     </article>
   </section>
+
+  <article class="card">
+    <div class="card-header"><div><p class="eyebrow">Supply &amp; Procurement</p><h3>Zero Stock - Supply the Shop or Procure?</h3><p class="helper-copy">{{ zero_stock_count }} physical stock items have no positive recorded balance. Showing up to 20, prioritised by saved sales in the last 30 days. Shared sale options use their source stock and are not separate purchases.</p></div><div class="toolbar"><a class="button subtle button-small" href="{{ url_for('inventory', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter, stock='zero') }}">View Inventory Items</a><a class="button subtle button-small" href="{{ url_for('inventory_demand_export', kind='zero-stock', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Export Full Procurement Guide</a></div></div>
+    <p class="muted">Check warehouse availability before buying. This is advice, not an automatic purchase order. No recent sales can also mean an item was unavailable; confirm customer requests before deciding not to stock it.</p>
+    <div class="table-wrap"><table><thead><tr><th>Item</th><th>Recorded Stock</th><th>Sold / 30 Days</th><th>Suggested Units</th><th>Advice</th><th></th></tr></thead><tbody>
+    {% for item in zero_stock_rows %}<tr><td><strong>{{ item.name }}</strong><small class="table-secondary">{{ item.areaLabel }} &middot; {{ item.category }}</small></td><td>{{ item.quantityDisplay }}</td><td>{{ item.unitsSold }}</td><td>{{ item.reorderUnits }}</td><td>{{ item.orderAction }}</td><td><a href="{{ url_for('inventory', edit=item.productId) }}">Update Stock</a></td></tr>{% else %}<tr><td colspan="6">No zero-stock items match your current filters.</td></tr>{% endfor %}
+    </tbody></table></div>
+  </article>
 
   <section class="split-grid inventory-demand-section">
     <article class="card">
@@ -128,6 +141,7 @@
         <div class="toolbar">
           <form method="get" class="search-row inventory-filter-row">
             <input type="search" name="q" placeholder="Search products" value="{{ search }}">
+            <select name="stock"><option value="">All Stock Balances</option><option value="zero" {% if stock_filter == 'zero' %}selected{% endif %}>Zero / Negative Stock</option></select>
             <select name="area">
               <option value="">All Areas</option>
               {% for value, label in business_area_options %}

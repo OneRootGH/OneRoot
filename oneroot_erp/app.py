@@ -3045,7 +3045,8 @@ def build_inventory_demand_rows(
         average_daily_units = round(units_sold / period_days, 3)
         last_sale_date = product_stats["lastSaleDate"]
         days_since_sale = (today_key - last_sale_date).days if last_sale_date else None
-        quantity_on_hand = max(parse_amount(product.quantity_on_hand), 0.0)
+        recorded_quantity = parse_amount(product.quantity_on_hand)
+        quantity_on_hand = max(recorded_quantity, 0.0)
         minimum_stock = max(product_min_stock_level(product), 0)
         days_cover = round(quantity_on_hand / average_daily_units, 1) if average_daily_units > 0 else None
         target_stock = max(minimum_stock, int(average_daily_units * 14 + 0.9999)) if average_daily_units > 0 else minimum_stock
@@ -3085,6 +3086,19 @@ def build_inventory_demand_rows(
         else:
             order_action = "Keep monitoring this item."
 
+        if recorded_quantity <= 0:
+            if not product.quantity_known:
+                order_action = "Count the stock first. The recorded balance is not confirmed; do not procure from this number alone."
+            elif recorded_quantity < 0:
+                order_action = "Reconcile the negative balance against a physical count first. " + (
+                    f"Recent sales support replenishment of about {max(target_stock, 1)} units after checking warehouse stock."
+                    if units_sold > 0 else "No recent sales support an automatic purchase; check customer demand."
+                )
+            elif units_sold > 0:
+                order_action = f"Check the warehouse first; supply the shop if stock is available. Otherwise procure about {max(target_stock, 1)} fresh units based on 30-day sales and 14-day cover."
+            else:
+                order_action = "No recent sales recorded. Check warehouse stock and customer requests; use a small trial quantity only if demand is confirmed. Do not procure automatically."
+
         rows.append(
             {
                 "productId": product.id,
@@ -3099,10 +3113,10 @@ def build_inventory_demand_rows(
                 "orderCount": len(product_stats["orderIds"]),
                 "lastSaleDate": last_sale_date.isoformat() if last_sale_date else "",
                 "daysSinceSale": days_since_sale,
-                "quantityOnHand": round(quantity_on_hand, 2),
+                "quantityOnHand": round(recorded_quantity, 2),
                 "quantityDisplay": format_product_stock_badge(product),
                 "daysCover": days_cover,
-                "reorderUnits": reorder_units,
+                "reorderUnits": reorder_units if units_sold > 0 and product.quantity_known else 0,
                 "movement": movement,
                 "movementTone": movement_tone,
                 "movementRank": movement_rank,
@@ -22237,7 +22251,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         category_filter = normalize_text(request.args.get("category"))
         expiry_filter = normalize_text(request.args.get("expiry")).lower()
         location_filter = normalize_text(request.args.get("location"))
+        stock_filter = normalize_text(request.args.get("stock"))
         query = select(Product)
+        if stock_filter == "zero":
+            query = query.where(Product.active.is_(True), Product.track_inventory.is_(True), Product.quantity_on_hand <= 0)
         if area_filter:
             query = query.where(Product.business_area_id == area_filter)
         if category_filter:
@@ -22309,6 +22326,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             and (not expiry_filter or product_matches_expiry_filter(item, expiry_filter))
         ]
         demand_rows = build_inventory_demand_rows(g.db, demand_products)
+        zero_stock_rows = [item for item in demand_rows if item["quantityOnHand"] <= 0]
+        zero_stock_rows.sort(key=lambda item: (-item["unitsSold"], item["name"]))
         demand_fast_rows = [
             item for item in demand_rows if item["movement"] in {"Fast Moving", "Steady Moving"}
         ]
@@ -22326,6 +22345,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "inventory.html",
             page_title="Inventory",
             products=products,
+            stock_filter=stock_filter,
+            zero_stock_rows=zero_stock_rows[:20],
+            zero_stock_count=len(zero_stock_rows),
             editing_product=editing_product,
             duplicate_source_name=duplicate_source_name,
             business_area_options=BUSINESS_AREA_OPTIONS,
@@ -22647,7 +22669,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             and (not expiry_filter or product_matches_expiry_filter(item, expiry_filter))
         ]
         demand_rows = build_inventory_demand_rows(g.db, demand_products)
-        if export_kind == "best-sellers":
+        if export_kind == "zero-stock":
+            selected_rows = [item for item in demand_rows if item["quantityOnHand"] <= 0]
+            selected_rows.sort(key=lambda item: (-item["unitsSold"], item["name"]))
+            filename = f"oneroot-zero-stock-procurement-guide-{date.today().isoformat()}.csv"
+        elif export_kind == "best-sellers":
             selected_rows = [
                 item for item in demand_rows if item["movement"] in {"Fast Moving", "Steady Moving"}
             ]
