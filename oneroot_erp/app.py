@@ -6,6 +6,7 @@ import csv
 import hashlib
 import html
 import json
+import math
 import os
 import re
 import time
@@ -7652,8 +7653,30 @@ def sync_customer_loyalty_accounts(db_session) -> None:
         set_module_record_metadata(record, MODULES["customer_loyalty"], payload)
 
 
+def handover_skipped_fields(shift: Any) -> set[str]:
+    shift = normalize_text(shift)
+    petty_fields = {prefix + suffix for prefix in ("groceries", "food")
+                    for suffix in ("PettyCashAllocated", "PettyCashSpent", "PettyCashRemaining")}
+    if shift in {"Night", "Evening"}:
+        return petty_fields
+    if shift == "Day Start":
+        return {
+            "shiftStartTime", "shiftEndTime", "groceriesCashTotal", "groceriesMomoTotal",
+            "foodCashTotal", "foodMomoTotal", "momoHandledTotal", "momoCommissionTotal",
+            "cashExpected", "cashCounted", "cashVariance", "allDailySales", "openOrders", "stockChecked",
+            "groceriesPettyCashSpent", "foodPettyCashSpent", "groceriesPettyCashRemaining", "foodPettyCashRemaining",
+        }
+    return set()
+
+
 def daily_handover_rollup(db_session, payload: dict[str, Any]) -> None:
+    for name in handover_skipped_fields(payload.get("shift")):
+        payload.pop(name, None)
     handover_date = parse_date(payload.get("handoverDate")) or date.today()
+    if normalize_text(payload.get("shift")) == "Day Start":
+        payload["handoverDate"] = handover_date.isoformat()
+        payload["allDailySales"] = 0.0
+        return
     sales_records = db_session.scalars(
         select(ModuleRecord).where(ModuleRecord.module_key == "sales", ModuleRecord.record_date == handover_date)
     ).all()
@@ -7714,6 +7737,8 @@ def daily_handover_rollup(db_session, payload: dict[str, Any]) -> None:
         for record in open_service_records
         if normalize_text(record.status).lower() not in {"completed", "delivered", "cancelled", "returned"}
     )
+    for name in handover_skipped_fields(payload.get("shift")):
+        payload.pop(name, None)
 
 
 def business_area_scorecard_rollup(db_session, payload: dict[str, Any]) -> None:
@@ -18410,6 +18435,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
             analytics=business_analytics_context(g.db, month_filter),
         )
 
+    @app.route("/app/api/handovers/preview")
+    @access_required("daily_handovers", api=True)
+    def handover_preview():
+        payload = {field.name: request.args.get(field.name, "") for field in MODULES["daily_handovers"].fields}
+        try:
+            daily_handover_rollup(g.db, payload)
+        except ValueError:
+            return jsonify(ok=False, error="Use valid shift times, for example 08:00 and 18:00."), 400
+        return jsonify(ok=True, totals={key: payload.get(key, 0) for key in [
+            "groceriesCashTotal", "groceriesMomoTotal", "foodCashTotal", "foodMomoTotal",
+            "groceriesPettyCashRemaining", "foodPettyCashRemaining", "momoHandledTotal",
+            "momoCommissionTotal", "allDailySales", "cashExpected", "cashVariance", "openOrders",
+        ]})
+
     @app.route("/app/reports")
     @access_required("reports")
     def reports_page():
@@ -20242,6 +20281,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             form_errors = mobile_money_form_errors(module_key, payload)
             if module_key == "daily_handovers" and payload.get("handoverTimeError"):
                 form_errors.append(payload.pop("handoverTimeError"))
+            if module_key == "daily_handovers":
+                allowed_shifts = {value for value, _ in next(field for field in definition.fields if field.name == "shift").options}
+                if payload.get("shift") not in allowed_shifts:
+                    form_errors.append("Choose Day Start, Day Handover or Night Handover.")
+                for name, label in [("handedOverBy", "staff name"), ("momoPhysicalCashCounted", "MoMo physical cash"), ("momoECashCounted", "MoMo e-cash")]:
+                    if not normalize_text(request.form.get(name)):
+                        form_errors.append(f"Enter the {label}.")
+                if payload.get("shift") != "Day Start" and not normalize_text(request.form.get("cashCounted")):
+                    form_errors.append("Enter the counted POS cash, including 0 when there is none.")
             if module_key == "mobile_money_transactions":
                 matching_reference = normalize_text(payload.get("reference"))
                 existing_reference_record = g.db.scalar(
@@ -20368,13 +20416,26 @@ def create_app(config: AppConfig | None = None) -> Flask:
             customer_loyalty_rollup(record_payload)
         elif module_key == "daily_handovers":
             record_payload.setdefault("handoverDate", date.today().isoformat())
-            record_payload.setdefault("shift", "Full Day")
+            record_payload.setdefault("shift", "Day" if datetime.utcnow().hour < 18 else "Night")
+            record_payload.setdefault("handedOverBy", g.current_user.full_name or g.current_user.username)
+            record_payload.setdefault("status", "Draft")
+            if not record and request.method == "GET":
+                previous = g.db.scalar(select(ModuleRecord).where(
+                    ModuleRecord.module_key == "daily_handovers",
+                    ModuleRecord.record_date == parse_date(record_payload.get("handoverDate")),
+                    ModuleRecord.status.in_(["Submitted", "Accepted"]),
+                ).order_by(desc(ModuleRecord.created_at)).limit(1))
+                if previous:
+                    for prefix in ("groceries", "food"):
+                        for suffix in ("PettyCashAllocated", "PettyCashSpent"):
+                            record_payload.setdefault(prefix + suffix, (previous.payload or {}).get(prefix + suffix, 0))
+            if request.method == "GET":
+                daily_handover_rollup(g.db, record_payload)
         elif module_key == "loss_prevention_controls":
             record_payload.setdefault("controlDate", date.today().isoformat())
             record_payload.setdefault("status", "Open Review")
             record_payload.setdefault("reviewedBy", g.current_user.full_name or g.current_user.username)
             record_payload.setdefault("status", "Draft")
-            daily_handover_rollup(g.db, record_payload)
         elif module_key == "business_area_scorecards":
             record_payload.setdefault("month", date.today().strftime("%Y-%m"))
             record_payload.setdefault("businessAreaId", "cold-store-groceries")
@@ -20452,6 +20513,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if query_value is None:
                     continue
                 record_payload[field.name] = parse_field_value(field, query_value)
+        if module_key == "daily_handovers":
+            return render_template("handover_form.html", page_title="Shift Handover", definition=definition, record=record, payload=record_payload,
+                                   skipped_fields=handover_skipped_fields(record_payload.get("shift")))
         if module_key == "apartments":
             record_payload.setdefault("businessAreaId", "rentals-apartments")
             field_map = {field.name: field for field in definition.fields}
@@ -21447,6 +21511,98 @@ def create_app(config: AppConfig | None = None) -> Flask:
             generated_on=date.today().isoformat(),
             payroll_month=record.month or parse_month(payload.get("month")),
         )
+
+    @app.route("/app/apartments/<record_id>/correct", methods=["GET", "POST"])
+    @access_required("apartments")
+    def apartment_correction(record_id: str):
+        reference = g.db.get(ModuleRecord, record_id)
+        if not reference or reference.module_key != "apartments":
+            return redirect(url_for("module_list", module_key="apartments"))
+        source = apartment_record_payload(reference)
+        history = g.db.scalars(select(ModuleRecord).where(
+            ModuleRecord.module_key == "apartments", ModuleRecord.reference == reference.reference,
+        ).order_by(desc(ModuleRecord.month))).all()
+        tenant_identity = apartment_tenant_identity(source)
+        history = [row for row in history if tenant_identity and apartment_tenant_identity(apartment_record_payload(row)) == tenant_identity]
+        allowed = {row.id: row for row in history}
+        allowed[reference.id] = reference
+        target_id = request.form.get("targetId") if request.method == "POST" else request.args.get("targetId", record_id)
+        target = allowed.get(target_id)
+        if not target:
+            flash("Choose an existing month for this tenant.", "error")
+            return redirect(url_for("apartment_correction", record_id=record_id))
+        fields = [(field.name, field.label) for field in MODULES["apartments"].fields if field.name in {
+            "rentDue", "bedRentDue", "mattressRentDue", "waterBill", "toiletBill", "sweepingBill", "wasteBill",
+            "customChargeAmount", "customChargeTwoAmount",
+        }]
+        payload = dict(target.payload or {})
+        entries = [dict(entry) for entry in payload.get("apartmentPaymentEntries", []) if isinstance(entry, dict)]
+        if request.method == "POST":
+            reason = normalize_text(request.form.get("reason"))
+            kind = request.form.get("correctionType")
+            before = {}
+            changes = {}
+            try:
+                if not reason or len(reason) > 1000:
+                    raise ValueError("Enter a correction reason, up to 1,000 characters.")
+                # Reject stale forms before changing financial data.
+                locked = g.db.scalar(select(ModuleRecord).where(ModuleRecord.id == target.id).with_for_update().execution_options(populate_existing=True))
+                if locked.updated_at.isoformat() != request.form.get("version"):
+                    raise ValueError("This month changed since you opened it. Reload and check the amounts again.")
+                payload = dict(locked.payload or {})
+                def amount(name):
+                    try:
+                        value = float(request.form.get(name, ""))
+                    except (ValueError, TypeError):
+                        raise ValueError("Enter a valid amount for each correction field, including 0 where appropriate.")
+                    if not math.isfinite(value) or value < 0:
+                        raise ValueError("Correction amounts must be zero or greater.")
+                    return round(value, 2)
+                if kind == "charges":
+                    for key, _ in fields:
+                        before[key] = parse_amount(payload.get(key))
+                        changes[key] = amount(key)
+                    payload.update(changes)
+                elif kind == "payment":
+                    if entries:
+                        entry = next((entry for entry in entries if entry.get("id") == request.form.get("paymentId")), None)
+                        if not entry:
+                            raise ValueError("Choose the payment you want to correct.")
+                        for entry_key, total_key in (("rentAmount", "rentPaid"), ("billsAmount", "billAmountPaid")):
+                            before[entry_key] = parse_amount(entry.get(entry_key))
+                            changes[entry_key] = amount(entry_key)
+                            total = round(parse_amount(payload.get(total_key)) + changes[entry_key] - before[entry_key], 2)
+                            if total < 0:
+                                raise ValueError("This payment is inconsistent with the saved total. Review the full record before correcting it.")
+                            payload[total_key] = total
+                            entry[entry_key] = changes[entry_key]
+                        payload["apartmentPaymentEntries"] = entries
+                    else:
+                        for key in ("rentPaid", "billAmountPaid"):
+                            before[key] = parse_amount(payload.get(key))
+                            changes[key] = amount(key)
+                            payload[key] = changes[key]
+                else:
+                    raise ValueError("Choose Charges or Payment.")
+                if before == changes:
+                    raise ValueError("No amounts have changed.")
+                payload["updatedAt"] = datetime.utcnow().isoformat()
+                set_module_record_metadata(locked, MODULES["apartments"], payload)
+                sync_generated_sales_for_module_record(locked)
+                audit("apartments", "Apartments", "correction", locked.title, locked.id,
+                      json.dumps({"reason": reason, "month": locked.month, "type": kind,
+                                  "paymentId": request.form.get("paymentId") if kind == "payment" else None,
+                                  "before": before, "after": changes}, ensure_ascii=True))
+                g.db.commit()
+                flash("Correction saved. Balances, statements and the tenant portal use the corrected amounts.", "success")
+                return redirect(url_for("apartment_correction", record_id=record_id, targetId=target.id))
+            except ValueError as error:
+                g.db.rollback()
+                flash(str(error), "error")
+                payload = dict(target.payload or {})
+        return render_template("apartment_correction.html", page_title="Correct Rent / Bills",
+                               reference=reference, target=target, history=list(allowed.values()), payload=payload,
+                               profile=apartment_profile(target), fields=fields, entries=entries)
 
     @app.route("/app/apartments/<record_id>/payment", methods=["GET", "POST"])
     @access_required("apartments")

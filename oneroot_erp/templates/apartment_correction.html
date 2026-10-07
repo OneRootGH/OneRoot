@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+{% block content %}
+<article class="card">
+  <div class="card-header"><div><p class="eyebrow">Apartments</p><h3>Correct Rent / Bills</h3><p>{{ profile.suite }} &middot; {{ profile.tenant }}</p></div><a class="button subtle" href="{{ url_for('module_list', module_key='apartments') }}">Back to Apartments</a></div>
+  <form method="get" class="form-grid">
+    <label><span>Tenant Month</span><select name="targetId">{% for row in history %}<option value="{{ row.id }}" {% if row.id == target.id %}selected{% endif %}>{{ row.month or 'No month' }} &middot; {{ row.title }}</option>{% endfor %}</select></label>
+    <button class="button subtle" type="submit">Open Month</button>
+  </form>
+  <p class="muted">Correct an existing charge or recorded payment. To collect new money, use <a href="{{ url_for('apartment_payment_form', record_id=target.id) }}">Record Payment</a>. Corrections do not create an extra payment.</p>
+  <form method="post" id="apartment-correction" class="form-grid">
+    <input type="hidden" name="targetId" value="{{ target.id }}">
+    <input type="hidden" name="version" value="{{ target.updated_at.isoformat() }}">
+    <label class="span-2"><span>What Needs Correction?</span><select name="correctionType"><option value="charges">Rent / Bill Charges</option><option value="payment">A Recorded Payment</option></select></label>
+    <section class="span-2" id="correction-charges"><div class="form-grid">
+      {% for key, label in fields %}<label><span>{{ label }}{% if key == 'customChargeAmount' %} &middot; {{ payload.get('customChargeLabel', '') }}{% elif key == 'customChargeTwoAmount' %} &middot; {{ payload.get('customChargeTwoLabel', '') }}{% endif %}</span><input type="number" step="0.01" min="0" name="{{ key }}" value="{{ payload.get(key) or 0 }}" required></label>{% endfor %}
+    </div></section>
+    <section class="span-2" id="correction-payment" hidden><div class="form-grid">
+      {% if entries %}
+      <label class="span-2"><span>Payment to Correct</span><select name="paymentId">{% for entry in entries %}<option value="{{ entry.id }}">{{ entry.paymentDate }} &middot; Rent {{ entry.rentAmount|currency }} &middot; Bills {{ entry.billsAmount|currency }} &middot; {{ entry.paymentReference or entry.paymentMethod }}</option>{% endfor %}</select></label>
+      <label><span>Correct Rent Payment Amount</span><input type="number" name="rentAmount" min="0" step="0.01" required></label>
+      <label><span>Correct Bills Payment Amount</span><input type="number" name="billsAmount" min="0" step="0.01" required></label>
+      {% else %}
+      <p class="muted span-2">This month has older payment totals, not individual payment entries. Correct the saved totals below.</p>
+      <label><span>Correct Rent Paid Total (excluding Bed / Mattress)</span><input type="number" name="rentPaid" value="{{ payload.get('rentPaid') or 0 }}" min="0" step="0.01" required></label>
+      <label><span>Correct Bills Paid Total</span><input type="number" name="billAmountPaid" value="{{ payload.get('billAmountPaid') or 0 }}" min="0" step="0.01" required></label>
+      {% endif %}
+    </div></section>
+    <label class="span-2"><span>Reason for Correction</span><textarea name="reason" maxlength="1000" rows="2" required placeholder="Explain what was wrong and why this is the correct amount."></textarea></label>
+    <button class="button primary" type="submit">Save Correction</button>
+  </form>
+</article>
+<style>#apartment-correction [hidden] { display: none !important; }</style>
+<script>
+(() => {
+  const form = document.getElementById('apartment-correction');
+  const entries = {{ entries|tojson }};
+  function selectPayment() {
+    if (!form.elements.paymentId) return;
+    const entry = entries.find(item => item.id === form.elements.paymentId.value);
+    if (entry) { form.elements.rentAmount.value = entry.rentAmount || 0; form.elements.billsAmount.value = entry.billsAmount || 0; }
+  }
+  function applyLogic() {
+    const payment = form.elements.correctionType.value === 'payment';
+    for (const [id, show] of [['correction-charges', !payment], ['correction-payment', payment]]) {
+      const section = document.getElementById(id); section.hidden = !show;
+      for (const input of section.querySelectorAll('input,select')) input.disabled = !show;
+    }
+  }
+  form.elements.correctionType.addEventListener('change', applyLogic);
+  if (form.elements.paymentId) form.elements.paymentId.addEventListener('change', selectPayment);
+  selectPayment(); applyLogic();
+})();
+</script>
+{% endblock %}
