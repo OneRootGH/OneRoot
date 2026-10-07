@@ -13378,12 +13378,13 @@ def build_sidebar(user: User | None = None):
         daily_work_sections = [
             ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
-            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance"]),
+            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance", "daily_handovers"]),
         ]
         menu_groups = [("Daily Work", daily_work_sections)] + [
             (group_label, [
                 section for section in sections
                 if not (group_label == "Operations" and section[0] == "Service Desk")
+                and not (group_label == "Operations" and section[0] == "Shift & Counter Handover")
                 and not (group_label == "People" and section[0] == "Payroll, Schedules & Training")
             ])
             for group_label, sections in MENU_GROUPS

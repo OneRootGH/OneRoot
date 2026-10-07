@@ -2044,7 +2044,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "daily_handovers": ModuleDefinition(
         key="daily_handovers",
-        label="Daily Handover & Shift Checklist",
+        label="Shift Handovers",
         legacy_collection="dailyHandovers",
         menu_group="Admin",
         amount_field="allDailySales",
@@ -2435,6 +2435,7 @@ MENU_GROUPS = [
     (
         "Operations",
         [
+            ("Shift & Counter Handover", ["daily_handovers"]),
             ("Property & Work Orders", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records", "maintenance_records"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
         ],
