@@ -257,7 +257,7 @@
                 </td>
                 <td>
                   <div class="row-actions">
-                    <a class="table-link" href="{{ url_for('apartment_correction', record_id=item.id) }}">Correct Rent / Bills</a>
+                    <a class="table-link" href="{{ url_for('apartment_payment_form', record_id=item.id) }}">Collect Rent / Bills</a>
                     <a class="table-link" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Open</a>
                     <a class="table-link" href="{{ url_for('apartment_statement', record_id=item.id) }}" target="_blank" rel="noopener">Statement</a>
                     <a class="table-link" href="{{ url_for('apartment_agreement', record_id=item.id) }}" target="_blank" rel="noopener">Agreement</a>
@@ -392,7 +392,7 @@
                   <a class="table-link" href="{{ url_for('apartment_statement', record_id=item.id) }}" target="_blank" rel="noopener">Statement</a>
                   <a class="table-link" href="{{ url_for('apartment_bill_notice', record_id=item.id) }}" target="_blank" rel="noopener">Bill Notice</a>
                   <a class="table-link" href="{{ url_for('apartment_agreement', record_id=item.id) }}" target="_blank" rel="noopener">Agreement</a>
-                  <a class="table-link" href="{{ url_for('apartment_correction', record_id=item.id) }}">Correct Rent / Bills</a>
+                  <a class="table-link" href="{{ url_for('apartment_payment_form', record_id=item.id) }}">Collect Rent / Bills</a>
                   <a class="table-link" href="{{ url_for('module_form', module_key='apartments', record_id=item.id) }}">Edit</a>
                   <form method="post" action="{{ url_for('module_delete', module_key='apartments', record_id=item.id) }}" onsubmit="return confirm('Delete this apartment record?');">
                     <input type="hidden" name="q" value="{{ search }}">

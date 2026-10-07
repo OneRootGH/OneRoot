@@ -2053,7 +2053,10 @@ MODULES: dict[str, ModuleDefinition] = {
         status_field="status",
         fields=[
             FieldDefinition("handoverDate", "Handover Date", "date", True),
-            FieldDefinition("shift", "Shift", "select", True, [("Day Start", "Day Shift Start Cash"), ("Day", "Day Shift Handover"), ("Night", "Night Shift Handover"), ("Morning", "Morning (Earlier Records)"), ("Evening", "Evening (Earlier Records)"), ("Full Day", "Full Day")]),
+            FieldDefinition("entryType", "Record Type", "select", True, [("Morning Opening", "Morning Opening"), ("Shift Handover", "Shift Handover")]),
+            FieldDefinition("shift", "Shift", "select", True, [("Day", "Day Shift"), ("Night", "Night Shift")]),
+            FieldDefinition("pettyCashSource", "Petty Cash Comes From", "select", False, [("Separate Funds", "Separate Funds"), ("POS Cash", "Opening POS Cash")]),
+            FieldDefinition("openingPOSAfterPetty", "POS Opening Cash After Petty Cash (Automatic)", "number"),
             FieldDefinition("shiftStartTime", "Shift Start Time (24-hour HH:MM)", "text"),
             FieldDefinition("shiftEndTime", "Shift End Time (24-hour HH:MM)", "text"),
             FieldDefinition("handedOverBy", "Handed Over By", "text", True),
@@ -2435,7 +2438,7 @@ MENU_GROUPS = [
     (
         "Operations",
         [
-            ("Shift & Counter Handover", ["daily_handovers"]),
+            ("Shift & Counter Handover", ["morning_opening", "daily_handovers"]),
             ("Property & Work Orders", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records", "maintenance_records"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
         ],

@@ -6373,6 +6373,7 @@ def cashbook_entry_preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 SIDEBAR_LINK_LABELS = {
+    "morning_opening": ("Morning Opening", "morning_opening", None),
     "dashboard": ("Dashboard", "dashboard", None),
     "owner_briefing": ("Owner Daily Briefing", "owner_daily_briefing", None),
     "analytics": ("Business Analytics", "analytics_page", None),
@@ -7658,22 +7659,58 @@ def handover_skipped_fields(shift: Any) -> set[str]:
     petty_fields = {prefix + suffix for prefix in ("groceries", "food")
                     for suffix in ("PettyCashAllocated", "PettyCashSpent", "PettyCashRemaining")}
     if shift in {"Night", "Evening"}:
-        return petty_fields
+        return petty_fields | {"pettyCashSource", "openingPOSAfterPetty"}
     if shift == "Day Start":
         return {
-            "shiftStartTime", "shiftEndTime", "groceriesCashTotal", "groceriesMomoTotal",
+            "shift", "shiftStartTime", "shiftEndTime", "groceriesCashTotal", "groceriesMomoTotal",
             "foodCashTotal", "foodMomoTotal", "momoHandledTotal", "momoCommissionTotal",
-            "cashExpected", "cashCounted", "cashVariance", "allDailySales", "openOrders", "stockChecked",
+            "cashExpected", "cashVariance", "allDailySales", "openOrders", "stockChecked",
             "groceriesPettyCashSpent", "foodPettyCashSpent", "groceriesPettyCashRemaining", "foodPettyCashRemaining",
         }
-    return set()
+    return {"pettyCashSource", "openingPOSAfterPetty"}
+
+
+def handover_is_opening(payload: dict[str, Any]) -> bool:
+    return payload.get("entryType") == "Morning Opening" or payload.get("shift") == "Day Start"
+
+
+def handover_source_record(db_session, payload: dict[str, Any]) -> ModuleRecord | None:
+    opening = handover_is_opening(payload)
+    target_date = parse_date(payload.get("handoverDate")) or date.today()
+    source_date = target_date - timedelta(days=1) if opening else target_date
+    rows = db_session.scalars(select(ModuleRecord).where(
+        ModuleRecord.module_key == "daily_handovers", ModuleRecord.record_date == source_date,
+        ModuleRecord.status == "Accepted",
+    ).order_by(desc(ModuleRecord.updated_at))).all()
+    for row in rows:
+        if row.id == payload.get("id"):
+            continue
+        candidate = row.payload or {}
+        if opening and candidate.get("shift") in {"Night", "Evening"}:
+            return row
+        if not opening and payload.get("shift") == "Night" and candidate.get("shift") in {"Day", "Morning"} and not handover_is_opening(candidate):
+            return row
+        if not opening and payload.get("shift") != "Night" and handover_is_opening(candidate):
+            return row
+    return None
 
 
 def daily_handover_rollup(db_session, payload: dict[str, Any]) -> None:
-    for name in handover_skipped_fields(payload.get("shift")):
+    opening = handover_is_opening(payload)
+    effective_shift = "Day Start" if opening else payload.get("shift")
+    for name in handover_skipped_fields(effective_shift):
         payload.pop(name, None)
+    payload["entryType"] = "Morning Opening" if opening else "Shift Handover"
+    if opening:
+        payload["shift"] = "Day"
+    source = handover_source_record(db_session, payload)
+    source_payload = (source.payload or {}) if source else {}
+    payload["sourceHandoverId"] = source.id if source else ""
     handover_date = parse_date(payload.get("handoverDate")) or date.today()
-    if normalize_text(payload.get("shift")) == "Day Start":
+    if opening:
+        allocated = sum(max(parse_amount(payload.get(prefix + "PettyCashAllocated")), 0) for prefix in ("groceries", "food"))
+        funded_from_pos = payload.get("pettyCashSource") == "POS Cash"
+        payload["openingPOSAfterPetty"] = round(parse_amount(payload.get("cashCounted")) - (allocated if funded_from_pos else 0), 2)
         payload["handoverDate"] = handover_date.isoformat()
         payload["allDailySales"] = 0.0
         return
@@ -7715,7 +7752,8 @@ def daily_handover_rollup(db_session, payload: dict[str, Any]) -> None:
     completed_momo = [record for record in momo_records if mobile_money_transaction_is_completed(record.payload or {})]
     payload["momoHandledTotal"] = round(sum(parse_amount((record.payload or {}).get("transactionValue")) for record in completed_momo), 2)
     payload["momoCommissionTotal"] = round(sum(parse_amount((record.payload or {}).get("salesAmount")) for record in completed_momo), 2)
-    payload["cashExpected"] = round(
+    carried_cash = parse_amount(source_payload.get("openingPOSAfterPetty")) if source and handover_is_opening(source_payload) else parse_amount(source_payload.get("cashCounted"))
+    payload["cashExpected"] = round(carried_cash +
         sum(
             parse_amount(order.total_amount)
             for order in pos_orders
@@ -13403,7 +13441,7 @@ def build_sidebar(user: User | None = None):
         daily_work_sections = [
             ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
-            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance", "daily_handovers"]),
+            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance", "morning_opening", "daily_handovers"]),
         ]
         menu_groups = [("Daily Work", daily_work_sections)] + [
             (group_label, [
@@ -13426,6 +13464,7 @@ def build_sidebar(user: User | None = None):
                     continue
                 access_key = (
                     "inventory" if key == "warehouse"
+                    else "daily_handovers" if key == "morning_opening"
                     else "pos" if key == "food_pos"
                     else "reports" if key == "analytics"
                     else key
@@ -18435,6 +18474,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             analytics=business_analytics_context(g.db, month_filter),
         )
 
+    @app.route("/app/morning-opening")
+    @access_required("daily_handovers")
+    def morning_opening():
+        return redirect(url_for("module_form", module_key="daily_handovers", entryType="Morning Opening"))
+
     @app.route("/app/api/handovers/preview")
     @access_required("daily_handovers", api=True)
     def handover_preview():
@@ -18443,10 +18487,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             daily_handover_rollup(g.db, payload)
         except ValueError:
             return jsonify(ok=False, error="Use valid shift times, for example 08:00 and 18:00."), 400
-        return jsonify(ok=True, totals={key: payload.get(key, 0) for key in [
+        source = handover_source_record(g.db, payload)
+        source_payload = source.payload or {} if source else {}
+        return jsonify(ok=True, source={"found": bool(source), "date": source.month or source.record_date.isoformat() if source and source.record_date else "",
+                       "cash": parse_amount(source_payload.get("cashCounted")), "physical": parse_amount(source_payload.get("momoPhysicalCashCounted")),
+                       "ecash": parse_amount(source_payload.get("momoECashCounted"))}, totals={key: payload.get(key, 0) for key in [
             "groceriesCashTotal", "groceriesMomoTotal", "foodCashTotal", "foodMomoTotal",
             "groceriesPettyCashRemaining", "foodPettyCashRemaining", "momoHandledTotal",
-            "momoCommissionTotal", "allDailySales", "cashExpected", "cashVariance", "openOrders",
+            "momoCommissionTotal", "allDailySales", "cashExpected", "cashVariance", "openOrders", "openingPOSAfterPetty",
         ]})
 
     @app.route("/app/reports")
@@ -20282,14 +20330,31 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if module_key == "daily_handovers" and payload.get("handoverTimeError"):
                 form_errors.append(payload.pop("handoverTimeError"))
             if module_key == "daily_handovers":
+                if payload.get("entryType") not in {"Morning Opening", "Shift Handover"}:
+                    form_errors.append("Choose Morning Opening or Shift Handover.")
                 allowed_shifts = {value for value, _ in next(field for field in definition.fields if field.name == "shift").options}
                 if payload.get("shift") not in allowed_shifts:
                     form_errors.append("Choose Day Start, Day Handover or Night Handover.")
                 for name, label in [("handedOverBy", "staff name"), ("momoPhysicalCashCounted", "MoMo physical cash"), ("momoECashCounted", "MoMo e-cash")]:
                     if not normalize_text(request.form.get(name)):
                         form_errors.append(f"Enter the {label}.")
-                if payload.get("shift") != "Day Start" and not normalize_text(request.form.get("cashCounted")):
-                    form_errors.append("Enter the counted POS cash, including 0 when there is none.")
+                if not normalize_text(request.form.get("cashCounted")):
+                    form_errors.append("Enter the actual POS cash received or counted, including 0 when there is none.")
+                if handover_is_opening(payload):
+                    if payload.get("pettyCashSource") not in {"Separate Funds", "POS Cash"}:
+                        form_errors.append("Choose where the morning petty cash comes from.")
+                    if payload.get("openingPOSAfterPetty", 0) < 0:
+                        form_errors.append("Petty cash cannot exceed the opening POS cash when funded from POS.")
+                    source = handover_source_record(g.db, payload)
+                    if payload.get("status") in {"Submitted", "Accepted"}:
+                        has_difference = not source or any(abs(parse_amount(payload.get(key)) - parse_amount((source.payload or {}).get(key))) >= 0.01
+                            for key in ("cashCounted", "momoPhysicalCashCounted", "momoECashCounted"))
+                        if has_difference and not normalize_text(payload.get("issues")):
+                            form_errors.append("Explain the missing confirmed night handover or the difference in opening amounts under Issues / Exceptions.")
+                for name in ("cashCounted", "momoPhysicalCashCounted", "momoECashCounted", "groceriesPettyCashAllocated", "foodPettyCashAllocated", "groceriesPettyCashSpent", "foodPettyCashSpent"):
+                    value = parse_amount(payload.get(name))
+                    if not math.isfinite(value) or value < 0:
+                        form_errors.append("Counted cash, e-cash and petty cash amounts must be zero or greater.")
             if module_key == "mobile_money_transactions":
                 matching_reference = normalize_text(payload.get("reference"))
                 existing_reference_record = g.db.scalar(
@@ -20415,16 +20480,18 @@ def create_app(config: AppConfig | None = None) -> Flask:
             record_payload.setdefault("rewardThreshold", 100)
             customer_loyalty_rollup(record_payload)
         elif module_key == "daily_handovers":
+            record_payload.setdefault("entryType", request.args.get("entryType") or ("Morning Opening" if record_payload.get("shift") == "Day Start" else "Shift Handover"))
+            if record_payload.get("shift") in {"Morning", "Day Start", "Full Day"}:
+                record_payload["shift"] = "Day"
+            elif record_payload.get("shift") == "Evening":
+                record_payload["shift"] = "Night"
             record_payload.setdefault("handoverDate", date.today().isoformat())
             record_payload.setdefault("shift", "Day" if datetime.utcnow().hour < 18 else "Night")
             record_payload.setdefault("handedOverBy", g.current_user.full_name or g.current_user.username)
             record_payload.setdefault("status", "Draft")
-            if not record and request.method == "GET":
-                previous = g.db.scalar(select(ModuleRecord).where(
-                    ModuleRecord.module_key == "daily_handovers",
-                    ModuleRecord.record_date == parse_date(record_payload.get("handoverDate")),
-                    ModuleRecord.status.in_(["Submitted", "Accepted"]),
-                ).order_by(desc(ModuleRecord.created_at)).limit(1))
+            record_payload.setdefault("pettyCashSource", "Separate Funds")
+            if not record and request.method == "GET" and not handover_is_opening(record_payload):
+                previous = handover_source_record(g.db, record_payload)
                 if previous:
                     for prefix in ("groceries", "food"):
                         for suffix in ("PettyCashAllocated", "PettyCashSpent"):
@@ -20515,7 +20582,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 record_payload[field.name] = parse_field_value(field, query_value)
         if module_key == "daily_handovers":
             return render_template("handover_form.html", page_title="Shift Handover", definition=definition, record=record, payload=record_payload,
-                                   skipped_fields=handover_skipped_fields(record_payload.get("shift")))
+                                   skipped_fields=handover_skipped_fields("Day Start" if handover_is_opening(record_payload) else record_payload.get("shift")),
+                                   opening_source=handover_source_record(g.db, record_payload))
         if module_key == "apartments":
             record_payload.setdefault("businessAreaId", "rentals-apartments")
             field_map = {field.name: field for field in definition.fields}
@@ -21694,11 +21762,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         return render_template(
             "apartment_payment_form.html",
-            page_title=f"Apartment Payment - {profile['suite']}",
+            page_title=f"Collect Rent / Bills - {profile['suite']}",
             record=record,
             profile=profile,
             payment_methods=PAYMENT_METHODS,
             today_iso=date.today().isoformat(),
+            collector_name=g.current_user.full_name or g.current_user.username,
+            payment_month_records=[row for row in g.db.scalars(select(ModuleRecord).where(
+                ModuleRecord.module_key == "apartments", ModuleRecord.reference == record.reference,
+            ).order_by(desc(ModuleRecord.month))).all()
+                if row.id == record.id or (apartment_tenant_identity(payload) and apartment_tenant_identity(row.payload or {}) == apartment_tenant_identity(payload))],
         )
 
     @app.route("/app/apartments/<record_id>/receipt")

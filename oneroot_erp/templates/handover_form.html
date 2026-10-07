@@ -2,34 +2,35 @@
 {% block content %}
 <style>#handover-form [hidden] { display: none !important; }</style>
 <article class="card">
-  <div class="card-header"><div><p class="eyebrow">Counter Controls</p><h3>Shift Handover</h3><p class="muted">Choose the shift, count the money, and hand over. Totals come from saved entries in Ghana time.</p></div><a class="button subtle" href="{{ url_for('module_list', module_key='daily_handovers') }}">Saved Handovers</a></div>
-  {% set automatic = ['groceriesCashTotal','groceriesMomoTotal','foodCashTotal','foodMomoTotal','groceriesPettyCashRemaining','foodPettyCashRemaining','momoHandledTotal','momoCommissionTotal','allDailySales','cashExpected','cashVariance','openOrders'] %}
+  <div class="card-header"><div><p class="eyebrow">Counter Controls</p><h3>Morning Opening &amp; Shift Handover</h3><p class="muted">Open each morning from the confirmed night handover. Use Day or Night for closing handovers.</p></div><div class="toolbar"><a class="button subtle" href="{{ url_for('morning_opening') }}">Morning Opening</a><a class="button subtle" href="{{ url_for('module_form', module_key='daily_handovers') }}">Shift Handover</a><a class="button subtle" href="{{ url_for('module_list', module_key='daily_handovers') }}">Saved Records</a></div></div>
+  {% set automatic = ['groceriesCashTotal','groceriesMomoTotal','foodCashTotal','foodMomoTotal','groceriesPettyCashRemaining','foodPettyCashRemaining','momoHandledTotal','momoCommissionTotal','allDailySales','cashExpected','cashVariance','openOrders','openingPOSAfterPetty'] %}
   {% set groups = [
-    ('Shift Details', ['handoverDate','shift','handedOverBy','receivedBy']),
+    ('Record Details', ['handoverDate','entryType','shift','handedOverBy','receivedBy']),
     ('Groceries & More', ['groceriesCashTotal','groceriesMomoTotal','groceriesPettyCashAllocated','groceriesPettyCashSpent','groceriesPettyCashRemaining']),
     ('Cold Store & Kitchen', ['foodCashTotal','foodMomoTotal','foodPettyCashAllocated','foodPettyCashSpent','foodPettyCashRemaining']),
     ('MoMo Agent Float - Separate From POS', ['momoHandledTotal','momoCommissionTotal','momoPhysicalCashCounted','momoECashCounted']),
-    ('Count & Confirm', ['cashExpected','cashCounted','cashVariance','stockChecked','momoChecked','status','issues'])
+    ('Count & Confirm', ['cashExpected','cashCounted','pettyCashSource','openingPOSAfterPetty','cashVariance','stockChecked','momoChecked','status','issues'])
   ] %}
   {% macro control(name) %}
     {% for field in definition.fields if field.name == name %}
     <label data-field="{{ name }}" {% if name in skipped_fields %}hidden{% endif %}{% if field.field_type == 'textarea' %} class="span-2"{% endif %}><span>{{ field.label|replace(' (Automatic)', '') }}</span>
     {% if field.field_type == 'select' %}
-      <select name="{{ name }}" {% if name in skipped_fields %}disabled{% endif %} {% if field.required %}required{% endif %}><option value="">Select</option>{% for value, label in field.options %}<option value="{{ value }}" {% if payload.get(name) == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
+      <select name="{{ name }}" {% if name in skipped_fields %}disabled{% endif %} {% if field.required or name == 'pettyCashSource' %}required{% endif %}><option value="">Select</option>{% for value, label in field.options %}<option value="{{ value }}" {% if payload.get(name) == value %}selected{% endif %}>{{ label }}</option>{% endfor %}</select>
     {% elif field.field_type == 'textarea' %}
       <textarea name="{{ name }}" rows="2">{{ payload.get(name, '') }}</textarea>
     {% else %}
-      <input name="{{ name }}" {% if name in skipped_fields %}disabled{% endif %} type="{{ 'time' if name in ['shiftStartTime','shiftEndTime'] else field.field_type }}" value="{{ payload.get(name, '') }}" {% if field.field_type == 'number' %}step="0.01"{% endif %} {% if name in automatic %}readonly{% elif field.required or name == 'cashCounted' %}required{% endif %}>
+      <input name="{{ name }}" {% if name in skipped_fields %}disabled{% endif %} type="{{ 'time' if name in ['shiftStartTime','shiftEndTime'] else field.field_type }}" value="{{ payload.get(name, '') }}" {% if field.field_type == 'number' %}step="0.01"{% if name not in automatic %} min="0"{% endif %}{% endif %} {% if name in automatic %}readonly{% elif field.required or name == 'cashCounted' %}required{% endif %}>
     {% endif %}</label>
     {% endfor %}
   {% endmacro %}
   <form method="post" id="handover-form">
     <p id="handover-shift-guide" role="status"></p>
-    <details id="handover-shift-times" {% if payload.get('shift') == 'Day Start' %}hidden{% endif %}><summary>Shift times &amp; daily overview</summary><div class="form-grid">{{ control('shiftStartTime') }}{{ control('shiftEndTime') }}{{ control('allDailySales') }}{{ control('openOrders') }}</div><p class="muted">Adjust times to match your actual shift. Overnight end times belong to the next day. Totals use entry timestamps, not payment backdates.</p></details>
+    <p id="handover-source-summary" role="status"></p>
+    <details id="handover-shift-times" {% if payload.get('entryType') == 'Morning Opening' %}hidden{% endif %}><summary>Shift times &amp; daily overview</summary><div class="form-grid">{{ control('shiftStartTime') }}{{ control('shiftEndTime') }}{{ control('allDailySales') }}{{ control('openOrders') }}</div><p class="muted">Adjust times to match your actual shift. Overnight end times belong to the next day. Totals use entry timestamps, not payment backdates.</p></details>
     {% for title, names in groups %}
       <section><h4>{{ title }}</h4><div class="form-grid">{% for name in names %}{{ control(name) }}{% endfor %}</div></section>
     {% endfor %}
-    <p class="muted">Petty cash usage is cumulative for the day. Prior submitted handover allocations are carried forward. This form records a count only: record actual spending in Expenses and float movements in the MoMo counter. Expected POS cash excludes petty cash, opening change, and service collections.</p>
+    <p class="muted">Accept a handover after checking it so the next record can use it. Petty cash usage is cumulative for the day. This form does not move money or create expenses. Opening POS cash is carried forward after any petty cash issued from it; new POS cash sales are added to the next expected count. Service and credit collections are not included in this POS-only count.</p>
     <p id="handover-preview-status" role="status"></p>
     <button class="button subtle" type="button" id="handover-refresh">Refresh Totals</button>
     <button class="button primary" type="submit">Save Handover</button>
@@ -41,18 +42,19 @@
   const status = document.getElementById('handover-preview-status');
   let controller;
   function applySkipLogic() {
-    const start = form.elements.shift.value === 'Day Start';
+    const start = form.elements.entryType.value === 'Morning Opening';
     const night = ['Night','Evening'].includes(form.elements.shift.value);
-    const openingSkip = new Set(['shiftStartTime','shiftEndTime','groceriesCashTotal','groceriesMomoTotal','foodCashTotal','foodMomoTotal','momoHandledTotal','momoCommissionTotal','cashExpected','cashCounted','cashVariance','allDailySales','openOrders','stockChecked','groceriesPettyCashSpent','foodPettyCashSpent','groceriesPettyCashRemaining','foodPettyCashRemaining']);
+    const openingSkip = new Set(['shift','shiftStartTime','shiftEndTime','groceriesCashTotal','groceriesMomoTotal','foodCashTotal','foodMomoTotal','momoHandledTotal','momoCommissionTotal','cashExpected','cashVariance','allDailySales','openOrders','stockChecked','groceriesPettyCashSpent','foodPettyCashSpent','groceriesPettyCashRemaining','foodPettyCashRemaining']);
     for (const label of form.querySelectorAll('[data-field]')) {
       const name = label.dataset.field;
-      const skip = (start && openingSkip.has(name)) || (night && name.includes('PettyCash'));
+      const skip = (start && openingSkip.has(name)) || (!start && night && name.includes('PettyCash')) || (!start && ['pettyCashSource','openingPOSAfterPetty'].includes(name));
       label.hidden = skip;
       for (const input of label.querySelectorAll('input,select,textarea')) input.disabled = skip;
     }
     document.getElementById('handover-shift-times').hidden = start;
+    form.querySelector('[data-field="cashCounted"] span').textContent = start ? 'Actual POS Cash Received This Morning' : 'Counted POS Cash Handed Over';
     document.getElementById('handover-shift-guide').textContent = start
-      ? 'Start the day: confirm opening MoMo cash and e-cash, and allocate petty cash to each counter. No sales or closing counts are needed.'
+      ? 'Morning opening: count the POS cash and MoMo balances actually received, then set petty cash for each counter. Explain any difference from the confirmed night handover.'
       : night ? 'Night handover: review collections and enter counted cash and e-cash. Day petty cash questions are skipped.'
       : 'Day handover: review collections, enter petty cash used so far, and confirm counted cash and e-cash.';
     for (const [name, description] of [['momoPhysicalCashCounted','physical cash'],['momoECashCounted','e-cash']]) {
@@ -68,16 +70,23 @@
       const data = await response.json();
       if (!response.ok || !data.ok) throw new Error(data.error || 'Unable to refresh totals.');
       for (const [key, value] of Object.entries(data.totals)) if (form.elements[key]) form.elements[key].value = value;
+      const opening = form.elements.entryType.value === 'Morning Opening';
+      const source = data.source;
+      document.getElementById('handover-source-summary').textContent = source.found
+        ? `Confirmed ${opening ? 'previous night' : 'preceding'} record: POS cash GHS ${source.cash.toFixed(2)}, MoMo physical cash GHS ${source.physical.toFixed(2)}, e-cash GHS ${source.ecash.toFixed(2)}. Enter your actual counts separately.`
+        : `No confirmed ${opening ? 'previous night handover' : 'preceding opening/handover'} found. Check the amounts; explain missing records before submitting a morning opening.`;
       status.textContent = 'Totals updated. Confirm your counted amounts before saving.';
     } catch (error) { if (error.name !== 'AbortError') status.textContent = error.message || 'Could not refresh. Check your connection.'; }
   }
   form.elements.shift.addEventListener('change', () => {
     const night = ['Night','Evening'].includes(form.elements.shift.value);
     form.elements.shiftStartTime.value = night ? '18:00' : '00:00';
-    form.elements.shiftEndTime.value = night || ['Day Start','Full Day'].includes(form.elements.shift.value) ? '00:00' : '18:00';
+    form.elements.shiftEndTime.value = night ? '00:00' : '18:00';
     applySkipLogic();
     refresh();
   });
+  form.elements.entryType.addEventListener('change', () => { applySkipLogic(); refresh(); });
+  form.elements.pettyCashSource.addEventListener('change', refresh);
   for (const name of ['handoverDate','shiftStartTime','shiftEndTime','groceriesPettyCashAllocated','groceriesPettyCashSpent','foodPettyCashAllocated','foodPettyCashSpent','cashCounted']) form.elements[name].addEventListener('change', refresh);
   document.getElementById('handover-refresh').addEventListener('click', refresh);
   applySkipLogic();

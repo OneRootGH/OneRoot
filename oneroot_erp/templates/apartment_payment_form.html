@@ -5,20 +5,21 @@
       <div class="card-header">
         <div>
           <p class="eyebrow">Apartments</p>
-          <h3>Record Tenant Payment</h3>
+          <h3>Collect Rent / Bills</h3>
           <p class="muted">Enter what was received today. Rent and bills can be captured together or separately.</p>
         </div>
-        <a class="button subtle" href="{{ url_for('module_form', module_key='apartments', record_id=record.id) }}">Back to Apartment</a>
+        <a class="button subtle" href="{{ url_for('module_list', module_key='apartments') }}">Back to Apartments</a>
       </div>
+      <label><span>Tenant Month</span><select id="collection-month">{% for row in payment_month_records %}<option value="{{ url_for('apartment_payment_form', record_id=row.id) }}" {% if row.id == record.id %}selected{% endif %}>{{ row.month or 'No month' }} &middot; {{ profile.suite }} &middot; {{ profile.tenant }}</option>{% endfor %}</select></label>
       <form method="post" class="form-grid" data-offline-queue data-offline-label="Apartment payment for {{ profile.suite }}" data-offline-reset="rentAmount,billsAmount,paymentReference,notes">
         <label><span>Payment Date</span><input type="date" name="paymentDate" value="{{ today_iso }}" required></label>
         <label><span>Payment Method</span><select name="paymentMethod" required><option value="">Select payment method</option>{% for method in payment_methods %}<option value="{{ method }}">{{ method }}</option>{% endfor %}</select></label>
         <label><span>Rent Received</span><input type="number" name="rentAmount" min="0" step="0.01" placeholder="0.00"></label>
         <label><span>Bills Received</span><input type="number" name="billsAmount" min="0" step="0.01" placeholder="0.00"></label>
         <label><span>Reference</span><input type="text" name="paymentReference" placeholder="Receipt or transaction reference"></label>
-        <label><span>Received By</span><input type="text" name="receivedBy" placeholder="Staff name"></label>
+        <label><span>Received By</span><input type="text" name="receivedBy" value="{{ collector_name }}" placeholder="Staff name"></label>
         <label class="span-2"><span>Notes</span><textarea name="notes" rows="3" placeholder="Optional payment note"></textarea></label>
-        <div class="form-actions span-2"><button class="button primary" type="submit">Save Tenant Payment</button></div>
+        <div class="form-actions span-2"><button class="button primary" type="submit">Save Collection</button><a class="button subtle" href="{{ url_for('apartment_receipt', record_id=record.id) }}" target="_blank" rel="noopener">Receipt</a></div>
       </form>
     </article>
     <aside class="card">
@@ -32,4 +33,5 @@
       <p class="muted">Offline payments are held on this device and posted once when OneRoot reconnects. They are not final until synced.</p>
     </aside>
   </section>
+  <script>document.getElementById('collection-month').addEventListener('change', function () { if (this.value) window.location.assign(this.value); });</script>
 {% endblock %}
