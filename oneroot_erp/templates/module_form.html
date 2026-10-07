@@ -16,6 +16,8 @@
             Set revenue and spending plans here, including the monthly petty-cash float control limit. This replaces the old separate petty-cash budget tool.
           {% elif definition.key == 'family_education_payments' %}
             This is a private Owner-only record for children's school transport and class payments. It is kept separate from OneRoot business sales, expenses, cashbook, and profitability reports.
+          {% elif definition.key == 'daily_handovers' %}
+            Choose Day Start, Day or Night. Payment totals are calculated when you save using the times entered (Ghana time). An end time earlier than the start runs into the next day. Count MoMo agent cash and e-cash separately from POS collections. Petty cash is a day allocation: enter cumulative usage, not sales. This checklist does not create expenses or move money; record actual spending under Expenses.
           {% else %}
             Capture clean records with dropdowns, dates, and fewer free-text fields where the app can help.
           {% endif %}
@@ -104,10 +106,16 @@
       {% endif %}
       {% set kitchen_auto_fields = ['businessAreaId', 'recipeName', 'kitchenCategory', 'servingCount', 'sellingPricePerServing', 'ingredientCost', 'totalRecipeCost', 'costPerServing', 'projectedSales', 'projectedProfit', 'marginPercent', 'actualProduced', 'actualSold', 'wasteQuantity'] %}
       {% for field in definition.fields %}
+        {% if definition.key == 'daily_handovers' %}
+          {% set handover_sections = {'handoverDate': 'Shift Details', 'groceriesCashTotal': 'Groceries & More Counter POS', 'foodCashTotal': 'Cold Store & Kitchen Counter POS', 'momoHandledTotal': 'Mobile Money Agent Counter', 'allDailySales': 'Daily Totals & Sign-Off'} %}
+          {% if field.name in handover_sections %}<h4 class="span-2">{{ handover_sections[field.name] }}</h4>{% endif %}
+        {% endif %}
         {% if definition.key != 'kitchen_recipe_plans' or field.name not in ['recipeSummary', 'notes'] %}
         <label class="{% if field.field_type == 'textarea' %}span-2{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in kitchen_auto_fields %} kitchen-auto-field{% endif %}{% if definition.key == 'kitchen_recipe_plans' and field.name in ['recipeSummary', 'notes'] %} kitchen-optional-field{% endif %}">
           <span>{{ field.label }}</span>
-          {% if field.field_type == 'textarea' %}
+          {% if definition.key == 'daily_handovers' and field.name in ['groceriesCashTotal', 'groceriesMomoTotal', 'foodCashTotal', 'foodMomoTotal', 'groceriesPettyCashRemaining', 'foodPettyCashRemaining', 'momoHandledTotal', 'momoCommissionTotal', 'allDailySales', 'cashExpected', 'cashVariance', 'openOrders'] %}
+            <input type="number" step="0.01" name="{{ field.name }}" value="{{ payload.get(field.name, '') }}" readonly placeholder="Calculated on save">
+          {% elif field.field_type == 'textarea' %}
             <textarea name="{{ field.name }}" rows="{{ field.rows }}" placeholder="{{ field.placeholder or field.label }}">{{ payload.get(field.name, '') }}</textarea>
           {% elif field.field_type == 'file' %}
             <input type="file" name="{{ field.name }}" accept="image/*,application/pdf">

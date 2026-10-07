@@ -246,6 +246,70 @@ COLD_STORE_KITCHEN_AREA_ID = "cold-store-groceries"
 KITCHEN_MENU_SOURCE_CATEGORY = "OneRoot Kitchen Menu"
 KITCHEN_MENU_PRODUCTS = [
     {
+        "id": "kitchen-breakfast-tom-brown",
+        "name": "Tom Brown Porridge",
+        "category": "Breakfast",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "Freshly prepared Tom Brown. Tell us your preferred portion and whether to add milk or sugar. Price confirmed before payment. Record ingredients through Kitchen Production Sessions.",
+    },
+    {
+        "id": "kitchen-breakfast-oats",
+        "name": "Oats Porridge",
+        "category": "Breakfast",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "Prepared oats with optional milk and sugar. Price confirmed before payment. Record ingredients through Kitchen Production Sessions.",
+    },
+    {
+        "id": "kitchen-breakfast-tea",
+        "name": "Hot Tea",
+        "category": "Breakfast",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "Freshly made tea using our stocked tea. Choose plain tea or request milk and sugar. Price confirmed before payment.",
+    },
+    {
+        "id": "kitchen-breakfast-milo",
+        "name": "Hot Milo",
+        "category": "Breakfast",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "A warm Milo drink with optional milk. Price confirmed before payment. Record ingredients through Kitchen Production Sessions.",
+    },
+    {
+        "id": "kitchen-breakfast-coffee",
+        "name": "Hot Coffee",
+        "category": "Breakfast",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "Freshly made Nescafe coffee. Tell us whether you prefer black coffee or milk. Price confirmed before payment.",
+    },
+    {
+        "id": "kitchen-breakfast-combo-tom-brown-bread",
+        "name": "Breakfast Combo - Tom Brown & Bread",
+        "category": "Breakfast Combos",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "Tom Brown porridge with bread. Portion, availability and price confirmed before payment. Record bread and porridge ingredients through Kitchen Production Sessions.",
+    },
+    {
+        "id": "kitchen-breakfast-combo-tea-bread-egg",
+        "name": "Breakfast Combo - Tea, Bread & Boiled Egg",
+        "category": "Breakfast Combos",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "Hot tea, bread and one boiled egg. Tell us if you need extra eggs. Price confirmed before payment. Record the ingredients through Kitchen Production Sessions.",
+    },
+    {
+        "id": "kitchen-breakfast-combo-oats-egg",
+        "name": "Breakfast Combo - Oats & Boiled Egg",
+        "category": "Breakfast Combos",
+        "salesPrice": 0.0,
+        "ownerPriced": True,
+        "notes": "Prepared oats and one boiled egg. Portion and price confirmed before payment. Record the ingredients through Kitchen Production Sessions.",
+    },
+    {
         "id": "kitchen-main-jollof-regular",
         "name": "Jollof Rice - Regular Serve",
         "category": "Main Meals",
@@ -4800,6 +4864,11 @@ def sync_kitchen_menu_catalog(db_session) -> None:
             normalize_product_record(product)
             continue
 
+        # Breakfast prices and costs are set by the owner, never reset at startup.
+        if seed.get("ownerPriced") and not is_new:
+            normalize_product_record(product)
+            continue
+
         is_drink = normalize_text(seed.get("category")).lower() == "drinks"
         product.source_catalog_id = KITCHEN_MENU_SOURCE_ID
         product.name = normalize_text(seed["name"])
@@ -7586,8 +7655,40 @@ def daily_handover_rollup(db_session, payload: dict[str, Any]) -> None:
         select(ModuleRecord).where(ModuleRecord.module_key == "sales", ModuleRecord.record_date == handover_date)
     ).all()
     payload["handoverDate"] = handover_date.isoformat()
-    payload["allDailySales"] = round(sum(parse_amount(record.amount) for record in sales_records), 2)
-    pos_orders = db_session.scalars(select(PosOrder).where(PosOrder.order_date == handover_date)).all()
+    payload["allDailySales"] = round(sum(
+        parse_amount(record.amount) for record in sales_records
+        if not is_mobile_money_daily_sales_record(record)
+    ), 2)
+    shift = normalize_text(payload.get("shift"))
+    start_time = normalize_text(payload.get("shiftStartTime")) or ("18:00" if shift in {"Night", "Evening"} else "00:00")
+    end_time = normalize_text(payload.get("shiftEndTime")) or ("18:00" if shift in {"Day", "Morning"} else "00:00")
+    start_at = datetime.combine(handover_date, datetime.strptime(start_time, "%H:%M").time())
+    end_at = datetime.combine(handover_date, datetime.strptime(end_time, "%H:%M").time())
+    if end_at <= start_at:
+        end_at += timedelta(days=1)
+    payload.update(shiftStartTime=start_time, shiftEndTime=end_time)
+    pos_orders = db_session.scalars(select(PosOrder).options(selectinload(PosOrder.lines)).where(
+        PosOrder.created_at >= start_at, PosOrder.created_at < end_at,
+    )).all() if shift != "Day Start" else []
+    for prefix, desk in (("groceries", "groceries"), ("food", "food")):
+        areas = pos_desk_area_ids(desk)
+        for suffix, methods in (("CashTotal", POS_CASH_PAYMENT_METHODS), ("MomoTotal", {"mobile money", "mtn mobile money", "momo"})):
+            payload[prefix + suffix] = round(sum(
+                parse_amount(line.total_amount)
+                for order in pos_orders
+                if not is_kitchen_stock_issue(order) and normalize_text(order.payment_method).lower() in methods
+                for line in order.lines if line.business_area_id in areas
+            ), 2)
+        allocated = max(parse_amount(payload.get(prefix + "PettyCashAllocated")), 0)
+        spent = max(parse_amount(payload.get(prefix + "PettyCashSpent")), 0)
+        payload[prefix + "PettyCashRemaining"] = round(allocated - spent, 2)
+    momo_records = db_session.scalars(select(ModuleRecord).where(
+        ModuleRecord.module_key == "mobile_money_transactions",
+        ModuleRecord.created_at >= start_at, ModuleRecord.created_at < end_at,
+    )).all() if shift != "Day Start" else []
+    completed_momo = [record for record in momo_records if mobile_money_transaction_is_completed(record.payload or {})]
+    payload["momoHandledTotal"] = round(sum(parse_amount((record.payload or {}).get("transactionValue")) for record in completed_momo), 2)
+    payload["momoCommissionTotal"] = round(sum(parse_amount((record.payload or {}).get("salesAmount")) for record in completed_momo), 2)
     payload["cashExpected"] = round(
         sum(
             parse_amount(order.total_amount)
@@ -20035,7 +20136,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
             elif module_key == "customer_loyalty":
                 customer_loyalty_rollup(payload)
             elif module_key == "daily_handovers":
-                daily_handover_rollup(g.db, payload)
+                try:
+                    daily_handover_rollup(g.db, payload)
+                except ValueError:
+                    payload["handoverTimeError"] = "Enter shift times as HH:MM, for example 08:00 or 18:00."
             elif module_key == "business_area_scorecards":
                 business_area_scorecard_rollup(g.db, payload)
             elif module_key == "loss_prevention_controls":
@@ -20132,6 +20236,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["documentAttachmentType"] = document_attachment_type
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
+            if module_key == "daily_handovers" and payload.get("handoverTimeError"):
+                form_errors.append(payload.pop("handoverTimeError"))
             if module_key == "mobile_money_transactions":
                 matching_reference = normalize_text(payload.get("reference"))
                 existing_reference_record = g.db.scalar(
@@ -22714,6 +22820,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return jsonify({"ok": False, "error": "One or more items could not be found."}), 400
         if not kitchen_issue_mode and any(not is_pos_eligible_product(product) for product in products.values()):
             return jsonify({"ok": False, "error": "One or more items are not available for POS checkout."}), 400
+        if not kitchen_issue_mode and any(
+            product.id.startswith("kitchen-breakfast-") and parse_amount(product.sales_price) <= 0
+            for product in products.values()
+        ):
+            return jsonify({"ok": False, "error": "Set the breakfast selling price in Inventory before saving this sale. Website quote requests are not free meals."}), 400
         if kitchen_issue_mode and any(not product_tracks_inventory(product) for product in products.values()):
             return jsonify({"ok": False, "error": "Kitchen stock issues can use tracked inventory items only."}), 400
         if not kitchen_issue_mode and any(not product_matches_pos_desk(product, pos_desk) for product in products.values()):
