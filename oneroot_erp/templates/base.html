@@ -35,7 +35,16 @@
                   <h3>{{ section.label }}</h3>
                   <div class="menu-links">
                     {% for link in section.links %}
-                      {% if link.module %}
+                      {% if link.children %}
+                        <details class="workspace-submenu" {% if link.is_active or link.label == 'Owner Dashboard' %}open{% endif %}>
+                          <summary>{{ link.label }}</summary>
+                          <div class="workspace-submenu-links">
+                            {% for child in link.children %}
+                              <a href="{{ url_for(child.endpoint, module_key=child.module) if child.module else url_for(child.endpoint) }}" class="menu-link {% if child.is_active %}active{% endif %}" {% if child.is_active %}aria-current="page"{% endif %}>{{ child.label }}</a>
+                            {% endfor %}
+                          </div>
+                        </details>
+                      {% elif link.module %}
                         <a href="{{ url_for(link.endpoint, module_key=link.module) }}" class="menu-link {% if link.is_active %}active{% endif %}">
                           {{ link.label }}
                         </a>

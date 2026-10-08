@@ -2958,3 +2958,20 @@ thead th {
 }
 .workspace-tabs a.active { background: #204d3a; color: #fff; }
 .workspace-tabs a:focus-visible { outline: 2px solid #a56d22; outline-offset: 2px; }
+.workspace-submenu { width: 100%; }
+.workspace-submenu > summary {
+  padding: 10px 12px;
+  font-weight: 700;
+  cursor: pointer;
+  border-radius: 6px;
+  background: rgba(255,255,255,.08);
+}
+.workspace-submenu-links { margin: 6px 0 8px 12px; border-left: 2px solid rgba(255,255,255,.25); padding-left: 8px; }
+.workspace-submenu-links .menu-link { font-size: 13px; padding: 8px 10px; }
+.growth-action-grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,300px),1fr)); gap: 14px; }
+.growth-action-card { border: 1px solid #d9e2dc; border-radius: 10px; padding: 16px; background: #f7faf7; }
+.growth-action-card h4 { font-size: 17px; margin: 8px 0; }
+.growth-action-card p { font-size: 13px; line-height: 1.6; }
+.growth-priority { color: #245d40; font-weight: 700; }
+.growth-detail-analysis > summary { cursor: pointer; font-weight: 700; padding: 16px; margin-bottom: 16px; border: 1px solid #d9e2dc; border-radius: 8px; }
+#growth-message-draft { width: 100%; box-sizing: border-box; }

@@ -21,6 +21,8 @@ class WorkspaceNavigationTests(unittest.TestCase):
             links = [link for group in build_sidebar(self.owner)
                      for section in group["sections"] for link in section["links"]]
             self.assertEqual(sum(link["label"] == "Suppliers" for link in links), 1)
+            supplier_hub = next(link for link in links if link["label"] == "Suppliers")
+            self.assertEqual(len(supplier_hub["children"]), 3)
             self.assertFalse(any(link["label"] == "Campaign ROI" for link in links))
             self.assertTrue(any(link["label"] == "Customers & Growth" for link in links))
             self.assertFalse(any(link["label"].endswith("Counter POS") and link["is_active"] for link in links))

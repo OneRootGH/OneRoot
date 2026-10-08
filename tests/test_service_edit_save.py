@@ -74,6 +74,14 @@ class ServiceEditSaveTests(unittest.TestCase):
         response = self.client.get("/app/modules/equipment_rental_bookings/test-rental/edit")
         self.assertEqual(response.status_code, 302)
 
+    def test_owner_insights_page_renders_action_plan_and_submenus(self):
+        response = self.client.get("/app/ai-growth-assistant")
+        self.assertEqual(response.status_code, 200)
+        text = response.get_data(as_text=True)
+        self.assertIn("Your Priority Action Plan", text)
+        self.assertIn('class="workspace-submenu"', text)
+        self.assertIn("Insights &amp; Suggested Actions", text)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2,9 +2,9 @@
 {% block content %}
   <section class="dashboard-hero compact-hero">
     <div>
-      <p class="eyebrow">System Employee · Owner Review</p>
-      <h3>OneRoot AI Growth Assistant</h3>
-      <p class="muted">A controlled business assistant that turns today’s OneRoot records into clear next actions. It never sends messages, changes stock, moves money, or edits customer accounts without a staff member reviewing the action.</p>
+      <p class="eyebrow">Owner Dashboard · AI Growth Assistant</p>
+      <h3>Insights &amp; Suggested Actions</h3>
+      <p class="muted">Your next actions, based on saved OneRoot records. Recommendations use built-in analysis rules, not an external AI service. Review before acting; no messages or transactions are sent automatically.</p>
     </div>
     <div class="toolbar">
       <a class="button subtle" href="{{ url_for('owner_daily_briefing', date=briefing_date|date_value) }}">Owner Briefing</a>
@@ -19,6 +19,11 @@
       <button class="button primary" type="submit">Refresh Work Queue</button>
       <a class="button subtle" href="{{ url_for('ai_growth_assistant') }}">Today</a>
     </form>
+    <nav class="workspace-tabs" aria-label="Quick owner questions">
+      {% for question in ['What should I do next?', 'What should I reorder?', 'Who owes credit?', 'Profit today', 'Jollof profit'] %}
+        <a href="{{ url_for('ai_growth_assistant', date=briefing_date|date_value, ask=question) }}">{{ question }}</a>
+      {% endfor %}
+    </nav>
   </section>
 
   {% if ai_question %}
@@ -30,6 +35,45 @@
     </section>
   {% endif %}
 
+  <section class="card">
+    <div class="card-header compact"><div><p class="eyebrow">Start Here</p><h3>Your Priority Action Plan</h3></div><span class="metric-chip">{{ briefing_date|date_value }}</span></div>
+    <p class="muted">Sales analysis covers {{ assistant.intelligence.periodStart }} to {{ briefing_date|date_value }}. Credit, stock and pending-order signals reflect the current saved position, not a historical snapshot.</p>
+    <div class="growth-action-grid">
+      {% for action in assistant.actionPlan %}
+        <article class="growth-action-card">
+          <small class="growth-priority">{{ action.priority }} · {{ action.owner }}</small>
+          <h4>{{ action.title }}</h4>
+          <p><strong>Evidence:</strong> {{ action.evidence }}</p>
+          <p><strong>Next step:</strong> {{ action.steps }}</p>
+          <p class="muted"><strong>Check the result:</strong> {{ action.measure }}</p>
+          <a class="button primary button-small" href="{{ action.href }}">Take Action</a>
+        </article>
+      {% endfor %}
+    </div>
+  </section>
+  {% if assistant.marketingDraft %}
+    <section class="card">
+      <div class="card-header compact"><div><p class="eyebrow">Promote A Recorded Best Seller</p><h3>Ready-To-Copy WhatsApp / Facebook Draft</h3></div><button type="button" class="button subtle" id="copy-growth-draft">Copy Message</button></div>
+      <textarea id="growth-message-draft" rows="3" aria-label="Editable marketing message">{{ assistant.marketingDraft }}</textarea>
+      <p class="muted" id="growth-copy-status" aria-live="polite">Check stock and price before posting. Send direct promotional messages only to customers with recorded consent.</p>
+    </section>
+    <script>
+      document.getElementById('copy-growth-draft').addEventListener('click', async function () {
+        const field = document.getElementById('growth-message-draft');
+        const status = document.getElementById('growth-copy-status');
+        try {
+          await navigator.clipboard.writeText(field.value);
+          status.textContent = 'Message copied. Review availability before sharing.';
+        } catch (error) {
+          field.focus(); field.select();
+          status.textContent = 'Select and copy the highlighted message.';
+        }
+      });
+    </script>
+  {% endif %}
+
+  <details class="growth-detail-analysis">
+    <summary>Explore Detailed Analysis, Forecasts &amp; Follow-Up Queues</summary>
   <section class="card-grid four">
     <article class="metric-card"><span>Priority Actions</span><strong>{{ assistant.tasks|length }}</strong><small>Prepared from today’s live records</small></article>
     <article class="metric-card"><span>Customer Follow-Ups</span><strong>{{ assistant.growth.counts.contacts }}</strong><small>{{ assistant.growth.counts.pendingOrders }} pending-order follow-up{{ '' if assistant.growth.counts.pendingOrders == 1 else 's' }}</small></article>
@@ -214,4 +258,5 @@
     <div class="table-wrap"><table><thead><tr><th>AI Work Area</th><th>Current Position</th><th>What It Prepares</th><th></th></tr></thead><tbody>{% for item in assistant.operations.automationCards %}<tr><td><strong>{{ item.title }}</strong></td><td>{{ item.status }}</td><td>{{ item.note }}</td><td><a class="button subtle button-small" href="{{ item.href }}">Open</a></td></tr>{% endfor %}</tbody></table></div>
     <p class="muted compact-copy">The AI assistant is visible in User Accounts as <strong>OneRoot AI Growth Assistant</strong>. It has no password, cannot sign in, and cannot approve or execute transactions. It prepares work for the owner or operations manager to review and act on.</p>
   </section>
+  </details>
 {% endblock %}

@@ -6391,7 +6391,7 @@ SIDEBAR_LINK_LABELS = {
     "dashboard": ("Dashboard", "dashboard", None),
     "owner_briefing": ("Owner Daily Briefing", "owner_daily_briefing", None),
     "analytics": ("Business Analytics", "analytics_page", None),
-    "ai_growth_assistant": ("AI Growth Assistant", "ai_growth_assistant", None),
+    "ai_growth_assistant": ("Insights & Suggested Actions", "ai_growth_assistant", None),
     "profits": ("Profit Center", "profits_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
@@ -12528,6 +12528,18 @@ def ai_owner_question_answer(question: str, assistant: dict[str, Any]) -> str:
     intelligence = assistant["intelligence"]
     briefing = assistant["briefing"]
     operations = assistant["operations"]
+    if "jollof" in query:
+        cycle = assistant.get("jollofCycle", {})
+        if not cycle.get("active"):
+            return "No active Jollof ingredient-credit cycle was found. Confirm that the kitchen ingredient issue and the Jollof sales are recorded before relying on a profit estimate."
+        return f"The active Jollof cycle has {parse_amount(cycle.get('quantitySold')):g} serving(s) sold, {format_currency(cycle.get('salesTotal', 0))} sales and {format_currency(cycle.get('grossProfit', 0))} recorded gross profit. Review the ingredient allocation below; this is not net profit after all business expenses."
+    if "today" in query and any(word in query for word in {"profit", "made", "earned"}):
+        return f"For the selected review date, the recorded operating position is {format_currency(briefing.get('operatingPosition', 0))}: gross profit less recorded expenses and payroll paid. Check that all costs are entered; this is not a complete accounting net-profit statement."
+    if any(word in query for word in {"priority", "next action", "what should i do"}):
+        actions = assistant.get("actionPlan", [])
+        if actions:
+            first = actions[0]
+            return f"Start with: {first['title']}. {first['evidence']} Next: {first['steps']}"
     if any(word in query for word in {"profit", "margin", "made"}):
         return f"Over the last {intelligence['periodDays']} days, recorded paid sales were {format_currency(intelligence['recentSales'])} and gross profit was {format_currency(intelligence['recentProfit'])}, before overheads, payroll, and expenses."
     if any(word in query for word in {"reorder", "stock", "buy"}):
@@ -12550,6 +12562,54 @@ def ai_owner_question_answer(question: str, assistant: dict[str, Any]) -> str:
     if top_area:
         return f"The strongest recorded area in the last {intelligence['periodDays']} days is {top_area['label']} with {format_currency(top_area['sales'])} sales and a {top_area['margin']}% gross margin. Start by protecting its stock and offering a related add-on."
     return "I can advise from the current OneRoot records, but more paid sales, stock updates, customer contacts, and service payments will make the recommendations more specific."
+
+
+def build_growth_action_plan(briefing, intelligence, operations):
+    """Rank reviewable actions using existing source summaries, without extra queries."""
+    actions = []
+
+    def add(priority, title, evidence, steps, owner, measure, href):
+        actions.append(dict(priority=priority, title=title, evidence=evidence,
+                            steps=steps, owner=owner, measure=measure, href=href))
+
+    expired = int(briefing.get("expiredCount", 0))
+    if expired:
+        add("Urgent", "Remove expired items from sale",
+            f"{expired} inventory item(s) have an expired date on record.",
+            "Check the physical items, isolate expired units, and record approved disposal or stock corrections.",
+            "Stock officer", "No expired units available for sale after the check.", "/app/inventory?expiry=expired")
+    overdue = int(briefing.get("overdueCreditCount", 0))
+    if overdue:
+        add("Urgent", "Follow up overdue customer credit",
+            f"{overdue} overdue account(s); total open credit, including not-yet-due balances, is {format_currency(briefing.get('creditOutstanding', 0))}.",
+            "Open the phone-linked customer account, confirm the unpaid balance, and agree a payment date before extending more credit.",
+            "Owner / finance officer", "Record collections against the original customer account, not as a new sale.", "/app/modules/customer_credit_accounts")
+    pending = operations.get("onlineFollowUps", [])
+    if pending:
+        add("Today", "Confirm outstanding online orders",
+            f"{len(pending)} order(s) shown in the current follow-up queue.",
+            "Confirm availability, contact the customer, and update payment and dispatch status. Check the full order desk for additional orders.",
+            "Service desk / dispatch", "Each reviewed order has a confirmed next step or a recorded cancellation.", "/app/online-orders")
+    for item in intelligence.get("marginWatch", [])[:1]:
+        add("Today", f"Check the margin on {item['name']}",
+            f"Recorded sales {format_currency(item['sales'])}, gross profit {format_currency(item['profit'])}, margin {item['margin']}% in the analysis period.",
+            "Verify purchase cost, pack size and sale price first. Correct missing costs before changing prices; do not discount below cost.",
+            "Owner / stock officer", "A verified unit cost and an approved selling price.", f"/app/inventory?q={quote(item['name'])}")
+    for item in intelligence.get("reorderPlan", [])[:1]:
+        add("Today", f"Review replenishment for {item['name']}",
+            f"{item['unitsSold']:g} recent units sold; recorded stock {item['stock']}; suggested cover {item['suggestedUnits']:g} units.",
+            "Count shop stock and check the warehouse first. Transfer available stock before buying; confirm supplier price and cash available before ordering.",
+            "Stock officer", "Confirmed stock and a justified transfer or purchase quantity. Suggested cover is not a purchase instruction.", f"/app/inventory?q={quote(item['name'])}")
+    for item in intelligence.get("recommendations", [])[:1]:
+        add("This Week", item["title"], item["note"],
+            "Run one small display or customer follow-up test. Compare sales and gross profit with the preceding seven days before repeating it.",
+            "Customer growth officer", "Record campaign spend and attributable sales; do not assume all sales growth came from the campaign.", item["href"])
+    if not actions:
+        add("Today", "Confirm the trading records before making changes",
+            "No priority exception was found in the available summaries. This does not confirm that all activity has been recorded.",
+            "Review sales, stock counts and closeouts for missing entries before placing new orders or changing prices.",
+            "Owner", "Complete and reconciled daily records.", "/app/sales-summary")
+    return actions[:6]
 
 
 def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, Any]:
@@ -12609,6 +12669,12 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
         "jollofCycle": jollof_cycle,
         "intelligence": intelligence,
         "operations": operations,
+        "actionPlan": build_growth_action_plan(briefing, intelligence, operations),
+        "marketingDraft": (
+            f"Looking for {intelligence['topProducts'][0]['name']}? Contact OneRoot Essentials in Amasaman, Medie for today's availability and price. "
+            "Shop at oneroot.shop or WhatsApp 0544995005 / 0242847065. We will confirm pickup or delivery."
+            if intelligence.get("topProducts") else ""
+        ),
         "workstreams": [
             {
                 "title": "Daily owner brief",
@@ -13565,7 +13631,8 @@ def build_sidebar(user: User | None = None):
                     if not member:
                         filtered.append(link)
                     elif not retained:
-                        filtered.append({**primary, "label": hub_label, "is_active": any(candidate["is_active"] for candidate in available)})
+                        filtered.append({**primary, "label": hub_label, "children": available,
+                                         "is_active": any(candidate["is_active"] for candidate in available)})
                         retained = True
                 section["links"] = filtered
                 section["is_active"] = any(link["is_active"] for link in filtered)
@@ -18127,7 +18194,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         ai_question = normalize_text(request.args.get("ask"))
         return render_template(
             "ai_growth_assistant.html",
-            page_title="AI Growth Assistant",
+            page_title="Insights & Suggested Actions",
             briefing_date=briefing_date,
             assistant=assistant,
             ai_question=ai_question,
