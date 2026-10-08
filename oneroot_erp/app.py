@@ -20501,7 +20501,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     sync_service_collection_closeouts(module_key, payload, record_payload)
                 if module_key == "mobile_money_transactions":
                     sync_mobile_money_customer_contact(g.db, record)
-                if module_key in {"customer_crm", "apartments", "laundry_tickets", "kitchen_orders", "equipment_rental_bookings", "delivery_dispatch", "catering_quotes", "customer_service_cases"}:
+                # Rental and laundry saves must not rebuild business-wide marketing history.
+                # Growth screens refresh their derived customer data when opened.
+                if module_key in {"customer_crm", "apartments", "kitchen_orders", "delivery_dispatch", "catering_quotes", "customer_service_cases"}:
                     sync_customer_crm_automation(g.db)
                     sync_customer_loyalty_accounts(g.db)
                     sync_marketing_campaign_automation(g.db)
