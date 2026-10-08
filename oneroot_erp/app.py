@@ -30,6 +30,7 @@ from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 from .config import AppConfig, load_config
 from .importer import bootstrap_database
 from .models import AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
+from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
 from .registry import (
     BUSINESS_AREA_LABELS,
     BUSINESS_AREA_OPTIONS,
@@ -1032,6 +1033,45 @@ def ensure_schema_columns(engine) -> None:
             connection.exec_driver_sql(statement)
 
 
+def seed_plumbing_electrical_inventory(db_session) -> int:
+    marker_id = "setup-plumbing-electrical-range-v1"
+    if db_session.get(ModuleRecord, marker_id):
+        return 0
+    products = db_session.scalars(select(Product).where(
+        Product.business_area_id.in_(["plumbing-electrical", "construction-consumables"]))).all()
+    categories_by_name = {name.casefold(): category for category, name, _ in PLUMBING_ELECTRICAL_ITEMS}
+    for product in products:
+        category = categories_by_name.get(normalize_text(product.name).casefold())
+        if category and product.business_area_id == "construction-consumables":
+            product.business_area_id = "plumbing-electrical"
+            product.category = category
+    existing_names = {normalize_text(product.name).casefold() for product in products}
+    created = 0
+    for category, name, stage in PLUMBING_ELECTRICAL_ITEMS:
+        if name.casefold() in existing_names:
+            continue
+        product_id = "plumbing-draft-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        if db_session.get(Product, product_id):
+            continue
+        product = Product(
+            id=product_id, source_catalog_id="plumbing-electrical-owner-review-v1",
+            name=name, category=category, business_area_id="plumbing-electrical",
+            item_type="stock", track_inventory=True, active=False, user_created=True,
+            quantity_on_hand=0, quantity_known=False, sales_price=0, cost_price=0,
+            stock_location="warehouse-equipment-water",
+            notes=f"{stage}. Draft: confirm brand, size, material or electrical rating, unit of sale, supplier, cost, price and actual stock before activation. Create a separate item for each specification. Check expiry for sealants and solvent cement. Verify electrical product quality and approval. Not available for sale yet.",
+        )
+        product.sku = generate_auto_product_sku(product_id=product_id, name=name,
+                                              business_area_id=product.business_area_id, category=category)
+        db_session.add(product)
+        existing_names.add(name.casefold())
+        created += 1
+    db_session.add(ModuleRecord(id=marker_id, module_key="system_setup",
+                               reference=marker_id, title="Plumbing range drafted",
+                               payload={"createdItems": created}, status="Complete"))
+    return created
+
+
 def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
     retries = DATABASE_INIT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
     last_error: OperationalError | None = None
@@ -1044,6 +1084,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 created_workspace = bootstrap_database(bootstrap_session, app_config)
                 run_data_repairs = normalize_text(os.getenv("ONEROOT_RUN_STARTUP_DATA_REPAIRS")).lower() in {"1", "true", "yes", "on"}
                 sync_kitchen_menu_catalog(bootstrap_session, breakfast_only=True)
+                seed_plumbing_electrical_inventory(bootstrap_session)
                 # Historical repair work rewrites large tables. Restrict it to a new
                 # workspace or an explicit maintenance deployment, never each restart.
                 if created_workspace or run_data_repairs:
