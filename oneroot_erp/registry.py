@@ -9,6 +9,7 @@ BUSINESS_AREAS = [
     {"id": "groceries", "label": "OneRoot Groceries & More", "short": "Groceries & More"},
     {"id": "phone-accessories-charging", "label": "OneRoot Phone Accessories & Charging", "short": "Phone & Charging"},
     {"id": "construction-consumables", "label": "OneRoot Construction Consumables Express", "short": "Construction Express"},
+    {"id": "plumbing-electrical", "label": "OneRoot Plumbing & Electrical Essentials", "short": "Plumbing & Electrical"},
     {"id": "laundry-services", "label": "OneRoot Laundry Services", "short": "Laundry"},
     {"id": "mobile-money", "label": "OneRoot Mobile Money Services", "short": "Mobile Money"},
     {"id": "rentals-apartments", "label": "OneRoot Rentals & Apartments", "short": "Apartments"},
@@ -78,6 +79,14 @@ INVENTORY_CATEGORY_LIBRARY = {
         "Safety & PPE",
         "Small Tools & Consumables",
         "Repair & Hardware",
+    ],
+    "plumbing-electrical": [
+        "Plumbing & Fittings",
+        "Taps, Valves & Hoses",
+        "Lighting & Bulbs",
+        "Switches, Sockets & Plugs",
+        "Cables & Electrical Accessories",
+        "Installation Supplies",
     ],
     "laundry-services": [
         "Laundry - Clothing",

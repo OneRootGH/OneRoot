@@ -71,7 +71,7 @@ KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
 KITCHEN_MEAL_ITEMS_KEY = "mealItems"
 # Cold Store & Kitchen handles its food range and the fast-moving construction
 # consumables counter. Groceries & More remains the retail home for phone stock.
-POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables"}
+POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables", "plumbing-electrical"}
 POS_GROCERIES_MORE_AREA_IDS = {
     "groceries",
     "fresh-foods-drinks",
@@ -140,6 +140,7 @@ PRODUCT_IMAGE_AREA_COLORS = {
     "fresh-foods-drinks": "#ca5d27",
     "phone-accessories-charging": "#2459a6",
     "construction-consumables": "#b56720",
+    "plumbing-electrical": "#277c87",
     "shared-operations": "#50606f",
 }
 ICONIFY_API_BASE = "https://api.iconify.design"
@@ -1657,7 +1658,7 @@ def catalog_default_image_path(product: Product) -> str:
         return CATALOG_IMAGE_PATHS["water"] if "water" in name_key or "gallon" in name_key or "bucket" in name_key else CATALOG_IMAGE_PATHS["equipment"]
     if area_id == "phone-accessories-charging":
         return CATALOG_IMAGE_PATHS["stationery"]
-    if area_id == "construction-consumables":
+    if area_id in {"construction-consumables", "plumbing-electrical"}:
         return CATALOG_IMAGE_PATHS["equipment"]
     if area_id == COLD_STORE_KITCHEN_AREA_ID:
         if category_key == "frozen treats":
@@ -1739,6 +1740,11 @@ def reclassify_inventory_product(product: Product) -> bool:
         if getattr(product, field) != value:
             setattr(product, field, value)
             changed = True
+
+    if area_id == "construction-consumables" and category_key in {"electrical accessories", "plumbing & fittings"}:
+        set_value("business_area_id", "plumbing-electrical")
+        set_value("category", "Plumbing & Fittings" if category_key == "plumbing & fittings" else "Cables & Electrical Accessories")
+        return changed
 
     # Prepared-food menu items stay under Cold Store & Kitchen, while all
     # packaged drinks are sold from Groceries & More. This keeps the two
@@ -2025,7 +2031,7 @@ def default_warehouse_location(product: Product) -> str:
         return "groceries-shelves"
     if area_id == "phone-accessories-charging":
         return "groceries-counter"
-    if area_id == "construction-consumables":
+    if area_id in {"construction-consumables", "plumbing-electrical"}:
         return "warehouse-equipment-water"
     if area_id == "fresh-foods-drinks":
         return "cold-store-freezer" if category == "frozen treats" else "groceries-counter"
@@ -13649,6 +13655,7 @@ def is_orderable_area(area_id: str) -> bool:
         "groceries",
         "phone-accessories-charging",
         "construction-consumables",
+        "plumbing-electrical",
         "laundry-services",
         "mobile-money",
         "rentals-apartments",

@@ -1600,6 +1600,8 @@
         return "Chargers, cables, earphones, screen protection, power banks, and convenient phone charging.";
       case "construction-consumables":
         return "Nails, fasteners, fittings, sealants, safety supplies, and quick repair essentials.";
+      case "plumbing-electrical":
+        return "Plumbing fittings, taps, lighting, switches, sockets, and everyday installation supplies.";
       case "laundry-services":
         return "Normal and express laundry requests with pickup, delivery, or special notes.";
       case "mobile-money":
@@ -1661,6 +1663,8 @@
         return "#2459a6";
       case "construction-consumables":
         return "#b56720";
+      case "plumbing-electrical":
+        return "#277c87";
       case "laundry-services":
         return "#5f6fd8";
       case "mobile-money":
