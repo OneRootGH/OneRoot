@@ -13438,6 +13438,48 @@ def build_online_order_export_rows(orders: list[dict[str, Any]]) -> tuple[list[s
     return headers, rows
 
 
+WORKSPACE_HUBS = [
+    ("Owner Dashboard", ["dashboard", "owner_briefing", "analytics", "reports", "ai_growth_assistant"]),
+    ("Daily Sales & Collections", ["sales_summary", "sales"]),
+    ("Inventory", ["inventory", "warehouse", "inventory_barcode"]),
+    ("Cash & Float Control", ["wallet_control", "cashbook_entries", "petty_cash"]),
+    ("Mobile Money Counter", ["mobile_money_transactions", "mobile_money_reconciliations"]),
+    ("Shift Control", ["morning_opening", "daily_handovers", "pos_closeouts"]),
+    ("Apartments", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records"]),
+    ("Kitchen Operations", ["kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
+    ("Staff Administration", ["staff_documents", "knowledge_base", "job_vacancies"]),
+    ("Attendance & Staff Welfare", ["workforce_attendance", "staff_meal_schedule"]),
+    ("Suppliers", ["supplier_directory", "suppliers", "supplier_price_updates"]),
+    ("Customers & Growth", ["customer_crm", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
+    ("Budget & Planning", ["forecast_plans", "petty_cash_budgets"]),
+]
+
+
+def workspace_link(key, user):
+    access_key = {"warehouse": "inventory", "morning_opening": "daily_handovers", "food_pos": "pos", "analytics": "reports"}.get(key, key)
+    if access_key not in user_access_keys(user):
+        return None
+    if key in {"dashboard", "owner_briefing", "analytics", "reports", "ai_growth_assistant"} and not user_can_view_dashboard(user):
+        return None
+    if key in SIDEBAR_LINK_LABELS:
+        label, endpoint, module = SIDEBAR_LINK_LABELS[key]
+    elif key in MODULES:
+        label, endpoint, module = MODULES[key].label, "module_list", key
+    else:
+        return None
+    active_module = (request.view_args or {}).get("module_key")
+    return {"key": key, "label": label, "endpoint": endpoint, "module": module,
+            "is_active": active_module == module if module else request.endpoint == endpoint}
+
+
+def build_workspace_tabs(user):
+    for label, keys in WORKSPACE_HUBS:
+        links = [link for key in keys if (link := workspace_link(key, user))]
+        if any(link["is_active"] for link in links):
+            return {"label": label, "links": links}
+    return None
+
+
 def build_sidebar(user: User | None = None):
     allowed_keys = user_access_keys(user)
     items = []
@@ -13491,8 +13533,8 @@ def build_sidebar(user: User | None = None):
                     label, endpoint, module = MODULES[key].label, "module_list", key
                 else:
                     continue
-                is_food_pos = key == "food_pos" and normalize_text(request.args.get("desk")) == "food"
-                is_general_pos = key == "pos" and normalize_text(request.args.get("desk")) != "food"
+                is_food_pos = key == "food_pos" and active_endpoint in {"food_pos_page", "pos_page"} and normalize_text(request.args.get("desk")) == "food"
+                is_general_pos = key == "pos" and active_endpoint == "pos_page" and normalize_text(request.args.get("desk")) != "food"
                 is_active = is_food_pos or is_general_pos or ((module and active_module == module) or (not module and active_endpoint == endpoint))
                 section_active = section_active or is_active
                 links.append(
@@ -13508,7 +13550,29 @@ def build_sidebar(user: User | None = None):
                 group_active = group_active or section_active
         if rendered_sections:
             items.append({"group": group_label, "sections": rendered_sections, "is_active": group_active})
-    return items
+    # One entry per hub; supporting screens remain available as contextual tabs.
+    for hub_label, keys in WORKSPACE_HUBS:
+        available = [link for key in keys if (link := workspace_link(key, user))]
+        if not available:
+            continue
+        primary = available[0]
+        retained = False
+        for group in items:
+            for section in group["sections"]:
+                filtered = []
+                for link in section["links"]:
+                    member = any(link["endpoint"] == candidate["endpoint"] and link["module"] == candidate["module"] for candidate in available)
+                    if not member:
+                        filtered.append(link)
+                    elif not retained:
+                        filtered.append({**primary, "label": hub_label, "is_active": any(candidate["is_active"] for candidate in available)})
+                        retained = True
+                section["links"] = filtered
+                section["is_active"] = any(link["is_active"] for link in filtered)
+    for group in items:
+        group["sections"] = [section for section in group["sections"] if section["links"]]
+        group["is_active"] = any(section["is_active"] for section in group["sections"])
+    return [group for group in items if group["sections"]]
 
 
 def is_orderable_area(area_id: str) -> bool:
@@ -20078,6 +20142,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key == "petty_cash_budgets" and not record_id:
+            flash("Petty Cash Limits is now a historical register. Use Budget & Planning for new budgets.", "info")
+            return redirect(url_for("module_list", module_key="forecast_plans") if user_has_access(g.current_user, "forecast_plans") else url_for("module_list", module_key=module_key))
         if not definition.editable:
             flash("This module is view-only in the new platform right now.", "warning")
             return redirect(url_for("module_list", module_key=module_key))
@@ -23554,6 +23621,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "current_access_keys": user_access_keys(current_user),
             "attendance_widget": build_attendance_widget(current_user),
             "sidebar_items": build_sidebar(current_user),
+            "workspace_hub": build_workspace_tabs(current_user),
             "module_definitions": MODULES,
             "normalize_role_key": normalize_role_key,
             "user_role_label": role_label,

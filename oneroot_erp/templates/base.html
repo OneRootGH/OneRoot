@@ -141,6 +141,13 @@
             </div>
           {% endif %}
         {% endwith %}
+        {% if workspace_hub %}
+          <nav class="workspace-tabs" aria-label="{{ workspace_hub.label }}">
+            {% for link in workspace_hub.links %}
+              <a href="{{ url_for(link.endpoint, module_key=link.module) if link.module else url_for(link.endpoint) }}" {% if link.is_active %}class="active" aria-current="page"{% endif %}>{{ link.label }}</a>
+            {% endfor %}
+          </nav>
+        {% endif %}
         {% block content %}{% endblock %}
       </main>
     </div>
