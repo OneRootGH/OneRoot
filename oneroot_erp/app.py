@@ -31,6 +31,7 @@ from .config import AppConfig, load_config
 from .importer import bootstrap_database
 from .models import AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
+from .phone_catalog import PHONE_CHARGING_ITEMS
 from .registry import (
     BUSINESS_AREA_LABELS,
     BUSINESS_AREA_OPTIONS,
@@ -1072,6 +1073,47 @@ def seed_plumbing_electrical_inventory(db_session) -> int:
     return created
 
 
+def seed_phone_charging_inventory(db_session) -> int:
+    marker_id = "setup-phone-charging-range-v1"
+    if db_session.get(ModuleRecord, marker_id):
+        return 0
+    existing_names = {
+        normalize_text(product.name).casefold()
+        for product in db_session.scalars(select(Product).where(
+            Product.business_area_id == "phone-accessories-charging")).all()
+    }
+    created = 0
+    for category, name, item_type in PHONE_CHARGING_ITEMS:
+        if name.casefold() in existing_names:
+            continue
+        product_id = "phone-draft-" + re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+        if db_session.get(Product, product_id):
+            continue
+        is_stock = item_type == "stock"
+        guidance = (
+            "Confirm brand, connector, output rating, compatibility, unit cost, selling price and actual stock. Create separate items for different ratings or capacities."
+            if is_stock else
+            "Confirm the charging fee and what each charge covers. Record one service per device; do not treat customer devices as stock. Use a customer reference and safe device handover procedure."
+        )
+        product = Product(
+            id=product_id, source_catalog_id="phone-charging-owner-review-v1", name=name,
+            business_area_id="phone-accessories-charging", category=category,
+            item_type=item_type, track_inventory=is_stock, active=False, user_created=True,
+            quantity_on_hand=0, quantity_known=False, sales_price=0, cost_price=0,
+            stock_location="groceries-counter" if is_stock else "",
+            notes=f"Draft: {guidance} Not available for sale until reviewed and activated.",
+        )
+        product.sku = generate_auto_product_sku(product_id=product_id, name=name,
+                                              business_area_id=product.business_area_id, category=category)
+        db_session.add(product)
+        existing_names.add(name.casefold())
+        created += 1
+    db_session.add(ModuleRecord(id=marker_id, module_key="system_setup", reference=marker_id,
+                               title="Phone charging range drafted", status="Complete",
+                               payload={"createdItems": created}))
+    return created
+
+
 def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
     retries = DATABASE_INIT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
     last_error: OperationalError | None = None
@@ -1085,6 +1127,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 run_data_repairs = normalize_text(os.getenv("ONEROOT_RUN_STARTUP_DATA_REPAIRS")).lower() in {"1", "true", "yes", "on"}
                 sync_kitchen_menu_catalog(bootstrap_session, breakfast_only=True)
                 seed_plumbing_electrical_inventory(bootstrap_session)
+                seed_phone_charging_inventory(bootstrap_session)
                 # Historical repair work rewrites large tables. Restrict it to a new
                 # workspace or an explicit maintenance deployment, never each restart.
                 if created_workspace or run_data_repairs:
