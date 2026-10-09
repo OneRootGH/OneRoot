@@ -1864,23 +1864,9 @@
           />
         </div>
         <div class="catalog-card-header">
-          <div class="catalog-card-identity">
-            <span class="catalog-mark">${escapeHtml(getAreaMonogram(item.businessAreaId))}</span>
-            <div>
-              <strong>${escapeHtml(item.name)}</strong>
-              <p>${escapeHtml(getAreaLabel(item.businessAreaId))}</p>
-            </div>
-          </div>
+          <strong class="catalog-item-name">${escapeHtml(item.name)}</strong>
           <span class="catalog-price">${displayPrice}</span>
         </div>
-
-        <div class="catalog-meta">
-          <span>${escapeHtml(item.category || "General")}</span>
-          <span>${escapeHtml(item.itemType === "service" ? "Service" : "Stock")}</span>
-          ${item.salesPrice > 0 ? "" : `<span class="quote-pill">Quote</span>`}
-        </div>
-
-        <p>${escapeHtml(item.notes || "Available for quick OneRoot order capture.")}</p>
 
         <div class="catalog-card-footer">
           <label class="quantity-field">
@@ -1898,7 +1884,7 @@
           <button class="button button-primary" data-shop-action="add-to-cart" data-item-id="${escapeHtml(
             item.id
           )}" type="button">
-            ${isQuoteItem ? "Add Quote Item" : "Add To Order"}
+            ${isQuoteItem ? "Request" : "Add"}
           </button>
         </div>
       </article>
