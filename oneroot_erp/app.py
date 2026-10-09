@@ -1179,6 +1179,19 @@ def ensure_half_bread_variant(db_session) -> bool:
     return changed
 
 
+def remove_product_duplication_instructions(db_session) -> int:
+    removed = 0
+    for product in db_session.scalars(select(Product).where(Product.notes.contains("Duplicated from"))).all():
+        cleaned = re.sub(
+            r"Duplicated from [^\r\n]*?\. Update the name, barcode, location, and opening stock before saving\.",
+            "", product.notes or "",
+        ).strip()
+        if cleaned != (product.notes or ""):
+            product.notes = cleaned
+            removed += 1
+    return removed
+
+
 def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
     retries = DATABASE_INIT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
     last_error: OperationalError | None = None
@@ -1194,6 +1207,7 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 seed_plumbing_electrical_inventory(bootstrap_session)
                 seed_phone_charging_inventory(bootstrap_session)
                 ensure_half_bread_variant(bootstrap_session)
+                remove_product_duplication_instructions(bootstrap_session)
                 ensure_default_staff_meal_schedule(bootstrap_session)
                 # Historical repair work rewrites large tables. Restrict it to a new
                 # workspace or an explicit maintenance deployment, never each restart.
@@ -22463,7 +22477,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     image_url=source_product.image_url,
                     active=True,
                     user_created=True,
-                    notes=f"Duplicated from {source_product.name}. Update the name, barcode, location, and opening stock before saving.",
+                    notes="",
                     created_at=datetime.utcnow(),
                 )
             else:

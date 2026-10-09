@@ -5,7 +5,8 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
 from oneroot_erp.app import (ensure_half_bread_variant, adjust_product_stock, staff_meal_week_rows,
-                             ensure_default_staff_meal_schedule, pos_line_is_bread)
+                             ensure_default_staff_meal_schedule, pos_line_is_bread,
+                             remove_product_duplication_instructions)
 from oneroot_erp.models import Base, Product, ModuleRecord
 
 
@@ -57,6 +58,14 @@ class BreadStaffMealsTests(unittest.TestCase):
         ensure_default_staff_meal_schedule(self.db)
         self.db.commit()
         self.assertEqual(len(self.db.scalars(select(ModuleRecord)).all()), 28)
+
+    def test_remove_duplication_message_preserves_real_notes(self):
+        product = Product(id="copy", name="Rice", notes="Duplicated from Creed Plus Rice - 5KG. Update the name, barcode, location, and opening stock before saving.\nKeep dry.")
+        self.db.add(product)
+        self.db.commit()
+        self.assertEqual(remove_product_duplication_instructions(self.db), 1)
+        self.assertEqual(product.notes, "Keep dry.")
+        self.assertEqual(remove_product_duplication_instructions(self.db), 0)
 
 
 if __name__ == "__main__":
