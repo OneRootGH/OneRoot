@@ -2087,3 +2087,23 @@ textarea {
 body.cart-drawer-open {
   overflow: hidden;
 }
+.hero-section-home { grid-template-columns: 1fr; gap: 0; }
+.hero-section-home .hero-copy { max-width: 850px; }
+.page-hero { padding-block: 1rem; gap: .5rem; }
+.page-hero h1 { font-size: clamp(1.6rem, 3vw, 2.5rem); line-height: 1.15; }
+.page-hero .hero-tags { display: none; }
+.page-hero .page-hero-actions { margin-top: .65rem; }
+.customer-help { border: 1px solid rgba(20,58,43,.15); border-radius: 12px; padding: 1rem; }
+.customer-help > summary { cursor: pointer; font-weight: 700; }
+.customer-help[open] > summary { margin-bottom: 1rem; }
+.customer-help.service-side-panel { display: block; }
+.customer-help.service-side-panel article { margin-top: .75rem; }
+@media (max-width: 760px) {
+  .page-hero { padding: .75rem; }
+  .page-hero .eyebrow { margin-bottom: .25rem; }
+  .page-hero .section-note { margin-block: .4rem; font-size: .9rem; }
+  .page-hero-actions .button { padding: .6rem .8rem; min-height: 44px; }
+  .hero-section-home .hero-actions { display: grid; grid-template-columns: 1fr 1fr; }
+  .hero-section-home .hero-actions .button { width: 100%; }
+  .customer-help.service-side-panel { width: 100%; box-sizing: border-box; }
+}

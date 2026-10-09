@@ -800,19 +800,19 @@
     if (elements.equipmentFormNote) {
       elements.equipmentFormNote.textContent =
         mode === "buy"
-          ? "Choose the items you want to buy, set quantity, and send one order for everything you need."
+          ? "Choose items and quantities. We confirm availability."
           : mode === "rent"
-            ? "Choose the equipment you need, set quantity and rental days, and include all required items in one request."
-            : "Choose equipment to rent or items to buy, set quantity, and send one combined request.";
+            ? "Choose equipment, quantities and days. We confirm the charge."
+            : "Add rental and purchase items to one request.";
     }
 
     if (elements.equipmentQuickPickHint) {
       elements.equipmentQuickPickHint.textContent =
         mode === "buy"
-          ? "Choose the item first, then set the quantity you want to buy."
+          ? "Select an item and quantity."
           : mode === "rent"
-            ? "Choose the equipment first, then set the quantity and rental days."
-            : "Choose the item first, then set quantity. Rental items will also ask for days.";
+            ? "Select equipment, quantity and days."
+            : "Select an item. Add days for rentals.";
     }
 
     if (elements.equipmentAddItemBtn) {

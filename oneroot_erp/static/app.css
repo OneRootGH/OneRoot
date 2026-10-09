@@ -1314,6 +1314,17 @@ textarea { resize: vertical; }
 .login-card {
   width: min(560px, 100%);
 }
+.login-body { align-content: start; gap: 1.25rem; }
+.login-meal-card { width: min(900px,100%); padding: 1.25rem; background: #fffdf8; border: 1px solid #d9e2dc; border-radius: 14px; box-sizing: border-box; }
+.staff-meal-table { width: 100%; }
+.staff-meal-table small { display: block; margin-top: 4px; }
+.staff-meal-table .meal-today { background: #e5f1e8; }
+@media (max-width: 600px) {
+  .login-body { padding: .75rem; }
+  .login-meal-card { padding: .75rem; }
+  .staff-meal-table { font-size: 12px; min-width: 0; }
+  .staff-meal-table th, .staff-meal-table td { padding: 8px 5px; overflow-wrap: anywhere; }
+}
 
 .muted-box {
   margin-top: 1rem;

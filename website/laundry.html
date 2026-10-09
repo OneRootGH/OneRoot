@@ -63,11 +63,9 @@
         <section class="page-hero">
           <div>
             <p class="eyebrow">Laundry Services</p>
-            <h1>Fresh laundry, ready when you need it.</h1>
+            <h1>Book laundry</h1>
             <p class="section-note">
-              Book normal or express laundry, use ready-made combos for common
-              loads, choose pickup or delivery, and include everything you want
-              cleaned in one request.
+              Choose your items and Normal or Express service.
             </p>
             <div class="hero-actions page-hero-actions">
               <a class="button button-primary" href="#book">Choose Laundry Service</a>
@@ -84,7 +82,7 @@
                 <p class="eyebrow">Laundry Request</p>
                 <h2>Book laundry service</h2>
               </div>
-              <p class="section-note">Choose Normal or Express service, use a combo where it helps, and include all the clothing or household items you want cleaned in one booking.</p>
+              <p class="section-note">Add all your items to one booking.</p>
             </div>
 
             <form id="laundryBookingForm" class="checkout-form" novalidate>
@@ -92,17 +90,17 @@
                 <div class="service-request-head">
                   <div>
                     <span class="count-pill">Build Request</span>
-                    <strong>Add more than one laundry line for one customer.</strong>
+                    <strong>Your laundry items</strong>
                   </div>
                   <button id="laundryAddItemBtn" class="button button-secondary" type="button">
-                    Add Laundry Line
+                    Add Item
                   </button>
                 </div>
 
                 <div id="laundryComboSection" class="service-quick-picks hidden">
                   <div class="service-quick-picks-head">
                     <span class="count-pill">Popular Combos</span>
-                    <p>Start with a ready-made laundry combo. When you use a combo, Item Count means the number of combo sets needed.</p>
+                    <p>For combos, enter the number of sets.</p>
                   </div>
                   <div id="laundryComboQuickPickGrid" class="service-quick-pick-grid"></div>
                 </div>
@@ -110,7 +108,7 @@
                 <div class="service-quick-picks">
                   <div class="service-quick-picks-head">
                     <span class="count-pill">Tap To Select</span>
-                    <p>Choose any laundry service below, then enter the item count and add it to your request.</p>
+                    <p>Select an item and quantity.</p>
                   </div>
                   <label class="service-search-field">
                     <span>Search laundry services</span>
@@ -195,15 +193,15 @@
             <div id="laundryMessage" class="checkout-message hidden"></div>
           </section>
 
-          <aside class="service-side-panel">
+          <details class="service-side-panel customer-help">
+            <summary>Booking help &amp; other services</summary>
             <article class="order-guide-card">
               <p class="eyebrow">How It Works</p>
-              <h3>Choose the service, share the items, and let us handle the rest.</h3>
+              <h3>Before sending</h3>
               <ul class="order-guide-list">
                 <li>Choose Normal or Express service.</li>
-                <li>Use Popular Combos for common loads like bedsheets and pillowcases.</li>
-                <li>Enter the item count and a short summary of the laundry load.</li>
-                <li>OneRoot confirms turnaround time, pickup, delivery, and final follow-up if needed.</li>
+                <li>Check your quantities and contact details.</li>
+                <li>We confirm price, turnaround time and pickup or delivery.</li>
               </ul>
             </article>
             <article class="order-guide-card order-guide-card-muted">
@@ -213,7 +211,7 @@
                 <a class="button button-secondary" href="/track-order">Track Request</a>
               </div>
             </article>
-          </aside>
+          </details>
         </section>
       </main>
 

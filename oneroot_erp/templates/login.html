@@ -15,7 +15,7 @@
     <main class="login-card">
       <p class="eyebrow">OneRoot Essentials</p>
       <h1>Platform Sign In</h1>
-      <p class="muted">Sign in to the unified OneRoot operations workspace from any connected device.</p>
+      <p class="muted">Sign in to your staff account.</p>
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
           <div class="flash-stack">
@@ -40,6 +40,23 @@
         <button class="button subtle" type="button" data-install-app hidden>Install App</button>
       </div>
     </main>
+    <section class="login-meal-card" aria-labelledby="staff-meal-heading">
+      <p class="eyebrow">Staff Meals</p>
+      <h2 id="staff-meal-heading">This Week's Breakfast &amp; Lunch</h2>
+      <p class="muted">Weekly rotation. Today's row is highlighted. Menus and serving times may be updated by management.</p>
+      <div class="table-wrap">
+        <table class="staff-meal-table">
+          <thead><tr><th>Day</th><th>Breakfast</th><th>Lunch</th></tr></thead>
+          <tbody>{% for meal in staff_login_meals %}
+            <tr {% if meal.isToday %}class="meal-today"{% endif %}>
+              <td><strong>{{ meal.day }}</strong><small>{{ meal.date }}{% if meal.isToday %} · Today{% endif %}</small></td>
+              <td>{{ meal.breakfast }}<small>{{ meal.breakfastTime }}</small></td>
+              <td>{{ meal.lunch }}<small>{{ meal.lunchTime }}</small></td>
+            </tr>
+          {% endfor %}</tbody>
+        </table>
+      </div>
+    </section>
     <script src="/website/pwa.js?v=20260725a" defer></script>
   </body>
 </html>

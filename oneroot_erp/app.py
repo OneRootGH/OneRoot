@@ -916,16 +916,46 @@ def ensure_default_job_vacancies(db_session, app_config: AppConfig) -> None:
             apply_module_record_metadata(record, definition, payload)
 
 
+STAFF_BREAKFAST_ROTATION = ["Tom Brown", "Koko", "Tea", "Tom Brown", "Koko", "Tea", "Tom Brown"]
+STAFF_LUNCH_ROTATION = ["Jollof Rice", "Plain Rice with Stew", "Yam with Stew",
+                       "Banku with Okro / Soup", "Beans and Gari", "Plantain with Stew", "Cocoyam with Stew"]
+
+
+def staff_meal_week_rows(db_session=None, today=None):
+    today = today or datetime.now(ZoneInfo("Africa/Accra")).date()
+    monday = today - timedelta(days=today.weekday())
+    saved = {}
+    if db_session is not None:
+        for record in db_session.scalars(select(ModuleRecord).where(
+            ModuleRecord.module_key == "staff_meal_schedule",
+            ModuleRecord.record_date >= monday,
+            ModuleRecord.record_date <= monday + timedelta(days=6)
+        ).order_by(ModuleRecord.updated_at.asc())).all():
+            payload = record.payload or {}
+            saved[(record.record_date, normalize_text(payload.get("mealPeriod")))] = payload
+    rows = []
+    for offset in range(7):
+        day = monday + timedelta(days=offset)
+        row = {"day": day.strftime("%A"), "date": day.isoformat(), "isToday": day == today}
+        for period, menus, time_label in [("Breakfast", STAFF_BREAKFAST_ROTATION, "08:00"), ("Lunch", STAFF_LUNCH_ROTATION, "13:00")]:
+            payload = saved.get((day, period), {})
+            row[period.lower()] = "Cancelled" if payload.get("status") == "Cancelled" else payload.get("menu") or menus[offset]
+            row[period.lower() + "Time"] = payload.get("servingTime") or time_label
+        rows.append(row)
+    return rows
+
+
 def ensure_default_staff_meal_schedule(db_session) -> None:
     """Create a small editable meal roster for the coming week without overwriting staff changes."""
     definition = MODULES.get("staff_meal_schedule")
     if not definition:
         return
 
-    start_date = date.today()
-    end_date = start_date + timedelta(days=6)
-    existing_references = {
-        normalize_text(record.reference)
+    today = datetime.now(ZoneInfo("Africa/Accra")).date()
+    start_date = today - timedelta(days=today.weekday())
+    end_date = start_date + timedelta(days=13)
+    existing_records = {
+        normalize_text(record.reference): record
         for record in db_session.scalars(
             select(ModuleRecord).where(
                 ModuleRecord.module_key == "staff_meal_schedule",
@@ -934,18 +964,23 @@ def ensure_default_staff_meal_schedule(db_session) -> None:
             )
         ).all()
     }
-    meal_templates = (
-        ("Breakfast", "Tom Brown & Tea", "08:00"),
-        ("Lunch", "Rice & Banku", "13:00"),
-    )
-    for day_offset in range(7):
+    for day_offset in range(14):
         schedule_date = start_date + timedelta(days=day_offset)
-        for meal_period, menu, serving_time in meal_templates:
+        for meal_period, rotation, serving_time in [("Breakfast", STAFF_BREAKFAST_ROTATION, "08:00"), ("Lunch", STAFF_LUNCH_ROTATION, "13:00")]:
+            menu = rotation[schedule_date.weekday()]
             reference = f"staff-meal|{schedule_date.isoformat()}|{meal_period.lower()}"
-            if reference in existing_references:
+            if reference in existing_records:
+                existing = existing_records[reference]
+                old_payload = dict(existing.payload or {})
+                if (old_payload.get("menu") in {"Tom Brown & Tea", "Rice & Banku"}
+                    and old_payload.get("status") == "Scheduled"
+                    and not parse_amount(old_payload.get("servedHeadcount"))
+                    and normalize_text(old_payload.get("notes")).startswith("Default OneRoot staff meal roster.")):
+                    old_payload["menu"] = menu
+                    apply_module_record_metadata(existing, definition, old_payload)
                 continue
             payload = {
-                "id": uuid4().hex,
+                "id": f"staff-meal-{schedule_date.isoformat()}-{meal_period.lower()}",
                 "reference": reference,
                 "scheduleDate": schedule_date.isoformat(),
                 "mealPeriod": meal_period,
@@ -955,7 +990,7 @@ def ensure_default_staff_meal_schedule(db_session) -> None:
                 "servedHeadcount": 0,
                 "status": "Scheduled",
                 "businessAreaId": "shared-operations",
-                "notes": "Default OneRoot staff meal roster. Edit menu, time, and headcount when needed.",
+                "notes": "Rotating OneRoot staff meal roster. Edit menu, time, and headcount when needed.",
                 "createdAt": datetime.utcnow().isoformat(),
             }
             record = ModuleRecord(
@@ -1114,6 +1149,36 @@ def seed_phone_charging_inventory(db_session) -> int:
     return created
 
 
+def ensure_half_bread_variant(db_session) -> bool:
+    source = db_session.get(Product, "3591c976c751433abb17eab9f0fb303b")
+    if not source:
+        source = db_session.scalar(select(Product).where(Product.name == "Bread", Product.business_area_id == "groceries"))
+    if not source:
+        return False
+    changed = False
+    for product_id, area, category in [("bread-half-ghs750", "groceries", "Bakery & Bread"),
+                                       ("food-bread-half-ghs750", COLD_STORE_KITCHEN_AREA_ID, "Bread")]:
+        if db_session.get(Product, product_id):
+            continue
+        product = Product(id=product_id, name="Bread - Half Loaf (GHS7.50)",
+                          business_area_id=area, category=category,
+                          source_catalog_id="half-bread-ghs750" if area == "groceries" else "linked-bread:half-ghs750",
+                          source_category="Shared Bread Portions", item_type="stock", track_inventory=True,
+                          stock_source_product_id=source.id, stock_units_per_sale=0.5,
+                          stock_unit_label="half loaves", purchase_pack_size=1, purchase_pack_label="half loaf",
+                          quantity_on_hand=round(parse_amount(source.quantity_on_hand) * 2, 4),
+                          quantity_known=bool(source.quantity_known), sales_price=7.5,
+                          cost_price=round(parse_amount(source.cost_price) * 0.5, 2),
+                          expiry_date=source.expiry_date, active=bool(source.active), user_created=True,
+                          stock_location=source.stock_location, image_url=source.image_url,
+                          notes="Each half-loaf sale deducts 0.5 from the existing Bread stock, as approved by the Owner. Restock the Bread source only; do not count this portion separately.")
+        product.sku = generate_auto_product_sku(product_id=product_id, name=product.name,
+                                              business_area_id=area, category=category)
+        db_session.add(product)
+        changed = True
+    return changed
+
+
 def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
     retries = DATABASE_INIT_RETRIES if app_config.database_url.startswith("postgresql+psycopg://") else 1
     last_error: OperationalError | None = None
@@ -1128,6 +1193,8 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                 sync_kitchen_menu_catalog(bootstrap_session, breakfast_only=True)
                 seed_plumbing_electrical_inventory(bootstrap_session)
                 seed_phone_charging_inventory(bootstrap_session)
+                ensure_half_bread_variant(bootstrap_session)
+                ensure_default_staff_meal_schedule(bootstrap_session)
                 # Historical repair work rewrites large tables. Restrict it to a new
                 # workspace or an explicit maintenance deployment, never each restart.
                 if created_workspace or run_data_repairs:
@@ -1146,7 +1213,6 @@ def initialize_database(engine, session_factory, app_config: AppConfig) -> None:
                     normalize_product_catalog(bootstrap_session)
                     backfill_pos_line_costs(bootstrap_session)
                     ensure_default_job_vacancies(bootstrap_session, app_config)
-                    ensure_default_staff_meal_schedule(bootstrap_session)
                     repair_staff_access_roles(bootstrap_session)
                 bootstrap_session.commit()
             session_factory.remove()
@@ -19546,6 +19612,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key == "staff_meal_schedule":
+            ensure_default_staff_meal_schedule(g.db)
+            g.db.commit()
         growth_context: dict[str, Any] | None = None
         if module_key in {"customer_credit_accounts", "cashbook_entries"}:
             # Repair historical repayments and backfill their linked cashbook movements.
@@ -23782,6 +23851,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "attendance_widget": build_attendance_widget(current_user),
             "sidebar_items": build_sidebar(current_user),
             "workspace_hub": build_workspace_tabs(current_user),
+            "staff_login_meals": staff_meal_week_rows(getattr(g, "db", None) if app.config["DATABASE_READY"] else None) if request.endpoint == "login" else [],
             "module_definitions": MODULES,
             "normalize_role_key": normalize_role_key,
             "user_role_label": role_label,

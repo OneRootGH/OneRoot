@@ -63,12 +63,9 @@
         <section class="page-hero">
           <div>
             <p class="eyebrow">Equipment</p>
-            <h1>Rent equipment or buy site support items without the back and forth.</h1>
+            <h1>Rent or buy equipment</h1>
             <p class="section-note">
-              Reserve wheelbarrows, concrete vibrators, cutting machines, head
-              pans, shovels, impact drills, and related support equipment, or
-              buy items like nails and other site consumables. Add everything
-              needed for one customer before sending.
+              Choose your tools, quantities and rental dates.
             </p>
             <div class="hero-actions page-hero-actions">
               <a class="button button-primary" href="#book">Choose Equipment</a>
@@ -83,9 +80,9 @@
             <div class="section-heading">
               <div>
                 <p class="eyebrow">Equipment Desk</p>
-                <h2>Send rent or buy request</h2>
+                <h2>Choose equipment</h2>
               </div>
-              <p id="equipmentFormNote" class="section-note">Choose the equipment you need, set quantity and rental days, and include all required items in one request.</p>
+              <p id="equipmentFormNote" class="section-note">We confirm availability and the final charge.</p>
             </div>
 
             <form id="equipmentBookingForm" class="checkout-form" novalidate>
@@ -93,17 +90,17 @@
                 <div class="service-request-head">
                   <div>
                     <span class="count-pill">Build Request</span>
-                    <strong>Add several equipment items for one customer before sending.</strong>
+                    <strong>Your equipment items</strong>
                   </div>
                   <button id="equipmentAddItemBtn" class="button button-secondary" type="button">
-                    Add Equipment Item
+                    Add Item
                   </button>
                 </div>
 
                 <div class="service-quick-picks">
                   <div class="service-quick-picks-head">
                     <span class="count-pill">Tap To Select</span>
-                    <p id="equipmentQuickPickHint">Choose an item first, then set the quantity and rental days.</p>
+                    <p id="equipmentQuickPickHint">Select an item, quantity and days.</p>
                   </div>
                   <label class="service-search-field">
                     <span>Search equipment</span>
@@ -193,10 +190,11 @@
             <div id="equipmentMessage" class="checkout-message hidden"></div>
           </section>
 
-          <aside class="service-side-panel">
+          <details class="service-side-panel customer-help">
+            <summary>Booking help &amp; other services</summary>
             <article class="order-guide-card">
               <p class="eyebrow">Booking Notes</p>
-              <h3>Tell us what you need and when you need it.</h3>
+              <h3>Before sending</h3>
               <ul class="order-guide-list">
                 <li>Choose the exact item and quantity. Rental items also need the number of days.</li>
                 <li>Add the site location and whether delivery or pickup is preferred.</li>
@@ -210,7 +208,7 @@
                 <a class="button button-secondary" href="/track-order">Track Request</a>
               </div>
             </article>
-          </aside>
+          </details>
         </section>
       </main>
 
