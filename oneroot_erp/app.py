@@ -17737,6 +17737,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.route("/api/public/catalog")
     def public_catalog_api():
         catalog = build_public_catalog()
+        # Keep large uploaded images out of the catalog JSON. Browsers fetch
+        # visible images separately and reuse them across storefront pages.
+        for item in catalog:
+            image_value = item.get("imageUrl", "")
+            if image_value.startswith("data:image/") and item.get("source") == "inventory":
+                version = hashlib.sha256(image_value.encode()).hexdigest()[:16]
+                item["imageUrl"] = url_for("public_product_image", product_id=item["id"], v=version)
         area_counts: dict[str, int] = defaultdict(int)
         for item in catalog:
             area_id = normalize_text(item.get("businessAreaId"))
@@ -17758,6 +17765,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 ],
             }
         )
+
+    @app.route("/api/public/products/<product_id>/image")
+    def public_product_image(product_id):
+        product = g.db.get(Product, product_id)
+        if not product or not product.active or not is_orderable_area(product.business_area_id):
+            return Response(status=404)
+        value = product_image_src(product)
+        if not value.startswith("data:image/"):
+            return redirect(value)
+        try:
+            header, encoded = value.split(",", 1)
+            mime = header[5:].split(";", 1)[0]
+            content = base64.b64decode(encoded, validate=True)
+        except (ValueError, TypeError):
+            return Response(status=404)
+        return send_file(BytesIO(content), mimetype=mime,
+                         etag=hashlib.sha256(content).hexdigest(),
+                         max_age=86400, conditional=True)
 
     @app.route("/api/vacancies")
     @app.route("/api/public/vacancies")

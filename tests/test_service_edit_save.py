@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from oneroot_erp.app import create_app, set_module_record_metadata
 from oneroot_erp.config import load_config
-from oneroot_erp.models import Base, ModuleRecord, User
+from oneroot_erp.models import Base, ModuleRecord, Product, User
 from oneroot_erp.registry import MODULES
 
 
@@ -47,6 +47,24 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.sessions.remove()
         self.sessions.bind.dispose()
         self.temp.cleanup()
+
+    def test_public_catalog_uses_separate_cached_images(self):
+        db = self.sessions()
+        db.add(Product(id="image-test", name="Test Bread", business_area_id="groceries",
+                       active=True, image_url="data:image/png;base64,aGVsbG8="))
+        db.commit()
+        with self.client.session_transaction() as session:
+            session.clear()
+        response = self.client.get("/api/catalog")
+        self.assertEqual(response.status_code, 200)
+        item = next(item for item in response.json["items"] if item["id"] == "image-test")
+        self.assertNotIn("data:image", item["imageUrl"])
+        image = self.client.get(item["imageUrl"])
+        self.assertEqual(image.status_code, 200)
+        self.assertEqual(image.data, b"hello")
+        self.assertIn("max-age=86400", image.headers["Cache-Control"])
+        cached = self.client.get(item["imageUrl"], headers={"If-None-Match": image.headers["ETag"]})
+        self.assertEqual(cached.status_code, 304)
 
     def test_owner_can_open_and_save_paid_rental_without_marketing_rebuild(self):
         url = "/app/modules/equipment_rental_bookings/test-rental/edit"
