@@ -60,7 +60,7 @@ img {
 .site-header,
 .site-footer,
 main {
-  width: min(1200px, calc(100vw - 2rem));
+  width: calc(100% - 2rem);
   margin: 0 auto;
 }
 
@@ -2106,4 +2106,24 @@ body.cart-drawer-open {
   .hero-section-home .hero-actions { display: grid; grid-template-columns: 1fr 1fr; }
   .hero-section-home .hero-actions .button { width: 100%; }
   .customer-help.service-side-panel { width: 100%; box-sizing: border-box; }
+}
+
+/* Use available screen space without making cards or controls oversized. */
+@media (min-width: 1025px) {
+  .site-header { padding-block: .65rem; }
+  .shop-layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; }
+  .catalog-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .75rem; }
+  .catalog-card { padding: .8rem; gap: .65rem; }
+  .catalog-card-image-wrap { aspect-ratio: 3 / 2; }
+  .service-quick-pick-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
+  .page-hero { padding-block: .65rem; }
+}
+@media (max-width: 760px) {
+  .site-header, .site-footer, main { width: calc(100% - 1rem); }
+  .catalog-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .5rem; }
+  .catalog-card { min-width: 0; padding: .6rem; gap: .55rem; }
+  .catalog-card-header { flex-wrap: wrap; }
+  .catalog-card h3 { overflow-wrap: anywhere; }
+  .catalog-card-image-wrap { aspect-ratio: 4 / 3; }
+  .catalog-card .button { min-height: 44px; padding-inline: .5rem; }
 }
