@@ -1,4 +1,4 @@
-const CACHE_NAME = "oneroot-platform-v75";
+const CACHE_NAME = "oneroot-platform-v76";
 const APP_SHELL_ASSETS = [
   "/",
   "/shop",
@@ -16,8 +16,8 @@ const APP_SHELL_ASSETS = [
   "/manifest.webmanifest",
   "/icon.svg",
   "/assets/oneroot-icon-transparent.png",
-  "/website/styles.css?v=20260812a",
-  "/website/app.js?v=20260812d",
+  "/website/styles.css?v=20261010a",
+  "/website/app.js?v=20261010a",
   "/website/pwa.js?v=20261004b",
   "/static/app.css",
   "/static/app.js",
@@ -87,7 +87,7 @@ self.addEventListener("fetch", (event) => {
   }
 
   event.respondWith(
-    caches.match(event.request, { ignoreSearch: true }).then((cachedResponse) => {
+    caches.match(event.request).then((cachedResponse) => {
       const networkFetch = fetch(event.request)
         .then((networkResponse) => {
           if (networkResponse && networkResponse.status === 200) {
@@ -97,7 +97,9 @@ self.addEventListener("fetch", (event) => {
           return networkResponse;
         })
         .catch(() => cachedResponse);
-      return cachedResponse || networkFetch;
+      // Refresh layout/code online, but keep image reuse fast and work offline.
+      const isLayoutAsset = /\.(css|js)$/.test(requestUrl.pathname);
+      return isLayoutAsset ? networkFetch : (cachedResponse || networkFetch);
     })
   );
 });

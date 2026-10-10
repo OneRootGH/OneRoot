@@ -2125,7 +2125,7 @@ body.cart-drawer-open {
 @media (min-width: 1025px) {
   .site-header { padding-block: .65rem; }
   .shop-layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; }
-  .catalog-grid { grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: .75rem; }
+  .catalog-grid { grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 1rem; }
   .catalog-card { padding: .8rem; gap: .65rem; }
   .catalog-card-image-wrap { aspect-ratio: 3 / 2; }
   .service-quick-pick-grid { grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); }
