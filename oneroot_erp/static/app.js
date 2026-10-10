@@ -297,7 +297,7 @@
 
   function shouldAutoPrintReceipt() {
     // Any customer credit POS sale needs a receipt, regardless of the selling area.
-    // Retail cash/card/MoMo sales print automatically from GH₵30 upward.
+    // Retail cash/card/MoMo sales print automatically from GH₵20 upward.
     // Kitchen stock issues are internal movements, not customer sales receipts.
     if (kitchenIssueMode) {
       return false;
@@ -305,7 +305,7 @@
     if (isCreditSale()) {
       return true;
     }
-    return ["groceries", "food"].includes(posDesk) && getCartTotal() >= 30;
+    return ["groceries", "food"].includes(posDesk) && getCartTotal() >= 20;
   }
 
   function openAutomaticReceiptWindow() {
