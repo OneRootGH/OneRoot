@@ -20050,11 +20050,25 @@ def create_app(config: AppConfig | None = None) -> Flask:
             g.db.commit()
         # Opening a rewards list must not rebuild and write every customer card.
         # Loyalty updates run through the customer automation/save workflows.
-        all_records = g.db.scalars(
-            select(ModuleRecord)
-            .where(ModuleRecord.module_key == module_key)
-            .order_by(desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
-        ).all()
+        records_query = select(ModuleRecord).where(ModuleRecord.module_key == module_key)
+        if module_key == "customer_loyalty":
+            # Select one card per saved phone in SQL, rather than transferring
+            # every historical duplicate payload before filtering in Python.
+            phone = ModuleRecord.payload["customerPhone"].as_string()
+            ranked_cards = select(
+                ModuleRecord.id.label("card_id"),
+                func.row_number().over(
+                    partition_by=func.coalesce(func.nullif(phone, ""), ModuleRecord.id),
+                    order_by=(desc(func.coalesce(ModuleRecord.payload["pointsRedeemed"].as_float(), 0)),
+                              desc(ModuleRecord.updated_at), desc(ModuleRecord.id)),
+                ).label("card_rank"),
+            ).where(ModuleRecord.module_key == module_key).subquery()
+            records_query = records_query.where(ModuleRecord.id.in_(
+                select(ranked_cards.c.card_id).where(ranked_cards.c.card_rank == 1)
+            ))
+        all_records = g.db.scalars(records_query.order_by(
+            desc(ModuleRecord.month), desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at)
+        )).all()
         if module_key == "kitchen_recipe_plans":
             # Catch up today's already-saved batches when the new internal Kitchen
             # credit control is introduced. The operation is idempotent by batch.
