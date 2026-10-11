@@ -90,6 +90,7 @@ class Product(Base):
     track_inventory: Mapped[bool] = mapped_column(Boolean, default=True)
     quantity_on_hand: Mapped[float] = mapped_column(Float, default=0)
     quantity_known: Mapped[bool] = mapped_column(Boolean, default=True)
+    stock_baseline: Mapped[float] = mapped_column(Float, default=0)
     min_stock_level: Mapped[int] = mapped_column(Integer, default=0)
     # A sellable pack can draw from another product's physical stock.  For example,
     # a Voltic full bag consumes 30 sachets from the shared Voltic sachet balance.

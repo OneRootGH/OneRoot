@@ -641,7 +641,7 @@
     const searchText = normalizeText(elements.equipmentSearchInput?.value).toLowerCase();
     return getEquipmentCatalogBaseItems().filter((item) => {
       const matchesCategory = !activeCategory || getServiceCategoryLabel(item.category, "equipment") === activeCategory;
-      const matchesSearch = !searchText || [item.name, item.category, item.sku, item.barcode]
+      const matchesSearch = !searchText || [item.name, item.category, item.purchaseCategory, item.sku, item.barcode]
         .map((value) => normalizeText(value).toLowerCase())
         .some((value) => value.includes(searchText));
       return matchesCategory && matchesSearch;
@@ -727,6 +727,9 @@
   }
 
   function getEquipmentOrderMode(item) {
+    if (["construction-consumables", "plumbing-electrical"].includes(normalizeText(item?.businessAreaId))) {
+      return "buy";
+    }
     return getServiceCategoryLabel(item?.category, "equipment") === "Buy" ? "buy" : "rent";
   }
 
@@ -867,6 +870,9 @@
 
   function isEquipmentCatalogItem(item) {
     const areaId = normalizeText(item.businessAreaId);
+    if (["construction-consumables", "plumbing-electrical"].includes(areaId)) {
+      return normalizeText(item.itemType).toLowerCase() !== "service";
+    }
     if (areaId !== "water-equipment") {
       return false;
     }
@@ -944,7 +950,11 @@
   }
 
   function getEquipmentCatalogBaseItems() {
-    const matchingItems = state.catalog.filter(isEquipmentCatalogItem);
+    const matchingItems = state.catalog.filter(isEquipmentCatalogItem).map((item) =>
+      ["construction-consumables", "plumbing-electrical"].includes(normalizeText(item.businessAreaId))
+        ? { ...item, purchaseCategory: item.category, category: "Buy" }
+        : item
+    );
     const preferredItems = [];
     const inventoryFingerprints = new Set(
       matchingItems

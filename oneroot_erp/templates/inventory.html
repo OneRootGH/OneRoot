@@ -141,7 +141,7 @@
         <div class="toolbar">
           <form method="get" class="search-row inventory-filter-row">
             <input type="search" name="q" placeholder="Search products" value="{{ search }}">
-            <select name="stock"><option value="">All Stock Balances</option><option value="zero" {% if stock_filter == 'zero' %}selected{% endif %}>Zero / Negative Stock</option></select>
+            <select name="stock"><option value="">All Stock Balances</option><option value="zero" {% if stock_filter == 'zero' %}selected{% endif %}>Zero / Negative Stock</option><option value="below20" {% if stock_filter == 'below20' %}selected{% endif %}>Below 20% Remaining</option></select>
             <select name="area">
               <option value="">All Areas</option>
               {% for value, label in business_area_options %}
@@ -175,7 +175,7 @@
           </form>
           <a class="button subtle" href="{{ url_for('warehouse_page') }}">Warehouse</a>
           <a class="button subtle" href="{{ url_for('inventory_barcode') }}">Barcode Update</a>
-          <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter) }}">Export CSV</a>
+          <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter, stock=stock_filter) }}">Export CSV</a>
         </div>
       </div>
       <div class="table-wrap tall">
@@ -213,7 +213,12 @@
                 </td>
                 <td>{{ item.sku or '—' }}</td>
                 <td>{{ item.item_type|title }}</td>
-                <td>{{ format_product_stock_badge(item) }}</td>
+                <td>{{ format_product_stock_badge(item) }}
+                  {% if item.track_inventory and not item.stock_source_product_id %}
+                    {% set remaining = stock_remaining_percent(item) %}
+                    <small class="table-secondary">{% if remaining is not none %}{{ remaining }}% of entered stock left{% else %}Baseline not recorded{% endif %}</small>
+                  {% endif %}
+                </td>
                 <td>
                   <div class="inventory-price-stack">
                     <strong>{{ item.expiry_date.isoformat() if item.expiry_date else '—' }}</strong>

@@ -6,11 +6,34 @@ from sqlalchemy.orm import Session
 
 from oneroot_erp.app import (ensure_half_bread_variant, adjust_product_stock, staff_meal_week_rows,
                              ensure_default_staff_meal_schedule, pos_line_is_bread,
-                             remove_product_duplication_instructions)
-from oneroot_erp.models import Base, Product, ModuleRecord
+                             remove_product_duplication_instructions, stock_remaining_percent,
+                             sync_customer_loyalty_accounts)
+from oneroot_erp.models import Base, Product, ModuleRecord, PosOrder
 
 
 class BreadStaffMealsTests(unittest.TestCase):
+    def test_stock_percentage_is_based_on_recorded_baseline(self):
+        product = Product(id="stock", track_inventory=True, quantity_known=True,
+                          quantity_on_hand=19, stock_baseline=100)
+        self.assertEqual(stock_remaining_percent(product), 19)
+        product.stock_baseline = 0
+        self.assertIsNone(stock_remaining_percent(product))
+
+    def test_loyalty_excludes_credit_and_crm_value(self):
+        self.db.add(ModuleRecord(id="crm", module_key="customer_crm", payload={
+            "customerName": "Test Customer", "customerPhone": "0240000000", "lifetimeValue": 9999}))
+        for method, amount in [("Cash", 50), ("Credit", 500), ("Pay On Pickup", 200)]:
+            self.db.add(PosOrder(id=method, order_number=method, order_date=date(2026,10,11),
+                                payment_method=method, customer_phone="0240000000", total_amount=amount))
+        self.db.commit()
+        sync_customer_loyalty_accounts(self.db)
+        self.db.commit()
+        reward = self.db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty"))
+        self.assertEqual(reward.payload["pointsEarned"], 10)
+        sync_customer_loyalty_accounts(self.db)
+        self.db.commit()
+        self.assertEqual(reward.payload["pointsEarned"], 10)
+
     def setUp(self):
         self.engine = create_engine("sqlite://")
         Base.metadata.create_all(self.engine)

@@ -1,5 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
+  {% if definition.key == 'customer_loyalty' %}
+    <section class="card"><h3>Paid Purchase Rewards</h3><p>Phone-linked paid POS purchases earn 1 point per GH₵5. Review the reward before redemption; points are not cash. Credit, deferred orders, rent, deposits, MoMo float and internal kitchen stock issues do not earn automatic points.</p><p class="muted">Service payments, online orders and later credit collections require review before points are added. No discount or message is issued automatically.</p><a class="button subtle" href="{{ url_for('module_list', module_key='customer_crm') }}">Customer Records</a></section>
+  {% endif %}
   <section class="card module-hero compact-module-hero">
     <div class="card-header compact-header">
       <div>

@@ -1035,6 +1035,8 @@ def ensure_schema_columns(engine) -> None:
         product_columns = {column["name"] for column in inspector.get_columns("products")}
     if "products" in table_names and "image_url" not in product_columns:
         statements.append("ALTER TABLE products ADD COLUMN image_url TEXT DEFAULT ''")
+    if "products" in table_names and "stock_baseline" not in product_columns:
+        statements.append("ALTER TABLE products ADD COLUMN stock_baseline FLOAT DEFAULT 0")
     if "products" in table_names and "expiry_date" not in product_columns:
         statements.append("ALTER TABLE products ADD COLUMN expiry_date DATE")
     if "products" in table_names and "stock_source_product_id" not in product_columns:
@@ -2387,6 +2389,8 @@ def adjust_product_stock(db_session, product: Product, sale_quantity: Any, *, di
         return product
     movement = round(max(parse_amount(sale_quantity), 0) * product_stock_units_per_sale(product) * direction, 4)
     source_product.quantity_on_hand = round(parse_amount(source_product.quantity_on_hand) + movement, 4)
+    if movement > 0:
+        source_product.stock_baseline = max(parse_amount(source_product.stock_baseline), source_product.quantity_on_hand)
     source_product.quantity_known = True
     source_product.updated_at = datetime.utcnow()
     sync_shared_stock_variant_quantities(db_session, source_product)
@@ -2887,6 +2891,13 @@ def product_quantity_known(item_or_payload: Product | dict[str, Any]) -> bool:
     if isinstance(item_or_payload, Product):
         return bool(item_or_payload.quantity_known)
     return bool(item_or_payload.get("quantityKnown", item_or_payload.get("quantity_known", True)))
+
+
+def stock_remaining_percent(product: Product) -> float | None:
+    baseline = parse_amount(product.stock_baseline)
+    if baseline <= 0 or not product.quantity_known or not product_tracks_inventory(product):
+        return None
+    return round(max(parse_amount(product.quantity_on_hand), 0) / baseline * 100, 1)
 
 
 def format_product_stock_badge(item_or_payload: Product | dict[str, Any]) -> str:
@@ -7808,6 +7819,11 @@ def sync_customer_loyalty_accounts(db_session) -> None:
     )
     existing = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty")).all()
     by_reference = {normalize_text(record.reference): record for record in existing if normalize_text(record.reference)}
+    eligible_by_phone = defaultdict(float)
+    for order in db_session.scalars(select(PosOrder).where(PosOrder.payment_method.in_(["Cash", "Mobile Money", "Bank Transfer", "Card"]))).all():
+        phone = normalize_phone(order.customer_phone)
+        if phone and not is_kitchen_stock_issue(order):
+            eligible_by_phone[phone] += max(parse_amount(order.total_amount), 0)
     for crm_record in crm_records:
         crm_payload = dict(crm_record.payload or {})
         customer_name = normalize_text(crm_payload.get("customerName"))
@@ -7817,7 +7833,7 @@ def sync_customer_loyalty_accounts(db_session) -> None:
         reference = f"loyalty|{customer_phone}"
         record = by_reference.get(reference)
         payload = dict(record.payload or {}) if record else {}
-        earned = int(parse_amount(crm_payload.get("lifetimeValue")) // 5)
+        earned = int(eligible_by_phone[customer_phone] // 5)
         payload.update(
             {
                 "id": record.id if record else uuid4().hex,
@@ -7828,7 +7844,8 @@ def sync_customer_loyalty_accounts(db_session) -> None:
                 "pointsEarned": earned,
                 "pointsRedeemed": parse_amount(payload.get("pointsRedeemed")),
                 "rewardThreshold": parse_amount(payload.get("rewardThreshold")) or 100,
-                "notes": "Automatically calculated at 1 point for every GH₵5 of recorded customer value.",
+                "eligiblePaidAmount": round(eligible_by_phone[customer_phone], 2),
+                "notes": "1 point per GH₵5 of phone-linked paid POS sales. Credit, deferred payments, MoMo float, rent, deposits and internal kitchen issues excluded. Service and online rewards require review; points are not cash.",
             }
         )
         customer_loyalty_rollup(payload)
@@ -13566,6 +13583,8 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
         "stockLocation",
         "shelfLocation",
         "quantityOnHand",
+        "stockBaseline",
+        "stockRemainingPercent",
         "minStockLevel",
         "salesPrice",
         "costPrice",
@@ -13590,6 +13609,8 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
             "stockLocation": item.stock_location,
             "shelfLocation": item.shelf_location,
             "quantityOnHand": item.quantity_on_hand,
+            "stockBaseline": item.stock_baseline,
+            "stockRemainingPercent": stock_remaining_percent(item) if not product_uses_shared_stock(item) else "",
             "minStockLevel": item.min_stock_level,
             "salesPrice": item.sales_price,
             "costPrice": item.cost_price,
@@ -19936,6 +19957,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if module_key == "sales" and (not date_from or not date_to or date_from == date_to):
             refresh_pos_generated_sales_for_date(date_from or date_to or date.today())
             g.db.commit()
+        if module_key == "customer_loyalty":
+            sync_customer_loyalty_accounts(g.db)
+            g.db.commit()
         all_records = g.db.scalars(
             select(ModuleRecord)
             .where(ModuleRecord.module_key == module_key)
@@ -22542,6 +22566,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 product.shelf_location = normalize_text(request.form.get("shelf_location")).upper()
                 entered_quantity = parse_amount(request.form.get("quantity_on_hand"))
                 received_bags = max(parse_amount(request.form.get("received_bags")), 0)
+                previous_stock = parse_amount(product.quantity_on_hand)
                 if not product_uses_shared_stock(product):
                     product.quantity_on_hand = entered_quantity
                     if received_bags and parse_amount(product.purchase_pack_size) > 1:
@@ -22549,6 +22574,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                             product.quantity_on_hand + received_bags * parse_amount(product.purchase_pack_size),
                             4,
                         )
+                    if is_new or product.quantity_on_hand != previous_stock or not product.stock_baseline:
+                        product.stock_baseline = max(product.quantity_on_hand, 0)
                 product.min_stock_level = int(parse_amount(request.form.get("min_stock_level")))
                 product.sales_price = parse_amount(request.form.get("sales_price"))
                 product.cost_price = parse_amount(request.form.get("cost_price"))
@@ -22608,6 +22635,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         query = select(Product)
         if stock_filter == "zero":
             query = query.where(Product.active.is_(True), Product.track_inventory.is_(True), Product.quantity_on_hand <= 0)
+        elif stock_filter == "below20":
+            query = query.where(Product.active.is_(True), Product.track_inventory.is_(True),
+                                Product.quantity_known.is_(True), Product.stock_baseline > 0,
+                                Product.quantity_on_hand < Product.stock_baseline * 0.2,
+                                or_(Product.stock_source_product_id == "", Product.stock_source_product_id.is_(None)))
         if area_filter:
             query = query.where(Product.business_area_id == area_filter)
         if category_filter:
@@ -22699,6 +22731,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             page_title="Inventory",
             products=products,
             stock_filter=stock_filter,
+            stock_remaining_percent=stock_remaining_percent,
             zero_stock_rows=zero_stock_rows[:20],
             zero_stock_count=len(zero_stock_rows),
             editing_product=editing_product,
@@ -22889,6 +22922,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     new_quantity = previous_quantity + physical_quantity
                     action_label = "added"
                 source_product.quantity_on_hand = round(new_quantity, 2)
+                if action_type in {"set", "add"} or action_label == "added":
+                    source_product.stock_baseline = max(new_quantity, 0)
                 source_product.quantity_known = True
                 source_product.updated_at = datetime.utcnow()
                 sync_shared_stock_variant_quantities(g.db, source_product)
@@ -22965,6 +23000,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         expiry_filter = normalize_text(request.args.get("expiry")).lower()
         location_filter = normalize_text(request.args.get("location"))
         query = select(Product)
+        if normalize_text(request.args.get("stock")) == "below20":
+            query = query.where(Product.active.is_(True), Product.track_inventory.is_(True),
+                                Product.quantity_known.is_(True), Product.stock_baseline > 0,
+                                Product.quantity_on_hand < Product.stock_baseline * 0.2,
+                                or_(Product.stock_source_product_id == "", Product.stock_source_product_id.is_(None)))
         if area_filter:
             query = query.where(Product.business_area_id == area_filter)
         if category_filter:
