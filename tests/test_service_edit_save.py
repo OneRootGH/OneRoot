@@ -116,6 +116,23 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertEqual(context["month_sales_total"], 40)
         self.assertEqual(context["month_profit_total"], 0)
 
+    def test_loyalty_page_reuses_legacy_card_and_hides_duplicates(self):
+        db = self.sessions()
+        db.add(ModuleRecord(id="crm-loyalty", module_key="customer_crm", payload={
+            "customerName": "Mary", "customerPhone": "0240000000"}))
+        for identity, redeemed in [("old-card", 0), ("redeemed-card", 5)]:
+            db.add(ModuleRecord(id=identity, module_key="customer_loyalty", payload={
+                "customerName": "Mary", "customerPhone": "0240000000", "pointsRedeemed": redeemed}))
+        db.commit()
+        for _ in range(2):
+            response = self.client.get("/app/modules/customer_loyalty")
+            self.assertEqual(response.status_code, 200)
+        cards = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty")).all()
+        self.assertEqual(len(cards), 2)
+        card = db.get(ModuleRecord, "redeemed-card")
+        self.assertEqual(card.payload["pointsRedeemed"], 5)
+        self.assertEqual(card.reference, "loyalty|0240000000")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -7812,18 +7812,39 @@ def customer_loyalty_rollup(payload: dict[str, Any]) -> None:
         payload["rewardStatus"] = "Building"
 
 
+def latest_customer_loyalty_records(records: list[ModuleRecord]) -> list[ModuleRecord]:
+    """Keep legacy duplicate cards out of the desk without deleting reward history."""
+    by_phone = {}
+    unlinked = []
+    for record in records:
+        phone = normalize_phone((record.payload or {}).get("customerPhone"))
+        if not phone:
+            unlinked.append(record)
+            continue
+        current = by_phone.get(phone)
+        rank = (parse_amount((record.payload or {}).get("pointsRedeemed")), record.updated_at)
+        if current is None or rank > (parse_amount((current.payload or {}).get("pointsRedeemed")), current.updated_at):
+            by_phone[phone] = record
+    return list(by_phone.values()) + unlinked
+
+
 def sync_customer_loyalty_accounts(db_session) -> None:
     """Create one phone-based loyalty account per live CRM customer, without duplicate cards."""
     crm_records = latest_customer_crm_records(
         db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_crm")).all()
     )
-    existing = db_session.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty")).all()
-    by_reference = {normalize_text(record.reference): record for record in existing if normalize_text(record.reference)}
+    existing = latest_customer_loyalty_records(db_session.scalars(
+        select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty")
+    ).all())
+    by_reference = {f"loyalty|{normalize_phone((record.payload or {}).get('customerPhone'))}": record
+                    for record in existing if normalize_phone((record.payload or {}).get("customerPhone"))}
     eligible_by_phone = defaultdict(float)
-    for order in db_session.scalars(select(PosOrder).where(PosOrder.payment_method.in_(["Cash", "Mobile Money", "Bank Transfer", "Card"]))).all():
-        phone = normalize_phone(order.customer_phone)
-        if phone and not is_kitchen_stock_issue(order):
-            eligible_by_phone[phone] += max(parse_amount(order.total_amount), 0)
+    orders = db_session.execute(select(PosOrder.customer_phone, PosOrder.total_amount, PosOrder.notes)
+        .where(PosOrder.payment_method.in_(["Cash", "Mobile Money", "Bank Transfer", "Card"])))
+    for customer_phone, total_amount, notes in orders:
+        phone = normalize_phone(customer_phone)
+        if phone and not normalize_text(notes).startswith(KITCHEN_STOCK_ISSUE_NOTE_PREFIX):
+            eligible_by_phone[phone] += max(parse_amount(total_amount), 0)
     for crm_record in crm_records:
         crm_payload = dict(crm_record.payload or {})
         customer_name = normalize_text(crm_payload.get("customerName"))
@@ -7837,6 +7858,7 @@ def sync_customer_loyalty_accounts(db_session) -> None:
         payload.update(
             {
                 "id": record.id if record else uuid4().hex,
+                "reference": reference,
                 "joinDate": normalize_text(payload.get("joinDate")) or normalize_text(crm_payload.get("captureDate")) or date.today().isoformat(),
                 "customerName": customer_name,
                 "customerPhone": customer_phone,
@@ -7852,7 +7874,9 @@ def sync_customer_loyalty_accounts(db_session) -> None:
         if not record:
             record = ModuleRecord(id=payload["id"], module_key="customer_loyalty", created_at=datetime.utcnow())
             db_session.add(record)
-        set_module_record_metadata(record, MODULES["customer_loyalty"], payload)
+        if record.payload != payload or record.reference != reference:
+            set_module_record_metadata(record, MODULES["customer_loyalty"], payload)
+        by_reference[reference] = record
 
 
 def handover_skipped_fields(shift: Any) -> set[str]:
@@ -20055,6 +20079,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             all_records = [record for record in all_records if not is_mobile_money_daily_sales_record(record)]
         if module_key == "customer_crm":
             all_records = latest_customer_crm_records(all_records)
+        if module_key == "customer_loyalty":
+            all_records = latest_customer_loyalty_records(all_records)
         records = filter_module_records(
             all_records,
             definition,

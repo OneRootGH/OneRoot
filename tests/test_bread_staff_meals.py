@@ -50,6 +50,13 @@ class BreadStaffMealsTests(unittest.TestCase):
         sync_customer_loyalty_accounts(self.db)
         self.db.commit()
         self.assertEqual(reward.payload["pointsEarned"], 10)
+        rewards = self.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty")).all()
+        self.assertEqual(len(rewards), 1)
+        self.assertEqual(reward.reference, "loyalty|0240000000")
+        updated_at = reward.updated_at
+        sync_customer_loyalty_accounts(self.db)
+        self.db.commit()
+        self.assertEqual(reward.updated_at, updated_at)
 
     def setUp(self):
         self.engine = create_engine("sqlite://")
