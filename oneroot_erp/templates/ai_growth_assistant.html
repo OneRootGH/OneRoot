@@ -36,8 +36,14 @@
   {% endif %}
 
   <section class="card">
-    <div class="card-header compact"><div><p class="eyebrow">Start Here</p><h3>Your Priority Action Plan</h3></div><span class="metric-chip">{{ briefing_date|date_value }}</span></div>
+    <div class="card-header compact"><div><p class="eyebrow">Buy · Hold · Clear · Collect · Promote</p><h3>Money Actions This Week</h3></div><span class="metric-chip">{{ briefing_date|date_value }}</span></div>
     <p class="muted">Sales analysis covers {{ assistant.intelligence.periodStart }} to {{ briefing_date|date_value }}. Credit, stock and pending-order signals reflect the current saved position, not a historical snapshot.</p>
+    <div class="card-grid four">
+      <article class="metric-card"><span>Today's Gross Profit</span><strong>{{ assistant.briefing.sales.total_profit|currency }}</strong><small>Before expenses and payroll</small></article>
+      <article class="metric-card"><span>Operating Position</span><strong>{{ assistant.briefing.operatingPosition|currency }}</strong><small>Recorded gross profit less expenses and payroll paid; not full accrual net profit</small></article>
+      <article class="metric-card"><span>Customer Credit Open</span><strong>{{ assistant.briefing.creditOutstanding|currency }}</strong><small>{{ assistant.briefing.overdueCreditCount }} overdue accounts; collections are not new sales</small></article>
+      <article class="metric-card"><span>Recent Gross Profit</span><strong>{{ assistant.intelligence.recentProfit|currency }}</strong><small>Analysis period shown above</small></article>
+    </div>
     <div class="growth-action-grid">
       {% for action in assistant.actionPlan %}
         <article class="growth-action-card">

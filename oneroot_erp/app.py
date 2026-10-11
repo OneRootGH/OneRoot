@@ -12765,12 +12765,23 @@ def build_growth_action_plan(briefing, intelligence, operations):
             f"Recorded sales {format_currency(item['sales'])}, gross profit {format_currency(item['profit'])}, margin {item['margin']}% in the analysis period.",
             "Verify purchase cost, pack size and sale price first. Correct missing costs before changing prices; do not discount below cost.",
             "Owner / stock officer", "A verified unit cost and an approved selling price.", f"/app/inventory?q={quote(item['name'])}")
-    for item in intelligence.get("reorderPlan", [])[:1]:
+    for item in intelligence.get("reorderPlan", [])[:3]:
         add("Today", f"Review replenishment for {item['name']}",
             f"{item['unitsSold']:g} recent units sold; recorded stock {item['stock']}; suggested cover {item['suggestedUnits']:g} units.",
             "Count shop stock and check the warehouse first. Transfer available stock before buying; confirm supplier price and cash available before ordering.",
             "Stock officer", "Confirmed stock and a justified transfer or purchase quantity. Suggested cover is not a purchase instruction.", f"/app/inventory?q={quote(item['name'])}")
-    for item in intelligence.get("recommendations", [])[:1]:
+    for item in intelligence.get("slowStock", [])[:2]:
+        add("This Week", f"Hold buying / review clearance: {item['name']}",
+            f"Recorded stock {item['stock']}; cost value {format_currency(item['value'])}. No paid POS movement found in the analysis period.",
+            "Check expiry, physical stock and service usage. Pause repeat buying until reviewed; test a small display or bundle only if safe and profitable.",
+            "Stock / customer growth officer", "Compare units sold and profit after the test; never sell expired stock.", f"/app/inventory?q={quote(item['name'])}")
+    if intelligence.get("topProducts"):
+        best = intelligence["topProducts"][0]
+        add("This Week", f"Promote a recorded seller: {best['name']}",
+            f"Recorded sales {format_currency(best['sales'])}; gross profit {format_currency(best['profit'])} in the analysis period.",
+            "Confirm availability and cost. Test one relevant offer or complementary bundle, using the campaign register to link costs and resulting orders.",
+            "Customer growth officer", "Collected campaign sales less product costs, discounts, delivery and campaign spend; compare against the prior week.", "/app/modules/campaign_roi")
+    for item in intelligence.get("recommendations", [])[:2]:
         add("This Week", item["title"], item["note"],
             "Run one small display or customer follow-up test. Compare sales and gross profit with the preceding seven days before repeating it.",
             "Customer growth officer", "Record campaign spend and attributable sales; do not assume all sales growth came from the campaign.", item["href"])
@@ -12779,7 +12790,7 @@ def build_growth_action_plan(briefing, intelligence, operations):
             "No priority exception was found in the available summaries. This does not confirm that all activity has been recorded.",
             "Review sales, stock counts and closeouts for missing entries before placing new orders or changing prices.",
             "Owner", "Complete and reconciled daily records.", "/app/sales-summary")
-    return actions[:6]
+    return actions[:12]
 
 
 def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, Any]:
@@ -12832,6 +12843,13 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
                 "workstream": "Kitchen Profit",
             },
         )
+    action_plan = build_growth_action_plan(briefing, intelligence, operations)
+    if growth.get("counts", {}).get("contacts", 0):
+        action_plan.append(dict(priority="This Week", title="Bring service and shop customers back",
+            evidence=f"{growth['counts']['contacts']} contacts in the customer growth queue.",
+            steps="Review recent laundry, food, rental and shop activity. Choose one relevant follow-up group; check marketing consent and remove duplicate contacts before sending.",
+            owner="Customer growth officer", measure="Track paid repeat orders and contribution after campaign costs; honour opt-outs.",
+            href="/app/modules/customer_crm"))
     return {
         "briefing": briefing,
         "growth": growth,
@@ -12839,7 +12857,7 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
         "jollofCycle": jollof_cycle,
         "intelligence": intelligence,
         "operations": operations,
-        "actionPlan": build_growth_action_plan(briefing, intelligence, operations),
+        "actionPlan": action_plan,
         "marketingDraft": (
             f"Looking for {intelligence['topProducts'][0]['name']}? Contact OneRoot Essentials in Amasaman, Medie for today's availability and price. "
             "Shop at oneroot.shop or WhatsApp 0544995005 / 0242847065. We will confirm pickup or delivery."

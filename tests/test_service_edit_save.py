@@ -96,7 +96,7 @@ class ServiceEditSaveTests(unittest.TestCase):
         response = self.client.get("/app/ai-growth-assistant")
         self.assertEqual(response.status_code, 200)
         text = response.get_data(as_text=True)
-        self.assertIn("Your Priority Action Plan", text)
+        self.assertIn("Money Actions This Week", text)
         self.assertIn('class="workspace-submenu"', text)
         self.assertIn("Insights &amp; Suggested Actions", text)
 

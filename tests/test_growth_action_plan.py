@@ -4,6 +4,15 @@ from oneroot_erp.app import build_growth_action_plan
 
 
 class GrowthActionPlanTests(unittest.TestCase):
+    def test_money_actions_link_to_source_records(self):
+        actions = build_growth_action_plan({}, {
+            "slowStock": [{"name": "Rice", "stock": 10, "value": 50}],
+            "topProducts": [{"name": "Bread", "sales": 100, "profit": 25}],
+        }, {})
+        self.assertIn("Hold buying", actions[0]["title"])
+        self.assertIn("No paid POS movement", actions[0]["evidence"])
+        self.assertEqual(actions[1]["href"], "/app/modules/campaign_roi")
+
     def test_empty_data_does_not_invent_growth_opportunities(self):
         actions = build_growth_action_plan({}, {}, {})
         self.assertEqual(len(actions), 1)
