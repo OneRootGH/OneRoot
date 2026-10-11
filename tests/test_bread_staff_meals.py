@@ -7,11 +7,25 @@ from sqlalchemy.orm import Session
 from oneroot_erp.app import (ensure_half_bread_variant, adjust_product_stock, staff_meal_week_rows,
                              ensure_default_staff_meal_schedule, pos_line_is_bread,
                              remove_product_duplication_instructions, stock_remaining_percent,
-                             sync_customer_loyalty_accounts)
+                             sync_customer_loyalty_accounts, external_credit_payment_records,
+                             is_internal_kitchen_credit_payment)
 from oneroot_erp.models import Base, Product, ModuleRecord, PosOrder
 
 
 class BreadStaffMealsTests(unittest.TestCase):
+    def test_credit_collections_exclude_internal_kitchen_and_other_dates(self):
+        today = date(2026,10,11)
+        for key, name, day, kind in [("customer", "Mary", today, "Payment Received"),
+                                     ("kitchen", "OneRoot Kitchen", today, "Payment Received"),
+                                     ("legacy", "OneRoot Essentials", today, "Payment Received"),
+                                     ("other", "Mary", date(2026,10,10), "Payment Received"),
+                                     ("sale", "Mary", today, "Credit Sale")]:
+            self.db.add(ModuleRecord(id=key, module_key="customer_credit_accounts", record_date=day,
+                payload={"customerName": name, "transactionType": kind, "amount": 40}))
+        self.db.commit()
+        self.assertEqual([r.id for r in external_credit_payment_records(self.db, today)], ["customer"])
+        self.assertTrue(is_internal_kitchen_credit_payment({"customerName": "OneRoot  kitchen"}))
+
     def test_stock_percentage_is_based_on_recorded_baseline(self):
         product = Product(id="stock", track_inventory=True, quantity_known=True,
                           quantity_on_hand=19, stock_baseline=100)

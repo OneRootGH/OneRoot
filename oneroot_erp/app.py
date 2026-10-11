@@ -11284,6 +11284,19 @@ def petty_cash_operating_expense_amount(payload: dict[str, Any]) -> float:
     return abs(parse_amount(payload.get("amount"))) if normalize_text(payload.get("transactionTypeId")) in legacy_spend_types else 0.0
 
 
+def is_internal_kitchen_credit_payment(payload: dict[str, Any]) -> bool:
+    name = re.sub(r"[^a-z0-9]", "", normalize_text(payload.get("customerName")).lower())
+    return name in {"onerootkitchen", "onerootessentials"} or bool(payload.get("internalKitchenIssue"))
+
+
+def external_credit_payment_records(db_session, payment_date: date):
+    return [record for record in db_session.scalars(select(ModuleRecord).where(
+        ModuleRecord.module_key == "customer_credit_accounts", ModuleRecord.record_date == payment_date
+    )).all() if normalize_text((record.payload or {}).get("transactionType")) == "Payment Received"
+       and not is_internal_kitchen_credit_payment(record.payload or {})
+       and parse_amount((record.payload or {}).get("amount")) > 0]
+
+
 def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") -> dict[str, Any]:
     selected_area = normalize_text(area_id)
     scoped_areas = [area for area in BUSINESS_AREAS if not selected_area or area["id"] == selected_area]
@@ -11453,6 +11466,19 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
             notes=normalize_text(payload.get("notes")),
         )
 
+    credit_received_total = 0.0
+    for record in external_credit_payment_records(db_session, sale_date):
+        payload = record.payload or {}
+        area = normalize_text(payload.get("businessAreaId")) or normalize_text(record.business_area_id)
+        if selected_area and area != selected_area:
+            continue
+        amount = parse_amount(payload.get("amount"))
+        credit_received_total += amount
+        append_sale_entry(entry_id=f"credit-payment|{record.id}", title=normalize_text(payload.get("customerName")),
+                          reference=record.reference, record_date_value=sale_date.isoformat(), updated_at_value="",
+                          business_area_id=area, source_type="customer-credit-collection", source_label="Customer Credit Collected",
+                          amount=amount, cost_total=0, profit_total=0, transaction_count=1,
+                          notes="Repayment of an earlier credit sale; no new profit recognised.")
     total_sales = round(sum(row["salesTotal"] for row in area_map.values()), 2)
     total_cost = round(sum(row["costTotal"] for row in area_map.values()), 2)
     total_profit = round(sum(row["profitTotal"] for row in area_map.values()), 2)
@@ -11530,6 +11556,8 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         "area_source_rows": area_source_rows,
         "detail_rows": detail_rows[:40],
         "total_sales": total_sales,
+        "credit_collections_total": round(credit_received_total, 2),
+        "new_paid_sales_total": round(total_sales - credit_received_total, 2),
         "total_cost": total_cost,
         "total_profit": total_profit,
         "transaction_total": transaction_total,
@@ -11725,6 +11753,8 @@ def daily_sales_accountability_context(db_session, sale_date: date, area_id: str
         if transaction_type == "Credit Sale":
             activity, kind = "Credit Sale", "credit-sale"
         elif transaction_type == "Payment Received":
+            if is_internal_kitchen_credit_payment(payload):
+                continue
             activity, kind = "Credit Collection", "credit-collection"
         else:
             activity, kind = f"Credit {transaction_type}", "credit-adjustment"
@@ -16113,6 +16143,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload = dict(credit_record.payload or {})
             if normalize_text(payload.get("transactionType")) != "Payment Received":
                 continue
+            if is_internal_kitchen_credit_payment(payload):
+                continue
             credit_area_id = normalize_text(payload.get("businessAreaId"))
             if selected_area and credit_area_id != selected_area:
                 continue
@@ -16663,13 +16695,24 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 1,
             )
 
+        credit_received_by_area = defaultdict(float)
+        for credit_record in external_credit_payment_records(g.db, order_date):
+            payload = credit_record.payload or {}
+            credit_area = normalize_text(payload.get("businessAreaId")) or normalize_text(credit_record.business_area_id)
+            if scoped_area_ids and credit_area not in scoped_area_ids:
+                continue
+            amount = parse_amount(payload.get("amount"))
+            daily_sales_by_area[credit_area] += amount
+            credit_received_by_area[credit_area] += amount
+            daily_sales_transaction_count_by_area[credit_area] += 1
         all_daily_sales_breakdown = [
             {
                 "areaId": area_key,
                 "areaLabel": BUSINESS_AREA_SHORT.get(area_key, area_key or "Shared Operations"),
                 "salesAmount": round(amount, 2),
                 "costAmount": round(daily_sales_cost_by_area.get(area_key, 0.0), 2),
-                "profitAmount": round(amount - daily_sales_cost_by_area.get(area_key, 0.0), 2),
+                "profitAmount": round(amount - credit_received_by_area.get(area_key, 0.0) - daily_sales_cost_by_area.get(area_key, 0.0), 2),
+                "creditCollected": round(credit_received_by_area.get(area_key, 0.0), 2),
                 "transactionCount": daily_sales_transaction_count_by_area.get(area_key, 0),
             }
             for area_key, amount in daily_sales_by_area.items()
@@ -16688,7 +16731,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             sales_query = sales_query.where(ModuleRecord.business_area_id.in_(scoped_area_ids))
         sales_rows = g.db.scalars(sales_query).all()
         daily_sales_total = round(
-            sum(parse_amount(record.amount) for record in sales_rows if not is_mobile_money_daily_sales_record(record)),
+            sum(parse_amount(record.amount) for record in sales_rows if not is_mobile_money_daily_sales_record(record))
+            + sum(credit_received_by_area.values()),
             2,
         )
 

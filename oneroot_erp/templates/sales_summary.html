@@ -119,8 +119,9 @@
 
   <section class="card-grid four">
     <article class="metric-card">
-      <span>Daily Sales</span>
+      <span>Daily Paid Sales &amp; Credit Collected</span>
       <strong>{{ total_sales|currency }}</strong>
+      <small>New paid sales {{ new_paid_sales_total|currency }} · Customer credit collected {{ credit_collections_total|currency }}. Internal kitchen payments excluded.</small>
       <small>Total ledger sales captured for {{ sale_date }}</small>
     </article>
     <article class="metric-card">
