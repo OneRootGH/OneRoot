@@ -8,7 +8,7 @@ from oneroot_erp.app import (ensure_half_bread_variant, adjust_product_stock, st
                              ensure_default_staff_meal_schedule, pos_line_is_bread,
                              remove_product_duplication_instructions, stock_remaining_percent,
                              sync_customer_loyalty_accounts, external_credit_payment_records,
-                             is_internal_kitchen_credit_payment)
+                             is_internal_kitchen_credit_payment, external_credit_collection_totals)
 from oneroot_erp.models import Base, Product, ModuleRecord, PosOrder
 
 
@@ -25,6 +25,9 @@ class BreadStaffMealsTests(unittest.TestCase):
         self.db.commit()
         self.assertEqual([r.id for r in external_credit_payment_records(self.db, today)], ["customer"])
         self.assertTrue(is_internal_kitchen_credit_payment({"customerName": "OneRoot  kitchen"}))
+        totals = external_credit_collection_totals(self.db.scalars(select(ModuleRecord)).all())
+        self.assertEqual(totals[today], 40)
+        self.assertEqual(totals[date(2026,10,10)], 40)
 
     def test_stock_percentage_is_based_on_recorded_baseline(self):
         product = Product(id="stock", track_inventory=True, quantity_known=True,

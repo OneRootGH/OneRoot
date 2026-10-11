@@ -11289,6 +11289,17 @@ def is_internal_kitchen_credit_payment(payload: dict[str, Any]) -> bool:
     return name in {"onerootkitchen", "onerootessentials"} or bool(payload.get("internalKitchenIssue"))
 
 
+def external_credit_collection_totals(records) -> dict[date, float]:
+    totals = defaultdict(float)
+    for record in records:
+        payload = record.payload or {}
+        if (record.module_key == "customer_credit_accounts" and record.record_date
+                and normalize_text(payload.get("transactionType")) == "Payment Received"
+                and not is_internal_kitchen_credit_payment(payload)):
+            totals[record.record_date] += max(parse_amount(payload.get("amount")), 0)
+    return dict(totals)
+
+
 def external_credit_payment_records(db_session, payment_date: date):
     return [record for record in db_session.scalars(select(ModuleRecord).where(
         ModuleRecord.module_key == "customer_credit_accounts", ModuleRecord.record_date == payment_date
@@ -18225,6 +18236,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             running_share = next_share
         sales_mix_style = f"conic-gradient({', '.join(mix_stops)})" if mix_stops else "conic-gradient(#e9e3d7 0 100%)"
         daily_sales_rows = []
+        weekly_credit_collections = external_credit_collection_totals(all_records)
         for days_ago in range(6, -1, -1):
             sales_date = today - timedelta(days=days_ago)
             daily_sales_rows.append({
@@ -18233,7 +18245,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "amount": round(sum(
                     record.amount for record in paid_sales_records
                     if record.record_date == sales_date
-                ), 2),
+                ) + weekly_credit_collections.get(sales_date, 0), 2),
             })
         online_orders = [
             serialize_online_order(record) for record in all_records if record.module_key == "online_orders"

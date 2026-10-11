@@ -46,7 +46,7 @@
 
   <section class="dashboard-chart-grid">
     <article class="card">
-      <div class="card-header compact"><div><p class="eyebrow">Trend Chart</p><h3>Last 7 Days of Sales</h3></div></div>
+      <div class="card-header compact"><div><p class="eyebrow">Trend Chart</p><h3>Last 7 Days of Paid Sales &amp; Collections</h3><p class="muted">Includes external customer credit payments on the payment date. Internal OneRoot Kitchen payments are excluded.</p></div></div>
       <div class="dashboard-trend">
         {% for day in weekly_sales_chart %}
           <div class="dashboard-trend-column"><span class="trend-value">{{ day.chartValue|currency }}</span><div class="dashboard-trend-rail"><span style="height: {{ day.chartWidth }}%; background: {{ day.chartColor }};"></span></div><strong>{{ day.chartLabel }}</strong><small>{{ day.short }}</small></div>
