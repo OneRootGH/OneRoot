@@ -20048,9 +20048,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if module_key == "sales" and (not date_from or not date_to or date_from == date_to):
             refresh_pos_generated_sales_for_date(date_from or date_to or date.today())
             g.db.commit()
-        if module_key == "customer_loyalty":
-            sync_customer_loyalty_accounts(g.db)
-            g.db.commit()
+        # Opening a rewards list must not rebuild and write every customer card.
+        # Loyalty updates run through the customer automation/save workflows.
         all_records = g.db.scalars(
             select(ModuleRecord)
             .where(ModuleRecord.module_key == module_key)

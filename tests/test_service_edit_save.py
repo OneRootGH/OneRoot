@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from sqlalchemy import select
 
-from oneroot_erp.app import create_app, set_module_record_metadata
+from oneroot_erp.app import create_app, set_module_record_metadata, sync_customer_loyalty_accounts
 from oneroot_erp.config import load_config
 from oneroot_erp.models import Base, ModuleRecord, Product, User
 from oneroot_erp.registry import MODULES
@@ -124,8 +124,11 @@ class ServiceEditSaveTests(unittest.TestCase):
             db.add(ModuleRecord(id=identity, module_key="customer_loyalty", payload={
                 "customerName": "Mary", "customerPhone": "0240000000", "pointsRedeemed": redeemed}))
         db.commit()
+        sync_customer_loyalty_accounts(db)
+        db.commit()
         for _ in range(2):
-            response = self.client.get("/app/modules/customer_loyalty")
+            with patch("oneroot_erp.app.sync_customer_loyalty_accounts", side_effect=AssertionError("Rebuild on page load")):
+                response = self.client.get("/app/modules/customer_loyalty")
             self.assertEqual(response.status_code, 200)
         cards = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_loyalty")).all()
         self.assertEqual(len(cards), 2)
