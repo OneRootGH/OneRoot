@@ -18132,6 +18132,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.commit()
         dashboard_record_keys = {
             "sales",
+            "customer_credit_accounts",
             "apartments",
             "recurring_controls",
             "maintenance_records",
@@ -18160,9 +18161,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         expenses_total = sum(record.amount for record in all_records if record.module_key == "expenses")
         sales_total = sum(record.amount for record in paid_sales_records)
         profit_total = sum(module_record_profit_amount(record) for record in paid_sales_records)
+        credit_collections = external_credit_collection_totals(all_records)
         today_sales_total = sum(
             record.amount for record in paid_sales_records if record.record_date == today
-        )
+        ) + credit_collections.get(today, 0)
         today_profit_total = sum(
             module_record_profit_amount(record)
             for record in paid_sales_records
@@ -18207,6 +18209,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if record.record_date and record.record_date.strftime("%Y-%m") == current_month:
                 sales_by_area_map[record.business_area_id or "shared-operations"] += record.amount
                 profit_by_area_map[record.business_area_id or "shared-operations"] += module_record_profit_amount(record)
+        for record in all_records:
+            if (record.module_key == "customer_credit_accounts"
+                    and record.record_date
+                    and record.record_date.strftime("%Y-%m") == current_month
+                    and normalize_text((record.payload or {}).get("transactionType")) == "Payment Received"
+                    and not is_internal_kitchen_credit_payment(record.payload or {})):
+                sales_by_area_map[record.business_area_id or "shared-operations"] += max(
+                    parse_amount((record.payload or {}).get("amount")), 0
+                )
         monthly_sales_by_area = sorted(
             [
                 {
@@ -18236,7 +18247,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             running_share = next_share
         sales_mix_style = f"conic-gradient({', '.join(mix_stops)})" if mix_stops else "conic-gradient(#e9e3d7 0 100%)"
         daily_sales_rows = []
-        weekly_credit_collections = external_credit_collection_totals(all_records)
+        weekly_credit_collections = credit_collections
         for days_ago in range(6, -1, -1):
             sales_date = today - timedelta(days=days_ago)
             daily_sales_rows.append({

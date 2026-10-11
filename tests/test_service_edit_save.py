@@ -100,6 +100,22 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertIn('class="workspace-submenu"', text)
         self.assertIn("Insights &amp; Suggested Actions", text)
 
+    def test_dashboard_loads_external_credit_collections(self):
+        db = self.sessions()
+        for identity, customer, amount in [("external", "Mary", 40), ("internal", "OneRoot Kitchen", 900)]:
+            db.add(ModuleRecord(id=identity, module_key="customer_credit_accounts",
+                                business_area_id="groceries", record_date=date.today(), amount=amount,
+                                payload={"transactionType": "Payment Received", "customerName": customer,
+                                         "amount": amount}))
+        db.commit()
+        with patch("oneroot_erp.app.render_template", return_value="dashboard") as render:
+            response = self.client.get("/app/")
+        self.assertEqual(response.status_code, 200)
+        context = render.call_args.kwargs
+        self.assertEqual(context["today_sales_total"], 40)
+        self.assertEqual(context["month_sales_total"], 40)
+        self.assertEqual(context["month_profit_total"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()
