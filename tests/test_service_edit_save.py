@@ -14,6 +14,23 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_public_equipment_request_saves_linked_booking(self):
+        db = self.sessions()
+        db.add(Product(id="public-drill", name="Impact Drill", business_area_id="water-equipment",
+                       category="Rent", item_type="service", active=True, sales_price=50))
+        db.commit()
+        with patch("oneroot_erp.app.sync_customer_crm_automation", side_effect=AssertionError("Global rebuild")):
+            response = self.client.post("/api/orders", json={
+                "customerName": "Booking Test", "customerPhone": "0240000000",
+                "preferredDate": date.today().isoformat(), "items": [
+                    {"id": "public-drill", "quantity": 2, "requestedDays": 3, "pricingMultiplier": 3}]})
+        self.assertEqual(response.status_code, 200, response.get_data(as_text=True))
+        self.assertTrue(response.json["ok"])
+        self.assertEqual(response.json["totalAmount"], 300)
+        booking = db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "equipment_rental_bookings",
+                            ModuleRecord.reference == response.json["orderNumber"]))
+        self.assertIsNotNone(booking)
+
     def setUp(self):
         self.temp = TemporaryDirectory()
         config = replace(load_config(), database_url=f"sqlite:///{Path(self.temp.name) / 'test.db'}")

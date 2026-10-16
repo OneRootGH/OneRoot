@@ -15926,7 +15926,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "kitchenCreditStatus": "Settled after declared sales" if credit_balance <= 0 else "Open internal kitchen credit",
         }
 
-    def upsert_pos_customer_crm_contact(order: PosOrder, db_session=None) -> None:
+    def upsert_pos_customer_crm_contact(order: PosOrder, db_session=None, *, source="POS") -> None:
         """Capture a POS customer without rebuilding every CRM record at checkout."""
         db = db_session or g.db
         customer_name = normalize_text(order.customer_name)
@@ -15949,11 +15949,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "customerName": customer_name or normalize_text(payload.get("customerName")),
                 "customerPhone": customer_phone or normalize_text(payload.get("customerPhone")),
                 "customerSegment": normalize_text(payload.get("customerSegment")) or "Customer",
-                "leadSource": normalize_text(payload.get("leadSource")) or "POS",
+                "leadSource": normalize_text(payload.get("leadSource")) or source,
                 "preferredContact": normalize_text(payload.get("preferredContact")) or ("WhatsApp" if customer_phone else "Phone"),
                 "lastOrderDate": order.order_date.isoformat(),
                 "status": normalize_text(payload.get("status")) or "Active",
-                "notes": normalize_text(payload.get("notes")) or "Captured from OneRoot POS checkout.",
+                "notes": normalize_text(payload.get("notes")) or f"Captured from OneRoot {source}.",
             }
         )
         record = existing or ModuleRecord(id=payload["id"], module_key="customer_crm", created_at=datetime.utcnow())
@@ -18023,7 +18023,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.add(record)
         g.db.flush()
         sync_service_records_for_online_order(record, db_session=g.db)
-        sync_customer_crm_automation(g.db)
+        upsert_pos_customer_crm_contact(PosOrder(
+            customer_name=normalize_text(payload.get("customerName")),
+            customer_phone=normalize_text(payload.get("customerPhone")),
+            order_date=date.today(), primary_business_area_id=record.business_area_id,
+        ), db_session=g.db, source="Website Order")
         order = serialize_online_order(record)
         audit(
             "online_orders",

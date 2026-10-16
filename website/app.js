@@ -3006,7 +3006,13 @@
       },
       body: JSON.stringify(payload)
     });
-    const result = await response.json();
+    const responseText = await response.text();
+    let result;
+    try {
+      result = JSON.parse(responseText);
+    } catch {
+      throw new Error("We could not confirm your request. Please check Track Order with your phone number before trying again, or call 0544995005.");
+    }
 
     if (!response.ok || !result.ok) {
       throw new Error(Array.isArray(result.errors) ? result.errors[0] : "Unable to save order.");
