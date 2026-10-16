@@ -14,6 +14,20 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_owner_updates_salary_without_creating_payment_or_documents(self):
+        db = self.sessions()
+        db.add(ModuleRecord(id="suzzy-profile", module_key="staff_onboarding_profiles", title="Suzzy",
+                            payload={"staffName": "Suzzy", "startDate": "2026-09-14", "monthlySalary": 0}))
+        db.commit()
+        response = self.client.post("/app/staff-onboarding/suzzy-profile/pay-settings",
+                                    data={"monthlySalary": "1350", "paydayDay": "14"})
+        self.assertEqual(response.status_code, 302)
+        db.expire_all()
+        payload = db.get(ModuleRecord, "suzzy-profile").payload
+        self.assertEqual(payload["monthlySalary"], 1350)
+        self.assertEqual(payload["paydayDay"], 14)
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "salary_records")).all())
+
     def test_public_equipment_request_saves_linked_booking(self):
         db = self.sessions()
         db.add(Product(id="public-drill", name="Impact Drill", business_area_id="water-equipment",

@@ -8,6 +8,15 @@
 {% endblock %}
 
 {% block document_body %}
+  {% if payroll_settings_url %}
+  <form method="post" action="{{ payroll_settings_url }}" class="no-print">
+    <h3>Salary &amp; Payday Settings</h3>
+    <label>Monthly Salary (GH₵) <input name="monthlySalary" type="number" min="0.01" step="0.01" value="{{ profile.get('monthlySalary', 0) }}" required></label>
+    <label>Payday (day of month) <input name="paydayDay" type="number" min="1" max="31" value="{{ profile.get('paydayDay') or 28 }}" required></label>
+    <button class="button" type="submit">Save Salary &amp; Payday</button>
+    <p>This updates the staff pack and salary reminders. It does not record a payment.</p>
+  </form>
+  {% endif %}
   <section class="document-copy">
     <h3>Employment Profile</h3>
     <p>

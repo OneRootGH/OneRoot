@@ -22010,6 +22010,32 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "reviewFrequency": "Monthly", "onboardingStatus": "Ready for Signing",
         }, staff_role_options=STAFF_WORK_ROLES)
 
+    @app.route("/app/staff-onboarding/<profile_id>/pay-settings", methods=["POST"])
+    @access_required("staff_documents")
+    def staff_pay_settings(profile_id: str):
+        if not user_is_owner(g.current_user):
+            return "Owner access required.", 403
+        profile = g.db.get(ModuleRecord, profile_id)
+        if not profile or profile.module_key != "staff_onboarding_profiles":
+            return "Staff profile not found.", 404
+        salary = parse_amount(request.form.get("monthlySalary"))
+        payday = int(parse_amount(request.form.get("paydayDay")))
+        if salary <= 0 or not 1 <= payday <= 31:
+            flash("Enter a positive salary and a payday between 1 and 31.", "error")
+            return redirect(url_for("staff_onboarding_pack", profile_id=profile.id))
+        payload = dict(profile.payload or {})
+        old_salary = parse_amount(payload.get("monthlySalary"))
+        old_payday = normalize_text(payload.get("payday"))
+        payload.update(monthlySalary=salary, payBasis="Monthly", payFrequency="Monthly",
+                       paydayDay=payday, payday=f"Day {payday} of each month")
+        profile.payload = payload
+        profile.updated_at = datetime.utcnow()
+        audit("staff_onboarding_profiles", "Staff Payroll Settings", "update", profile.title, profile.id,
+              f"Monthly salary {old_salary:.2f} to {salary:.2f}; payday {old_payday} to {payday}. No payment recorded.")
+        g.db.commit()
+        flash("Monthly salary and payday saved. No salary payment has been recorded.", "success")
+        return redirect(url_for("staff_onboarding_pack", profile_id=profile.id))
+
     @app.route("/app/staff-onboarding/<profile_id>/pack")
     @access_required("staff_documents")
     def staff_onboarding_pack(profile_id: str):
@@ -22031,6 +22057,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "staff_onboarding_pack.html",
             page_title=f"Staff Document Pack - {profile.title}",
             profile=profile.payload or {},
+            payroll_settings_url=url_for("staff_pay_settings", profile_id=profile.id) if user_is_owner(g.current_user) else None,
             document_records=document_records,
             download_url=url_for("staff_onboarding_pack_docx", profile_id=profile.id),
             back_url=url_for("module_list", module_key="staff_documents"),
