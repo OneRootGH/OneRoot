@@ -2426,6 +2426,21 @@ MODULES: dict[str, ModuleDefinition] = {
 }
 
 MODULES.update({
+    "daily_cash_positions": ModuleDefinition(
+        key="daily_cash_positions", label="Daily Cash & Petty Cash", legacy_collection="dailyCashPositions",
+        menu_group="Finance", title_field="recordedBy", date_field="date", amount_field="", editable=False,
+        fields=[FieldDefinition("date", "Date", "date", True),
+                FieldDefinition("groceriesCash", "Groceries Cash Before Petty Cash", "number", True),
+                FieldDefinition("foodCash", "Cold Store & Kitchen Cash Before Petty Cash", "number", True),
+                FieldDefinition("momoCash", "MoMo Physical Cash", "number", True),
+                FieldDefinition("momoECash", "MoMo Phone E-Cash", "number", True),
+                FieldDefinition("groceriesPetty", "Groceries Petty Cash", "number", True),
+                FieldDefinition("foodPetty", "Cold Store & Kitchen Petty Cash", "number", True),
+                FieldDefinition("groceriesRemaining", "Groceries Cash Remaining", "number"),
+                FieldDefinition("foodRemaining", "Cold Store & Kitchen Cash Remaining", "number"),
+                FieldDefinition("totalPhysical", "Total Physical Cash Including Petty Cash", "number"),
+                FieldDefinition("pettyTotal", "Total Petty Cash Set Aside", "number"),
+                FieldDefinition("recordedBy", "Recorded By", "text"), FieldDefinition("notes", "Notes", "textarea")]),
     "customer_prepaid": ModuleDefinition(
         key="customer_prepaid", label="Customer Prepaid Accounts", legacy_collection="customerPrepaid",
         menu_group="Finance", title_field="customerName", date_field="date", amount_field="amount", status_field="transactionType",
@@ -2466,7 +2481,7 @@ MODULES.update({
                 FieldDefinition("notes", "Instructions", "textarea")]),
 })
 for role in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
-    ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar"})
+    ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar", "daily_cash_positions"})
 for role in ("cashier", "retail-stock-service", "kitchen-food-counter", "sales-stock-operator", "frontline-service-lead"):
     ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar"})
 

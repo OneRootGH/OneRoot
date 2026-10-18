@@ -6568,6 +6568,7 @@ def cashbook_entry_preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 SIDEBAR_LINK_LABELS = {
+    "daily_cash_positions": ("Daily Cash & Petty Cash", "daily_cash_page", None),
     "morning_opening": ("Morning Opening", "morning_opening", None),
     "dashboard": ("Dashboard", "dashboard", None),
     "owner_briefing": ("Owner Daily Briefing", "owner_daily_briefing", None),
@@ -14077,8 +14078,8 @@ def build_sidebar(user: User | None = None):
     for group in items:
         group["sections"] = [section for section in group["sections"] if section["links"]]
         group["is_active"] = any(section["is_active"] for section in group["sections"])
-    account_keys = {"customer_prepaid", "construction_accounts", "business_calendar"}
-    account_links = [link for key in ("customer_prepaid", "construction_accounts", "business_calendar")
+    account_keys = {"daily_cash_positions", "customer_prepaid", "construction_accounts", "business_calendar"}
+    account_links = [link for key in ("daily_cash_positions", "customer_prepaid", "construction_accounts", "business_calendar")
                      if (link := workspace_link(key, user))]
     if account_links:
         for group in items:
@@ -18485,6 +18486,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         return render_template(
             "dashboard.html",
+            latest_cash_position=(g.db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")
+                .order_by(desc(ModuleRecord.record_date)).limit(1)) if user_has_access(g.current_user, "daily_cash_positions") else None),
             page_title="Dashboard",
             counts=counts,
             expenses_total=expenses_total,
@@ -19128,6 +19131,66 @@ def create_app(config: AppConfig | None = None) -> Flask:
             month_filter=month_filter,
             analytics=business_analytics_context(g.db, month_filter),
         )
+
+    @app.route("/app/daily-cash", methods=["GET", "POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_page():
+        today = datetime.now(ZoneInfo("Africa/Accra")).date()
+        selected = parse_date(request.values.get("date")) or today
+        identity = "daily-cash-" + selected.isoformat()
+        record = g.db.get(ModuleRecord, identity)
+        payload = dict(record.payload or {}) if record else {"date": selected.isoformat()}
+        errors = []
+        fields = ("groceriesCash", "foodCash", "momoCash", "momoECash", "groceriesPetty", "foodPetty")
+        if request.method == "POST":
+            if not parse_date(request.form.get("date")) or selected > today:
+                errors.append("Choose today or an earlier date for the actual count.")
+            for name in fields:
+                raw = normalize_text(request.form.get(name))
+                try:
+                    value = round(float(raw.replace(",", "")), 2)
+                except ValueError:
+                    value = -1
+                if not math.isfinite(value) or value < 0:
+                    errors.append("Enter zero or a positive amount in every money box.")
+                payload[name] = value
+            if payload["groceriesPetty"] > payload["groceriesCash"]:
+                errors.append("Groceries petty cash cannot exceed the cash counted for that shop.")
+            if payload["foodPetty"] > payload["foodCash"]:
+                errors.append("Cold Store & Kitchen petty cash cannot exceed the cash counted for that shop.")
+            payload["date"] = selected.isoformat()
+            payload["notes"] = normalize_text(request.form.get("notes"))[:2000]
+            if not errors:
+                if g.db.bind.dialect.name == "postgresql":
+                    g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": identity})
+                g.db.expire_all()
+                record = g.db.get(ModuleRecord, identity)
+                previous = dict(record.payload or {}) if record else {}
+                payload.update(id=identity, groceriesRemaining=round(payload["groceriesCash"] - payload["groceriesPetty"], 2),
+                    foodRemaining=round(payload["foodCash"] - payload["foodPetty"], 2),
+                    pettyTotal=round(payload["groceriesPetty"] + payload["foodPetty"], 2),
+                    totalPhysical=round(payload["groceriesCash"] + payload["foodCash"] + payload["momoCash"], 2),
+                    recordedBy=g.current_user.full_name or g.current_user.username,
+                    recordedById=g.current_user.id, recordedAt=datetime.utcnow().isoformat())
+                record = record or ModuleRecord(id=identity, module_key="daily_cash_positions")
+                set_module_record_metadata(record, MODULES["daily_cash_positions"], payload)
+                g.db.add(record)
+                audit("daily_cash_positions", "Daily Cash & Petty Cash", "update" if previous else "create",
+                      selected.isoformat(), identity,
+                      json.dumps({"before": {k: previous.get(k) for k in fields},
+                                  "after": {k: payload[k] for k in fields}, "notes": payload["notes"]}))
+                g.db.commit()
+                flash("Daily cash saved. The owner can see it now.", "success")
+                return redirect(url_for("daily_cash_page", date=selected.isoformat()))
+        for error in dict.fromkeys(errors):
+            flash(error, "error")
+        date_from = parse_date(request.args.get("date_from")) or today - timedelta(days=30)
+        date_to = parse_date(request.args.get("date_to")) or today
+        history = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions",
+            ModuleRecord.record_date >= date_from, ModuleRecord.record_date <= date_to)
+            .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
+        return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
+                               selected=selected, history=history, date_from=date_from, date_to=date_to)
 
     @app.route("/app/morning-opening")
     @access_required("daily_handovers")
@@ -20015,6 +20078,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key == "daily_cash_positions":
+            return redirect(url_for("daily_cash_page"))
         if module_key in {"customer_prepaid", "construction_accounts", "business_calendar"}:
             if module_key == "business_calendar":
                 ensure_business_responsibilities(g.db)

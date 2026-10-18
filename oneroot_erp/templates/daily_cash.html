@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="card-header"><div><h3>Daily Cash &amp; Petty Cash</h3><p class="muted">Count each shop's cash before setting petty cash aside. Enter the e-cash balance shown on the MoMo phone.</p></div></div>
+  <form method="post" id="daily-cash-form">
+    <div class="form-grid"><label>Date <input type="date" name="date" value="{{ selected }}" required></label></div>
+    <div class="card-grid two">
+      {% for title, cash, petty in [('Groceries & More', 'groceriesCash', 'groceriesPetty'), ('Cold Store & Kitchen', 'foodCash', 'foodPetty')] %}
+      <section><h3>{{ title }}</h3><div class="form-grid">
+        <label>Cash counted before petty cash (GH₵)<input type="number" name="{{ cash }}" step="0.01" min="0" value="{{ payload.get(cash, '') }}" required></label>
+        <label>Petty cash to set aside (GH₵)<input type="number" name="{{ petty }}" step="0.01" min="0" value="{{ payload.get(petty, 0) }}" required></label>
+      </div><p>Cash remaining: <strong data-remainder="{{ cash }}">—</strong></p></section>
+      {% endfor %}
+    </div>
+    <h3>Mobile Money — Separate Float</h3><div class="form-grid">
+      <label>Physical cash available for MoMo customers (GH₵)<input type="number" name="momoCash" step="0.01" min="0" value="{{ payload.get('momoCash', '') }}" required></label>
+      <label>E-cash balance on the MoMo phone (GH₵)<input type="number" name="momoECash" step="0.01" min="0" value="{{ payload.get('momoECash', '') }}" required></label>
+    </div>
+    <div class="card-grid three"><article class="metric-card"><span>Total physical cash, including petty cash</span><strong id="physical-total">—</strong></article><article class="metric-card"><span>Petty cash set aside</span><strong id="petty-total">—</strong></article><article class="metric-card"><span>MoMo e-cash (not physical cash)</span><strong id="ecash-total">—</strong></article></div>
+    <label>Note (optional)<textarea name="notes" rows="2" maxlength="2000">{{ payload.get('notes', '') }}</textarea></label>
+    <p class="muted">These are counted balances, not sales or profit. Petty cash remains part of the physical cash total. Record actual spending in Expenses. Saving does not change MoMo transactions, Cashbook or the existing shift records.</p>
+    {% if payload.get('recordedAt') %}<p>Last saved by {{ payload.recordedBy }} · {{ payload.recordedAt }} UTC. Saving again updates this date's record and keeps an audit trail.</p>{% endif %}
+    <button class="button primary" type="submit">Save Daily Cash</button>
+  </form>
+</section>
+<section class="card"><div class="card-header"><h3>Daily Records</h3><a class="button subtle" href="{{ url_for('module_export', module_key='daily_cash_positions', date_from=date_from, date_to=date_to) }}">Export CSV</a></div>
+  <form method="get" class="toolbar"><label>From <input type="date" name="date_from" value="{{ date_from }}"></label><label>To <input type="date" name="date_to" value="{{ date_to }}"></label><button class="button" type="submit">View</button></form>
+  <p class="muted">Each row is a daily balance snapshot. Do not add daily balances together as income.</p>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Groceries Cash Remaining</th><th>Groceries Petty Cash</th><th>Cold Store Cash Remaining</th><th>Cold Store Petty Cash</th><th>MoMo Physical Cash</th><th>MoMo E-Cash</th><th>Recorded By</th><th></th></tr></thead><tbody>
+  {% for r in history %}<tr><td>{{ r.record_date }}</td>{% for key in ['groceriesRemaining', 'groceriesPetty', 'foodRemaining', 'foodPetty', 'momoCash', 'momoECash'] %}<td>{{ r.payload.get(key, 0)|currency }}</td>{% endfor %}<td>{{ r.payload.get('recordedBy') }}</td><td><a href="{{ url_for('daily_cash_page', date=r.record_date) }}">Open</a></td></tr>{% else %}<tr><td colspan="9">No daily cash counts saved for this period.</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+<script>
+(() => {
+  const form = document.getElementById('daily-cash-form');
+  const money = n => new Intl.NumberFormat('en-GH', {style: 'currency', currency: 'GHS'}).format(n);
+  const value = name => Number(form.elements[name].value) || 0;
+  function update() {
+    for (const [cash, petty] of [['groceriesCash', 'groceriesPetty'], ['foodCash', 'foodPetty']]) {
+      form.querySelector(`[data-remainder="${cash}"]`).textContent = money(value(cash) - value(petty));
+      form.elements[petty].max = String(Math.max(value(cash), 0));
+    }
+    document.getElementById('physical-total').textContent = money(value('groceriesCash') + value('foodCash') + value('momoCash'));
+    document.getElementById('petty-total').textContent = money(value('groceriesPetty') + value('foodPetty'));
+    document.getElementById('ecash-total').textContent = money(value('momoECash'));
+  }
+  form.addEventListener('input', update);
+  update();
+})();
+</script>
+{% endblock %}

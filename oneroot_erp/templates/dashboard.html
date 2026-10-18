@@ -20,6 +20,16 @@
   </section>
 
   <section class="dashboard-chart-grid">
+    {% if latest_cash_position %}
+    <article class="card">
+      <div class="card-header"><h3>Latest Daily Cash · {{ latest_cash_position.record_date }}</h3><a class="button subtle" href="{{ url_for('daily_cash_page') }}">View Daily Records</a></div>
+      {% set cash = latest_cash_position.payload %}
+      <p>Groceries cash remaining <strong>{{ cash.get('groceriesRemaining', 0)|currency }}</strong> · Petty cash <strong>{{ cash.get('groceriesPetty', 0)|currency }}</strong></p>
+      <p>Cold Store &amp; Kitchen cash remaining <strong>{{ cash.get('foodRemaining', 0)|currency }}</strong> · Petty cash <strong>{{ cash.get('foodPetty', 0)|currency }}</strong></p>
+      <p>MoMo physical cash <strong>{{ cash.get('momoCash', 0)|currency }}</strong> · MoMo e-cash <strong>{{ cash.get('momoECash', 0)|currency }}</strong></p>
+      <small>Counted by {{ cash.get('recordedBy') }}. Balance snapshot, not sales.</small>
+    </article>
+    {% endif %}
     <article class="card">
       <div class="card-header compact"><div><p class="eyebrow">Bar Chart</p><h3>Sales by Business Area</h3></div><span class="metric-chip">{{ month_sales_total|currency }} this month</span></div>
       {% if monthly_sales_chart %}

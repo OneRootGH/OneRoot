@@ -16,6 +16,45 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_daily_cash_keeps_pettty_allocation_separate_and_one_record_per_date(self):
+        form = dict(date=date.today().isoformat(), groceriesCash="500", foodCash="300", momoCash="900",
+                    momoECash="1040", groceriesPetty="50", foodPetty="30", notes="Morning count")
+        response = self.client.post("/app/daily-cash", data=form)
+        self.assertEqual(response.status_code, 302)
+        db = self.sessions()
+        records = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")).all()
+        self.assertEqual(len(records), 1)
+        p = records[0].payload
+        self.assertEqual(p["groceriesRemaining"], 450)
+        self.assertEqual(p["foodRemaining"], 270)
+        self.assertEqual(p["pettyTotal"], 80)
+        self.assertEqual(p["totalPhysical"], 1700)
+        self.assertEqual(p["momoECash"], 1040)
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(["sales", "expenses", "cashbook_entries", "petty_cash"]))).all())
+        form["groceriesPetty"] = "60"
+        self.assertEqual(self.client.post("/app/daily-cash", data=form).status_code, 302)
+        db.expire_all()
+        records = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")).all()
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].payload["groceriesRemaining"], 440)
+        self.assertIn("Latest Daily Cash", self.client.get("/app/").get_data(as_text=True))
+        self.assertEqual(self.client.get("/app/daily-cash").status_code, 200)
+        self.assertEqual(self.client.get("/app/modules/daily_cash_positions/export.csv").status_code, 200)
+
+    def test_daily_cash_rejects_invalid_counts_and_cashier_access(self):
+        form = dict(date=date.today().isoformat(), groceriesCash="10", foodCash="20", momoCash="900",
+                    momoECash="1040", groceriesPetty="11", foodPetty="0")
+        response = self.client.post("/app/daily-cash", data=form)
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("cannot exceed", response.get_data(as_text=True))
+        form.update(groceriesPetty="0", momoCash="NaN")
+        self.assertEqual(self.client.post("/app/daily-cash", data=form).status_code, 200)
+        db = self.sessions()
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")).all())
+        with self.client.session_transaction() as session:
+            session["user_id"] = "cashier"
+        self.assertEqual(self.client.get("/app/daily-cash").status_code, 302)
+
     def test_calendar_done_is_dated_idempotent_and_does_not_stop_recurrence(self):
         self.client.get("/app/modules/business_calendar")
         db = self.sessions()
