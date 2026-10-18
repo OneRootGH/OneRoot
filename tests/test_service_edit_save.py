@@ -7,13 +7,95 @@ from unittest.mock import patch
 
 from sqlalchemy import select
 
-from oneroot_erp.app import create_app, set_module_record_metadata, sync_customer_loyalty_accounts
+from oneroot_erp.app import (create_app, set_module_record_metadata, sync_customer_loyalty_accounts,
+                             prepaid_balance, responsibility_occurs, profit_detail_rows,
+                             daily_sales_summary_context, report_area_rows)
 from oneroot_erp.config import load_config
 from oneroot_erp.models import Base, ModuleRecord, Product, User
 from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_prepaid_deposit_application_and_overdraft_controls(self):
+        form = dict(date=date.today().isoformat(), customerName="Mary", customerPhone="0240000000",
+                    businessAreaId="groceries", transactionType="Deposit", amount="100", paymentMethod="Cash", reference="D1")
+        url = "/app/modules/customer_prepaid/new"
+        response = self.client.post(url, data=form)
+        self.assertEqual(response.status_code, 302)
+        db = self.sessions()
+        entries = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_prepaid")).all()
+        self.assertEqual(prepaid_balance(entries, "0240000000"), 100)
+        cash = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "cashbook_entries")).all()
+        self.assertEqual(len(cash), 1)
+        self.assertEqual(cash[0].amount, 100)
+        self.assertEqual(self.client.post(url, data=form).status_code, 200)
+        form.update(transactionType="Use Balance", amount="120", reference="SALE1")
+        self.assertEqual(self.client.post(url, data=form).status_code, 200)
+        form["amount"] = "25"
+        self.assertEqual(self.client.post(url, data=form).status_code, 302)
+        entries = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_prepaid")).all()
+        self.assertEqual(prepaid_balance(entries, "0240000000"), 75)
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "cashbook_entries")).all()), 1)
+        self.assertEqual(self.client.get("/app/modules/customer_prepaid").status_code, 200)
+        self.assertEqual(self.client.get(f"/app/prepaid/{entries[0].id}/receipt").status_code, 200)
+        response = self.client.post(f"/app/modules/cashbook_entries/{cash[0].id}/delete",
+                                    data={"deletion_reason": "Test linked record protection"})
+        self.assertEqual(response.status_code, 302)
+        self.assertIsNotNone(db.get(ModuleRecord, cash[0].id))
+        self.assertEqual(self.client.post("/app/modules/customer_prepaid/new", data={
+            **form, "transactionType": "Refund", "amount": "10", "reference": "REF1"}).status_code, 302)
+        entries = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_prepaid")).all()
+        self.assertEqual(prepaid_balance(entries, "0240000000"), 65)
+
+    def test_cashier_cannot_refund_prepaid(self):
+        with self.client.session_transaction() as session:
+            session["user_id"] = "cashier"
+        response = self.client.post("/app/modules/customer_prepaid/new", data={
+            "date": date.today().isoformat(), "customerName": "Mary", "customerPhone": "0240000000",
+            "businessAreaId": "groceries", "transactionType": "Refund", "amount": "10",
+            "paymentMethod": "Cash", "reference": "REF1"})
+        self.assertEqual(response.status_code, 200)
+        self.assertIn("Only the owner", response.get_data(as_text=True))
+
+    def test_calendar_seeds_once_preserves_edits_and_has_editable_duties(self):
+        self.assertEqual(self.client.get("/app/modules/business_calendar").status_code, 200)
+        db = self.sessions()
+        rows = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar")).all()
+        self.assertEqual(len(rows), 12)
+        row = next(r for r in rows if r.title == "Sweeping")
+        payload = dict(row.payload)
+        payload["officer"] = "Philip"
+        row.payload = payload
+        db.commit()
+        page = self.client.get("/app/modules/business_calendar")
+        self.assertEqual(page.status_code, 200)
+        db.expire_all()
+        self.assertEqual(db.get(ModuleRecord, row.id).payload["officer"], "Philip")
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar")).all()), 12)
+        gutter = dict(status="Active", frequency="Twice a week", weekdays="0,3")
+        self.assertTrue(responsibility_occurs(gutter, date(2026, 10, 19)))
+        self.assertFalse(responsibility_occurs(gutter, date(2026, 10, 20)))
+        self.assertFalse(responsibility_occurs(dict(status="Active", frequency="As needed"), date.today()))
+
+    def test_momo_profit_excludes_handled_pending_and_generated_duplicates(self):
+        db = self.sessions()
+        for identity, status in [("momo-done", "Completed"), ("momo-pending", "Pending"), ("momo-reversed", "Reversed")]:
+            db.add(ModuleRecord(id=identity, module_key="mobile_money_transactions", title=identity,
+                                record_date=date.today(), business_area_id="mobile-money", amount=1000,
+                                payload=dict(status=status, salesAmount=10, costAmount=2, profitAmount=8, transactionValue=1000)))
+        db.commit()
+        records = db.scalars(select(ModuleRecord)).all()
+        rows = profit_detail_rows(records, date.today().strftime("%Y-%m"))
+        self.assertEqual(sum(r["profitTotal"] for r in rows), 8)
+        self.assertEqual(sum(r["salesTotal"] for r in rows), 10)
+        summary = daily_sales_summary_context(db, date.today())
+        self.assertEqual(summary["total_sales"], 0)
+        self.assertEqual(summary["total_profit"], 8)
+        self.assertEqual(summary["mobile_money_profit"], 8)
+        momo = next(r for r in report_area_rows(records, date.today().strftime("%Y-%m")) if r["areaId"] == "mobile-money")
+        self.assertEqual(momo["profitTotal"], 8)
+        self.assertEqual(self.client.get("/app/modules/construction_accounts").status_code, 200)
+
     def test_owner_updates_salary_without_creating_payment_or_documents(self):
         db = self.sessions()
         db.add(ModuleRecord(id="suzzy-profile", module_key="staff_onboarding_profiles", title="Suzzy",

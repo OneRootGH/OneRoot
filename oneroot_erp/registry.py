@@ -2425,6 +2425,49 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
 }
 
+MODULES.update({
+    "customer_prepaid": ModuleDefinition(
+        key="customer_prepaid", label="Customer Prepaid Accounts", legacy_collection="customerPrepaid",
+        menu_group="Finance", title_field="customerName", date_field="date", amount_field="amount", status_field="transactionType",
+        fields=[FieldDefinition("date", "Transaction Date", "date", True),
+                FieldDefinition("customerName", "Customer Name", "text", True),
+                FieldDefinition("customerPhone", "Customer Phone / Account", "text", True),
+                FieldDefinition("businessAreaId", "Business Area", "select", True, BUSINESS_AREA_OPTIONS),
+                FieldDefinition("transactionType", "Transaction", "select", True, [(x, x) for x in ["Deposit", "Use Balance", "Refund"]]),
+                FieldDefinition("amount", "Amount (GH₵)", "number", True),
+                FieldDefinition("paymentMethod", "Payment Method", "select", True, [(x, x) for x in ["Cash", "Mobile Money", "Bank Transfer", "Card"]]),
+                FieldDefinition("reference", "Receipt / Sale / Service Reference", "text", True),
+                FieldDefinition("notes", "Notes", "textarea")]),
+    "construction_accounts": ModuleDefinition(
+        key="construction_accounts", label="Construction Site Accounts", legacy_collection="constructionAccounts",
+        menu_group="Customers", title_field="siteName", date_field="openingDate", status_field="status", amount_field="creditLimit",
+        fields=[FieldDefinition("openingDate", "Opened", "date", True),
+                FieldDefinition("siteName", "Site / Project Name", "text", True),
+                FieldDefinition("customerName", "Contractor / Account Holder", "text", True),
+                FieldDefinition("customerPhone", "Credit Account Phone", "text", True),
+                FieldDefinition("siteLocation", "Site Location / Digital Address", "text", True),
+                FieldDefinition("siteContact", "Site Contact / Foreman", "text"),
+                FieldDefinition("creditLimit", "Agreed Credit Limit (GH₵)", "number"),
+                FieldDefinition("paymentDueDate", "Next Payment Due", "date"),
+                FieldDefinition("status", "Status", "select", True, [(x, x) for x in ["Active", "On Hold", "Completed"]]),
+                FieldDefinition("notes", "Delivery Instructions / Terms", "textarea")]),
+    "business_calendar": ModuleDefinition(
+        key="business_calendar", label="Business Obligations Calendar", legacy_collection="businessCalendar",
+        menu_group="Operations", title_field="title", date_field="nextDueDate", status_field="status", amount_field="amount",
+        fields=[FieldDefinition("title", "Responsibility / Obligation", "text", True),
+                FieldDefinition("officer", "Officer In Charge", "text", True),
+                FieldDefinition("frequency", "Frequency", "select", True, [(x, x) for x in ["Daily", "Twice a week", "Weekly", "Monthly", "As needed", "Once"]]),
+                FieldDefinition("weekdays", "Days (Monday=0 to Sunday=6; comma separated)", "text"),
+                FieldDefinition("nextDueDate", "Due / Start Date", "date"),
+                FieldDefinition("amount", "Amount Due (GH₵, if any)", "number"),
+                FieldDefinition("status", "Status", "select", True, [(x, x) for x in ["Active", "Paused", "Completed"]]),
+                FieldDefinition("notes", "Instructions", "textarea")]),
+})
+for role in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
+    ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar"})
+for role in ("cashier", "retail-stock-service", "kitchen-food-counter", "sales-stock-operator", "frontline-service-lead"):
+    ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar"})
+
 LEGACY_TO_MODULE = {definition.legacy_collection: definition.key for definition in MODULES.values()}
 MODULE_TO_LEGACY = {definition.key: definition.legacy_collection for definition in MODULES.values()}
 
@@ -2440,14 +2483,14 @@ MENU_GROUPS = [
     (
         "Finance",
         [
-            ("Sales & Spend", ["sales_summary", "sales", "customer_credit_accounts", "expenses", "petty_cash"]),
+            ("Sales & Spend", ["sales_summary", "sales", "customer_credit_accounts", "customer_prepaid", "expenses", "petty_cash"]),
             ("Cash & Reconciliation", ["wallet_control", "cashbook_entries", "mobile_money_reconciliations"]),
         ],
     ),
     (
         "Operations",
         [
-            ("Shift & Counter Handover", ["morning_opening", "daily_handovers"]),
+            ("Shift & Counter Handover", ["morning_opening", "daily_handovers", "business_calendar"]),
             ("Property & Work Orders", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records", "maintenance_records"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
         ],
@@ -2464,7 +2507,7 @@ MENU_GROUPS = [
         "Growth",
         [
             ("AI Growth", ["ai_growth_assistant"]),
-            ("Customers & Marketing", ["customer_crm", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
+            ("Customers & Marketing", ["customer_crm", "construction_accounts", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
         ],
     ),
     (

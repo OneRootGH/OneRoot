@@ -23,7 +23,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
-from sqlalchemy import create_engine, desc, func, inspect, or_, select
+from sqlalchemy import create_engine, desc, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
@@ -7414,6 +7414,110 @@ def mobile_money_transaction_profit(payload: dict[str, Any]) -> float:
     return round(sales_amount - cost_amount, 2)
 
 
+def momo_profit_for_records(records, *, on_date=None, month="") -> float:
+    return round(sum(mobile_money_transaction_profit(r.payload or {}) for r in records
+        if r.module_key == "mobile_money_transactions"
+        and mobile_money_transaction_is_completed(r.payload or {})
+        and (not on_date or r.record_date == on_date)
+        and (not month or (r.record_date and r.record_date.strftime("%Y-%m") == month))), 2)
+
+
+BUSINESS_RESPONSIBILITIES = [
+    ("Watering of flowers", "Daniel / Philip", "Daily", ""),
+    ("Sweeping", "Suzzy / Philip", "Daily", ""),
+    ("Cleaning of gutters", "Suzzy / Philip", "Twice a week", "0,3"),
+    ("Cooking for staff", "Suzzy / Daniel", "Daily", ""),
+    ("Laundry", "Daniel / Philip", "As needed", ""),
+    ("Ironing", "Daniel", "As needed", ""),
+    ("Pumping of water into Polytank", "Daniel", "Daily", ""),
+    ("Equipment rentals", "Suzzy / Faustina", "Daily", ""),
+    ("Cold Store", "Suzzy / Faustina", "Daily", ""),
+    ("Mobile money", "Suzzy / Faustina", "Daily", ""),
+    ("Food", "Suzzy / Faustina", "Daily", ""),
+    ("Groceries and more", "Faustina / Suzzy", "Daily", ""),
+]
+
+
+def ensure_business_responsibilities(db):
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext('business-responsibilities-seed'))"))
+    for title, officer, frequency, weekdays in BUSINESS_RESPONSIBILITIES:
+        identity = "routine-" + hashlib.sha256(title.encode()).hexdigest()[:24]
+        if db.get(ModuleRecord, identity):
+            continue
+        payload = dict(id=identity, title=title, officer=officer, frequency=frequency,
+                       weekdays=weekdays, nextDueDate="2026-10-18", amount=0, status="Active", notes="")
+        record = ModuleRecord(id=identity, module_key="business_calendar")
+        set_module_record_metadata(record, MODULES["business_calendar"], payload)
+        db.add(record)
+    db.commit()
+
+
+def responsibility_occurs(payload, day):
+    if payload.get("status") != "Active":
+        return False
+    start = parse_date(payload.get("nextDueDate"))
+    if start and day < start:
+        return False
+    frequency = payload.get("frequency")
+    if frequency == "Daily":
+        return True
+    if frequency in {"Weekly", "Twice a week"}:
+        return str(day.weekday()) in normalize_text(payload.get("weekdays")).replace(" ", "").split(",")
+    if frequency == "Monthly" and start:
+        return day.day == min(start.day, calendar.monthrange(day.year, day.month)[1])
+    return frequency == "Once" and start == day
+
+
+def prepaid_balance(records, phone):
+    return round(sum(parse_amount((r.payload or {}).get("amount")) *
+                     (1 if (r.payload or {}).get("transactionType") == "Deposit" else -1)
+                     for r in records if normalize_phone((r.payload or {}).get("customerPhone")) == normalize_phone(phone)), 2)
+
+
+def validate_prepaid_entry(db, payload, *, is_owner=False):
+    phone = normalize_phone(payload.get("customerPhone"))
+    amount = round(parse_amount(payload.get("amount")), 2)
+    kind = payload.get("transactionType")
+    if not phone or not math.isfinite(amount) or amount <= 0:
+        return "Enter a customer phone and a positive amount."
+    if kind not in {"Deposit", "Use Balance", "Refund"}:
+        return "Choose Deposit, Use Balance or Refund."
+    if kind == "Refund" and not is_owner:
+        return "Only the owner can refund prepaid money."
+    if db.bind.dialect.name == "postgresql":
+        db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:account))"), {"account": "prepaid|" + phone})
+    entries = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_prepaid")).all()
+    if any(normalize_phone((r.payload or {}).get("customerPhone")) == phone
+           and normalize_text((r.payload or {}).get("reference")) == normalize_text(payload.get("reference")) for r in entries):
+        return "This reference already exists for this customer. Open the original entry."
+    if kind != "Deposit" and amount > prepaid_balance(entries, phone):
+        return "The amount exceeds this customer's available prepaid balance."
+    payload["customerPhone"] = phone
+    payload["amount"] = amount
+    return ""
+
+
+def sync_prepaid_cashbook(db, record):
+    payload = record.payload or {}
+    if payload.get("transactionType") == "Use Balance":
+        return  # Applying existing credit does not move cash a second time.
+    identity = "prepaid-cash-" + record.id
+    entry = db.get(ModuleRecord, identity)
+    if entry:
+        return
+    method = normalize_text(payload.get("paymentMethod"))
+    cash_payload = dict(id=identity, date=payload.get("date"), businessAreaId=payload.get("businessAreaId"),
+                        entryType="Cash In" if payload.get("transactionType") == "Deposit" else "Cash Out",
+                        accountName="Main Cash Drawer" if method == "Cash" else ("OneRoot MoMo Collection Wallet" if method == "Mobile Money" else "Business Bank Account"),
+                        amount=payload.get("amount"), paymentMethod=method, reference="prepaid|" + record.id,
+                        category="Customer Prepaid Liability", counterparty=payload.get("customerName"),
+                        notes="Customer money held/refunded; not sales or profit. " + normalize_text(payload.get("reference")))
+    entry = ModuleRecord(id=identity, module_key="cashbook_entries")
+    set_module_record_metadata(entry, MODULES["cashbook_entries"], cash_payload)
+    db.add(entry)
+
+
 MOBILE_MONEY_FEE_BASED_SERVICE_TYPES = {
     "Cash In",
     "Cash Out",
@@ -11128,7 +11232,7 @@ def management_report_records(db_session, month_value: str, *, include_exposure:
     month_key = parse_month(month_value)
     start = date.fromisoformat(f"{month_key}-01")
     end = date(start.year + (start.month == 12), start.month % 12 + 1, 1)
-    monthly_keys = ["sales", "expenses", "salary_records", "petty_cash", "maintenance_records", "forecast_plans"]
+    monthly_keys = ["sales", "mobile_money_transactions", "expenses", "salary_records", "petty_cash", "maintenance_records", "forecast_plans"]
     if include_exposure:
         monthly_keys += ["apartments", "online_orders"]
     # Assets depreciate across months; supplier balances include earlier bills.
@@ -11178,6 +11282,10 @@ def report_area_rows(records: list[ModuleRecord], month_value: str) -> list[dict
             ),
             2,
         )
+        if area_id == "mobile-money":
+            # Raw completed transactions are the source, never reconciliation
+            # totals or legacy generated sales copies of the same commissions.
+            profit_total = momo_profit_for_records(records, month=scoped_month)
         transaction_total = sum(
             1
             for record in records
@@ -11517,6 +11625,11 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
     total_sales = round(sum(row["salesTotal"] for row in area_map.values()), 2)
     total_cost = round(sum(row["costTotal"] for row in area_map.values()), 2)
     total_profit = round(sum(row["profitTotal"] for row in area_map.values()), 2)
+    momo_records = db_session.scalars(select(ModuleRecord).where(
+        ModuleRecord.module_key == "mobile_money_transactions", ModuleRecord.record_date == sale_date
+    )).all() if mobile_money_in_scope else []
+    momo_commission_profit = momo_profit_for_records(momo_records, on_date=sale_date)
+    total_profit = round(total_profit + momo_commission_profit, 2)
     transaction_total = sum(row["transactionCount"] for row in area_map.values())
     record_total = sum(row["recordCount"] for row in area_map.values())
 
@@ -11604,7 +11717,7 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
         "mobile_money_area": mobile_money_area,
         "mobile_money_source": mobile_money_source,
         "mobile_money_total": mobile_money_total,
-        "mobile_money_profit": mobile_money_profit,
+        "mobile_money_profit": momo_commission_profit,
         "mobile_money_transactions": mobile_money_transactions,
         "mobile_money_share": mobile_money_share,
         "mobile_money_in_scope": mobile_money_in_scope,
@@ -12973,16 +13086,21 @@ def ai_growth_assistant_context(db_session, briefing_date: date) -> dict[str, An
 def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: str = "") -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for record in records:
-        if record.module_key != "sales":
+        is_momo = record.module_key == "mobile_money_transactions"
+        if record.module_key != "sales" and not is_momo:
+            continue
+        if is_momo and not mobile_money_transaction_is_completed(record.payload or {}):
+            continue
+        if record.module_key == "sales" and is_mobile_money_daily_sales_record(record):
             continue
         if not record_in_month_scope(record, month_value) or not record_in_area_scope(record, area_id):
             continue
         payload = record.payload or {}
-        business_area_id = normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations"
-        source_type = normalize_text(payload.get("sourceType")).lower() or "manual-sale"
-        amount = round(parse_amount(record.amount), 2)
-        cost_total = round(module_record_cost_amount(record), 2)
-        profit_total = round(module_record_profit_amount(record), 2)
+        business_area_id = "mobile-money" if is_momo else (normalize_text(record.business_area_id) or normalize_text(payload.get("businessAreaId")) or "shared-operations")
+        source_type = "mobile-money-commission" if is_momo else (normalize_text(payload.get("sourceType")).lower() or "manual-sale")
+        amount = round(parse_amount(payload.get("salesAmount")) if is_momo else parse_amount(record.amount), 2)
+        cost_total = round(parse_amount(payload.get("costAmount")) if is_momo else module_record_cost_amount(record), 2)
+        profit_total = round(mobile_money_transaction_profit(payload) if is_momo else module_record_profit_amount(record), 2)
         transaction_count = max(int(parse_amount(payload.get("transactionCount"))), 1)
         rows.append(
             {
@@ -12994,7 +13112,7 @@ def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: s
                 "areaLabel": BUSINESS_AREA_LABELS.get(business_area_id, business_area_id),
                 "areaShort": BUSINESS_AREA_SHORT.get(business_area_id, business_area_id),
                 "sourceType": source_type,
-                "sourceLabel": normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type),
+                "sourceLabel": "MoMo Commission / Fees (not handled value)" if is_momo else (normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type)),
                 "transactionCount": transaction_count,
                 "salesTotal": amount,
                 "costTotal": cost_total,
@@ -13782,15 +13900,15 @@ WORKSPACE_HUBS = [
     ("Owner Dashboard", ["dashboard", "owner_briefing", "analytics", "reports", "ai_growth_assistant"]),
     ("Daily Sales & Collections", ["sales_summary", "sales"]),
     ("Inventory", ["inventory", "warehouse", "inventory_barcode"]),
-    ("Cash & Float Control", ["wallet_control", "cashbook_entries", "petty_cash"]),
+    ("Cash & Float Control", ["wallet_control", "cashbook_entries", "customer_prepaid", "petty_cash"]),
     ("Mobile Money Counter", ["mobile_money_transactions", "mobile_money_reconciliations"]),
-    ("Shift Control", ["morning_opening", "daily_handovers", "pos_closeouts"]),
+    ("Shift Control", ["morning_opening", "daily_handovers", "business_calendar", "pos_closeouts"]),
     ("Apartments", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records"]),
     ("Kitchen Operations", ["kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
     ("Staff Administration", ["staff_documents", "knowledge_base", "job_vacancies"]),
     ("Attendance & Staff Welfare", ["workforce_attendance", "staff_meal_schedule"]),
     ("Suppliers", ["supplier_directory", "suppliers", "supplier_price_updates"]),
-    ("Customers & Growth", ["customer_crm", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
+    ("Customers & Growth", ["customer_crm", "construction_accounts", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
     ("Budget & Planning", ["forecast_plans", "petty_cash_budgets"]),
 ]
 
@@ -13837,7 +13955,7 @@ def build_sidebar(user: User | None = None):
         daily_work_sections = [
             ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
-            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance", "morning_opening", "daily_handovers"]),
+            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance", "morning_opening", "daily_handovers", "business_calendar"]),
         ]
         menu_groups = [("Daily Work", daily_work_sections)] + [
             (group_label, [
@@ -18160,6 +18278,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.commit()
         dashboard_record_keys = {
             "sales",
+            "mobile_money_transactions",
             "customer_credit_accounts",
             "apartments",
             "recurring_controls",
@@ -18197,7 +18316,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             module_record_profit_amount(record)
             for record in paid_sales_records
             if record.record_date == today
-        )
+        ) + momo_profit_for_records(all_records, on_date=today)
         petty_cash_total = sum(record.amount for record in all_records if record.module_key == "petty_cash")
         apartment_due = round(sum(parse_amount(profile["outstanding"]) for profile in latest_suite_profiles), 2)
         supplier_balance = sum(
@@ -18261,6 +18380,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             reverse=True,
         )
         month_sales_total = round(sum(item["amount"] for item in monthly_sales_by_area), 2)
+        profit_by_area_map["mobile-money"] += momo_profit_for_records(all_records, month=current_month)
         month_profit_total = round(sum(profit_by_area_map.values()), 2)
         chart_palette = ["#1b4e39", "#2f6ea8", "#c47b34", "#8a4f74", "#5f6fd8", "#9a6a19", "#50606f"]
         sales_mix_legend = []
@@ -18561,7 +18681,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == "sales")
             .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
-        detail_rows = profit_detail_rows(sales_records, month_filter, area_filter)
+        detail_rows = profit_detail_rows(sales_records + [r for r in all_records if r.module_key == "mobile_money_transactions"], month_filter, area_filter)
         reporting_area_rows = report_area_rows(all_records, month_filter)
         if area_filter:
             reporting_area_rows = [row for row in reporting_area_rows if row["areaId"] == area_filter]
@@ -19776,6 +19896,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             )
         )
 
+    @app.route("/app/prepaid/<record_id>/receipt")
+    @access_required("customer_prepaid")
+    def prepaid_receipt(record_id):
+        record = g.db.get(ModuleRecord, record_id)
+        if not record or record.module_key != "customer_prepaid":
+            return "Prepaid transaction not found.", 404
+        entries = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_prepaid")).all()
+        return render_template("prepaid_receipt.html", page_title="Prepaid Receipt", record=record,
+                               balance=prepaid_balance(entries, (record.payload or {}).get("customerPhone")))
+
     @app.route("/app/modules/<module_key>")
     @login_required
     def module_list(module_key: str):
@@ -19785,6 +19915,60 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key in {"customer_prepaid", "construction_accounts", "business_calendar"}:
+            if module_key == "business_calendar":
+                ensure_business_responsibilities(g.db)
+            record_keys = {module_key}
+            if module_key == "business_calendar":
+                record_keys.update({"salary_records", "staff_onboarding_profiles", "suppliers", "recurring_controls"})
+            if module_key == "construction_accounts":
+                record_keys.update({"customer_credit_accounts", "equipment_rental_bookings", "laundry_tickets"})
+            source_records = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(record_keys))).all()
+            rows = [r for r in source_records if r.module_key == module_key]
+            search = normalize_text(request.args.get("q")).lower()
+            if search:
+                rows = [r for r in rows if search in json.dumps(r.payload or {}).lower()]
+            start = parse_date(request.args.get("date")) or date.today()
+            accounts, events = [], []
+            if module_key == "customer_prepaid":
+                phones = {normalize_phone((r.payload or {}).get("customerPhone")) for r in rows}
+                all_entries = [r for r in source_records if r.module_key == module_key]
+                for phone in sorted(phones):
+                    customer = next(r for r in rows if normalize_phone((r.payload or {}).get("customerPhone")) == phone)
+                    accounts.append(dict(name=(customer.payload or {}).get("customerName"), phone=phone,
+                                         balance=prepaid_balance(all_entries, phone)))
+            if module_key == "construction_accounts":
+                credits = build_customer_credit_collection_queue(g.db, [r for r in source_records if r.module_key == "customer_credit_accounts"])
+                for r in rows:
+                    p = r.payload or {}
+                    phone = normalize_phone(p.get("customerPhone"))
+                    debt = sum(parse_amount(c.get("balance")) for c in credits if normalize_phone(c.get("customerPhone")) == phone)
+                    accounts.append(dict(name=p.get("siteName"), phone=phone, balance=debt,
+                                         limit=parse_amount(p.get("creditLimit")), id=r.id, customer=p.get("customerName")))
+            if module_key == "business_calendar":
+                for offset in range(7):
+                    day = start + timedelta(days=offset)
+                    for r in rows:
+                        p = r.payload or {}
+                        if responsibility_occurs(p, day):
+                            events.append(dict(date=day, title=p.get("title"), officer=p.get("officer"), amount=parse_amount(p.get("amount")), href=url_for("module_form", module_key=module_key, record_id=r.id)))
+                for item in build_staff_people_alerts(source_records, today=start)["salaryDue"]:
+                    events.append(dict(date=item["dueDate"], title="Salary: " + item["staffName"], officer="Owner / Finance", amount=item["balance"], href=url_for("module_list", module_key="salary_records")))
+                for r in source_records:
+                    p = r.payload or {}
+                    if r.module_key not in {"suppliers", "recurring_controls"}:
+                        continue
+                    due = parse_date(p.get("dueDate") or p.get("nextDueDate"))
+                    if due and due <= start + timedelta(days=6):
+                        amount = supplier_outstanding(p) if r.module_key == "suppliers" else parse_amount(p.get("amount"))
+                        if r.module_key == "suppliers" and amount <= 0:
+                            continue
+                        if r.module_key == "recurring_controls" and p.get("activeState") != "Active":
+                            continue
+                        events.append(dict(date=due, title=r.title, officer=p.get("counterparty") or "Owner / Finance", amount=amount, href=url_for("module_form", module_key=r.module_key, record_id=r.id)))
+                events.sort(key=lambda e: (e["date"], e["title"]))
+            return render_template("business_controls.html", page_title=definition.label, definition=definition,
+                                   records=rows, accounts=accounts, events=events, search=search, start=start)
         if module_key == "staff_meal_schedule":
             ensure_default_staff_meal_schedule(g.db)
             g.db.commit()
@@ -20624,6 +20808,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload = dict(record_payload)
             payload.setdefault("id", record.id if record else uuid4().hex)
             payload.setdefault("createdAt", record.created_at.isoformat() if record else datetime.utcnow().isoformat())
+            if module_key == "customer_prepaid" and record:
+                flash("Posted prepaid entries cannot be edited. Record an owner-approved refund or a new transaction instead.", "error")
+                return redirect(url_for("module_list", module_key=module_key))
+            if module_key == "cashbook_entries" and record and normalize_text(record.reference).startswith("prepaid|"):
+                flash("This Cashbook entry is linked to customer prepaid money and cannot be edited independently.", "error")
+                return redirect(url_for("module_list", module_key=module_key))
             for field in definition.fields:
                 if (
                     module_key in SERVICE_LEGACY_PAYMENT_FIELDS
@@ -20885,6 +21075,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 portal_error = tenant_portal_account_error(g.db, payload)
                 if portal_error:
                     form_errors.append(portal_error)
+            if module_key == "customer_prepaid":
+                prepaid_error = validate_prepaid_entry(g.db, payload, is_owner=user_is_owner(g.current_user))
+                if prepaid_error:
+                    form_errors.append(prepaid_error)
+            if module_key == "business_calendar":
+                weekdays = normalize_text(payload.get("weekdays"))
+                if payload.get("frequency") in {"Weekly", "Twice a week"}:
+                    days = [v.strip() for v in weekdays.split(",") if v.strip()]
+                    if not days or any(v not in list("0123456") for v in days):
+                        form_errors.append("Choose weekdays using 0 to 6, separated by commas.")
             if form_errors:
                 record_payload = payload
                 for message in form_errors:
@@ -20900,6 +21100,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     sync_kitchen_menu_cost_from_recipe(g.db, payload)
                     payload.update(sync_kitchen_production_credit(record, payload, g.db))
                 set_module_record_metadata(record, definition, payload)
+                if module_key == "customer_prepaid":
+                    sync_prepaid_cashbook(g.db, record)
                 if module_key == "expenses":
                     sync_expense_payment_to_finance_records(record, g.db)
                 if module_key == "customer_credit_accounts":
@@ -21407,7 +21609,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if not record or record.module_key != module_key:
             flash("That service request could not be found.", "error")
             return redirect(url_for("module_list", module_key=module_key))
-
         payload = dict(record.payload or {})
         previous_payload = dict(payload)
         payment_summary = service_payment_summary(module_key, payload)
@@ -21686,10 +21887,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key == "customer_prepaid":
+            flash("Prepaid transactions are retained for accountability. Use an owner-approved refund rather than deleting customer money history.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
 
         record = g.db.get(ModuleRecord, record_id)
         if not record or record.module_key != module_key:
             flash("That record could not be found.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
+        if module_key == "cashbook_entries" and normalize_text(record.reference).startswith("prepaid|"):
+            flash("Linked prepaid Cashbook entries cannot be deleted independently.", "error")
             return redirect(url_for("module_list", module_key=module_key))
         if equipment_rental_has_recorded_payment(record) and not user_is_owner(g.current_user):
             flash("This equipment rental has recorded payments. Only the Owner can delete or amend it.", "error")

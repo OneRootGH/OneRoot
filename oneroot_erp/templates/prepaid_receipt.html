@@ -1,0 +1,18 @@
+{% extends "document_base.html" %}
+{% set document_label = 'Customer Prepaid Account' %}
+{% set document_title = 'Prepaid Transaction Receipt' %}
+{% set document_subtitle = record.payload.get('customerName') %}
+{% block document_body %}
+<section class="document-copy">
+  <p><strong>Date:</strong> {{ record.record_date }}<br>
+  <strong>Customer:</strong> {{ record.payload.get('customerName') }}<br>
+  <strong>Phone / Account:</strong> {{ record.payload.get('customerPhone') }}<br>
+  <strong>Transaction:</strong> {{ record.payload.get('transactionType') }}<br>
+  <strong>Amount:</strong> {{ record.amount|currency }}<br>
+  <strong>Reference:</strong> {{ record.reference }}<br>
+  <strong>Receipt ID:</strong> {{ record.id }}<br>
+  <strong>Current Available Balance:</strong> {{ balance|currency }}</p>
+  <p>{{ record.payload.get('notes', '') }}</p>
+  <p>Prepaid deposits are held for future purchases. This is a prepaid-account receipt, not a second sales receipt. The current balance includes transactions entered after this receipt.</p>
+</section>
+{% endblock %}
