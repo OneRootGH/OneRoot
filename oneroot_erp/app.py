@@ -14031,6 +14031,20 @@ def build_sidebar(user: User | None = None):
     for group in items:
         group["sections"] = [section for section in group["sections"] if section["links"]]
         group["is_active"] = any(section["is_active"] for section in group["sections"])
+    account_keys = {"customer_prepaid", "construction_accounts", "business_calendar"}
+    account_links = [link for key in ("customer_prepaid", "construction_accounts", "business_calendar")
+                     if (link := workspace_link(key, user))]
+    if account_links:
+        for group in items:
+            for section in group["sections"]:
+                section["links"] = [link for link in section["links"] if link.get("module") not in account_keys]
+                for link in section["links"]:
+                    if link.get("children"):
+                        link["children"] = [child for child in link["children"] if child.get("module") not in account_keys]
+            group["sections"] = [section for section in group["sections"] if section["links"]]
+        active = any(link["is_active"] for link in account_links)
+        items.insert(0, {"group": "Accounts & Calendar", "is_active": active,
+                         "sections": [{"label": "Customer Accounts & Responsibilities", "links": account_links, "is_active": active}]})
     return [group for group in items if group["sections"]]
 
 

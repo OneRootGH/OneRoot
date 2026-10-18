@@ -16,6 +16,14 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_new_accounts_are_visible_once_in_open_menu(self):
+        page = self.client.get("/app/")
+        self.assertEqual(page.status_code, 200)
+        html = page.get_data(as_text=True)
+        self.assertIn("Accounts &amp; Calendar", html)
+        for key in ("customer_prepaid", "construction_accounts", "business_calendar"):
+            self.assertEqual(html.count(f'href="/app/modules/{key}"'), 1)
+
     def test_prepaid_deposit_application_and_overdraft_controls(self):
         form = dict(date=date.today().isoformat(), customerName="Mary", customerPhone="0240000000",
                     businessAreaId="groceries", transactionType="Deposit", amount="100", paymentMethod="Cash", reference="D1")

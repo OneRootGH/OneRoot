@@ -24,7 +24,7 @@
           </div>
         </div>
         {% for group in sidebar_items %}
-          <details class="menu-group" {% if group.is_active or loop.first %}open{% endif %}>
+          <details class="menu-group" {% if group.is_active or loop.first or group.group == 'Accounts & Calendar' %}open{% endif %}>
             <summary>
               <span>{{ group.group }}</span>
               <small>{{ group.sections|length }} sections</small>
