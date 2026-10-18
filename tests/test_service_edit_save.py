@@ -1,5 +1,5 @@
 from dataclasses import replace
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
@@ -9,20 +9,72 @@ from sqlalchemy import select
 
 from oneroot_erp.app import (create_app, set_module_record_metadata, sync_customer_loyalty_accounts,
                              prepaid_balance, responsibility_occurs, profit_detail_rows,
-                             daily_sales_summary_context, report_area_rows)
+                             daily_sales_summary_context, report_area_rows, calendar_task_rows)
 from oneroot_erp.config import load_config
 from oneroot_erp.models import Base, ModuleRecord, Product, User
 from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_calendar_done_is_dated_idempotent_and_does_not_stop_recurrence(self):
+        self.client.get("/app/modules/business_calendar")
+        db = self.sessions()
+        task = db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar", ModuleRecord.title == "Sweeping"))
+        # The fixture's current host day is used for completion validation.
+        task.payload = {**task.payload, "nextDueDate": date.today().isoformat()}
+        db.commit()
+        url = f"/app/calendar/{task.id}/complete"
+        for _ in range(2):
+            self.assertEqual(self.client.post(url, data={"date": date.today().isoformat(), "notes": "Swept shop"}).status_code, 302)
+        completions = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar_completions")).all()
+        self.assertEqual(len(completions), 1)
+        db.expire_all()
+        self.assertEqual(db.get(ModuleRecord, task.id).payload["status"], "Active")
+        rows = calendar_task_rows(db, [task], date.today(), db.get(User, "owner"), days=2)
+        self.assertTrue(rows[0]["done"])
+        self.assertFalse(rows[1]["done"])
+        self.assertEqual(self.client.post(url, data={"date": (date.today() + timedelta(days=1)).isoformat()}).status_code, 400)
+        self.assertEqual(self.client.post(url, data={"date": date.today().isoformat(), "action": "reopen"}).status_code, 302)
+        page = self.client.get("/app/modules/business_calendar").get_data(as_text=True)
+        self.assertNotIn("<th>Amount</th>", page)
+        self.assertIn("Mark Done", page)
+        self.assertIn("Task Reminders", page)
+        form = self.client.get(f"/app/modules/business_calendar/{task.id}/edit").get_data(as_text=True)
+        self.assertNotIn('name="amount"', form)
+        self.assertIn('name="reminderMinutes"', form)
+
+    def test_unassigned_officer_cannot_complete_task(self):
+        self.client.get("/app/modules/business_calendar")
+        db = self.sessions()
+        task = db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar"))
+        with self.client.session_transaction() as session:
+            session["user_id"] = "cashier"
+        self.assertEqual(self.client.post(f"/app/calendar/{task.id}/complete", data={"date": date.today().isoformat()}).status_code, 403)
+
+    def test_reminder_respects_due_time_lead_and_off_setting(self):
+        db = self.sessions()
+        task = ModuleRecord(id="reminder-test", module_key="business_calendar", title="Test Duty",
+                            payload=dict(title="Test Duty", officer="Owner", status="Active", frequency="Daily",
+                                         dueTime="09:00", reminderMinutes=15, reminder="Enabled"))
+        db.add(task)
+        db.commit()
+        user = db.get(User, "owner")
+        early = calendar_task_rows(db, [task], date(2026, 10, 19), user, days=1, now=datetime(2026, 10, 19, 8, 30))
+        due = calendar_task_rows(db, [task], date(2026, 10, 19), user, days=1, now=datetime(2026, 10, 19, 8, 50))
+        self.assertFalse(early[0]["remind"])
+        self.assertTrue(due[0]["remind"])
+        task.payload = {**task.payload, "reminder": "Off"}
+        disabled = calendar_task_rows(db, [task], date(2026, 10, 19), user, days=1, now=datetime(2026, 10, 19, 10))
+        self.assertFalse(disabled[0]["remind"])
+
     def test_new_accounts_are_visible_once_in_open_menu(self):
         page = self.client.get("/app/")
         self.assertEqual(page.status_code, 200)
         html = page.get_data(as_text=True)
         self.assertIn("Accounts &amp; Calendar", html)
+        sidebar = html.split("</aside>")[0]
         for key in ("customer_prepaid", "construction_accounts", "business_calendar"):
-            self.assertEqual(html.count(f'href="/app/modules/{key}"'), 1)
+            self.assertEqual(sidebar.count(f'href="/app/modules/{key}"'), 1)
 
     def test_prepaid_deposit_application_and_overdraft_controls(self):
         form = dict(date=date.today().isoformat(), customerName="Mary", customerPhone="0240000000",

@@ -7469,6 +7469,52 @@ def responsibility_occurs(payload, day):
     return frequency == "Once" and start == day
 
 
+def officer_can_complete_task(user, payload):
+    if user_can_view_dashboard(user):
+        return True
+    names = {normalize_text(getattr(user, "full_name", "")).casefold(),
+             normalize_text(getattr(user, "username", "")).casefold()}
+    names.update(name.split()[0] for name in list(names) if name)
+    officers = {part.strip().casefold() for part in re.split(r"[/,;]", normalize_text(payload.get("officer")))}
+    return bool((names - {""}) & officers)
+
+
+def calendar_task_rows(db, tasks, start, user, *, days=7, now=None):
+    now = now or datetime.now(ZoneInfo("Africa/Accra")).replace(tzinfo=None)
+    end = start + timedelta(days=days - 1)
+    completions = db.scalars(select(ModuleRecord).where(
+        ModuleRecord.module_key == "business_calendar_completions",
+        ModuleRecord.record_date >= start, ModuleRecord.record_date <= end)).all()
+    done = {(r.payload.get("taskId"), r.record_date): r for r in completions if r.status == "Done"}
+    rows = []
+    for offset in range(days):
+        day = start + timedelta(days=offset)
+        for task in tasks:
+            p = task.payload or {}
+            start_date = parse_date(p.get("nextDueDate"))
+            as_needed = (p.get("frequency") == "As needed" and p.get("status") == "Active"
+                         and day == now.date() and (not start_date or day >= start_date))
+            if not responsibility_occurs(p, day) and not as_needed:
+                continue
+            completed = done.get((task.id, day))
+            clock = normalize_text(p.get("dueTime")) or "09:00"
+            try:
+                hour, minute = map(int, clock.split(":"))
+                due_at = datetime.combine(day, datetime.min.time()).replace(hour=hour, minute=minute)
+            except (ValueError, TypeError):
+                due_at = datetime.combine(day, datetime.min.time()).replace(hour=9)
+            lead = parse_amount(p.get("reminderMinutes"))
+            lead = lead if math.isfinite(lead) else 0
+            reminder_at = due_at - timedelta(minutes=max(min(lead, 1440), 0))
+            status = "Done" if completed else ("As needed" if as_needed else ("Overdue" if now > due_at else "Upcoming"))
+            rows.append(dict(id=task.id, date=day, title=p.get("title"), officer=p.get("officer"),
+                frequency=p.get("frequency"), time=clock, status=status, done=completed.payload if completed else None,
+                canComplete=officer_can_complete_task(user, p) and day <= now.date(),
+                remind=not completed and not as_needed and p.get("reminder") != "Off" and now >= reminder_at,
+                notes=p.get("notes", "")))
+    return sorted(rows, key=lambda r: (r["date"], r["time"], r["title"]))
+
+
 def prepaid_balance(records, phone):
     return round(sum(parse_amount((r.payload or {}).get("amount")) *
                      (1 if (r.payload or {}).get("transactionType") == "Deposit" else -1)
@@ -19920,6 +19966,46 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return render_template("prepaid_receipt.html", page_title="Prepaid Receipt", record=record,
                                balance=prepaid_balance(entries, (record.payload or {}).get("customerPhone")))
 
+    @app.route("/app/calendar/<task_id>/complete", methods=["POST"])
+    @access_required("business_calendar")
+    def calendar_complete(task_id):
+        task = g.db.scalar(select(ModuleRecord).where(ModuleRecord.id == task_id).with_for_update())
+        if not task or task.module_key != "business_calendar":
+            return "Task not found.", 404
+        payload = task.payload or {}
+        if not officer_can_complete_task(g.current_user, payload):
+            return "Only an assigned officer or manager can complete this task.", 403
+        day = parse_date(request.form.get("date"))
+        today = datetime.now(ZoneInfo("Africa/Accra")).date()
+        if not day or day > today:
+            return "Choose today or a past scheduled date.", 400
+        as_needed = (payload.get("frequency") == "As needed" and payload.get("status") == "Active"
+                     and (not parse_date(payload.get("nextDueDate")) or day >= parse_date(payload.get("nextDueDate"))))
+        if not responsibility_occurs(payload, day) and not as_needed:
+            return "This task is not scheduled for that date.", 400
+        identity = "calendar-done-" + hashlib.sha256(f"{task_id}|{day}".encode()).hexdigest()[:32]
+        entry = g.db.get(ModuleRecord, identity)
+        action = request.form.get("action", "done")
+        if action not in {"done", "reopen"}:
+            return "Invalid action.", 400
+        if action == "reopen" and not user_can_view_dashboard(g.current_user):
+            return "Only management can reopen completed tasks.", 403
+        desired = "Done" if action == "done" else "Pending"
+        if not entry or entry.status != desired:
+            entry = entry or ModuleRecord(id=identity, module_key="business_calendar_completions", record_date=day)
+            entry.title = task.title
+            entry.status = desired
+            entry.payload = dict(taskId=task.id, taskTitle=task.title, officer=payload.get("officer"),
+                completedBy=g.current_user.full_name or g.current_user.username, userId=g.current_user.id,
+                completedAt=datetime.utcnow().isoformat(), notes=normalize_text(request.form.get("notes"))[:1000],
+                action=action)
+            g.db.add(entry)
+            audit("business_calendar", "Task Completion", action, task.title, task.id,
+                  f"Scheduled {day}; {desired}; {entry.payload['completedBy']}; {entry.payload['notes']}")
+            g.db.commit()
+        flash("Task marked done." if desired == "Done" else "Task reopened.", "success")
+        return redirect(url_for("module_list", module_key="business_calendar", date=day.isoformat()))
+
     @app.route("/app/modules/<module_key>")
     @login_required
     def module_list(module_key: str):
@@ -19960,6 +20046,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     accounts.append(dict(name=p.get("siteName"), phone=phone, balance=debt,
                                          limit=parse_amount(p.get("creditLimit")), id=r.id, customer=p.get("customerName")))
             if module_key == "business_calendar":
+                task_rows = calendar_task_rows(g.db, rows, start, g.current_user)
+                officer_filter = normalize_text(request.args.get("officer"))
+                status_filter = normalize_text(request.args.get("task_status"))
+                if officer_filter:
+                    task_rows = [r for r in task_rows if officer_filter.casefold() in normalize_text(r["officer"]).casefold()]
+                if status_filter:
+                    task_rows = [r for r in task_rows if r["status"] == status_filter]
                 for offset in range(7):
                     day = start + timedelta(days=offset)
                     for r in rows:
@@ -19981,6 +20074,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                             continue
                         events.append(dict(date=due, title=r.title, officer=p.get("counterparty") or "Owner / Finance", amount=amount, href=url_for("module_form", module_key=r.module_key, record_id=r.id)))
                 events.sort(key=lambda e: (e["date"], e["title"]))
+                return render_template("business_calendar.html", page_title=definition.label, definition=definition,
+                    records=rows, tasks=task_rows, obligations=[e for e in events if "/business_calendar/" not in e["href"]],
+                    search=search, start=start, officer_filter=officer_filter, status_filter=status_filter,
+                    can_reopen=user_can_view_dashboard(g.current_user))
             return render_template("business_controls.html", page_title=definition.label, definition=definition,
                                    records=rows, accounts=accounts, events=events, search=search, start=start)
         if module_key == "staff_meal_schedule":
@@ -21099,6 +21196,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     days = [v.strip() for v in weekdays.split(",") if v.strip()]
                     if not days or any(v not in list("0123456") for v in days):
                         form_errors.append("Choose weekdays using 0 to 6, separated by commas.")
+                due_time = normalize_text(payload.get("dueTime")) or "09:00"
+                try:
+                    datetime.strptime(due_time, "%H:%M")
+                except ValueError:
+                    form_errors.append("Enter a valid due time, for example 09:00.")
+                minutes = parse_amount(payload.get("reminderMinutes"))
+                if not math.isfinite(minutes) or not 0 <= minutes <= 1440:
+                    form_errors.append("Reminder minutes must be between 0 and 1440.")
+                payload["dueTime"] = due_time
+                payload["reminder"] = normalize_text(payload.get("reminder")) or "Enabled"
+                payload.pop("amount", None)
             if form_errors:
                 record_payload = payload
                 for message in form_errors:
@@ -24300,7 +24408,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.context_processor
     def inject_common():
         current_user = getattr(g, "current_user", None)
+        calendar_reminders = []
+        if current_user and user_has_access(current_user, "business_calendar") and getattr(g, "db", None):
+            tasks = g.db.scalars(select(ModuleRecord).where(
+                ModuleRecord.module_key == "business_calendar", ModuleRecord.status == "Active")).all()
+            today = datetime.now(ZoneInfo("Africa/Accra")).date()
+            calendar_reminders = [r for r in calendar_task_rows(g.db, tasks, today, current_user, days=1)
+                                  if r["remind"] and officer_can_complete_task(current_user, {"officer": r["officer"]})]
         return {
+            "calendar_reminders": calendar_reminders,
             "current_user": current_user,
             "current_access_keys": user_access_keys(current_user),
             "attendance_widget": build_attendance_widget(current_user),

@@ -2453,13 +2453,15 @@ MODULES.update({
                 FieldDefinition("notes", "Delivery Instructions / Terms", "textarea")]),
     "business_calendar": ModuleDefinition(
         key="business_calendar", label="Business Obligations Calendar", legacy_collection="businessCalendar",
-        menu_group="Operations", title_field="title", date_field="nextDueDate", status_field="status", amount_field="amount",
+        menu_group="Operations", title_field="title", date_field="nextDueDate", status_field="status", amount_field="",
         fields=[FieldDefinition("title", "Responsibility / Obligation", "text", True),
                 FieldDefinition("officer", "Officer In Charge", "text", True),
                 FieldDefinition("frequency", "Frequency", "select", True, [(x, x) for x in ["Daily", "Twice a week", "Weekly", "Monthly", "As needed", "Once"]]),
                 FieldDefinition("weekdays", "Days (Monday=0 to Sunday=6; comma separated)", "text"),
                 FieldDefinition("nextDueDate", "Due / Start Date", "date"),
-                FieldDefinition("amount", "Amount Due (GH₵, if any)", "number"),
+                FieldDefinition("dueTime", "Due Time", "time"),
+                FieldDefinition("reminder", "In-App Reminder", "select", False, [("Enabled", "Enabled"), ("Off", "Off")]),
+                FieldDefinition("reminderMinutes", "Remind Minutes Before Due", "number"),
                 FieldDefinition("status", "Status", "select", True, [(x, x) for x in ["Active", "Paused", "Completed"]]),
                 FieldDefinition("notes", "Instructions", "textarea")]),
 })

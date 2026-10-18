@@ -68,6 +68,15 @@
           </div>
           <div class="topbar-actions">
             <div class="topbar-utilities">
+              {% if 'business_calendar' in current_access_keys %}
+                <details class="utility-menu">
+                  <summary class="utility-status"><strong>Task Reminders{% if calendar_reminders %} · {{ calendar_reminders|length }}{% endif %}</strong></summary>
+                  <div class="utility-panel"><strong>Tasks to complete</strong>
+                    {% for task in calendar_reminders[:5] %}<p>{{ task.title }} · {{ task.time }} · {{ task.status }}</p>{% else %}<p>No task reminders due now.</p>{% endfor %}
+                    <a href="{{ url_for('module_list', module_key='business_calendar') }}">Open Calendar &amp; Mark Done</a>
+                  </div>
+                </details>
+              {% endif %}
               {% if current_user %}
                 <div class="connection-status" data-connection-status aria-live="polite" title="OneRoot connection status">
                   <span class="connection-status-dot" aria-hidden="true"></span>
