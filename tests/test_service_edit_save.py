@@ -2,6 +2,7 @@ from dataclasses import replace
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from io import BytesIO
 import unittest
 from unittest.mock import patch
 
@@ -10,12 +11,105 @@ from sqlalchemy import select
 from oneroot_erp.app import (create_app, set_module_record_metadata, sync_customer_loyalty_accounts,
                              prepaid_balance, responsibility_occurs, profit_detail_rows,
                              daily_sales_summary_context, report_area_rows, calendar_task_rows)
+from oneroot_erp.app import daily_cash_movement_context
+from oneroot_erp.cash_controls import find_snapshot
 from oneroot_erp.config import load_config
 from oneroot_erp.models import Base, ModuleRecord, Product, User
 from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def cash_form(self, kind="Opening", **overrides):
+        data = dict(date=date.today().isoformat(), entryType=kind, groceriesCash="100", foodCash="50", momoCash="900",
+                    momoECash="1040", groceriesPetty="10", foodPetty="5", cashMode="Separate",
+                    confirmedDate=f"{date.today().isoformat()}|{kind}", exceptionReason="Manually checked source limitations")
+        data.update(overrides)
+        return data
+
+    def test_expense_from_petty_cash_is_linked_once_with_receipt_and_retries(self):
+        db = self.sessions()
+        token = "a" * 32
+        data = dict(date=date.today().isoformat(), wallet="groceriesPetty", amount="10", vendor="Cleaner",
+                    category="Cleaning", requestId=token, receiptReference="RC1")
+        response = self.client.post("/app/daily-cash/expense", data={**data, "receiptUpload": (BytesIO(b"%PDF-1.4 test receipt"), "receipt.pdf")})
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(self.client.post("/app/daily-cash/expense", data=data).status_code, 302)
+        expenses = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "expenses")).all()
+        self.assertEqual(len(expenses), 1)
+        self.assertTrue(expenses[0].payload["receiptAttachmentUrl"].startswith("data:application/pdf"))
+        cashbook = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "cashbook_entries")).all()
+        self.assertEqual(len(cashbook), 1)
+        context = daily_cash_movement_context(db, date.today())
+        self.assertEqual(context["effects"]["groceriesCash"], -10)
+        self.assertEqual(context["effects"]["groceriesPetty"], -10)
+        page = self.client.get("/app/daily-cash")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Save Expense", page.get_data(as_text=True))
+
+    def test_opening_closing_carry_forward_and_owner_approval_lock(self):
+        db = self.sessions()
+        db.delete(db.get(ModuleRecord, "test-rental")); db.commit()
+        previous = ModuleRecord(id="daily-cash-" + (date.today()-timedelta(days=1)).isoformat(),
+            module_key="daily_cash_positions", record_date=date.today()-timedelta(days=1), status="Approved",
+            payload={k: float(v) for k,v in self.cash_form().items() if k in ["groceriesCash","foodCash","momoCash","momoECash","groceriesPetty","foodPetty"]})
+        db.add(previous); db.commit()
+        self.assertIn("Suggested from closing", self.client.get("/app/daily-cash?entryType=Opening").get_data(as_text=True))
+        self.assertEqual(self.client.post("/app/daily-cash", data=self.cash_form()).status_code, 302)
+        self.assertEqual(self.client.post("/app/daily-cash", data=self.cash_form("Closing")).status_code, 302)
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")).all()), 3)
+        review=dict(date=date.today().isoformat(), entryType="Closing", action="approve", reviewNote="Checked", acceptExceptions="yes")
+        self.assertEqual(self.client.post("/app/daily-cash/review", data=review).status_code, 302)
+        db.expire_all()
+        closing = find_snapshot(db, date.today(), "Closing")
+        self.assertEqual(closing.status, "Approved")
+        expense = dict(date=date.today().isoformat(), wallet="food", amount="5", vendor="Vendor", category="Transport", requestId="b"*32)
+        self.assertEqual(self.client.post("/app/daily-cash/expense", data=expense).status_code, 302)
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "expenses")).all())
+        self.assertEqual(self.client.post("/app/daily-cash", data=self.cash_form("Closing", expectedUpdatedAt=closing.updated_at.isoformat())).status_code, 409)
+        self.assertEqual(self.client.post("/app/daily-cash/review", data={**review, "action":"reopen", "reviewNote":""}).status_code, 400)
+        self.assertEqual(self.client.post("/app/daily-cash/review", data={**review, "action":"reopen", "reviewNote":"Correct count"}).status_code, 302)
+
+    def test_momo_expected_movements_use_completed_transactions_and_expense_once(self):
+        db = self.sessions()
+        for identity, kind, amount, fee, status in [("in", "Cash In", 100, 10, "Completed"),
+                ("out", "Cash Out", 50, 5, "Completed"), ("pending", "Cash Out", 999, 10, "Pending")]:
+            db.add(ModuleRecord(id=identity, module_key="mobile_money_transactions", record_date=date.today(),
+                payload=dict(provider="MTN Mobile Money", serviceType=kind, transactionValue=amount, salesAmount=fee, status=status)))
+        db.commit()
+        self.client.post("/app/daily-cash/expense", data=dict(date=date.today().isoformat(), wallet="momoECash",
+            amount="7", vendor="Supplier", category="Utilities", requestId="c"*32))
+        summary = daily_cash_movement_context(db, date.today())
+        self.assertEqual(summary["effects"]["momoCash"], 65)
+        self.assertEqual(summary["effects"]["momoECash"], -57)
+
+    def test_transfers_are_not_income_and_reversal_restores_cash(self):
+        db = self.sessions()
+        day = date.today().isoformat()
+        transfer=dict(date=day, source="groceries", destination="groceriesPetty", amount="20", recipient="Manager", reference="PETTY-1")
+        self.assertEqual(self.client.post("/app/daily-cash/transfer", data=transfer).status_code, 302)
+        context = daily_cash_movement_context(db, date.today())
+        self.assertEqual(context["effects"]["groceriesCash"], 0)
+        self.assertEqual(context["effects"]["groceriesPetty"], 20)
+        self.client.post("/app/daily-cash/transfer", data=transfer)
+        moves = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_movements")).all()
+        self.assertEqual(len(moves), 1)
+        self.assertEqual(self.client.post(f"/app/daily-cash/transfer/{moves[0].id}/reverse", data={"reason":"Wrong allocation"}).status_code, 302)
+        context = daily_cash_movement_context(db, date.today())
+        self.assertEqual(context["effects"]["groceriesPetty"], 0)
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(["sales","expenses"]))).all())
+
+    def test_combined_cash_requires_date_confirmation_and_does_not_fake_shop_split(self):
+        data = self.cash_form("Closing", cashMode="Combined", combinedCash="150", groceriesCash="0", foodCash="0")
+        no_confirmation = {**data, "confirmedDate":""}
+        self.assertEqual(self.client.post("/app/daily-cash", data=no_confirmation).status_code, 200)
+        self.assertEqual(self.client.post("/app/daily-cash", data=data).status_code, 302)
+        db = self.sessions()
+        p = find_snapshot(db, date.today(), "Closing").payload
+        self.assertEqual(p["cashMode"], "Combined")
+        self.assertEqual(p["combinedCash"], 150)
+        self.assertEqual(p["groceriesRemaining"], 0)
+        self.assertEqual(p["foodRemaining"], 0)
+
     def test_daily_cash_date_correction_preserves_count_and_recorder(self):
         db = self.sessions()
         payload = dict(id="daily-cash-2026-10-19", date="2026-10-19", recordedBy="Daniel Agyei",
@@ -49,7 +143,8 @@ class ServiceEditSaveTests(unittest.TestCase):
 
     def test_daily_cash_keeps_pettty_allocation_separate_and_one_record_per_date(self):
         form = dict(date=date.today().isoformat(), groceriesCash="500", foodCash="300", momoCash="900",
-                    momoECash="1040", groceriesPetty="50", foodPetty="30", notes="Morning count")
+                    momoECash="1040", groceriesPetty="50", foodPetty="30", notes="Morning count",
+                    confirmedDate=f"{date.today().isoformat()}|Closing", exceptionReason="No opening recorded; actual count confirmed")
         response = self.client.post("/app/daily-cash", data=form)
         self.assertEqual(response.status_code, 302)
         db = self.sessions()
@@ -63,6 +158,7 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertEqual(p["momoECash"], 1040)
         self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(["sales", "expenses", "cashbook_entries", "petty_cash"]))).all())
         form["groceriesPetty"] = "60"
+        form["expectedUpdatedAt"] = records[0].updated_at.isoformat()
         self.assertEqual(self.client.post("/app/daily-cash", data=form).status_code, 302)
         db.expire_all()
         records = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")).all()

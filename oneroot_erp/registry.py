@@ -575,6 +575,8 @@ EXPENSE_PAYMENT_SOURCES = [
     ("Petty Cash Float", "Petty Cash Float"),
     ("Business Bank Account", "Business Bank Account"),
     ("OneRoot MoMo Collection Wallet", "OneRoot MoMo Collection Wallet"),
+    ("MTN MoMo Physical Cash Float", "MTN MoMo Physical Cash Float"),
+    ("MTN MoMo E-Cash Float", "MTN MoMo E-Cash Float"),
 ]
 RECEIPT_STATUSES = ["Uploaded", "Pending", "Not Required"]
 EXPENSE_CATEGORY_LIBRARY = {
@@ -2430,6 +2432,10 @@ MODULES.update({
         key="daily_cash_positions", label="Daily Cash & Petty Cash", legacy_collection="dailyCashPositions",
         menu_group="Finance", title_field="recordedBy", date_field="date", amount_field="", editable=False,
         fields=[FieldDefinition("date", "Date", "date", True),
+                FieldDefinition("entryType", "Opening / Closing", "text"),
+                FieldDefinition("cashMode", "Separate / Combined Shop Cash", "text"),
+                FieldDefinition("reviewStatus", "Owner Review Status", "text"),
+                FieldDefinition("combinedCash", "Combined Shop Cash", "number"),
                 FieldDefinition("groceriesCash", "Groceries Cash Before Petty Cash", "number", True),
                 FieldDefinition("foodCash", "Cold Store & Kitchen Cash Before Petty Cash", "number", True),
                 FieldDefinition("momoCash", "MoMo Physical Cash", "number", True),
@@ -2440,6 +2446,13 @@ MODULES.update({
                 FieldDefinition("foodRemaining", "Cold Store & Kitchen Cash Remaining", "number"),
                 FieldDefinition("totalPhysical", "Total Physical Cash Including Petty Cash", "number"),
                 FieldDefinition("pettyTotal", "Total Petty Cash Set Aside", "number"),
+                FieldDefinition("recordedBy", "Recorded By", "text"), FieldDefinition("notes", "Notes", "textarea")]),
+    "daily_cash_movements": ModuleDefinition(
+        key="daily_cash_movements", label="Cash Transfers & Owner Handover", legacy_collection="dailyCashMovements",
+        menu_group="Finance", title_field="recipient", date_field="date", amount_field="amount", editable=False,
+        fields=[FieldDefinition("date", "Date", "date"), FieldDefinition("source", "From", "text"),
+                FieldDefinition("destination", "To", "text"), FieldDefinition("amount", "Amount", "number"),
+                FieldDefinition("recipient", "Received By", "text"), FieldDefinition("reference", "Reference", "text"),
                 FieldDefinition("recordedBy", "Recorded By", "text"), FieldDefinition("notes", "Notes", "textarea")]),
     "customer_prepaid": ModuleDefinition(
         key="customer_prepaid", label="Customer Prepaid Accounts", legacy_collection="customerPrepaid",
@@ -2481,7 +2494,7 @@ MODULES.update({
                 FieldDefinition("notes", "Instructions", "textarea")]),
 })
 for role in ("owner", "admin", "operations", "finance", "operations-controls-lead"):
-    ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar", "daily_cash_positions"})
+    ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar", "daily_cash_positions", "daily_cash_movements"})
 for role in ("cashier", "retail-stock-service", "kitchen-food-counter", "sales-stock-operator", "frontline-service-lead"):
     ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar"})
 

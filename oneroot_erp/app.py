@@ -28,6 +28,8 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
 from .config import AppConfig, load_config
+from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
+                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed)
 from .importer import bootstrap_database
 from .models import AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
@@ -7520,6 +7522,127 @@ def prepaid_balance(records, phone):
     return round(sum(parse_amount((r.payload or {}).get("amount")) *
                      (1 if (r.payload or {}).get("transactionType") == "Deposit" else -1)
                      for r in records if normalize_phone((r.payload or {}).get("customerPhone")) == normalize_phone(phone)), 2)
+
+
+def daily_cash_movement_context(db, day):
+    """Use source collections once; cashbook copies do not create extra receipts."""
+    effects = {key: 0.0 for key in COUNT_FIELDS}
+    warnings, lines = [], []
+    records = db.scalars(select(ModuleRecord).where(ModuleRecord.record_date == day,
+        ModuleRecord.module_key.in_(["cashbook_entries", "expenses", "sales", "customer_credit_accounts",
+                                    "mobile_money_reconciliations"]))).all()
+    cashbook = [r for r in records if r.module_key == "cashbook_entries"]
+    references = {normalize_text(r.reference) for r in cashbook}
+    def side(area):
+        if area in POS_FOOD_SALES_AREA_IDS or area == "laundry-services":
+            return "food"
+        if area in POS_GROCERIES_MORE_AREA_IDS:
+            return "groceries"
+        return ""
+    def add(label, key, effect, reference="", petty=False):
+        if not math.isfinite(effect):
+            warnings.append(f"{label}: invalid source amount omitted; correct the original record.")
+            return
+        effects[key] += effect
+        if petty:
+            effects[key.replace("Cash", "Petty")] += effect
+        lines.append(dict(label=label, wallet=key, effect=round(effect, 2), reference=reference))
+    for record in cashbook:
+        p = record.payload or {}
+        account = normalize_text(p.get("accountName"))
+        ref = normalize_text(record.reference)
+        if ref.startswith("pos-payment|"):
+            order = db.get(PosOrder, ref.split("|", 1)[1])
+            if order and normalize_text(order.payment_method).lower() == "cash on delivery":
+                warnings.append(f"POS {order.order_number}: cash-on-delivery has no separate collection confirmation; omitted from confirmed cash.")
+                continue
+            if order and len(order.business_area_ids or []) > 1 and not p.get("cashDesk"):
+                warnings.append(f"POS {order.order_number}: mixed-area sale assigned to its primary area; confirm the physical counter receiving the cash.")
+        if ref.startswith("customer-credit-payment|"):
+            credit = db.get(ModuleRecord, ref.split("|", 1)[1])
+            if credit and is_internal_kitchen_credit_payment(credit.payload or {}):
+                continue
+        effect = cashbook_wallet_effect(p)
+        if not effect:
+            if p.get("entryType") == "Transfer":
+                warnings.append("A legacy one-line Cashbook transfer needs review; it is not counted twice or assigned automatically.")
+            continue
+        if account in {"MTN MoMo Physical Cash Float", "MTN MoMo E-Cash Float"}:
+            add("Recorded MoMo float transfer", "momoECash" if "E-Cash" in account else "momoCash", effect, ref)
+        elif account in {"Main Cash Drawer", "Petty Cash Float"}:
+            desk = normalize_text(p.get("cashDesk")) or side(record.business_area_id)
+            if desk not in {"groceries", "food"}:
+                warnings.append(f"Cashbook {record.title or record.id}: shop not identified; verify where this cash belongs.")
+                continue
+            add("Cashbook collection / movement", desk + "Cash", effect, ref, petty=account == "Petty Cash Float")
+    for expense in [r for r in records if r.module_key == "expenses"]:
+        p = expense.payload or {}
+        desk = side(expense.business_area_id)
+        paid_from = normalize_text(p.get("paidFromAccount")) or ("Main Cash Drawer" if normalize_text(p.get("paymentMethod")).lower() == "cash" else "Business Bank Account")
+        if normalize_text(p.get("paymentMethod")).lower() in {"credit", "pay on pickup", "cash on delivery"}:
+            continue
+        if paid_from not in {"Main Cash Drawer", "Petty Cash Float"}:
+            continue
+        if f"expense-payment|{expense.id}" not in references:
+            if desk:
+                add("Cash expense (no Cashbook copy)", desk + "Cash", -abs(parse_amount(p.get("amount"))),
+                    expense.id, petty=paid_from == "Petty Cash Float")
+            else:
+                warnings.append(f"Expense {expense.title}: cash source shop needs review.")
+    # Older POS collections may not have a Cashbook copy. Use order lines only
+    # for those orders, preserving multi-area totals without counting summaries.
+    orders = db.scalars(select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == day)).all()
+    for order in orders:
+        if f"pos-payment|{order.id}" in references or is_kitchen_stock_issue(order) or normalize_text(order.payment_method).lower() != "cash":
+            continue
+        for line in order.lines:
+            desk = side(line.business_area_id)
+            if desk:
+                add("Cash POS collection", desk + "Cash", parse_amount(line.total_amount), order.order_number)
+            else:
+                warnings.append(f"POS {order.order_number}: unassigned cash collection needs review.")
+    for credit in [r for r in records if r.module_key == "customer_credit_accounts"]:
+        p = credit.payload or {}
+        if (p.get("transactionType") == "Payment Received" and normalize_text(p.get("paymentMethod")).lower() in POS_CASH_PAYMENT_METHODS
+                and not is_internal_kitchen_credit_payment(p) and f"customer-credit-payment|{credit.id}" not in references):
+            desk = side(credit.business_area_id)
+            if desk:
+                add("Customer credit cash collected", desk + "Cash", abs(parse_amount(p.get("amount"))), credit.id)
+            else:
+                warnings.append("A customer cash repayment has no assigned shop.")
+    services = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(
+        ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]))).all()
+    for service in services:
+        for payment in service_payment_entries(service.module_key, service.payload or {}):
+            if parse_date(payment.get("paymentDate")) == day and normalize_text(payment.get("paymentMethod")).lower() in POS_CASH_PAYMENT_METHODS:
+                add("Service cash collected", "foodCash", parse_amount(payment.get("amountPaid")), service.id)
+    generated = {"pos-summary", "laundry-payment", "equipment-rental-payment", "kitchen-order-payment", "mobile-money-transaction"}
+    for sale in [r for r in records if r.module_key == "sales"]:
+        p = sale.payload or {}
+        source = normalize_text(p.get("sourceType"))
+        if source in generated or is_mobile_money_daily_sales_record(sale):
+            continue
+        if normalize_text(p.get("paymentMethod")).lower() not in POS_CASH_PAYMENT_METHODS:
+            if not normalize_text(p.get("paymentMethod")) or p.get("paymentMethod") == "Recorded":
+                warnings.append(f"Sales entry {sale.title}: payment method not identified; confirm cash collections.")
+            continue
+        desk = side(sale.business_area_id)
+        if desk:
+            add("Manual / online cash collection", desk + "Cash", parse_amount(sale.amount), sale.reference or sale.id)
+        else:
+            warnings.append(f"Cash sales entry {sale.title}: choose which shop received it.")
+    momo = mobile_money_transaction_day_rollup(db, day, "MTN Mobile Money")
+    add("Completed MoMo cash-in / cash-out and fees", "momoCash",
+        momo["cashInValueTotal"] - momo["cashOutValueTotal"] + momo["feeTotal"])
+    add("Completed MoMo e-cash movements", "momoECash", momo["cashOutValueTotal"] - momo["cashInValueTotal"])
+    for record in records:
+        if record.module_key == "mobile_money_reconciliations" and any(parse_amount((record.payload or {}).get(k)) for k in
+                ("cashTopUp", "cashRemoved", "eCashTopUp", "eCashRemoved", "operatingExpense")):
+            warnings.append("MoMo reconciliation has manual float adjustments. Verify they have been recorded once as transfers; reconciliation adjustments are not added again here.")
+    effects = {k: round(v, 2) for k, v in effects.items()}
+    lines.sort(key=lambda row: (row["wallet"], row["reference"] or "", row["label"], row["effect"]))
+    return dict(effects=effects, warnings=sorted(set(warnings)), lines=lines,
+                momo=momo, signature=hashlib.sha256(json.dumps(dict(effects=effects, lines=lines), sort_keys=True).encode()).hexdigest())
 
 
 def validate_prepaid_entry(db, payload, *, is_owner=False):
@@ -18487,7 +18610,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return render_template(
             "dashboard.html",
             latest_cash_position=(g.db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")
-                .order_by(desc(ModuleRecord.record_date)).limit(1)) if user_has_access(g.current_user, "daily_cash_positions") else None),
+                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at)).limit(1)) if user_has_access(g.current_user, "daily_cash_positions") else None),
             page_title="Dashboard",
             counts=counts,
             expenses_total=expenses_total,
@@ -19132,6 +19255,175 @@ def create_app(config: AppConfig | None = None) -> Flask:
             analytics=business_analytics_context(g.db, month_filter),
         )
 
+    def save_cash_transfer(day, source, destination, amount, recipient, reference, notes, *, reverses=""):
+        if source not in WALLETS or destination not in WALLETS or source == destination or amount <= 0 or not recipient or not reference:
+            raise ValueError("Choose different wallets, enter an amount above zero, a recipient and a unique reference.")
+        if day > datetime.now(ZoneInfo("Africa/Accra")).date():
+            raise ValueError("Cash movements must use today or an earlier actual date.")
+        if g.db.bind.dialect.name == "postgresql":
+            g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": "cash-control|" + day.isoformat()})
+            g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:ref))"), {"ref": "cash-transfer|" + reference.casefold()})
+        close = find_snapshot(g.db, day, "Closing")
+        if close and close.status == "Approved":
+            raise ValueError("The closing count is approved. Ask the owner to reopen it before adding a cash movement for this date.")
+        identity = "cash-move-" + hashlib.sha256(reference.casefold().encode()).hexdigest()[:32]
+        if g.db.get(ModuleRecord, identity):
+            raise ValueError("This cash-transfer reference already exists. Review the original instead of recording it twice.")
+        actor = g.current_user.full_name or g.current_user.username
+        payload = dict(id=identity, date=day.isoformat(), source=source, destination=destination, amount=amount,
+                       recipient=recipient, reference=reference, notes=notes, recordedBy=actor,
+                       recordedAt=datetime.utcnow().isoformat(), reverses=reverses)
+        record = ModuleRecord(id=identity, module_key="daily_cash_movements", title=f"{WALLETS[source][0]} → {WALLETS[destination][0]}",
+                              record_date=day, amount=amount, reference=reference, status="Recorded", payload=payload)
+        g.db.add(record)
+        for wallet, direction in ((source, "Cash Out"), (destination, "Cash In")):
+            label, account, area = WALLETS[wallet]
+            if not account:
+                continue
+            cash_id = "cash-leg-" + hashlib.sha256(f"{identity}|{wallet}".encode()).hexdigest()[:32]
+            cash_payload = dict(id=cash_id, date=day.isoformat(), businessAreaId=area, accountName=account,
+                entryType=direction, amount=amount, paymentMethod="Cash" if wallet != "momoECash" else "Mobile Money",
+                reference=f"cash-control|{identity}|{wallet}", cashDesk="food" if wallet.startswith("food") else ("groceries" if wallet.startswith("groceries") else ""),
+                sourceType="cash-control-transfer", linkedCashMovementId=identity,
+                notes=f"Transfer, not sales or expense. {reference}; received by {recipient}. {notes}")
+            entry = ModuleRecord(id=cash_id, module_key="cashbook_entries")
+            set_module_record_metadata(entry, MODULES["cashbook_entries"], cash_payload)
+            g.db.add(entry)
+            if wallet in {"groceriesPetty", "foodPetty"}:
+                petty_id = "cash-petty-" + hashlib.sha256(f"{identity}|{wallet}".encode()).hexdigest()[:32]
+                petty_payload = dict(id=petty_id, date=day.isoformat(), businessAreaId=area, amount=amount,
+                    transactionTypeId="Float Top-Up" if direction == "Cash In" else "Float Return",
+                    description=f"Cash transfer {reference}", paymentMethod="Cash", reference=f"cash-control-petty|{identity}|{wallet}",
+                    linkedCashMovementId=identity, notes="Linked transfer, not an expense. Use the original movement to reverse.")
+                petty = ModuleRecord(id=petty_id, module_key="petty_cash")
+                set_module_record_metadata(petty, MODULES["petty_cash"], petty_payload)
+                g.db.add(petty)
+        audit("daily_cash_positions", "Cash Transfer / Handover", "reverse" if reverses else "transfer", record.title, record.id,
+              f"{amount:.2f}; {reference}; recipient {recipient}; {notes}")
+        return record
+
+    @app.route("/app/daily-cash/expense", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_expense():
+        if not user_has_access(g.current_user, "expenses"):
+            return "Expense entry access required.", 403
+        day = parse_date(request.form.get("date"))
+        wallet = normalize_text(request.form.get("wallet"))
+        token = normalize_text(request.form.get("requestId"))
+        vendor = normalize_text(request.form.get("vendor"))[:200]
+        category = normalize_text(request.form.get("category"))[:150]
+        if (not day or day > datetime.now(ZoneInfo("Africa/Accra")).date() or wallet not in
+                {"groceries", "food", "groceriesPetty", "foodPetty", "momoCash", "momoECash"}
+                or not re.fullmatch(r"[a-f0-9]{32}", token) or not vendor or not category):
+            return "Choose an actual date, payment source, supplier, category and valid form reference.", 400
+        try:
+            amount = cash_money(request.form.get("amount"))
+            if amount <= 0:
+                raise ValueError("Expense amount must be above zero.")
+            if g.db.bind.dialect.name == "postgresql":
+                g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": "cash-control|" + day.isoformat()})
+            close = find_snapshot(g.db, day, "Closing")
+            if close and close.status == "Approved":
+                raise ValueError("The closing count is approved. Ask the owner to reopen it before recording this expense.")
+            identity = "cash-expense-" + token
+            if g.db.get(ModuleRecord, identity):
+                flash("This expense was already saved. It has not been posted twice.", "success")
+                return redirect(url_for("daily_cash_page", date=day.isoformat(), entryType="Closing"))
+            attachment_url, attachment_name, attachment_type = encode_uploaded_receipt_attachment(request.files.get("receiptUpload"))
+            label, account, area = WALLETS[wallet]
+            payload = dict(id=identity, date=day.isoformat(), vendor=vendor, businessAreaId=area,
+                category=category, description=normalize_text(request.form.get("description"))[:2000],
+                amount=amount, paymentMethod="Mobile Money" if wallet == "momoECash" else "Cash", paidFromAccount=account,
+                receiptReference=normalize_text(request.form.get("receiptReference"))[:150],
+                receiptAttachmentUrl=attachment_url, receiptAttachmentName=attachment_name, receiptAttachmentType=attachment_type,
+                receiptStatus="Uploaded" if attachment_url else "Pending", notes="Entered from Daily Cash & Petty Cash; " + label)
+            record = ModuleRecord(id=identity, module_key="expenses")
+            set_module_record_metadata(record, MODULES["expenses"], payload)
+            g.db.add(record)
+            sync_expense_payment_to_finance_records(record, g.db)
+            audit("expenses", "Daily Cash Expense", "create", vendor, record.id, f"{amount:.2f}; {label}; {category}")
+            g.db.commit()
+            flash("Expense saved to Expenses and Cashbook. Cash comparison updated once.", "success")
+        except ValueError as error:
+            g.db.rollback()
+            flash(str(error), "error")
+        return redirect(url_for("daily_cash_page", date=day.isoformat(), entryType="Closing"))
+
+    @app.route("/app/daily-cash/transfer", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_transfer():
+        day = parse_date(request.form.get("date"))
+        if not day:
+            return "Enter the actual transfer date.", 400
+        try:
+            save_cash_transfer(day, normalize_text(request.form.get("source")), normalize_text(request.form.get("destination")),
+                cash_money(request.form.get("amount")), normalize_text(request.form.get("recipient"))[:200],
+                normalize_text(request.form.get("reference"))[:100], normalize_text(request.form.get("notes"))[:2000])
+            g.db.commit()
+        except ValueError as error:
+            g.db.rollback()
+            flash(str(error), "error")
+        return redirect(url_for("daily_cash_page", date=day.isoformat(), entryType="Closing"))
+
+    @app.route("/app/daily-cash/transfer/<record_id>/reverse", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_reverse_transfer(record_id):
+        if not user_is_owner(g.current_user):
+            return "Owner access required.", 403
+        record = g.db.get(ModuleRecord, record_id)
+        reason = normalize_text(request.form.get("reason"))[:1000]
+        if not record or record.module_key != "daily_cash_movements" or not reason:
+            return "Choose a valid movement and enter a reversal reason.", 400
+        p = record.payload or {}
+        if p.get("reverses"):
+            return "A reversal cannot itself be reversed. Record a new documented transfer.", 400
+        try:
+            save_cash_transfer(record.record_date, p["destination"], p["source"], parse_amount(p.get("amount")),
+                g.current_user.full_name or g.current_user.username, "REV-" + record.id, reason, reverses=record.id)
+            g.db.commit()
+        except ValueError as error:
+            g.db.rollback()
+            flash(str(error), "error")
+        return redirect(url_for("daily_cash_page", date=record.record_date.isoformat(), entryType="Closing"))
+
+    @app.route("/app/daily-cash/review", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_review():
+        if not user_is_owner(g.current_user):
+            return "Only the owner can approve or reopen a count.", 403
+        day = parse_date(request.form.get("date"))
+        entry_type = normalize_text(request.form.get("entryType"))
+        action = normalize_text(request.form.get("action"))
+        if not day or entry_type not in {"Opening", "Closing"} or action not in {"approve", "reopen"}:
+            return "Invalid review request.", 400
+        if g.db.bind.dialect.name == "postgresql":
+            g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": "cash-control|" + day.isoformat()})
+        record = find_snapshot(g.db, day, entry_type)
+        if not record:
+            return "No saved count to review.", 404
+        p = dict(record.payload or {})
+        note = normalize_text(request.form.get("reviewNote"))[:2000]
+        if action == "reopen" and not note:
+            return "Enter a reason before reopening an approved count.", 400
+        if action == "approve":
+            if record.status == "Approved":
+                return redirect(url_for("daily_cash_page", date=day.isoformat(), entryType=entry_type))
+            if not p.get("controlVersion"):
+                return "Review and resave this legacy count in the new form before approval.", 409
+            baseline = g.db.get(ModuleRecord, p.get("baselineId")) if p.get("baselineId") else None
+            if baseline and baseline.updated_at.isoformat() != p.get("baselineUpdatedAt"):
+                return "The opening/carry-forward count changed. Refresh and resave before approval.", 409
+            if entry_type == "Closing" and daily_cash_movement_context(g.db, day)["signature"] != p.get("sourceSignature"):
+                return "Receipts or movements changed since this count. Resave it before approval.", 409
+            if review_needed(p.get("comparison", []), p.get("warnings", [])) and (not note or request.form.get("acceptExceptions") != "yes"):
+                return "Explain and acknowledge the differences / source limitations before approval.", 400
+        p.update(reviewStatus="Approved" if action == "approve" else "Difference to Review",
+                 reviewedBy=g.current_user.full_name or g.current_user.username, reviewedAt=datetime.utcnow().isoformat(), reviewNote=note)
+        record.payload, record.status, record.updated_at = p, p["reviewStatus"], datetime.utcnow()
+        audit("daily_cash_positions", "Cash Count Review", action, day.isoformat(), record.id, f"{entry_type}: {note}")
+        g.db.commit()
+        return redirect(url_for("daily_cash_page", date=day.isoformat(), entryType=entry_type))
+
     @app.route("/app/daily-cash/correct-date", methods=["POST"])
     @access_required("daily_cash_positions")
     def daily_cash_correct_date():
@@ -19142,15 +19434,25 @@ def create_app(config: AppConfig | None = None) -> Flask:
         reason = normalize_text(request.form.get("reason"))[:1000]
         if not source or not target or source == target or not reason or target > datetime.now(ZoneInfo("Africa/Accra")).date():
             return "Choose distinct valid dates, not in the future, and enter a correction reason.", 400
-        source_id, target_id = "daily-cash-" + source.isoformat(), "daily-cash-" + target.isoformat()
+        entry_type = normalize_text(request.form.get("entryType")) or "Closing"
+        if entry_type not in {"Opening", "Closing"}:
+            return "Choose Opening or Closing.", 400
+        source_id, target_id = snapshot_id(source, entry_type), snapshot_id(target, entry_type)
         if g.db.bind.dialect.name == "postgresql":
-            for identity in sorted((source_id, target_id)):
-                g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": identity})
-        record = g.db.get(ModuleRecord, source_id)
+            for day in sorted((source, target)):
+                g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": "cash-control|" + day.isoformat()})
+        record = find_snapshot(g.db, source, entry_type)
         if not record or record.module_key != "daily_cash_positions":
             return "The original daily cash record was not found. Refresh the saved records.", 404
-        if g.db.get(ModuleRecord, target_id):
+        source_id = record.id
+        if not (record.payload or {}).get("controlVersion") and record.id == "daily-cash-" + source.isoformat():
+            target_id = "daily-cash-" + target.isoformat()
+        if find_snapshot(g.db, target, entry_type):
             return "The target date already has a saved count. Nothing was overwritten.", 409
+        if record.status == "Approved":
+            return "Reopen the approved count with a reason before changing its date.", 409
+        if entry_type == "Opening" and find_snapshot(g.db, source, "Closing"):
+            return "This opening has a linked closing count. Review both dates with the owner before moving it.", 409
         expected = normalize_text(request.form.get("expectedUpdatedAt"))
         if expected and expected != record.updated_at.isoformat():
             return "This record changed after you opened it. Refresh and review it before correcting the date.", 409
@@ -19160,67 +19462,124 @@ def create_app(config: AppConfig | None = None) -> Flask:
                                 correctedBy=g.current_user.full_name or g.current_user.username,
                                 correctedAt=datetime.utcnow().isoformat()))
         payload.update(id=target_id, date=target.isoformat(), dateCorrections=corrections)
+        if payload.get("controlVersion"):
+            payload.update(reviewStatus="Difference to Review", baselineId="", baselineUpdatedAt="", sourceSignature="", comparison=[],
+                           warnings=["The date changed. Recalculate and resave this count before approval."])
         original_recorder = payload.get("recordedBy")
         record.id = target_id
         set_module_record_metadata(record, MODULES["daily_cash_positions"], payload)
+        if payload.get("controlVersion"):
+            record.status = "Difference to Review"
         audit("daily_cash_positions", "Daily Cash Date Correction", "correct-date", target.isoformat(), target_id,
               f"Moved {source_id} to {target_id}. Original recorder: {original_recorder}. Amounts unchanged. Reason: {reason}")
         g.db.commit()
         flash(f"Cash record moved from {source} to {target}. Amounts and original recorder were preserved.", "success")
-        return redirect(url_for("daily_cash_page", date=target.isoformat()))
+        return redirect(url_for("daily_cash_page", date=target.isoformat(), entryType=entry_type))
 
     @app.route("/app/daily-cash", methods=["GET", "POST"])
     @access_required("daily_cash_positions")
     def daily_cash_page():
         today = datetime.now(ZoneInfo("Africa/Accra")).date()
         selected = parse_date(request.values.get("date")) or today
-        identity = "daily-cash-" + selected.isoformat()
-        record = g.db.get(ModuleRecord, identity)
-        payload = dict(record.payload or {}) if record else {"date": selected.isoformat()}
+        entry_type = normalize_text(request.values.get("entryType")) or "Closing"
+        if entry_type not in {"Opening", "Closing"}:
+            return "Choose Opening or Closing.", 400
+        record = find_snapshot(g.db, selected, entry_type)
+        opening = find_snapshot(g.db, selected, "Opening")
+        previous_close = latest_close(g.db, selected)
+        baseline = previous_close if entry_type == "Opening" else opening
+        payload = dict(record.payload or {}) if record else {"date": selected.isoformat(), "entryType": entry_type}
+        if not record and entry_type == "Opening" and previous_close:
+            payload.update({k: (previous_close.payload or {}).get(k, 0) for k in COUNT_FIELDS})
+            payload["cashMode"] = cash_mode(previous_close.payload or {})
+            payload["combinedCash"] = sum(parse_amount(payload.get(k)) for k in ("groceriesCash", "foodCash"))
+        movements = daily_cash_movement_context(g.db, selected)
+        base = baseline.payload if baseline else None
+        def comparison_for(counts):
+            warnings = list(movements["warnings"]) if entry_type == "Closing" else []
+            effects = movements["effects"] if entry_type == "Closing" else {k: 0 for k in COUNT_FIELDS}
+            if not baseline:
+                warnings.append("No opening count exists for this date." if entry_type == "Closing" else "No earlier closing count exists. Confirm the first opening balances manually.")
+            if previous_close and entry_type == "Opening" and previous_close.record_date != selected - timedelta(days=1):
+                warnings.append(f"Carry-forward is from {previous_close.record_date}, not yesterday. Explain any intervening activity.")
+            if entry_type == "Opening" and previous_close and previous_close.status != "Approved":
+                warnings.append("The suggested closing count has not been approved by the owner. Confirm the carry-forward amounts.")
+            combined = cash_mode(counts) == "Combined" or (base is not None and cash_mode(base) == "Combined")
+            rows = compare_counts(counts, base, effects, combined=combined)
+            if entry_type == "Opening":
+                rows = [row for row in rows if row["key"] not in {"groceriesPetty", "foodPetty"}]
+            if combined:
+                warnings.append("Shop cash is combined. Only the combined shop total can be reconciled; the individual shop split is not confirmed.")
+            if base:
+                warnings.append("Expected balances cover recorded sources only. Confirm all receipts, cash transfers and expenses; a variance is not proof of loss.") if entry_type == "Closing" and not movements["lines"] else None
+            return rows, warnings
         errors = []
-        fields = ("groceriesCash", "foodCash", "momoCash", "momoECash", "groceriesPetty", "foodPetty")
         if request.method == "POST":
             if not parse_date(request.form.get("date")) or selected > today:
                 errors.append("Choose today or an earlier date for the actual count.")
-            for name in fields:
-                raw = normalize_text(request.form.get(name))
-                try:
-                    value = round(float(raw.replace(",", "")), 2)
-                except ValueError:
-                    value = -1
-                if not math.isfinite(value) or value < 0:
-                    errors.append("Enter zero or a positive amount in every money box.")
-                payload[name] = value
-            if payload["groceriesPetty"] > payload["groceriesCash"]:
-                errors.append("Groceries petty cash cannot exceed the cash counted for that shop.")
-            if payload["foodPetty"] > payload["foodCash"]:
-                errors.append("Cold Store & Kitchen petty cash cannot exceed the cash counted for that shop.")
+            if request.form.get("confirmedDate") != f"{selected.isoformat()}|{entry_type}":
+                errors.append("Confirm the displayed date and Opening / Closing before saving.")
+            payload["cashMode"] = normalize_text(request.form.get("cashMode")) or "Separate"
+            if payload["cashMode"] not in {"Separate", "Combined"}:
+                errors.append("Choose Separate or Combined shop cash.")
+            for key in COUNT_FIELDS:
+                payload[key] = request.form.get(key, "0" if payload["cashMode"] == "Combined" and key in {"groceriesCash", "foodCash"} else "")
+            payload["combinedCash"] = request.form.get("combinedCash", 0)
+            try:
+                summarize_counts(payload)
+            except ValueError as error:
+                errors.append(str(error))
             payload["date"] = selected.isoformat()
+            payload["entryType"] = entry_type
             payload["notes"] = normalize_text(request.form.get("notes"))[:2000]
+            payload["exceptionReason"] = normalize_text(request.form.get("exceptionReason"))[:2000]
             if not errors:
+                comparison, warnings = comparison_for(payload)
+                if review_needed(comparison, warnings) and not payload["exceptionReason"]:
+                    errors.append("Explain the differences, combined cash, or missing opening / carry-forward under Difference / Review Note.")
+            if not errors:
+                identity = record.id if record else snapshot_id(selected, entry_type)
                 if g.db.bind.dialect.name == "postgresql":
-                    g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": identity})
+                    g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": "cash-control|" + selected.isoformat()})
                 g.db.expire_all()
-                record = g.db.get(ModuleRecord, identity)
+                record = find_snapshot(g.db, selected, entry_type)
+                if record and record.status == "Approved":
+                    return "This count is approved. The owner must reopen it with a reason before correction.", 409
+                expected = normalize_text(request.form.get("expectedUpdatedAt"))
+                if record and expected != record.updated_at.isoformat():
+                    return "The saved count changed. Refresh and review it before saving.", 409
+                if entry_type == "Opening" and (close := find_snapshot(g.db, selected, "Closing")) and (close.payload or {}).get("controlVersion") == 2:
+                    if not user_is_owner(g.current_user) or close.status == "Approved":
+                        return "A closing count already exists. The owner must reopen it before correcting the opening.", 409
+                baseline = latest_close(g.db, selected) if entry_type == "Opening" else find_snapshot(g.db, selected, "Opening")
+                base = baseline.payload if baseline else None
+                movements = daily_cash_movement_context(g.db, selected)
+                comparison, warnings = comparison_for(payload)
+                if review_needed(comparison, warnings) and not payload["exceptionReason"]:
+                    return "Source records changed. Refresh, review the new comparison and explain any difference before saving.", 409
                 previous = dict(record.payload or {}) if record else {}
-                payload.update(id=identity, groceriesRemaining=round(payload["groceriesCash"] - payload["groceriesPetty"], 2),
-                    foodRemaining=round(payload["foodCash"] - payload["foodPetty"], 2),
-                    pettyTotal=round(payload["groceriesPetty"] + payload["foodPetty"], 2),
-                    totalPhysical=round(payload["groceriesCash"] + payload["foodCash"] + payload["momoCash"], 2),
+                payload.update(id=identity, controlVersion=2, comparison=comparison, warnings=warnings,
+                    sourceSignature=movements["signature"] if entry_type == "Closing" else "",
+                    baselineId=baseline.id if baseline else "", baselineUpdatedAt=baseline.updated_at.isoformat() if baseline else "",
+                    reviewStatus="Difference to Review" if review_needed(comparison, warnings) else "Submitted",
                     recordedBy=g.current_user.full_name or g.current_user.username,
                     recordedById=g.current_user.id, recordedAt=datetime.utcnow().isoformat())
                 record = record or ModuleRecord(id=identity, module_key="daily_cash_positions")
                 set_module_record_metadata(record, MODULES["daily_cash_positions"], payload)
+                record.status = payload["reviewStatus"]
                 g.db.add(record)
                 audit("daily_cash_positions", "Daily Cash & Petty Cash", "update" if previous else "create",
                       selected.isoformat(), identity,
-                      json.dumps({"before": {k: previous.get(k) for k in fields},
-                                  "after": {k: payload[k] for k in fields}, "notes": payload["notes"]}))
+                      json.dumps({"entryType": entry_type, "before": {k: previous.get(k) for k in COUNT_FIELDS},
+                                  "after": {k: payload[k] for k in COUNT_FIELDS}, "reason": payload["exceptionReason"]}))
                 g.db.commit()
-                flash("Daily cash saved. The owner can see it now.", "success")
-                return redirect(url_for("daily_cash_page", date=selected.isoformat()))
+                flash(f"{entry_type} count saved for {selected}. The owner can review it now.", "success")
+                return redirect(url_for("daily_cash_page", date=selected.isoformat(), entryType=entry_type))
         for error in dict.fromkeys(errors):
             flash(error, "error")
+        comparison, warnings = comparison_for(payload) if not errors else ([], [])
+        if record and (record.payload or {}).get("controlVersion") == 2:
+            comparison, warnings = (record.payload or {}).get("comparison", []), (record.payload or {}).get("warnings", [])
         date_from = parse_date(request.args.get("date_from")) or today - timedelta(days=30)
         date_to = parse_date(request.args.get("date_to")) or today
         history = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions",
@@ -19229,7 +19588,17 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
                                selected=selected, history=history, date_from=date_from, date_to=date_to,
                                can_correct_date=user_is_owner(g.current_user),
-                               expected_updated_at=record.updated_at.isoformat() if record else "")
+                               expected_updated_at=record.updated_at.isoformat() if record else "",
+                               entry_type=entry_type, previous_close=previous_close, opening=opening,
+                               comparison=comparison, warnings=warnings, movement_context=movements, wallets=WALLETS,
+                               expense_request_id=uuid4().hex,
+                               daily_expenses=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "expenses", ModuleRecord.record_date == selected)
+                                   .order_by(desc(ModuleRecord.updated_at))).all(),
+                               source_changed=bool(record and entry_type == "Closing" and (record.payload or {}).get("controlVersion") == 2
+                                   and (record.payload or {}).get("sourceSignature") != movements["signature"]),
+                               saved_record=record, locked=bool(record and record.status == "Approved"),
+                               transfers=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_movements",
+                                   ModuleRecord.record_date == selected).order_by(desc(ModuleRecord.created_at))).all())
 
     @app.route("/app/morning-opening")
     @access_required("daily_handovers")
@@ -20982,6 +21351,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return redirect(url_for("module_form", module_key="expenses", record_id=linked_expense_id) if linked_expense_id else url_for("module_list", module_key="expenses"))
 
         record_payload = dict(record.payload if record else {})
+        if record and record_payload.get("linkedCashMovementId"):
+            flash("This entry belongs to a cash transfer. Correct it by reversing the original transfer, not editing its ledger entries.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
         prior_credit_key = customer_credit_rollup_key(g.db, record_payload) if module_key == "customer_credit_accounts" and record else ""
         if not record and module_key == "customer_credit_accounts":
             linked_credit_id = normalize_text(request.args.get("creditAccountId"))
@@ -21026,7 +21398,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if module_key == "customer_prepaid" and record:
                 flash("Posted prepaid entries cannot be edited. Record an owner-approved refund or a new transaction instead.", "error")
                 return redirect(url_for("module_list", module_key=module_key))
-            if module_key == "cashbook_entries" and record and normalize_text(record.reference).startswith("prepaid|"):
+            if module_key == "cashbook_entries" and record and normalize_text(record.reference).startswith(("prepaid|", "cash-control|")):
                 flash("This Cashbook entry is linked to customer prepaid money and cannot be edited independently.", "error")
                 return redirect(url_for("module_list", module_key=module_key))
             for field in definition.fields:
@@ -22121,8 +22493,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if not record or record.module_key != module_key:
             flash("That record could not be found.", "error")
             return redirect(url_for("module_list", module_key=module_key))
-        if module_key == "cashbook_entries" and normalize_text(record.reference).startswith("prepaid|"):
-            flash("Linked prepaid Cashbook entries cannot be deleted independently.", "error")
+        if module_key == "cashbook_entries" and normalize_text(record.reference).startswith(("prepaid|", "cash-control|")):
+            flash("Linked controlled Cashbook entries cannot be deleted independently.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
+        if (record.payload or {}).get("linkedCashMovementId"):
+            flash("Reverse the original cash transfer; its linked ledger entries cannot be deleted independently.", "error")
             return redirect(url_for("module_list", module_key=module_key))
         if equipment_rental_has_recorded_payment(record) and not user_is_owner(g.current_user):
             flash("This equipment rental has recorded payments. Only the Owner can delete or amend it.", "error")
@@ -24522,6 +24897,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return {
             "calendar_reminders": calendar_reminders,
             "current_user": current_user,
+            "cash_mode": cash_mode,
             "current_access_keys": user_access_keys(current_user),
             "attendance_widget": build_attendance_widget(current_user),
             "sidebar_items": build_sidebar(current_user),

@@ -22,10 +22,15 @@
   <section class="dashboard-chart-grid">
     {% if latest_cash_position %}
     <article class="card">
-      <div class="card-header"><h3>Latest Daily Cash · {{ latest_cash_position.record_date }}</h3><a class="button subtle" href="{{ url_for('daily_cash_page') }}">View Daily Records</a></div>
+      <div class="card-header"><h3>Latest Daily Cash · {{ latest_cash_position.record_date }} · {{ latest_cash_position.payload.get('entryType','Legacy Closing') }}</h3><a class="button subtle" href="{{ url_for('daily_cash_page', date=latest_cash_position.record_date, entryType=latest_cash_position.payload.get('entryType','Closing')) }}">View Daily Records</a></div>
       {% set cash = latest_cash_position.payload %}
+      <p><strong>{{ latest_cash_position.status or 'Needs owner review' }}</strong></p>
+      {% if cash_mode(cash) == 'Combined' %}
+      <p>Combined shop cash, including petty cash <strong>{{ (cash.get('groceriesCash',0) + cash.get('foodCash',0))|currency }}</strong>. Individual shop split not confirmed.</p>
+      {% else %}
       <p>Groceries cash remaining <strong>{{ cash.get('groceriesRemaining', 0)|currency }}</strong> · Petty cash <strong>{{ cash.get('groceriesPetty', 0)|currency }}</strong></p>
       <p>Cold Store &amp; Kitchen cash remaining <strong>{{ cash.get('foodRemaining', 0)|currency }}</strong> · Petty cash <strong>{{ cash.get('foodPetty', 0)|currency }}</strong></p>
+      {% endif %}
       <p>MoMo physical cash <strong>{{ cash.get('momoCash', 0)|currency }}</strong> · MoMo e-cash <strong>{{ cash.get('momoECash', 0)|currency }}</strong></p>
       <small>Counted by {{ cash.get('recordedBy') }}. Balance snapshot, not sales.</small>
     </article>

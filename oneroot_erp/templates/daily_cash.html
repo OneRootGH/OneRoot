@@ -1,63 +1,116 @@
 {% extends "base.html" %}
 {% block content %}
+{% set mode = payload.get('cashMode') or ('Combined' if 'combined' in payload.get('notes', '')|lower else 'Separate') %}
 <section class="card">
-  <div class="card-header"><div><h3>Daily Cash &amp; Petty Cash</h3><p class="muted">Count each shop's cash before setting petty cash aside. Enter the e-cash balance shown on the MoMo phone.</p></div></div>
-  <form method="post" id="daily-cash-form">
-    <div class="form-grid"><label>Date <input type="date" name="date" value="{{ selected }}" required></label></div>
-    <div class="card-grid two">
-      {% for title, cash, petty in [('Groceries & More', 'groceriesCash', 'groceriesPetty'), ('Cold Store & Kitchen', 'foodCash', 'foodPetty')] %}
-      <section><h3>{{ title }}</h3><div class="form-grid">
-        <label>Cash counted before petty cash (GH₵)<input type="number" name="{{ cash }}" step="0.01" min="0" value="{{ payload.get(cash, '') }}" required></label>
-        <label>Petty cash to set aside (GH₵)<input type="number" name="{{ petty }}" step="0.01" min="0" value="{{ payload.get(petty, 0) }}" required></label>
-      </div><p>Cash remaining: <strong data-remainder="{{ cash }}">—</strong></p></section>
-      {% endfor %}
-    </div>
-    <h3>Mobile Money — Separate Float</h3><div class="form-grid">
-      <label>Physical cash available for MoMo customers (GH₵)<input type="number" name="momoCash" step="0.01" min="0" value="{{ payload.get('momoCash', '') }}" required></label>
-      <label>E-cash balance on the MoMo phone (GH₵)<input type="number" name="momoECash" step="0.01" min="0" value="{{ payload.get('momoECash', '') }}" required></label>
-    </div>
-    <div class="card-grid three"><article class="metric-card"><span>Total physical cash, including petty cash</span><strong id="physical-total">—</strong></article><article class="metric-card"><span>Petty cash set aside</span><strong id="petty-total">—</strong></article><article class="metric-card"><span>MoMo e-cash (not physical cash)</span><strong id="ecash-total">—</strong></article></div>
-    <label>Note (optional)<textarea name="notes" rows="2" maxlength="2000">{{ payload.get('notes', '') }}</textarea></label>
-    <p class="muted">These are counted balances, not sales or profit. Petty cash remains part of the physical cash total. Record actual spending in Expenses. Saving does not change MoMo transactions, Cashbook or the existing shift records.</p>
-    {% if payload.get('recordedAt') %}<p>Last saved by {{ payload.recordedBy }} · {{ payload.recordedAt }} UTC. Saving again updates this date's record and keeps an audit trail.</p>{% endif %}
-    <button class="button primary" type="submit">Save Daily Cash</button>
+  <div class="card-header"><div><h3>Daily Cash &amp; Petty Cash</h3><p class="muted">Opening before trading · Closing after cash movements and the final count.</p></div><strong>{{ saved_record.status or 'Legacy count — review required' if saved_record else 'Not Submitted' }}</strong></div>
+  <form method="get" class="toolbar">
+    <label>Date <input type="date" name="date" value="{{ selected }}" required></label>
+    <label>Count <select name="entryType">{% for value in ['Opening','Closing'] %}<option {% if value == entry_type %}selected{% endif %}>{{ value }}</option>{% endfor %}</select></label>
+    <button class="button" type="submit">Open Date &amp; Count</button>
+    <a href="{{ url_for('daily_cash_page', date=selected, entryType='Opening' if entry_type == 'Closing' else 'Closing') }}">View {{ 'Opening' if entry_type == 'Closing' else 'Closing' }}</a>
   </form>
-  {% if can_correct_date and payload.get('recordedAt') %}
-  <details><summary>Owner: Correct Record Date</summary>
-    <form method="post" action="{{ url_for('daily_cash_correct_date') }}" class="form-grid">
-      <input type="hidden" name="sourceDate" value="{{ selected }}">
-      <input type="hidden" name="expectedUpdatedAt" value="{{ expected_updated_at }}">
-      <label>Correct date <input type="date" name="targetDate" required></label>
-      <label>Reason <input name="reason" maxlength="1000" required></label>
-      <p>This moves the existing count without changing its amounts or original recorder. It will not overwrite another date's count.</p>
-      <button class="button subtle" type="submit">Move Record to Correct Date</button>
-    </form>
-  </details>
+  <h3>You are recording {{ selected.strftime('%A, %d %B %Y') }} — {{ entry_type }}</h3>
+  {% if entry_type == 'Opening' and previous_close %}<p>Suggested from closing on <strong>{{ previous_close.record_date }}</strong>, recorded by {{ previous_close.payload.get('recordedBy') }}. Count and confirm; do not assume it is correct.</p>{% endif %}
+  {% if entry_type == 'Closing' %}<p>{% if opening %}Opening count exists for this date.{% else %}<strong>No opening count exists.</strong> You can submit actual closing balances with a review note, but expected cash cannot be confirmed.{% endif %}</p>{% endif %}
+  {% if locked %}<p><strong>Approved by {{ payload.get('reviewedBy') }}.</strong> The owner must reopen this record before any correction.</p>{% endif %}
+  {% if source_changed %}<p><strong>Source records changed since this count was saved.</strong> Review and resave before approval; reopen first if already approved.</p>{% endif %}
+  <form method="post" id="daily-cash-form">
+    <input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="entryType" value="{{ entry_type }}"><input type="hidden" name="expectedUpdatedAt" value="{{ expected_updated_at }}">
+    <fieldset {% if locked %}disabled{% endif %}>
+    <label>Shop cash arrangement <select name="cashMode" id="cash-mode"><option value="Separate" {% if mode == 'Separate' %}selected{% endif %}>Count the two shops separately</option><option value="Combined" {% if mode == 'Combined' %}selected{% endif %}>Shop cash has been combined — split unknown</option></select></label>
+    <div data-cash-mode="Combined" {% if mode != 'Combined' %}hidden{% endif %}><label>Combined physical cash from both shops, including petty cash (GH₵)<input name="combinedCash" type="number" min="0" step="0.01" value="{{ payload.get('combinedCash', (payload.get('groceriesCash',0)|float + payload.get('foodCash',0)|float)) }}" {% if mode != 'Combined' %}disabled{% else %}required{% endif %}></label><p>We will not pretend this amount belongs to one shop.</p></div>
+    <div class="card-grid two">
+    {% for title, cash, petty in [('Groceries & More', 'groceriesCash', 'groceriesPetty'), ('Cold Store & Kitchen', 'foodCash', 'foodPetty')] %}
+      <section><h3>{{ title }}</h3><div class="form-grid">
+        <label data-cash-mode="Separate" {% if mode != 'Separate' %}hidden{% endif %}>Total physical cash, including petty cash (GH₵)<input type="number" name="{{ cash }}" step="0.01" min="0" value="{{ payload.get(cash, '') }}" {% if mode != 'Separate' %}disabled{% else %}required{% endif %}></label>
+        <label>{{ 'Petty cash to keep for today' if entry_type == 'Opening' else 'Actual petty cash remaining at closing' }} (GH₵)<input type="number" name="{{ petty }}" step="0.01" min="0" value="{{ payload.get(petty, 0) }}" required></label>
+      </div><p data-cash-mode="Separate" {% if mode != 'Separate' %}hidden{% endif %}>Counter cash excluding petty cash: <strong data-remainder="{{ cash }}">—</strong></p></section>
+    {% endfor %}
+    </div>
+    <h3>MoMo — Keep Float Separate</h3><div class="form-grid">
+      <label>Physical cash for MoMo customers (GH₵)<input type="number" name="momoCash" step="0.01" min="0" value="{{ payload.get('momoCash', '') }}" required></label>
+      <label>E-cash displayed on the phone (GH₵)<input type="number" name="momoECash" step="0.01" min="0" value="{{ payload.get('momoECash', '') }}" required></label>
+    </div>
+    <div class="card-grid three"><article class="metric-card"><span>All physical cash, including petty cash</span><strong id="physical-total">—</strong></article><article class="metric-card"><span>Petty cash included above</span><strong id="petty-total">—</strong></article><article class="metric-card"><span>Phone e-cash — not physical cash</span><strong id="ecash-total">—</strong></article></div>
+    <label>Difference / Review Note<textarea name="exceptionReason" rows="2" maxlength="2000" placeholder="Explain a missing opening, changed carry-forward, combined money, or a counted difference.">{{ payload.get('exceptionReason','') }}</textarea></label>
+    <label>Other note<textarea name="notes" rows="2" maxlength="2000">{{ payload.get('notes','') }}</textarea></label>
+    <p class="muted">Allocating petty cash does not spend it or reduce total physical cash. Record purchases in Expenses, choosing the correct business area and Paid From account. Record transfers below once. Never add daily balance snapshots together as income.</p>
+    <label><input type="checkbox" name="confirmedDate" value="{{ selected }}|{{ entry_type }}" required> I confirm this is the actual <strong>{{ entry_type }}</strong> count for <strong>{{ selected.strftime('%d %B %Y') }}</strong>.</label>
+    <button class="button primary" type="submit" {% if locked %}disabled{% endif %}>Save {{ entry_type }} Count</button>
+    </fieldset>
+    {% if payload.get('recordedAt') %}<p>Saved by {{ payload.recordedBy }} · {{ payload.recordedAt }} UTC. Corrections are audited.</p>{% endif %}
+  </form>
+</section>
+<section class="card"><h3>Expected Versus Counted — {{ 'Last Saved Comparison' if saved_record else 'Preview' }}</h3>
+  {% for note in warnings %}<p class="muted">{{ note }}</p>{% endfor %}
+  <p>Recorded movements are a guide, not proof of loss. Service cash is assigned to Cold Store &amp; Kitchen. MoMo fees follow the MoMo counter's cash-fee treatment; verify if your provider credits fees differently.</p>
+  <div class="table-wrap"><table><thead><tr><th>Balance</th><th>{{ 'Previous Closing' if entry_type == 'Opening' else 'Opening' }}</th><th>Recorded Movement</th><th>Expected</th><th>Counted</th><th>Difference</th></tr></thead><tbody>
+  {% for row in comparison %}<tr><td>{{ row.label }}</td><td>{{ row.opening|currency }}</td><td>{{ row.movement|currency }}</td><td>{{ row.expected|currency }}</td><td>{{ row.actual|currency if saved_record else 'Not submitted' }}</td><td>{{ row.variance|currency if saved_record else '—' }}</td></tr>{% else %}<tr><td colspan="6">Expected balances are unavailable without a prior closing / opening count. Submit actual balances and explain for owner review.</td></tr>{% endfor %}
+  </tbody></table></div>
+  {% if can_correct_date and saved_record %}
+  <form method="post" action="{{ url_for('daily_cash_review') }}" class="form-grid">
+    <input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="entryType" value="{{ entry_type }}"><input type="hidden" name="action" value="{{ 'reopen' if locked else 'approve' }}">
+    <label>{{ 'Reason for reopening' if locked else 'Owner review note' }}<textarea name="reviewNote" rows="2" {% if locked %}required{% endif %}></textarea></label>
+    {% if not locked %}<label><input type="checkbox" name="acceptExceptions" value="yes"> I reviewed any differences, combined cash and incomplete sources.</label>{% endif %}
+    <button class="button" type="submit">{{ 'Reopen for Correction' if locked else 'Approve Reviewed Count' }}</button>
+  </form>
+  {% if not locked %}<details><summary>Owner: Correct Record Date</summary><form method="post" action="{{ url_for('daily_cash_correct_date') }}" class="form-grid"><input type="hidden" name="sourceDate" value="{{ selected }}"><input type="hidden" name="entryType" value="{{ entry_type }}"><input type="hidden" name="expectedUpdatedAt" value="{{ expected_updated_at }}"><label>Correct date<input type="date" name="targetDate" required></label><label>Reason<input name="reason" maxlength="1000" required></label><button class="button subtle" type="submit">Move Record to Correct Date</button></form></details>{% endif %}
   {% endif %}
 </section>
-<section class="card"><div class="card-header"><h3>Daily Records</h3><a class="button subtle" href="{{ url_for('module_export', module_key='daily_cash_positions', date_from=date_from, date_to=date_to) }}">Export CSV</a></div>
-  <form method="get" class="toolbar"><label>From <input type="date" name="date_from" value="{{ date_from }}"></label><label>To <input type="date" name="date_to" value="{{ date_to }}"></label><button class="button" type="submit">View</button></form>
-  <p class="muted">Each row is a daily balance snapshot. Do not add daily balances together as income.</p>
-  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Groceries Cash Remaining</th><th>Groceries Petty Cash</th><th>Cold Store Cash Remaining</th><th>Cold Store Petty Cash</th><th>MoMo Physical Cash</th><th>MoMo E-Cash</th><th>Recorded By</th><th></th></tr></thead><tbody>
-  {% for r in history %}<tr><td>{{ r.record_date }}</td>{% for key in ['groceriesRemaining', 'groceriesPetty', 'foodRemaining', 'foodPetty', 'momoCash', 'momoECash'] %}<td>{{ r.payload.get(key, 0)|currency }}</td>{% endfor %}<td>{{ r.payload.get('recordedBy') }}</td><td><a href="{{ url_for('daily_cash_page', date=r.record_date) }}">Open</a></td></tr>{% else %}<tr><td colspan="9">No daily cash counts saved for this period.</td></tr>{% endfor %}
+<section class="card"><h3>Record Expenses</h3><p>Save actual spending here once. It appears in Expenses, Cashbook and the cash comparison. Setting petty cash aside is not spending.</p>
+  {% if not locked and 'expenses' in current_access_keys %}<form method="post" action="{{ url_for('daily_cash_expense') }}" enctype="multipart/form-data" class="form-grid">
+    <input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="requestId" value="{{ expense_request_id }}">
+    <label>Paid from<select name="wallet" required><option value="">Choose source</option>{% for key in ['groceries','groceriesPetty','food','foodPetty','momoCash','momoECash'] %}<option value="{{ key }}">{{ wallets[key][0] }}</option>{% endfor %}</select></label>
+    <label>Amount (GH₵)<input name="amount" type="number" step="0.01" min="0.01" required></label>
+    <label>Paid to / Supplier<input name="vendor" maxlength="200" required></label>
+    <label>Expense category<input name="category" list="cash-expense-categories" maxlength="150" required></label>
+    <datalist id="cash-expense-categories">{% for name in ['Transport','Cleaning & Sanitation','Utilities','Repairs & Maintenance','Food & Staff Welfare','Other'] %}<option value="{{ name }}">{% endfor %}</datalist>
+    <label>What was purchased?<input name="description" maxlength="2000"></label><label>Receipt / payment reference<input name="receiptReference" maxlength="150"></label>
+    <label>Receipt photo or PDF (optional)<input type="file" name="receiptUpload" accept="image/jpeg,image/png,image/webp,application/pdf"></label>
+    <button class="button primary" type="submit">Save Expense</button>
+  </form>{% elif locked %}<p>Ask the owner to reopen this approved date before adding an expense.</p>{% endif %}
+  <div class="table-wrap"><table><thead><tr><th>Paid To</th><th>Category</th><th>Paid From</th><th>Amount</th><th>Receipt</th></tr></thead><tbody>{% for r in daily_expenses %}<tr><td>{{ r.payload.get('vendor') }}</td><td>{{ r.payload.get('category') }}</td><td>{{ r.payload.get('paidFromAccount') }}</td><td>{{ r.amount|currency }}</td><td>{% if r.payload.get('receiptAttachmentUrl') %}<a href="{{ r.payload.get('receiptAttachmentUrl') }}" target="_blank" rel="noopener">Open Receipt</a>{% else %}Not uploaded{% endif %}</td></tr>{% else %}<tr><td colspan="5">No expenses recorded for this date.</td></tr>{% endfor %}</tbody></table></div>
+  <a href="{{ url_for('module_list', module_key='expenses', date_from=selected, date_to=selected) }}">Open Expenses for This Date</a>
+</section>
+<section class="card"><h3>Transfers, Owner Handover &amp; Banking</h3><p>Record each transfer once, before the final closing count. A transfer moves money; it is not sales or an expense. Cashbook receives linked entries automatically. Do not enter the same transfer again in Cashbook or MoMo reconciliation adjustments.</p>
+  {% if not locked %}<form method="post" action="{{ url_for('daily_cash_transfer') }}" class="form-grid">
+    <input type="hidden" name="date" value="{{ selected }}">
+    {% for field, title in [('source','From'),('destination','To')] %}<label>{{ title }}<select name="{{ field }}" required><option value="">Choose wallet</option>{% for key, info in wallets.items() %}<option value="{{ key }}">{{ info[0] }}</option>{% endfor %}</select></label>{% endfor %}
+    <label>Amount (GH₵)<input type="number" name="amount" min="0.01" step="0.01" required></label><label>Received by / bank reference contact<input name="recipient" maxlength="200" required></label>
+    <label>Unique receipt / transfer reference<input name="reference" maxlength="100" required></label><label>Note<input name="notes" maxlength="2000"></label><button class="button primary" type="submit">Record Transfer / Handover</button>
+  </form>{% else %}<p>Reopen the approved closing count before adding a movement for this date.</p>{% endif %}
+  <div class="table-wrap"><table><thead><tr><th>From</th><th>To</th><th>Amount</th><th>Received By</th><th>Reference</th><th>Action</th></tr></thead><tbody>
+  {% for r in transfers %}<tr><td>{{ wallets.get(r.payload.source, [r.payload.source])[0] }}</td><td>{{ wallets.get(r.payload.destination, [r.payload.destination])[0] }}</td><td>{{ r.amount|currency }}</td><td>{{ r.payload.recipient }}</td><td>{{ r.reference }}{% if r.payload.get('reverses') %} · Reversal{% endif %}</td><td>{% if can_correct_date and not r.payload.get('reverses') and not locked %}<form method="post" action="{{ url_for('daily_cash_reverse_transfer', record_id=r.id) }}"><input name="reason" placeholder="Reason to reverse" required><button class="button subtle">Reverse</button></form>{% endif %}</td></tr>{% else %}<tr><td colspan="6">No transfers recorded for this date.</td></tr>{% endfor %}
   </tbody></table></div>
+  <details><summary>Recorded source movements used for comparison</summary><div class="table-wrap"><table><thead><tr><th>Source</th><th>Balance</th><th>Movement</th><th>Reference</th></tr></thead><tbody>{% for r in movement_context.lines %}<tr><td>{{ r.label }}</td><td>{{ r.wallet }}</td><td>{{ r.effect|currency }}</td><td>{{ r.reference }}</td></tr>{% endfor %}</tbody></table></div></details>
+</section>
+<section class="card"><div class="card-header"><h3>Opening &amp; Closing History</h3><a class="button subtle" href="{{ url_for('module_export', module_key='daily_cash_positions', date_from=date_from, date_to=date_to) }}">Export CSV</a></div>
+  <form method="get" class="toolbar"><input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="entryType" value="{{ entry_type }}"><label>From<input type="date" name="date_from" value="{{ date_from }}"></label><label>To<input type="date" name="date_to" value="{{ date_to }}"></label><button class="button" type="submit">View History</button></form>
+  <div class="table-wrap"><table><thead><tr><th>Date</th><th>Count</th><th>Status</th><th>Shop Cash</th><th>Petty Cash (Included)</th><th>MoMo Cash</th><th>MoMo E-Cash</th><th>Recorded By</th><th></th></tr></thead><tbody>
+  {% for r in history %}<tr><td>{{ r.record_date }}</td><td>{{ r.payload.get('entryType','Legacy Closing') }}</td><td>{{ r.status or 'Needs review' }}</td><td>{{ (r.payload.get('groceriesCash',0) + r.payload.get('foodCash',0))|currency }}{% if cash_mode(r.payload) == 'Combined' %} · Combined{% endif %}</td><td>{{ r.payload.get('pettyTotal',0)|currency }}</td><td>{{ r.payload.get('momoCash',0)|currency }}</td><td>{{ r.payload.get('momoECash',0)|currency }}</td><td>{{ r.payload.get('recordedBy') }}</td><td><a href="{{ url_for('daily_cash_page', date=r.record_date, entryType=r.payload.get('entryType','Closing')) }}">Open</a></td></tr>{% else %}<tr><td colspan="9">Not Submitted — no counts saved in this period.</td></tr>{% endfor %}
+  </tbody></table></div><p>Daily snapshots are balances, not income. Opening and Closing remain separate. Missing counts show Not Submitted when their date is opened.</p>
 </section>
 <script>
 (() => {
   const form = document.getElementById('daily-cash-form');
-  const money = n => new Intl.NumberFormat('en-GH', {style: 'currency', currency: 'GHS'}).format(n);
+  const mode = document.getElementById('cash-mode');
+  const money = n => new Intl.NumberFormat('en-GH', {style:'currency', currency:'GHS'}).format(n);
   const value = name => Number(form.elements[name].value) || 0;
   function update() {
-    for (const [cash, petty] of [['groceriesCash', 'groceriesPetty'], ['foodCash', 'foodPetty']]) {
-      form.querySelector(`[data-remainder="${cash}"]`).textContent = money(value(cash) - value(petty));
-      form.elements[petty].max = String(Math.max(value(cash), 0));
+    for (const group of form.querySelectorAll('[data-cash-mode]')) {
+      const active = group.dataset.cashMode === mode.value;
+      group.hidden = !active;
+      for (const input of group.querySelectorAll('input')) { input.disabled = !active || {{ 'true' if locked else 'false' }}; input.required = active; }
     }
-    document.getElementById('physical-total').textContent = money(value('groceriesCash') + value('foodCash') + value('momoCash'));
+    const shop = mode.value === 'Combined' ? value('combinedCash') : value('groceriesCash') + value('foodCash');
+    document.getElementById('physical-total').textContent = money(shop + value('momoCash'));
     document.getElementById('petty-total').textContent = money(value('groceriesPetty') + value('foodPetty'));
     document.getElementById('ecash-total').textContent = money(value('momoECash'));
+    for (const [cash, petty] of [['groceriesCash','groceriesPetty'],['foodCash','foodPetty']]) {
+      form.querySelector(`[data-remainder="${cash}"]`).textContent = money(value(cash)-value(petty));
+    }
   }
-  form.addEventListener('input', update);
-  update();
+  form.addEventListener('input', update); update();
 })();
 </script>
 {% endblock %}
