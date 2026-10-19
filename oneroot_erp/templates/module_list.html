@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
+  {% if definition.key == 'workforce_attendance' %}
+  <section class="card"><div class="card-header"><h3>Staff Reporting Today</h3><a class="button subtle" href="{{ url_for('module_list', module_key='staff_reporting_schedule') }}">Weekly Reporting Timetable</a></div>
+    <div class="table-wrap"><table><thead><tr><th>Officer</th><th>Start</th><th>Closing</th><th>Requirement</th></tr></thead><tbody>{% for shift in reporting_schedule_today %}<tr><td>{{ shift.name }}</td><td>{{ shift.start }}</td><td>{{ shift.end }}</td><td>{{ shift.requirement }}</td></tr>{% endfor %}</tbody></table></div>
+    <p class="muted">Reporting windows are not paid hours. Record actual check-in, check-out and breaks below.</p>
+  </section>
+  {% endif %}
   {% if definition.key == 'customer_loyalty' %}
     <section class="card"><h3>Paid Purchase Rewards</h3><p>Phone-linked paid POS purchases earn 1 point per GH₵5. Review the reward before redemption; points are not cash. Credit, deferred orders, rent, deposits, MoMo float and internal kitchen stock issues do not earn automatic points.</p><p class="muted">Service payments, online orders and later credit collections require review before points are added. No discount or message is issued automatically.</p><a class="button subtle" href="{{ url_for('module_list', module_key='customer_crm') }}">Customer Records</a></section>
   {% endif %}

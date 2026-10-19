@@ -2428,6 +2428,16 @@ MODULES: dict[str, ModuleDefinition] = {
 }
 
 MODULES.update({
+    "staff_reporting_schedule": ModuleDefinition(
+        key="staff_reporting_schedule", label="Staff Reporting Timetable", legacy_collection="staffReportingSchedule",
+        menu_group="People", title_field="staffName", status_field="status",
+        fields=[FieldDefinition("staffName", "Officer In Charge", "text", True),
+                FieldDefinition("days", "Days", "select", True, [(x, x) for x in ["Monday to Wednesday", "Thursday to Saturday", "Monday to Saturday", "Sunday", "Every day", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]]),
+                FieldDefinition("startTime", "Reporting / Start Time", "time"),
+                FieldDefinition("endTime", "Closing Time", "time"),
+                FieldDefinition("requirement", "Requirement", "select", True, [(x, x) for x in ["Required", "Optional", "Optional based on availability", "Support when available"]]),
+                FieldDefinition("status", "State", "select", True, [("Active", "Active"), ("Inactive", "Inactive")]),
+                FieldDefinition("notes", "Notes / Break Arrangements", "textarea")]),
     "daily_cash_positions": ModuleDefinition(
         key="daily_cash_positions", label="Daily Cash & Petty Cash", legacy_collection="dailyCashPositions",
         menu_group="Finance", title_field="recordedBy", date_field="date", amount_field="", editable=False,
@@ -2497,6 +2507,9 @@ for role in ("owner", "admin", "operations", "finance", "operations-controls-lea
     ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar", "daily_cash_positions", "daily_cash_movements"})
 for role in ("cashier", "retail-stock-service", "kitchen-food-counter", "sales-stock-operator", "frontline-service-lead"):
     ROLE_ACCESS_KEYS.setdefault(role, set()).update({"customer_prepaid", "construction_accounts", "business_calendar"})
+for role, permissions in ROLE_ACCESS_KEYS.items():
+    if role != "viewer":
+        permissions.add("staff_reporting_schedule")
 
 LEGACY_TO_MODULE = {definition.legacy_collection: definition.key for definition in MODULES.values()}
 MODULE_TO_LEGACY = {definition.key: definition.legacy_collection for definition in MODULES.values()}
@@ -2528,7 +2541,7 @@ MENU_GROUPS = [
     (
         "People",
         [
-            ("Payroll, Schedules & Training", ["salary_records", "staff_documents", "workforce_attendance", "staff_meal_schedule", "knowledge_base"]),
+            ("Payroll, Schedules & Training", ["salary_records", "staff_documents", "workforce_attendance", "staff_reporting_schedule", "staff_meal_schedule", "knowledge_base"]),
             ("Recruitment", ["job_vacancies"]),
             ("Suppliers", ["supplier_directory", "suppliers", "supplier_price_updates"]),
         ],

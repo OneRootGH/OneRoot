@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
 from .config import AppConfig, load_config
+from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
                             cash_mode, latest_close, summarize_counts, compare_counts, review_needed)
 from .importer import bootstrap_database
@@ -9853,6 +9854,8 @@ def status_for_module_record(definition: ModuleDefinition, payload: dict[str, An
 
 
 def reference_for_module_record(definition: ModuleDefinition, payload: dict[str, Any]) -> str:
+    if definition.key == "staff_reporting_schedule":
+        return "staff-roster|" + normalize_text(payload.get("id"))
     if definition.key == "sales" and normalize_text(payload.get("sourceType")) == "pos-summary":
         return normalize_text(payload.get("linkedGeneratedSalesKey"))
     if definition.key == "customer_crm":
@@ -14076,7 +14079,7 @@ WORKSPACE_HUBS = [
     ("Apartments", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records"]),
     ("Kitchen Operations", ["kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
     ("Staff Administration", ["staff_documents", "knowledge_base", "job_vacancies"]),
-    ("Attendance & Staff Welfare", ["workforce_attendance", "staff_meal_schedule"]),
+    ("Attendance & Staff Welfare", ["workforce_attendance", "staff_reporting_schedule", "staff_meal_schedule"]),
     ("Suppliers", ["supplier_directory", "suppliers", "supplier_price_updates"]),
     ("Customers & Growth", ["customer_crm", "construction_accounts", "customer_loyalty", "customer_service_cases", "promotions", "whatsapp_campaigns", "campaign_roi"]),
     ("Budget & Planning", ["forecast_plans", "petty_cash_budgets"]),
@@ -14125,7 +14128,7 @@ def build_sidebar(user: User | None = None):
         daily_work_sections = [
             ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
             ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders"]),
-            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance", "morning_opening", "daily_handovers", "business_calendar"]),
+            ("Stock & Shift", ["inventory", "inventory_barcode", "workforce_attendance", "staff_reporting_schedule", "morning_opening", "daily_handovers", "business_calendar"]),
         ]
         menu_groups = [("Daily Work", daily_work_sections)] + [
             (group_label, [
@@ -14543,7 +14546,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
             can_check_in = True
             can_check_out = False
 
+        roster = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "staff_reporting_schedule")).all()
+        scheduled = reporting_rows(roster, target_date)
+        display_name = attendance_display_name_for_user(user).strip().casefold()
+        personal = [row for row in scheduled if (row["name"] or "").strip().casefold() == display_name]
         return {
+            "reportingWindow": personal,
             "dateLabel": target_date.strftime("%A, %d %b %Y"),
             "staffName": attendance_display_name_for_user(user),
             "statusLabel": status_label,
@@ -14590,13 +14598,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             or candidate.startswith(f"{attendance_index}?")
             or candidate == attendance_form
             or candidate.startswith(f"{attendance_form}?")
+            or candidate == url_for("module_list", module_key="staff_reporting_schedule")
+            or candidate.startswith(url_for("module_list", module_key="staff_reporting_schedule") + "?")
             or candidate == url_for("logout")
         )
 
     def attendance_gate_response_for_request(user: User | None, module_key: str, *, api: bool = False):
         if not attendance_check_in_required(user):
             return None
-        if module_key == "workforce_attendance" or attendance_is_checked_in(user):
+        if module_key in {"workforce_attendance", "staff_reporting_schedule"} or attendance_is_checked_in(user):
             return None
         message = "Check in from Attendance before opening the rest of the workspace."
         if api:
@@ -20486,6 +20496,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key in {"staff_reporting_schedule", "workforce_attendance"}:
+            ensure_reporting_schedule(g.db, set_module_record_metadata, MODULES["staff_reporting_schedule"])
+        if module_key == "staff_reporting_schedule":
+            records = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == module_key)).all()
+            target_date = parse_date(request.args.get("date")) or current_local_datetime().date()
+            return render_template("staff_reporting_schedule.html", page_title=definition.label,
+                all_shifts=reporting_rows(records), today_shifts=reporting_rows(records, target_date),
+                target_date=target_date, can_manage=normalize_role_key(g.current_user.role) in
+                {"owner", "admin", "operations", "finance", "finance-hr-controls", "operations-controls-lead"})
         if module_key == "daily_cash_positions":
             return redirect(url_for("daily_cash_page"))
         if module_key in {"customer_prepaid", "construction_accounts", "business_calendar"}:
@@ -21334,6 +21353,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if not definition.editable:
             flash("This module is view-only in the new platform right now.", "warning")
             return redirect(url_for("module_list", module_key=module_key))
+        if module_key == "staff_reporting_schedule" and normalize_role_key(g.current_user.role) not in {"owner", "admin", "operations", "finance", "finance-hr-controls", "operations-controls-lead"}:
+            return "Only management can change the staff reporting timetable.", 403
 
         record = g.db.get(ModuleRecord, record_id) if record_id else None
         if record and record.module_key != module_key:
@@ -21666,6 +21687,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 prepaid_error = validate_prepaid_entry(g.db, payload, is_owner=user_is_owner(g.current_user))
                 if prepaid_error:
                     form_errors.append(prepaid_error)
+            if module_key == "staff_reporting_schedule":
+                form_errors.extend(reporting_form_errors(payload, g.db.scalars(select(ModuleRecord).where(
+                    ModuleRecord.module_key == module_key)).all(), record.id if record else ""))
             if module_key == "business_calendar":
                 weekdays = normalize_text(payload.get("weekdays"))
                 if payload.get("frequency") in {"Weekly", "Twice a week"}:
@@ -22487,6 +22511,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return access_response
         if module_key == "customer_prepaid":
             flash("Prepaid transactions are retained for accountability. Use an owner-approved refund rather than deleting customer money history.", "error")
+            return redirect(url_for("module_list", module_key=module_key))
+        if module_key == "staff_reporting_schedule":
+            flash("Keep timetable history: management can edit this entry and set it Inactive instead of deleting it.", "info")
             return redirect(url_for("module_list", module_key=module_key))
 
         record = g.db.get(ModuleRecord, record_id)
@@ -24887,6 +24914,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
     @app.context_processor
     def inject_common():
         current_user = getattr(g, "current_user", None)
+        reporting_today = []
+        if (current_user and request.endpoint == "module_list" and (request.view_args or {}).get("module_key") == "workforce_attendance"
+                and user_has_access(current_user, "staff_reporting_schedule")):
+            reporting_today = reporting_rows(g.db.scalars(select(ModuleRecord).where(
+                ModuleRecord.module_key == "staff_reporting_schedule")).all(), current_local_datetime().date())
         calendar_reminders = []
         if current_user and user_has_access(current_user, "business_calendar") and getattr(g, "db", None):
             tasks = g.db.scalars(select(ModuleRecord).where(
@@ -24895,6 +24927,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             calendar_reminders = [r for r in calendar_task_rows(g.db, tasks, today, current_user, days=1)
                                   if r["remind"] and officer_can_complete_task(current_user, {"officer": r["officer"]})]
         return {
+            "reporting_schedule_today": reporting_today,
             "calendar_reminders": calendar_reminders,
             "current_user": current_user,
             "cash_mode": cash_mode,

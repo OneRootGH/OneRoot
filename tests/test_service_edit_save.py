@@ -13,12 +13,47 @@ from oneroot_erp.app import (create_app, set_module_record_metadata, sync_custom
                              daily_sales_summary_context, report_area_rows, calendar_task_rows)
 from oneroot_erp.app import daily_cash_movement_context
 from oneroot_erp.cash_controls import find_snapshot
+from oneroot_erp.staff_roster import reporting_rows, reporting_form_errors
 from oneroot_erp.config import load_config
 from oneroot_erp.models import Base, ModuleRecord, Product, User
 from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_reporting_timetable_matches_requested_days_and_preserves_edits(self):
+        self.assertEqual(self.client.get("/app/modules/staff_reporting_schedule").status_code, 200)
+        db = self.sessions()
+        records = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "staff_reporting_schedule")).all()
+        self.assertEqual(len(records), 8)
+        monday = {r["name"]:r for r in reporting_rows(records, date(2026,10,19))}
+        sunday = {r["name"]:r for r in reporting_rows(records, date(2026,10,25))}
+        thursday = {r["name"]:r for r in reporting_rows(records, date(2026,10,22))}
+        self.assertEqual(monday["Suzzy Agyemang"]["end"], "8:00 PM")
+        self.assertEqual(thursday["Suzzy Agyemang"]["end"], "6:00 PM")
+        self.assertEqual(sunday["Suzzy Agyemang"]["requirement"], "Optional")
+        self.assertEqual(sunday["Daniel Agyei"]["start"], "11:30 AM")
+        self.assertEqual(sunday["Daniel Agyei"]["requirement"], "Required")
+        self.assertNotIn("Faustina Nti Nyamekye Alexandra", sunday)
+        self.assertEqual(thursday["Faustina Nti Nyamekye Alexandra"]["start"], "6:30 AM")
+        self.assertEqual(thursday["Faustina Nti Nyamekye Alexandra"]["end"], "8:00 PM")
+        self.assertEqual(monday["Philip Boakye"]["start"], "Flexible")
+        row = next(r for r in records if r.payload.get("staffName") == "Philip Boakye")
+        form = dict(row.payload); form["notes"] = "Support when available"
+        self.assertEqual(self.client.post(f"/app/modules/staff_reporting_schedule/{row.id}/edit", data=form).status_code, 302)
+        self.client.get("/app/modules/staff_reporting_schedule")
+        db.expire_all()
+        self.assertEqual(db.get(ModuleRecord, row.id).payload["notes"], "Support when available")
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "staff_reporting_schedule")).all()), 8)
+        self.assertIn("Weekly Reporting Timetable", self.client.get("/app/modules/workforce_attendance").get_data(as_text=True))
+
+    def test_staff_can_view_but_not_edit_reporting_timetable(self):
+        self.client.get("/app/modules/staff_reporting_schedule")
+        with self.client.session_transaction() as session:
+            session["user_id"] = "cashier"
+        self.assertEqual(self.client.get("/app/modules/staff_reporting_schedule").status_code, 200)
+        self.assertEqual(self.client.get("/app/modules/staff_reporting_schedule/new").status_code, 403)
+        self.assertTrue(reporting_form_errors(dict(days="Sunday", startTime="23:00", endTime="07:00", requirement="Required"), []))
+
     def cash_form(self, kind="Opening", **overrides):
         data = dict(date=date.today().isoformat(), entryType=kind, groceriesCash="100", foodCash="50", momoCash="900",
                     momoECash="1040", groceriesPetty="10", foodPetty="5", cashMode="Separate",

@@ -94,6 +94,8 @@
                     <strong>{{ attendance_widget.staffName }}</strong>
                     <small>{{ attendance_widget.dateLabel }}</small>
                     <p class="muted utility-note">{{ attendance_widget.statusNote }}</p>
+                    {% for shift in attendance_widget.reportingWindow %}<p><strong>Reporting: {{ shift.start }} – {{ shift.end }}</strong><br>{{ shift.requirement }}</p>{% endfor %}
+                    {% if 'staff_reporting_schedule' in current_access_keys %}<a href="{{ url_for('module_list', module_key='staff_reporting_schedule') }}">View Reporting Timetable</a>{% endif %}
                     <div class="attendance-quick-actions">
                       <form method="post" action="{{ url_for('attendance_clock') }}">
                         <input type="hidden" name="action" value="check-in">

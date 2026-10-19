@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="card-header"><div><h3>Staff Reporting Timetable</h3><p class="muted">Planned reporting windows. Actual check-in, check-out, breaks and approved hours remain in Attendance; this timetable does not create paid work hours.</p></div>
+    <div class="toolbar"><a class="button subtle" href="{{ url_for('module_list', module_key='workforce_attendance') }}">Attendance Records</a><a class="button subtle" href="{{ url_for('module_export', module_key='staff_reporting_schedule') }}">Export CSV</a>{% if can_manage %}<a class="button primary" href="{{ url_for('module_form', module_key='staff_reporting_schedule') }}">Add Reporting Window</a>{% endif %}</div>
+  </div>
+  <form method="get" class="toolbar"><label>Reporting date<input type="date" name="date" value="{{ target_date }}"></label><button class="button" type="submit">View Day</button></form>
+  <h3>{{ target_date.strftime('%A, %d %B %Y') }}</h3>
+  <div class="table-wrap"><table><thead><tr><th>Officer In Charge</th><th>Start Time</th><th>Closing Time</th><th>Requirement</th></tr></thead><tbody>
+  {% for row in today_shifts %}<tr><td>{{ row.name }}</td><td>{{ row.start }}</td><td>{{ row.end }}</td><td><strong>{{ row.requirement }}</strong></td></tr>{% else %}<tr><td colspan="4">No reporting windows scheduled for this date.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p>Optional days depend on availability. A missing schedule is not an automatic absence. Faustina has no Sunday reporting window unless management adds one.</p>
+</section>
+<section class="card"><h3>Weekly Schedule — Editable by Management</h3>
+  <div class="table-wrap"><table><thead><tr><th>Officer In Charge</th><th>Days</th><th>Start Time</th><th>Closing Time</th><th>Requirement</th><th>State / Notes</th><th></th></tr></thead><tbody>
+  {% for row in all_shifts %}<tr><td>{{ row.name }}</td><td>{{ row.days }}</td><td>{{ row.start }}</td><td>{{ row.end }}</td><td>{{ row.requirement }}</td><td>{{ row.status }}{% if row.notes %}<br>{{ row.notes }}{% endif %}</td><td>{% if can_manage %}<a href="{{ url_for('module_form', module_key='staff_reporting_schedule', record_id=row.id) }}">Edit</a>{% endif %}</td></tr>{% endfor %}
+  </tbody></table></div>
+</section>
+{% endblock %}
