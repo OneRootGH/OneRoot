@@ -16,6 +16,37 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_daily_cash_date_correction_preserves_count_and_recorder(self):
+        db = self.sessions()
+        payload = dict(id="daily-cash-2026-10-19", date="2026-10-19", recordedBy="Daniel Agyei",
+                       recordedAt="2026-10-19T06:56:09", groceriesCash=704, foodCash=0, momoCash=9450,
+                       momoECash=4481.66, groceriesPetty=84.9, foodPetty=0, notes="Combined shops count")
+        record = ModuleRecord(id=payload["id"], module_key="daily_cash_positions")
+        set_module_record_metadata(record, MODULES[record.module_key], payload)
+        db.add(record)
+        db.commit()
+        response = self.client.post("/app/daily-cash/correct-date", data={
+            "sourceDate": "2026-10-19", "targetDate": "2026-10-18", "reason": "Yesterday entered as today"})
+        self.assertEqual(response.status_code, 302)
+        db.expire_all()
+        self.assertIsNone(db.get(ModuleRecord, "daily-cash-2026-10-19"))
+        moved = db.get(ModuleRecord, "daily-cash-2026-10-18")
+        self.assertEqual(moved.record_date, date(2026, 10, 18))
+        for key in ("recordedBy", "recordedAt", "groceriesCash", "foodCash", "momoCash", "momoECash", "groceriesPetty", "foodPetty", "notes"):
+            self.assertEqual(moved.payload[key], payload[key])
+        self.assertEqual(len(moved.payload["dateCorrections"]), 1)
+
+    def test_daily_cash_date_correction_never_overwrites_existing_target(self):
+        db = self.sessions()
+        for day in ("2026-10-18", "2026-10-19"):
+            db.add(ModuleRecord(id="daily-cash-" + day, module_key="daily_cash_positions",
+                                record_date=date.fromisoformat(day), payload={"date": day, "groceriesCash": 10}))
+        db.commit()
+        response = self.client.post("/app/daily-cash/correct-date", data={
+            "sourceDate": "2026-10-19", "targetDate": "2026-10-18", "reason": "Correction"})
+        self.assertEqual(response.status_code, 409)
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")).all()), 2)
+
     def test_daily_cash_keeps_pettty_allocation_separate_and_one_record_per_date(self):
         form = dict(date=date.today().isoformat(), groceriesCash="500", foodCash="300", momoCash="900",
                     momoECash="1040", groceriesPetty="50", foodPetty="30", notes="Morning count")

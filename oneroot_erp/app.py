@@ -19132,6 +19132,43 @@ def create_app(config: AppConfig | None = None) -> Flask:
             analytics=business_analytics_context(g.db, month_filter),
         )
 
+    @app.route("/app/daily-cash/correct-date", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_correct_date():
+        if not user_is_owner(g.current_user):
+            return "Only the owner can correct a saved cash record's date.", 403
+        source = parse_date(request.form.get("sourceDate"))
+        target = parse_date(request.form.get("targetDate"))
+        reason = normalize_text(request.form.get("reason"))[:1000]
+        if not source or not target or source == target or not reason or target > datetime.now(ZoneInfo("Africa/Accra")).date():
+            return "Choose distinct valid dates, not in the future, and enter a correction reason.", 400
+        source_id, target_id = "daily-cash-" + source.isoformat(), "daily-cash-" + target.isoformat()
+        if g.db.bind.dialect.name == "postgresql":
+            for identity in sorted((source_id, target_id)):
+                g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": identity})
+        record = g.db.get(ModuleRecord, source_id)
+        if not record or record.module_key != "daily_cash_positions":
+            return "The original daily cash record was not found. Refresh the saved records.", 404
+        if g.db.get(ModuleRecord, target_id):
+            return "The target date already has a saved count. Nothing was overwritten.", 409
+        expected = normalize_text(request.form.get("expectedUpdatedAt"))
+        if expected and expected != record.updated_at.isoformat():
+            return "This record changed after you opened it. Refresh and review it before correcting the date.", 409
+        payload = dict(record.payload or {})
+        corrections = list(payload.get("dateCorrections") or [])
+        corrections.append(dict(fromDate=source.isoformat(), toDate=target.isoformat(), reason=reason,
+                                correctedBy=g.current_user.full_name or g.current_user.username,
+                                correctedAt=datetime.utcnow().isoformat()))
+        payload.update(id=target_id, date=target.isoformat(), dateCorrections=corrections)
+        original_recorder = payload.get("recordedBy")
+        record.id = target_id
+        set_module_record_metadata(record, MODULES["daily_cash_positions"], payload)
+        audit("daily_cash_positions", "Daily Cash Date Correction", "correct-date", target.isoformat(), target_id,
+              f"Moved {source_id} to {target_id}. Original recorder: {original_recorder}. Amounts unchanged. Reason: {reason}")
+        g.db.commit()
+        flash(f"Cash record moved from {source} to {target}. Amounts and original recorder were preserved.", "success")
+        return redirect(url_for("daily_cash_page", date=target.isoformat()))
+
     @app.route("/app/daily-cash", methods=["GET", "POST"])
     @access_required("daily_cash_positions")
     def daily_cash_page():
@@ -19190,7 +19227,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ModuleRecord.record_date >= date_from, ModuleRecord.record_date <= date_to)
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
-                               selected=selected, history=history, date_from=date_from, date_to=date_to)
+                               selected=selected, history=history, date_from=date_from, date_to=date_to,
+                               can_correct_date=user_is_owner(g.current_user),
+                               expected_updated_at=record.updated_at.isoformat() if record else "")
 
     @app.route("/app/morning-opening")
     @access_required("daily_handovers")
