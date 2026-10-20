@@ -7427,31 +7427,38 @@ def momo_profit_for_records(records, *, on_date=None, month="") -> float:
 
 
 BUSINESS_RESPONSIBILITIES = [
-    ("Watering of flowers", "Daniel / Philip", "Daily", ""),
-    ("Sweeping", "Suzzy / Philip", "Daily", ""),
-    ("Cleaning of gutters", "Suzzy / Philip", "Twice a week", "0,3"),
-    ("Cooking for staff", "Suzzy / Daniel", "Daily", ""),
-    ("Laundry", "Daniel / Philip", "As needed", ""),
-    ("Ironing", "Daniel", "As needed", ""),
-    ("Pumping of water into Polytank", "Daniel", "Daily", ""),
-    ("Equipment rentals", "Suzzy / Faustina", "Daily", ""),
-    ("Cold Store", "Suzzy / Faustina", "Daily", ""),
-    ("Mobile money", "Suzzy / Faustina", "Daily", ""),
-    ("Food", "Suzzy / Faustina", "Daily", ""),
-    ("Groceries and more", "Faustina / Suzzy", "Daily", ""),
+    ("Cooking for staff", "Suzzy Agyemang", "Weekly", "0,1,2,3,4,5", "08:00", "07:45"),
+    ("Pumping of water into Polytank", "Daniel Agyei", "Daily", "", "07:30", "07:15"),
+    ("Sweeping", "Faustina Nti Nyamekye Alexandra / Suzzy Agyemang", "Weekly", "0,1,2,3,4,5", "06:30", "06:30"),
+    ("Watering of flowers", "Daniel Agyei", "Daily", "", "07:40", "07:30"),
+    ("Cleaning of gutters", "Philip Boakye", "Weekly", "6", "", "10:30"),
+    ("Feeding the dogs", "Daniel Agyei", "Daily", "", "08:00", "07:50"),
+    ("Cleaning of toilets - Monday to Wednesday", "Faustina Nti Nyamekye Alexandra", "Weekly", "0,1,2", "07:30", "07:20"),
+    ("Cleaning of toilets - Thursday to Saturday", "Suzzy Agyemang", "Weekly", "3,4,5", "07:30", "07:20"),
+    ("Cleaning of bathrooms", "Daniel Agyei", "Twice a week", "2,5", "", "08:00"),
 ]
 
 
 def ensure_business_responsibilities(db):
     if db.bind.dialect.name == "postgresql":
         db.execute(text("SELECT pg_advisory_xact_lock(hashtext('business-responsibilities-seed'))"))
-    for title, officer, frequency, weekdays in BUSINESS_RESPONSIBILITIES:
+    for obsolete in ["Laundry", "Ironing", "Equipment rentals", "Cold Store", "Mobile money", "Food", "Groceries and more"]:
+        old = db.get(ModuleRecord, "routine-" + hashlib.sha256(obsolete.encode()).hexdigest()[:24])
+        if old and (old.payload or {}).get("scheduleVersion") != "2026-10-20":
+            payload = dict(old.payload or {}, status="Paused", scheduleVersion="2026-10-20")
+            set_module_record_metadata(old, MODULES["business_calendar"], payload)
+    for title, officer, frequency, weekdays, start, reminder in BUSINESS_RESPONSIBILITIES:
         identity = "routine-" + hashlib.sha256(title.encode()).hexdigest()[:24]
-        if db.get(ModuleRecord, identity):
+        record = db.get(ModuleRecord, identity)
+        if record and (record.payload or {}).get("scheduleVersion") == "2026-10-20":
             continue
-        payload = dict(id=identity, title=title, officer=officer, frequency=frequency,
-                       weekdays=weekdays, nextDueDate="2026-10-18", amount=0, status="Active", notes="")
-        record = ModuleRecord(id=identity, module_key="business_calendar")
+        payload = dict(record.payload or {}) if record else {}
+        payload.update(id=identity, title="Watering of flowers and other plants" if title == "Watering of flowers" else title,
+                       officer=officer, frequency=frequency, weekdays=weekdays, nextDueDate="2026-10-20",
+                       dueTime=start or reminder, startMode="Fixed time" if start else "Anytime",
+                       reminderTime=reminder, reminder="Enabled", reminderMinutes=0,
+                       scheduleVersion="2026-10-20", status="Active")
+        record = record or ModuleRecord(id=identity, module_key="business_calendar")
         set_module_record_metadata(record, MODULES["business_calendar"], payload)
         db.add(record)
     db.commit()
@@ -7480,6 +7487,7 @@ def officer_can_complete_task(user, payload):
              normalize_text(getattr(user, "username", "")).casefold()}
     names.update(name.split()[0] for name in list(names) if name)
     officers = {part.strip().casefold() for part in re.split(r"[/,;]", normalize_text(payload.get("officer")))}
+    officers.update(name.split()[0] for name in list(officers) if name)
     return bool((names - {""}) & officers)
 
 
@@ -7510,9 +7518,17 @@ def calendar_task_rows(db, tasks, start, user, *, days=7, now=None):
             lead = parse_amount(p.get("reminderMinutes"))
             lead = lead if math.isfinite(lead) else 0
             reminder_at = due_at - timedelta(minutes=max(min(lead, 1440), 0))
+            if p.get("reminderTime"):
+                try:
+                    reminder_at = datetime.combine(day, datetime.strptime(p["reminderTime"], "%H:%M").time())
+                except (ValueError, TypeError):
+                    pass
+            if p.get("startMode") == "Anytime":
+                due_at = datetime.combine(day, datetime.max.time())
             status = "Done" if completed else ("As needed" if as_needed else ("Overdue" if now > due_at else "Upcoming"))
             rows.append(dict(id=task.id, date=day, title=p.get("title"), officer=p.get("officer"),
-                frequency=p.get("frequency"), time=clock, status=status, done=completed.payload if completed else None,
+                frequency=p.get("frequency"), time="Anytime" if p.get("startMode") == "Anytime" else clock,
+                reminderTime=reminder_at.strftime("%H:%M"), status=status, done=completed.payload if completed else None,
                 canComplete=officer_can_complete_task(user, p) and day <= now.date(),
                 remind=not completed and not as_needed and p.get("reminder") != "Off" and now >= reminder_at,
                 notes=p.get("notes", "")))
@@ -17148,6 +17164,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             closeout_payload["expectedClosingCash"] = expected_closing_cash
             closeout_payload["cashVariance"] = cash_variance
 
+        desk_momo_included = desk_key != "food" and (not selected_area or selected_area == "mobile-money")
+        desk_momo_commission = mobile_money_snapshot["recognizedSalesTotal"] if desk_momo_included else 0.0
+        desk_momo_profit = mobile_money_snapshot["recognizedProfitTotal"] if desk_momo_included else 0.0
         summary = {
             "orderDate": order_date.isoformat(),
             "areaId": counter_scope_id,
@@ -17166,6 +17185,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "breadSalesProfit": round(bread_sales_total - bread_sales_cost, 2),
             "breadItemCount": round(bread_item_count, 2),
             "counterCollectionsTotal": round(total_amount + bread_sales_total, 2),
+            "deskSalesTotal": round(total_amount + bread_sales_total + desk_momo_commission, 2),
+            "deskProfitTotal": round(total_amount - total_cost + bread_sales_total - bread_sales_cost + desk_momo_profit, 2),
+            "deskMomoCommissionIncluded": desk_momo_commission,
             "creditCollectionsTotal": credit_collections["total"],
             "creditCashCollectionsTotal": credit_collections["cashTotal"],
             "creditCollectionCount": credit_collections["count"],
@@ -17229,13 +17251,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "mobileMoneyStatusLabel": "Separate MoMo Counter",
             "mobileMoneyUsesReconciliationFallback": False,
             "mobileMoneySourceLabel": "Mobile Money",
-            "mobileMoneySummaryNote": "Mobile Money is accounted for only in the dedicated MoMo counter and reconciliation.",
+            "mobileMoneySummaryNote": "Earned MoMo commission is included once in Groceries & More desk sales and profit. Handled value and float remain separate from sales and expected POS cash.",
             "orders": order_rows[:20],
             "businessAreaIds": sorted(business_areas),
             "lastCloseout": closeout_payload,
         }
         if not include_sensitive:
-            for protected_key in ("costAmount", "profitAmount", "breadSalesCost", "breadSalesProfit"):
+            for protected_key in ("costAmount", "profitAmount", "breadSalesCost", "breadSalesProfit", "deskProfitTotal"):
                 summary.pop(protected_key, None)
         return summary
 
@@ -17303,6 +17325,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "breadSalesTotal": summary["breadSalesTotal"],
                 "breadSalesProfit": summary["breadSalesProfit"],
                 "counterCollectionsTotal": summary["counterCollectionsTotal"],
+                "deskSalesTotal": summary["deskSalesTotal"],
+                "deskProfitTotal": summary["deskProfitTotal"],
+                "deskMomoCommissionIncluded": summary["deskMomoCommissionIncluded"],
                 "creditCollectionsTotal": summary["creditCollectionsTotal"],
                 "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
                 "creditCollectionCount": summary["creditCollectionCount"],
@@ -21705,6 +21730,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if not math.isfinite(minutes) or not 0 <= minutes <= 1440:
                     form_errors.append("Reminder minutes must be between 0 and 1440.")
                 payload["dueTime"] = due_time
+                if payload.get("reminderTime"):
+                    try:
+                        datetime.strptime(payload["reminderTime"], "%H:%M")
+                    except ValueError:
+                        form_errors.append("Enter a valid reminder time, for example 07:45.")
                 payload["reminder"] = normalize_text(payload.get("reminder")) or "Enabled"
                 payload.pop("amount", None)
             if form_errors:
@@ -24821,6 +24851,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "breadSalesTotal": summary["breadSalesTotal"],
             "breadSalesProfit": summary["breadSalesProfit"],
             "counterCollectionsTotal": summary["counterCollectionsTotal"],
+            "deskSalesTotal": summary["deskSalesTotal"],
+            "deskProfitTotal": summary["deskProfitTotal"],
+            "deskMomoCommissionIncluded": summary["deskMomoCommissionIncluded"],
             "creditCollectionsTotal": summary["creditCollectionsTotal"],
             "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
             "creditCollectionCount": summary["creditCollectionCount"],

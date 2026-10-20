@@ -44,12 +44,13 @@
     <section class="pos-counter-ribbon">
       <article class="pos-counter-pill">
         <span class="pos-counter-label">Desk Sales</span>
-        <strong id="pos-counter-total">{{ counter_summary.counterCollectionsTotal|currency }}</strong>
+        <strong id="pos-counter-total">{{ counter_summary.deskSalesTotal|currency }}</strong>
+        {% if not food_pos_mode %}<small>Includes MoMo commission, not handled value</small>{% endif %}
       </article>
       {% if can_view_desk_profit %}
         <article class="pos-counter-pill">
           <span class="pos-counter-label">Desk Profit</span>
-          <strong id="pos-counter-profit">{{ (counter_summary.profitAmount + counter_summary.breadSalesProfit)|currency }}</strong>
+          <strong id="pos-counter-profit">{{ counter_summary.deskProfitTotal|currency }}</strong>
         </article>
       {% endif %}
       <article class="pos-counter-pill">

@@ -876,7 +876,7 @@
     }
     state.currentSummary = summary;
     if (counterTotalNode) {
-      counterTotalNode.textContent = formatCurrency(summary.counterCollectionsTotal ?? summary.totalAmount);
+      counterTotalNode.textContent = formatCurrency(summary.deskSalesTotal ?? summary.counterCollectionsTotal ?? summary.totalAmount);
     }
     if (counterOrderCountNode) {
       counterOrderCountNode.textContent = String(summary.orderCount || 0);
@@ -885,7 +885,7 @@
       creditCollectedNode.textContent = formatCurrency(summary.creditCollectionsTotal);
     }
     if (counterProfitNode) {
-      counterProfitNode.textContent = formatCurrency(Number(summary.profitAmount || 0) + Number(summary.breadSalesProfit || 0));
+      counterProfitNode.textContent = formatCurrency(summary.deskProfitTotal ?? (Number(summary.profitAmount || 0) + Number(summary.breadSalesProfit || 0)));
     }
     if (ledgerTotalNode) {
       ledgerTotalNode.textContent = formatCurrency(summary.dailySalesLedgerTotal);

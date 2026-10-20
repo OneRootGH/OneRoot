@@ -12,7 +12,7 @@
     <a href="{{ url_for('module_list', module_key='business_calendar') }}">Today</a>
   </form>
   <div class="table-wrap"><table><thead><tr><th>Date / Time</th><th>Responsibility</th><th>Officer</th><th>Status</th><th>Action / Completion</th></tr></thead><tbody>
-  {% for t in tasks %}<tr><td>{{ t.date }}{% if t.status != 'As needed' %}<br>{{ t.time }}{% endif %}</td><td><strong>{{ t.title }}</strong>{% if t.notes %}<br>{{ t.notes }}{% endif %}</td><td>{{ t.officer }}</td><td>{{ t.status }}{% if t.remind %} · Reminder due{% endif %}</td><td>
+  {% for t in tasks %}<tr><td>{{ t.date }}{% if t.status != 'As needed' %}<br>Start: {{ t.time }}<br>Reminder: {{ t.reminderTime }}{% endif %}</td><td><strong>{{ t.title }}</strong>{% if t.notes %}<br>{{ t.notes }}{% endif %}</td><td>{{ t.officer }}</td><td>{{ t.status }}{% if t.remind %} · Reminder due{% endif %}</td><td>
   {% if t.done %}{{ t.done.completedBy }}<br>{{ t.done.completedAt }} UTC{% if t.done.notes %}<br>{{ t.done.notes }}{% endif %}
     {% if can_reopen %}<form method="post" action="{{ url_for('calendar_complete', task_id=t.id) }}"><input type="hidden" name="date" value="{{ t.date }}"><input type="hidden" name="action" value="reopen"><button class="button subtle" type="submit">Reopen</button></form>{% endif %}
   {% elif t.canComplete %}<form method="post" action="{{ url_for('calendar_complete', task_id=t.id) }}" class="toolbar"><input type="hidden" name="date" value="{{ t.date }}"><input name="notes" maxlength="1000" placeholder="Note (optional)" aria-label="Completion note"><button class="button primary" type="submit">Mark Done</button></form>
@@ -26,7 +26,7 @@
 </section>
 <section class="card"><h3>Responsibilities &amp; Reminder Settings</h3><p class="muted">Edit the officer, schedule, due time and reminder lead time. Reminders appear in the Staff App; no SMS or WhatsApp is sent.</p>
   <div class="table-wrap"><table><thead><tr><th>Responsibility</th><th>Officer</th><th>Frequency</th><th>Reminder</th><th>Action</th></tr></thead><tbody>
-  {% for r in records %}<tr><td>{{ r.title }}</td><td>{{ r.payload.get('officer') }}</td><td>{{ r.payload.get('frequency') }}</td><td>{{ r.payload.get('reminder') or 'Enabled' }} · {{ r.payload.get('dueTime') or '09:00' }} · {{ r.payload.get('reminderMinutes') or 0 }} minutes before</td><td><a href="{{ url_for('module_form', module_key='business_calendar', record_id=r.id) }}">Edit Task &amp; Reminder</a></td></tr>{% endfor %}
+  {% for r in records %}<tr><td>{{ r.title }}{% if r.status == 'Paused' %} (Paused){% endif %}</td><td>{{ r.payload.get('officer') }}</td><td>{{ r.payload.get('frequency') }}{% if r.payload.get('weekdays') %}<br>Days: {{ r.payload.get('weekdays') }} (Mon=0, Sun=6){% endif %}</td><td>Start: {{ 'Anytime' if r.payload.get('startMode') == 'Anytime' else (r.payload.get('dueTime') or '09:00') }}<br>{{ r.payload.get('reminder') or 'Enabled' }} · {{ r.payload.get('reminderTime') or ((r.payload.get('reminderMinutes') or 0)|string ~ ' minutes before') }}</td><td><a href="{{ url_for('module_form', module_key='business_calendar', record_id=r.id) }}">Edit Task &amp; Reminder</a></td></tr>{% endfor %}
   </tbody></table></div>
 </section>
 {% endblock %}

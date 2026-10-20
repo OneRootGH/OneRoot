@@ -20,6 +20,25 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_revised_calendar_reminders_and_flexible_tasks(self):
+        self.client.get("/app/modules/business_calendar")
+        db = self.sessions()
+        tasks = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar")).all()
+        rows = calendar_task_rows(db, tasks, date(2026, 10, 25), db.get(User, "owner"),
+                                  days=1, now=datetime(2026, 10, 25, 10, 30))
+        gutter = next(r for r in rows if r["title"] == "Cleaning of gutters")
+        self.assertEqual(gutter["time"], "Anytime")
+        self.assertEqual(gutter["reminderTime"], "10:30")
+        self.assertTrue(gutter["remind"])
+        self.assertEqual(gutter["status"], "Upcoming")
+        self.assertNotIn("Cooking for staff", [r["title"] for r in rows])
+        monday = calendar_task_rows(db, tasks, date(2026, 10, 26), db.get(User, "owner"),
+                                    days=1, now=datetime(2026, 10, 26, 7, 20))
+        toilet = next(r for r in monday if r["title"].startswith("Cleaning of toilets"))
+        self.assertEqual(toilet["officer"], "Faustina Nti Nyamekye Alexandra")
+        self.assertTrue(toilet["remind"])
+        self.assertEqual(toilet["time"], "07:30")
+
     def test_reporting_timetable_matches_requested_days_and_preserves_edits(self):
         self.assertEqual(self.client.get("/app/modules/staff_reporting_schedule").status_code, 200)
         db = self.sessions()
@@ -222,7 +241,7 @@ class ServiceEditSaveTests(unittest.TestCase):
         db = self.sessions()
         task = db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar", ModuleRecord.title == "Sweeping"))
         # The fixture's current host day is used for completion validation.
-        task.payload = {**task.payload, "nextDueDate": date.today().isoformat()}
+        task.payload = {**task.payload, "nextDueDate": date.today().isoformat(), "frequency": "Daily"}
         db.commit()
         url = f"/app/calendar/{task.id}/complete"
         for _ in range(2):
@@ -322,7 +341,7 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertEqual(self.client.get("/app/modules/business_calendar").status_code, 200)
         db = self.sessions()
         rows = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar")).all()
-        self.assertEqual(len(rows), 12)
+        self.assertEqual(len(rows), 9)
         row = next(r for r in rows if r.title == "Sweeping")
         payload = dict(row.payload)
         payload["officer"] = "Philip"
@@ -332,7 +351,7 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertEqual(page.status_code, 200)
         db.expire_all()
         self.assertEqual(db.get(ModuleRecord, row.id).payload["officer"], "Philip")
-        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar")).all()), 12)
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "business_calendar")).all()), 9)
         gutter = dict(status="Active", frequency="Twice a week", weekdays="0,3")
         self.assertTrue(responsibility_occurs(gutter, date(2026, 10, 19)))
         self.assertFalse(responsibility_occurs(gutter, date(2026, 10, 20)))
@@ -353,6 +372,12 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertEqual(summary["total_sales"], 0)
         self.assertEqual(summary["total_profit"], 8)
         self.assertEqual(summary["mobile_money_profit"], 8)
+        groceries = self.client.get("/app/api/pos/summary?desk=groceries").get_json()["summary"]
+        food = self.client.get("/app/api/pos/summary?desk=food").get_json()["summary"]
+        self.assertEqual(groceries["deskSalesTotal"] - groceries["counterCollectionsTotal"], 10)
+        self.assertEqual(groceries["deskProfitTotal"] - groceries["profitAmount"] - groceries["breadSalesProfit"], 8)
+        self.assertEqual(food["deskMomoCommissionIncluded"], 0)
+        self.assertEqual(groceries["cashSalesTotal"], 0)
         momo = next(r for r in report_area_rows(records, date.today().strftime("%Y-%m")) if r["areaId"] == "mobile-money")
         self.assertEqual(momo["profitTotal"], 8)
         self.assertEqual(self.client.get("/app/modules/construction_accounts").status_code, 200)

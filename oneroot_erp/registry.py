@@ -2498,6 +2498,8 @@ MODULES.update({
                 FieldDefinition("weekdays", "Days (Monday=0 to Sunday=6; comma separated)", "text"),
                 FieldDefinition("nextDueDate", "Due / Start Date", "date"),
                 FieldDefinition("dueTime", "Due Time", "time"),
+                FieldDefinition("startMode", "Start Time Type", "select", False, [("Fixed time", "Fixed time"), ("Anytime", "Anytime")]),
+                FieldDefinition("reminderTime", "Reminder Time (overrides minutes before)", "time"),
                 FieldDefinition("reminder", "In-App Reminder", "select", False, [("Enabled", "Enabled"), ("Off", "Off")]),
                 FieldDefinition("reminderMinutes", "Remind Minutes Before Due", "number"),
                 FieldDefinition("status", "Status", "select", True, [(x, x) for x in ["Active", "Paused", "Completed"]]),
