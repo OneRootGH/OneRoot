@@ -32,7 +32,8 @@ from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_f
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
                             cash_mode, latest_close, summarize_counts, compare_counts, review_needed)
 from .importer import bootstrap_database
-from .models import AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
+from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
+from .review_inbox import exception_item, apply_reviews
 from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
 from .phone_catalog import PHONE_CHARGING_ITEMS
 from .registry import (
@@ -6387,7 +6388,10 @@ def access_keys_for_role(value: Any) -> set[str]:
 def user_access_keys(user: User | None) -> set[str]:
     if not user:
         return set()
-    return access_keys_for_role(getattr(user, "role", "viewer"))
+    keys = access_keys_for_role(getattr(user, "role", "viewer"))
+    if getattr(user, "expense_entry_enabled", False):
+        keys.add("expenses")
+    return keys
 
 
 def user_has_access(user: User | None, key: str) -> bool:
@@ -6571,6 +6575,7 @@ def cashbook_entry_preview(payload: dict[str, Any]) -> dict[str, Any]:
 
 
 SIDEBAR_LINK_LABELS = {
+    "attention": ("Needs Your Attention", "attention_inbox", ""),
     "daily_cash_positions": ("Daily Cash & Petty Cash", "daily_cash_page", None),
     "morning_opening": ("Morning Opening", "morning_opening", None),
     "dashboard": ("Dashboard", "dashboard", None),
@@ -14170,6 +14175,7 @@ def build_sidebar(user: User | None = None):
                     else "daily_handovers" if key == "morning_opening"
                     else "pos" if key == "food_pos"
                     else "reports" if key == "analytics"
+                    else "dashboard" if key == "attention"
                     else key
                 )
                 if allowed_keys and access_key not in allowed_keys:
@@ -17604,6 +17610,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         if user_id and request.path.startswith(("/app", "/operations")):
             try:
                 g.current_user = g.db.get(User, user_id)
+                if g.current_user:
+                    permission = g.db.get(AppSetting, "expense-access|" + g.current_user.id)
+                    g.current_user.expense_entry_enabled = bool(permission and permission.value.get("enabled"))
             except OperationalError:
                 session.clear()
                 mark_database_unavailable()
@@ -18484,6 +18493,146 @@ def create_app(config: AppConfig | None = None) -> Flask:
         g.db.commit()
         flash(normalize_text(result.get("message")) or "Attendance saved.", "success")
         return redirect(next_path)
+
+    def attention_items():
+        today = current_local_datetime().date()
+        keys = ["pos_closeouts", "mobile_money_reconciliations", "loss_prevention_controls", "daily_cash_positions",
+                "laundry_tickets", "equipment_rental_bookings", "customer_credit_accounts"]
+        records = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(keys)).order_by(ModuleRecord.id)).all()
+        items = []
+        for r in records:
+            p = r.payload or {}
+            amount, reason = 0.0, ""
+            if r.module_key == "pos_closeouts":
+                amount = parse_amount(p.get("cashVariance"))
+                reason = "Counted POS cash differs from expected cash. Check receipts and the count."
+            elif r.module_key == "mobile_money_reconciliations":
+                cash, ecash = mobile_money_variance(p), mobile_money_ecash_variance(p)
+                if abs(cash) >= .01 or abs(ecash) >= .01:
+                    amount = abs(cash) + abs(ecash)
+                    reason = f"Physical cash variance {format_currency(cash)}; e-cash variance {format_currency(ecash)}. Review each separately."
+            elif r.module_key == "loss_prevention_controls" and r.status in {"Open Review", "Escalated"}:
+                amount = parse_amount(p.get("variance"))
+                reason = normalize_text(p.get("reason")) or "An open control requires management review."
+            elif r.module_key == "daily_cash_positions" and r.status != "Approved":
+                differences = [v for v in p.get("comparison", []) if abs(parse_amount(v.get("variance"))) >= .01]
+                amount = sum(abs(parse_amount(v.get("variance"))) for v in differences)
+                if differences or p.get("warnings"):
+                    reason = "Daily cash count needs review. Differences may overlap (petty cash is part of shop cash); do not add them as a loss. " + normalize_text(p.get("exceptionReason"))
+            if reason and (abs(amount) >= .01 or r.module_key in {"loss_prevention_controls", "daily_cash_positions"}):
+                items.append(exception_item(r.module_key, r.id, r.title or "Counter review", amount,
+                    r.record_date, p.get("closedBy") or p.get("recordedBy"), r.business_area_id,
+                    reason, url_for("module_list", module_key=r.module_key), p))
+        for key, builder, final_status in [("laundry_tickets", build_laundry_service_rows, "Delivered"),
+                                           ("equipment_rental_bookings", build_equipment_service_rows, "Returned")]:
+            for row in builder([r for r in records if r.module_key == key]):
+                if row["status"] == final_status and row["balance"] > .009:
+                    r = row["record"]
+                    items.append(exception_item(key, r.id, row["customerName"], row["balance"], r.record_date,
+                        (r.payload or {}).get("receivedBy"), r.business_area_id,
+                        f"{final_status}, but payment is still outstanding. Phone: {row['customerPhone'] or 'not saved'}.",
+                        url_for("service_payment_form", module_key=key, record_id=r.id), r.payload))
+        # Group full credit history by phone (or exact name when no phone exists).
+        customers = {}
+        for r in records:
+            p = r.payload or {}
+            if r.module_key != "customer_credit_accounts" or p.get("internalKitchenCredit"):
+                continue
+            name = normalize_text(p.get("customerName"))
+            if is_internal_kitchen_credit_payment(p):
+                continue
+            identity = normalize_phone(p.get("customerPhone")) or name.casefold()
+            if not identity:
+                continue
+            c = customers.setdefault(identity, dict(balance=0.0, dates=[], name=name, phone=normalize_phone(p.get("customerPhone"))))
+            c["balance"] += customer_credit_balance_effect(p)
+            due = parse_date(p.get("dueDate"))
+            if due and p.get("transactionType") == "Credit Sale":
+                c["dates"].append(due)
+        for identity, c in customers.items():
+            c["dates"].sort()
+            due = min(c["dates"]) if c["dates"] else None
+            if c["balance"] > .009 and due and due < today:
+                items.append(exception_item("Overdue credit", identity, c["name"], c["balance"], due, "Collections desk", "Customer credit",
+                    f"Customer account has an outstanding balance and a past due date. Phone: {c['phone'] or 'not saved'}; confirm which instalment is overdue.",
+                    url_for("module_list", module_key="customer_credit_accounts", q=c["phone"] or c["name"]), c))
+        logs = g.db.scalars(select(AuditLog).where(AuditLog.created_at >= datetime.combine(today - timedelta(days=30), datetime.min.time()),
+            (AuditLog.action.in_(["delete", "void", "stock-adjustment", "price-override"]) |
+             ((AuditLog.module_key == "inventory") & (AuditLog.action == "update") & AuditLog.detail.ilike("%stock%"))))
+            .order_by(desc(AuditLog.created_at)).limit(200)).all()
+        for log in logs:
+            items.append(exception_item("Audit review", log.id, log.title, 0, log.created_at.date(), log.actor_name,
+                log.module_label, log.detail or f"Recorded action: {log.action}", url_for("audit_page"),
+                dict(action=log.action, detail=log.detail, id=log.id)))
+        reviews = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "exception_reviews")).all()
+        return apply_reviews(items, reviews)
+
+    @app.route("/app/attention", methods=["GET", "POST"])
+    @access_required("dashboard")
+    def attention_inbox():
+        items = attention_items()
+        if request.method == "POST":
+            item = next((i for i in items if i["key"] == request.form.get("key")), None)
+            if not item or item["fingerprint"] != request.form.get("fingerprint"):
+                return "The source has changed. Refresh the inbox before reviewing it.", 409
+            action = request.form.get("action")
+            note = normalize_text(request.form.get("note"))[:1000]
+            assignee = normalize_text(request.form.get("assignee"))
+            if action not in {"Assign", "Request Explanation", "Resolve", "Reopen"}:
+                return "Invalid action.", 400
+            if action in {"Resolve", "Request Explanation"} and not note:
+                return "Enter a review note or explanation request.", 400
+            if assignee and not g.db.scalar(select(User.id).where(User.id == assignee, User.active.is_(True))):
+                return "Choose an active officer.", 400
+            if action == "Assign" and not assignee:
+                return "Choose an officer.", 400
+            identity = "review-" + item["key"]
+            if g.db.bind.dialect.name == "postgresql":
+                g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": identity})
+            record = g.db.scalar(select(ModuleRecord).where(ModuleRecord.id == identity).execution_options(populate_existing=True))
+            if record and str(record.updated_at) != request.form.get("reviewVersion", ""):
+                return "Another manager updated this review. Refresh and try again.", 409
+            record = record or ModuleRecord(id=identity, module_key="exception_reviews")
+            record.title = item["title"]
+            record.status = {"Assign": "Assigned", "Request Explanation": "Explanation Requested", "Resolve": "Resolved", "Reopen": "Open"}[action]
+            record.payload = dict(fingerprint=item["fingerprint"], status=record.status,
+                assignee=assignee, note=note, sourceKey=item["key"], sourceType=item["kind"], sourceHref=item["href"], reviewedBy=g.current_user.full_name,
+                reviewedAt=datetime.utcnow().isoformat())
+            g.db.add(record)
+            audit("exception_reviews", "Attention Inbox", action.lower(), item["title"], identity,
+                  f"{note}; assigned to {assignee or 'unassigned'}. Source money was not changed.")
+            g.db.commit()
+            flash("Review saved. The original transaction has not been changed.", "success")
+            return redirect(url_for("attention_inbox"))
+        status = request.args.get("status", "Open")
+        kind = normalize_text(request.args.get("kind"))
+        query = normalize_text(request.args.get("q")).casefold()
+        visible = [i for i in items if (status == "All" or (i["status"] != "Resolved" if status == "Open" else i["status"] == status))
+                   and (not kind or i["kind"] == kind) and (not query or query in (i["title"] + i["reason"] + i["officer"]).casefold())]
+        versions = {r.id.removeprefix("review-"): str(r.updated_at) for r in g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "exception_reviews")).all()}
+        return render_template("attention_inbox.html", page_title="Needs Your Attention", items=visible[:100], total=len(visible),
+            open_count=sum(i["status"] != "Resolved" for i in items), kinds=sorted({i["kind"] for i in items}),
+            status=status, kind=kind, query=query, versions=versions,
+            officers=g.db.scalars(select(User).where(User.active.is_(True)).order_by(User.full_name)).all())
+
+    @app.route("/app/users/<user_id>/expense-access", methods=["POST"])
+    @login_required
+    def user_expense_access(user_id):
+        if not user_is_owner(g.current_user):
+            return "Only the owner can change individual permissions.", 403
+        user = g.db.get(User, user_id)
+        if not user:
+            return "Account not found.", 404
+        enabled = request.form.get("enabled") == "yes"
+        identity = "expense-access|" + user.id
+        setting = g.db.get(AppSetting, identity) or AppSetting(key=identity)
+        setting.value = dict(enabled=enabled, grantedBy=g.current_user.id)
+        g.db.add(setting)
+        audit("users", "User Accounts", "permission-change", user.full_name, user.id,
+              f"Individual expense entry access {'enabled' if enabled else 'disabled'}; existing role unchanged.")
+        g.db.commit()
+        flash("Expense permission updated. The account role is unchanged.", "success")
+        return redirect(url_for("users_page", edit=user.id))
 
     @app.route("/app/")
     @access_required("dashboard")
@@ -20035,6 +20184,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         return render_template(
             "users.html",
+            expense_grants={r.key.removeprefix("expense-access|"): bool(r.value.get("enabled"))
+                            for r in g.db.scalars(select(AppSetting).where(AppSetting.key.like("expense-access|%"))).all()},
             page_title="User Accounts",
             users=users,
             editing_user=editing_user,

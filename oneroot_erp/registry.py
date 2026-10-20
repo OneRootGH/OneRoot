@@ -2558,7 +2558,7 @@ MENU_GROUPS = [
     (
         "Control",
         [
-            ("Planning & Reporting", ["forecast_plans", "recurring_controls", "pos_closeouts", "loss_prevention_controls"]),
+            ("Planning & Reporting", ["attention", "forecast_plans", "recurring_controls", "pos_closeouts", "loss_prevention_controls"]),
             ("Assets & Admin", ["asset_records", "audit", "users"]),
             ("Owner Private Records", ["family_education_payments"]),
         ],

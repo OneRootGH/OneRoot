@@ -15,11 +15,61 @@ from oneroot_erp.app import daily_cash_movement_context
 from oneroot_erp.cash_controls import find_snapshot
 from oneroot_erp.staff_roster import reporting_rows, reporting_form_errors
 from oneroot_erp.config import load_config
-from oneroot_erp.models import Base, ModuleRecord, Product, User
+from oneroot_erp.models import AppSetting, AuditLog, Base, ModuleRecord, Product, User
 from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_attention_credit_groups_payments_and_excludes_internal_kitchen(self):
+        db = self.sessions()
+        for identity, name, phone, kind, amount in [
+            ("owed", "Ama", "0240000011", "Credit Sale", 100),
+            ("paid", "Amaa", "0240000011", "Payment Received", 40),
+            ("internal", "OneRoot Kitchen", "", "Credit Sale", 500)]:
+            db.add(ModuleRecord(id=identity, module_key="customer_credit_accounts", payload=dict(
+                customerName=name, customerPhone=phone, transactionType=kind, amount=amount,
+                dueDate=(date.today()-timedelta(days=2)).isoformat())))
+        db.commit()
+        page = self.client.get("/app/attention?kind=Overdue+credit").get_data(as_text=True)
+        self.assertIn("GH₵60.00", page)
+        self.assertNotIn("GH₵500.00", page)
+
+    def test_individual_expense_grant_preserves_role_and_finance_restrictions(self):
+        db = self.sessions()
+        self.assertEqual(self.client.post("/app/users/cashier/expense-access", data={"enabled": "yes"}).status_code, 302)
+        self.assertTrue(db.get(AppSetting, "expense-access|cashier").value["enabled"])
+        db.expire_all()
+        self.assertEqual(db.get(User, "cashier").role, "cashier")
+        with self.client.session_transaction() as session:
+            session["user_id"] = "cashier"
+        self.assertEqual(self.client.get("/app/modules/expenses/new").status_code, 200)
+        self.assertEqual(self.client.post("/app/users/owner/expense-access", data={"enabled": "yes"}).status_code, 403)
+        self.assertNotEqual(self.client.get("/app/users").status_code, 200)
+        self.assertNotEqual(self.client.get("/app/attention").status_code, 200)
+
+    def test_attention_review_is_audited_and_source_change_reopens(self):
+        db = self.sessions()
+        source = ModuleRecord(id="variance-pos", module_key="pos_closeouts", title="Groceries closeout",
+                              record_date=date.today(), payload={"cashVariance": -15, "closedBy": "Staff"})
+        db.add(source); db.commit()
+        page = self.client.get("/app/attention")
+        self.assertEqual(page.status_code, 200)
+        from oneroot_erp.review_inbox import exception_item
+        i = exception_item("pos_closeouts", source.id, source.title, -15, date.today(), "Staff", "", "", "", source.payload)
+        data = dict(key=i["key"], fingerprint=i["fingerprint"], action="Resolve", note="Recount checked", reviewVersion="")
+        self.assertEqual(self.client.post("/app/attention", data=data).status_code, 302)
+        db.expire_all()
+        self.assertEqual(db.get(ModuleRecord, source.id).payload["cashVariance"], -15)
+        review = db.get(ModuleRecord, "review-" + i["key"])
+        self.assertEqual(review.status, "Resolved")
+        self.assertTrue(db.scalar(select(AuditLog).where(AuditLog.module_key == "exception_reviews")))
+        self.assertEqual(self.client.post("/app/attention", data=data).status_code, 409)
+        db = self.sessions()
+        source = db.get(ModuleRecord, "variance-pos")
+        source.payload = {"cashVariance": -20, "closedBy": "Staff"}; db.add(source); db.commit()
+        page = self.client.get("/app/attention").get_data(as_text=True)
+        self.assertIn("Source changed since the earlier review", page)
+
     def test_promotions_opens_without_rebuilding_crm_or_campaigns(self):
         db = self.sessions()
         promo = ModuleRecord(id="test-promotion", module_key="promotions", title="Weekend Offer",

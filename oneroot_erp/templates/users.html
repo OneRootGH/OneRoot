@@ -79,6 +79,12 @@
                 <td>
                   <div class="row-actions">
                     <a class="table-link" href="{{ url_for('users_page', edit=user.id, q=search_text) }}">Edit</a>
+                    {% if current_user.role == 'owner' %}
+                    <form method="post" action="{{ url_for('user_expense_access', user_id=user.id) }}">
+                      <input type="hidden" name="enabled" value="{{ 'no' if expense_grants.get(user.id) else 'yes' }}">
+                      <button class="text-button" type="submit">{{ 'Remove Extra Expense Access' if expense_grants.get(user.id) else 'Allow Expense Entry' }}</button>
+                    </form>
+                    {% endif %}
                     {% if user.id == current_user.id %}
                       <span class="muted">Signed in now</span>
                     {% else %}

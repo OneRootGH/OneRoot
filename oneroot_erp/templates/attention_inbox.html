@@ -1,0 +1,30 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card">
+  <div class="card-header"><div><h3>Needs Your Attention</h3><p>{{ open_count }} open review flags. Review is not proof of loss. Resolving a flag never changes or approves a payment.</p></div><a class="button" href="{{ url_for('dashboard') }}">Dashboard</a></div>
+  <form method="get" class="toolbar">
+    <label>Search<input name="q" value="{{ query }}" type="search"></label>
+    <label>Status<select name="status">{% for s in ['Open','Assigned','Explanation Requested','Resolved','All'] %}<option {% if status == s %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
+    <label>Type<select name="kind"><option value="">All types</option>{% for k in kinds %}<option {% if kind == k %}selected{% endif %}>{{ k }}</option>{% endfor %}</select></label>
+    <button class="button" type="submit">Apply</button>
+  </form>
+  <p>Showing {{ items|length }} of {{ total }} matching flags. Recent audit reviews cover the latest 200 matching events within 30 days; use Audit Trail for full history. Entries still offline on another device cannot be seen here.</p>
+  <div class="table-wrap"><table><thead><tr><th>Date / Type</th><th>Record / Amount</th><th>Officer / Area</th><th>Reason / Source</th><th>Review</th></tr></thead><tbody>
+  {% for i in items %}<tr>
+    <td>{{ i.date }}<br>{{ i.kind }}</td><td><strong>{{ i.title }}</strong><br>{{ i.amount|currency }}</td>
+    <td>{{ i.officer }}<br>{{ i.area }}</td><td>{{ i.reason }}<br><a href="{{ i.href }}">Open Source Record</a></td>
+    <td><strong>{{ i.status }}</strong>{% if i.note %}<p>{{ i.note }}</p>{% endif %}
+      {% if i.previousReview %}<p>Source changed since the earlier review. Review again.</p>{% endif %}
+      <form method="post">
+        <input type="hidden" name="key" value="{{ i.key }}"><input type="hidden" name="fingerprint" value="{{ i.fingerprint }}">
+        <input type="hidden" name="reviewVersion" value="{{ versions.get(i.key,'') }}">
+        <label>Assign officer<select name="assignee"><option value="">Unassigned</option>{% for u in officers %}<option value="{{ u.id }}" {% if i.assignee == u.id %}selected{% endif %}>{{ u.full_name or u.username }}</option>{% endfor %}</select></label>
+        <label>Review note / explanation request<textarea name="note" maxlength="1000">{{ i.note }}</textarea></label>
+        <label>Action<select name="action"><option>Assign</option><option>Request Explanation</option><option>Resolve</option><option>Reopen</option></select></label>
+        <button class="button" type="submit">Save Review</button>
+      </form>
+    </td></tr>{% else %}<tr><td colspan="5">No matching review flags.</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p>Assignments and explanation requests are recorded here for management follow-up. No SMS or WhatsApp is sent. Phone-linked credit is grouped; names without phone numbers may still need customer verification.</p>
+</section>
+{% endblock %}
