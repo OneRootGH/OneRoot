@@ -20,6 +20,23 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_promotions_opens_without_rebuilding_crm_or_campaigns(self):
+        db = self.sessions()
+        promo = ModuleRecord(id="test-promotion", module_key="promotions", title="Weekend Offer",
+                             payload=dict(title="Weekend Offer", status="Running"))
+        db.add(promo)
+        db.commit()
+        with patch("oneroot_erp.app.sync_customer_crm_automation") as crm, \
+             patch("oneroot_erp.app.sync_marketing_campaign_automation") as campaigns, \
+             patch("oneroot_erp.app.sync_customer_loyalty_accounts") as loyalty:
+            for path in ["/app/modules/promotions", "/app/modules/promotions?q=Weekend", "/app/modules/promotions/new"]:
+                response = self.client.get(path)
+                self.assertEqual(response.status_code, 200)
+            crm.assert_not_called()
+            campaigns.assert_not_called()
+            loyalty.assert_not_called()
+        self.assertIn("Weekend Offer", self.client.get("/app/modules/promotions").get_data(as_text=True))
+
     def test_revised_calendar_reminders_and_flexible_tasks(self):
         self.client.get("/app/modules/business_calendar")
         db = self.sessions()

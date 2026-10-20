@@ -20606,7 +20606,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             repair_customer_credit_balances(g.db)
             sync_all_customer_credit_payments_to_cashbook(g.db)
             g.db.commit()
-        if module_key in {"customer_crm", "promotions", "whatsapp_campaigns", "campaign_roi"}:
+        # Browsing saved offers must not rebuild all customer/loyalty history.
+        # That write-heavy work belongs to the CRM/campaign workflows, not Promotions GET.
+        if module_key in {"customer_crm", "whatsapp_campaigns", "campaign_roi"}:
             sync_customer_crm_automation(g.db)
             sync_marketing_campaign_automation(g.db)
             g.db.commit()
