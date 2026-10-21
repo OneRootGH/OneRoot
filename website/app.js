@@ -1608,6 +1608,10 @@
         return "Pantry goods, household essentials, personal care, baby care, and everyday retail stock.";
       case "phone-accessories-charging":
         return "Chargers, cables, earphones, screen protection, power banks, and convenient phone charging.";
+      case "bedding-linen":
+        return "Bedsheets, pillowcases, mattress protectors, towels, and bedding sets.";
+      case "gift-care-packages":
+        return "Grocery hampers, birthday gifts, baby essentials, and household care packages.";
       case "construction-consumables":
         return "Nails, fasteners, fittings, sealants, safety supplies, and quick repair essentials.";
       case "plumbing-electrical":
@@ -1671,6 +1675,10 @@
         return "#307a4a";
       case "phone-accessories-charging":
         return "#2459a6";
+      case "bedding-linen":
+        return "#286b78";
+      case "gift-care-packages":
+        return "#a85f35";
       case "construction-consumables":
         return "#b56720";
       case "plumbing-electrical":

@@ -7,6 +7,8 @@ BUSINESS_AREAS = [
     {"id": "water-equipment", "label": "OneRoot Water & Equipment Rentals", "short": "Water & Equipment"},
     {"id": "cold-store-groceries", "label": "OneRoot Cold Store & Kitchen", "short": "Cold Store & Kitchen"},
     {"id": "groceries", "label": "OneRoot Groceries & More", "short": "Groceries & More"},
+    {"id": "bedding-linen", "label": "OneRoot Bedding & Linen Service", "short": "Bedding & Linen"},
+    {"id": "gift-care-packages", "label": "OneRoot Gift & Care Packages", "short": "Gift & Care Packages"},
     {"id": "phone-accessories-charging", "label": "OneRoot Phone Accessories & Charging", "short": "Phone & Charging"},
     {"id": "construction-consumables", "label": "OneRoot Construction Consumables Express", "short": "Construction Express"},
     {"id": "plumbing-electrical", "label": "OneRoot Plumbing & Electrical Essentials", "short": "Plumbing & Electrical"},
@@ -20,6 +22,8 @@ BUSINESS_AREA_OPTIONS = [(item["id"], item["label"]) for item in BUSINESS_AREAS]
 BUSINESS_AREA_LABELS = {item["id"]: item["label"] for item in BUSINESS_AREAS}
 BUSINESS_AREA_SHORT = {item["id"]: item["short"] for item in BUSINESS_AREAS}
 INVENTORY_CATEGORY_LIBRARY = {
+    "bedding-linen": ["Bedsheets & Pillowcases", "Mattress Protectors", "Towels & Bath Linen", "Duvets & Blankets", "Bedding Sets"],
+    "gift-care-packages": ["Grocery Hampers", "New Baby Essentials", "Birthday Packages", "Household Care Packages", "Custom Gift Packages"],
     "water-equipment": [
         "Water Supply",
         "Water Delivery",

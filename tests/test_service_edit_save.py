@@ -20,6 +20,27 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_bedding_and_gift_areas_available_in_inventory_public_catalog_and_retail_pos(self):
+        from oneroot_erp.app import pos_desk_area_ids, is_orderable_area
+        from oneroot_erp.registry import BUSINESS_AREA_OPTIONS, INVENTORY_CATEGORY_LIBRARY
+        db = self.sessions()
+        for area in ["bedding-linen", "gift-care-packages"]:
+            self.assertIn(area, dict(BUSINESS_AREA_OPTIONS))
+            self.assertIn(area, pos_desk_area_ids("groceries"))
+            self.assertNotIn(area, pos_desk_area_ids("food"))
+            self.assertTrue(is_orderable_area(area))
+            self.assertTrue(INVENTORY_CATEGORY_LIBRARY[area])
+            db.add(Product(id="test-"+area, name="Test "+area, business_area_id=area,
+                           category=INVENTORY_CATEGORY_LIBRARY[area][0], user_created=True,
+                           sales_price=10, cost_price=6, quantity_on_hand=2, active=True))
+        db.commit()
+        catalog = self.client.get("/api/public/catalog").get_json()
+        self.assertTrue(catalog["ok"])
+        self.assertTrue({"test-bedding-linen", "test-gift-care-packages"}.issubset({i["id"] for i in catalog["items"]}))
+        form = self.client.get("/app/modules/expenses/new").get_data(as_text=True)
+        self.assertIn('value="bedding-linen"', form)
+        self.assertIn('value="gift-care-packages"', form)
+
     def test_attention_credit_groups_payments_and_excludes_internal_kitchen(self):
         db = self.sessions()
         for identity, name, phone, kind, amount in [
