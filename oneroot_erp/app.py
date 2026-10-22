@@ -17146,10 +17146,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         closeout_payload = serialize_module_record(closeout_record) if closeout_record else None
         cash_sales_total = pos_cash_sales_total(counter_payment_mix)
+        desk_momo_included = desk_key != "food" and (not selected_area or selected_area == "mobile-money")
+        desk_momo_commission = mobile_money_snapshot["recognizedSalesTotal"] if desk_momo_included else 0.0
+        desk_momo_profit = mobile_money_snapshot["recognizedProfitTotal"] if desk_momo_included else 0.0
         # Customer credit repayments are real cash received, but they are not
         # new POS sales. Keep their expected cash separate for a clear closeout.
         sales_and_service_cash_total = round(
             cash_sales_total
+            + desk_momo_commission
             + laundry_collections["cashTotal"]
             + equipment_collections["cashTotal"],
             2,
@@ -17164,6 +17168,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         expected_closing_cash = pos_expected_closing_cash(opening_cash, cash_collections_total)
         cash_variance = pos_cash_variance(opening_cash, closing_cash_counted, cash_collections_total)
         if closeout_payload is not None:
+            closeout_payload["momoCommissionCashTotal"] = desk_momo_commission
             closeout_payload["cashSalesTotal"] = cash_sales_total
             closeout_payload["creditCollectionsTotal"] = credit_collections["total"]
             closeout_payload["creditCashCollectionsTotal"] = credit_collections["cashTotal"]
@@ -17184,9 +17189,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
             closeout_payload["expectedClosingCash"] = expected_closing_cash
             closeout_payload["cashVariance"] = cash_variance
 
-        desk_momo_included = desk_key != "food" and (not selected_area or selected_area == "mobile-money")
-        desk_momo_commission = mobile_money_snapshot["recognizedSalesTotal"] if desk_momo_included else 0.0
-        desk_momo_profit = mobile_money_snapshot["recognizedProfitTotal"] if desk_momo_included else 0.0
         summary = {
             "orderDate": order_date.isoformat(),
             "areaId": counter_scope_id,
@@ -17208,6 +17210,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "deskSalesTotal": round(total_amount + bread_sales_total + desk_momo_commission, 2),
             "deskProfitTotal": round(total_amount - total_cost + bread_sales_total - bread_sales_cost + desk_momo_profit, 2),
             "deskMomoCommissionIncluded": desk_momo_commission,
+            "momoCommissionCashTotal": desk_momo_commission,
             "creditCollectionsTotal": credit_collections["total"],
             "creditCashCollectionsTotal": credit_collections["cashTotal"],
             "creditCollectionCount": credit_collections["count"],
@@ -17271,7 +17274,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "mobileMoneyStatusLabel": "Separate MoMo Counter",
             "mobileMoneyUsesReconciliationFallback": False,
             "mobileMoneySourceLabel": "Mobile Money",
-            "mobileMoneySummaryNote": "Earned MoMo commission is included once in Groceries & More desk sales and profit. Handled value and float remain separate from sales and expected POS cash.",
+            "mobileMoneySummaryNote": "MoMo commission is included once in Groceries & More desk sales and sales cash expected. Handled value is excluded. In Daily Cash it remains in MoMo physical cash; do not count that same commission again as shop cash unless transferred.",
             "orders": order_rows[:20],
             "businessAreaIds": sorted(business_areas),
             "lastCloseout": closeout_payload,
@@ -17322,6 +17325,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
             sales_and_service_cash_total = round(
                 cash_sales_total
+                + summary["momoCommissionCashTotal"]
                 + summary["laundryCashCollectionsTotal"]
                 + summary["equipmentCashCollectionsTotal"],
                 2,
@@ -17348,6 +17352,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "deskSalesTotal": summary["deskSalesTotal"],
                 "deskProfitTotal": summary["deskProfitTotal"],
                 "deskMomoCommissionIncluded": summary["deskMomoCommissionIncluded"],
+                "momoCommissionCashTotal": summary["momoCommissionCashTotal"],
                 "creditCollectionsTotal": summary["creditCollectionsTotal"],
                 "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
                 "creditCollectionCount": summary["creditCollectionCount"],
@@ -25017,6 +25022,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         cash_sales_total = pos_cash_sales_total(summary["counterPaymentMix"])
         sales_and_service_cash_total = round(
             cash_sales_total
+            + summary["momoCommissionCashTotal"]
             + summary["laundryCashCollectionsTotal"]
             + summary["equipmentCashCollectionsTotal"],
             2,
@@ -25043,6 +25049,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "deskSalesTotal": summary["deskSalesTotal"],
             "deskProfitTotal": summary["deskProfitTotal"],
             "deskMomoCommissionIncluded": summary["deskMomoCommissionIncluded"],
+            "momoCommissionCashTotal": summary["momoCommissionCashTotal"],
             "creditCollectionsTotal": summary["creditCollectionsTotal"],
             "creditCashCollectionsTotal": summary["creditCashCollectionsTotal"],
             "creditCollectionCount": summary["creditCollectionCount"],

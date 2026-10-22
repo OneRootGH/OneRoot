@@ -786,6 +786,8 @@
   }
 
   function renderAllDailySalesBreakdown(summary) {
+    const commissionCashNode = document.getElementById("pos-momo-commission-cash");
+    if (commissionCashNode) commissionCashNode.textContent = formatCurrency(summary.momoCommissionCashTotal || 0);
     if (allDailySalesNode) {
       allDailySalesNode.textContent = formatCurrency(summary.allDailySalesTotal ?? summary.dailySalesLedgerTotal);
     }

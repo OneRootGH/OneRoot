@@ -201,6 +201,7 @@
             </div>
             <div class="pos-ticket-inline pos-ticket-inline-tight">
               <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
+              {% if not food_pos_mode %}<span>MoMo Commission Cash <strong id="pos-momo-commission-cash">{{ counter_summary.momoCommissionCashTotal|currency }}</strong></span>{% endif %}
               <span>Credit Paid Cash <strong id="pos-credit-cash">{{ counter_summary.creditCashCollectionsTotal|currency }}</strong></span>
               {% if food_pos_mode %}<span>Laundry Cash <strong id="pos-laundry-cash">{{ counter_summary.laundryCashCollectionsTotal|currency }}</strong></span><span>Equipment Cash <strong id="pos-equipment-cash">{{ counter_summary.equipmentCashCollectionsTotal|currency }}</strong></span>{% endif %}
               <span>Sales Cash Expected <strong id="pos-expected-cash">{{ counter_summary.salesCashExpected|currency }}</strong></span>
@@ -208,6 +209,7 @@
               <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
             </div>
             <p class="muted">Credit Paid Cash is a recovery of an earlier credit sale. It is shown separately from today’s sales cash, but is included in Total Cash To Count because it is physical cash received at this counter.</p>
+            {% if not food_pos_mode %}<p class="muted">Sales Cash Expected includes MoMo cash commission, not the amount handled. Count the commission once. In Daily Cash, leave it under MoMo physical cash unless it was transferred to the shop.</p>{% endif %}
             {% if food_pos_mode %}<p class="muted">Laundry and equipment payments received today are included in this Cold Store & Kitchen cash closeout.</p>{% endif %}
             <p class="muted pos-closeout-note" id="pos-closeout-meta">
               {% if counter_summary.lastCloseout %}Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}.{% else %}No closeout has been saved for this counter day yet.{% endif %}
