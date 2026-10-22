@@ -20,6 +20,32 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_opening_petty_allocation_is_not_a_shop_shortage(self):
+        from oneroot_erp.cash_controls import opening_comparison
+        prior = dict(groceriesCash=358.90, foodCash=187, momoCash=4762, momoECash=8295.66)
+        counted = dict(openingBasis="Petty allocation", groceriesCash=101.90, foodCash=0,
+                       momoCash=5200, momoECash=8295.66)
+        rows = {r["key"]:r for r in opening_comparison(counted, prior)}
+        self.assertTrue(rows["groceriesCash"]["allocation"])
+        self.assertEqual(rows["groceriesCash"]["variance"], 0)
+        self.assertIsNone(rows["foodCash"]["expected"])
+        self.assertEqual(rows["foodCash"]["variance"], 0)
+        self.assertEqual(rows["momoCash"]["variance"], 438)
+        self.assertEqual(rows["momoECash"]["variance"], 0)
+        full = {r["key"]:r for r in opening_comparison({**counted, "openingBasis":"Full cash count"}, prior)}
+        self.assertEqual(full["groceriesCash"]["variance"], -257)
+
+    def test_opening_allocation_saves_chosen_petty_without_posting_money(self):
+        response = self.client.post("/app/daily-cash", data=self.cash_form(openingBasis="Petty allocation",
+            groceriesCash="101.90", foodCash="0", groceriesPetty="0", foodPetty="0"))
+        self.assertEqual(response.status_code, 302)
+        db = self.sessions()
+        record = find_snapshot(db, date.today(), "Opening")
+        self.assertEqual(record.payload["groceriesPetty"], 101.90)
+        self.assertEqual(record.payload["foodPetty"], 0)
+        self.assertEqual(record.payload["groceriesRemaining"], 0)
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(["expenses","daily_cash_movements","cashbook_entries"]))).all())
+
     def test_bedding_and_gift_areas_available_in_inventory_public_catalog_and_retail_pos(self):
         from oneroot_erp.app import pos_desk_area_ids, is_orderable_area
         from oneroot_erp.registry import BUSINESS_AREA_OPTIONS, INVENTORY_CATEGORY_LIBRARY

@@ -30,7 +30,7 @@ from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 from .config import AppConfig, load_config
 from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
-                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed)
+                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison)
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
@@ -19687,10 +19687,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
         previous_close = latest_close(g.db, selected)
         baseline = previous_close if entry_type == "Opening" else opening
         payload = dict(record.payload or {}) if record else {"date": selected.isoformat(), "entryType": entry_type}
+        if entry_type == "Opening":
+            payload.setdefault("openingBasis", "Full cash count" if record else "Petty allocation")
         if not record and entry_type == "Opening" and previous_close:
             payload.update({k: (previous_close.payload or {}).get(k, 0) for k in COUNT_FIELDS})
             payload["cashMode"] = cash_mode(previous_close.payload or {})
             payload["combinedCash"] = sum(parse_amount(payload.get(k)) for k in ("groceriesCash", "foodCash"))
+            if payload.get("openingBasis") == "Petty allocation":
+                payload["cashMode"] = "Separate"
+                for prefix in ("groceries", "food"):
+                    payload[prefix + "Cash"] = payload[prefix + "Petty"] = ""
         movements = daily_cash_movement_context(g.db, selected)
         base = baseline.payload if baseline else None
         def comparison_for(counts):
@@ -19705,7 +19711,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             combined = cash_mode(counts) == "Combined" or (base is not None and cash_mode(base) == "Combined")
             rows = compare_counts(counts, base, effects, combined=combined)
             if entry_type == "Opening":
-                rows = [row for row in rows if row["key"] not in {"groceriesPetty", "foodPetty"}]
+                rows = opening_comparison(counts, base, combined=combined)
+                if counts.get("openingBasis") == "Petty allocation":
+                    warnings.append("Shop figures are today's chosen petty cash, not yesterday's full cash balance. No shop shortage is inferred. Record where the remaining cash was handed over, banked or transferred; its destination is not assumed.")
             if combined:
                 warnings.append("Shop cash is combined. Only the combined shop total can be reconciled; the individual shop split is not confirmed.")
             if base:
@@ -19723,6 +19731,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             for key in COUNT_FIELDS:
                 payload[key] = request.form.get(key, "0" if payload["cashMode"] == "Combined" and key in {"groceriesCash", "foodCash"} else "")
             payload["combinedCash"] = request.form.get("combinedCash", 0)
+            if entry_type == "Opening":
+                payload["openingBasis"] = normalize_text(request.form.get("openingBasis")) or "Full cash count"
+                if payload["openingBasis"] not in {"Full cash count", "Petty allocation"}:
+                    errors.append("Choose a valid opening basis.")
+                if payload["openingBasis"] == "Petty allocation":
+                    if payload["cashMode"] != "Separate":
+                        errors.append("Enter the chosen petty cash allocation separately for each shop.")
+                    payload["groceriesPetty"] = payload["groceriesCash"]
+                    payload["foodPetty"] = payload["foodCash"]
             try:
                 summarize_counts(payload)
             except ValueError as error:
@@ -19769,7 +19786,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 audit("daily_cash_positions", "Daily Cash & Petty Cash", "update" if previous else "create",
                       selected.isoformat(), identity,
                       json.dumps({"entryType": entry_type, "before": {k: previous.get(k) for k in COUNT_FIELDS},
-                                  "after": {k: payload[k] for k in COUNT_FIELDS}, "reason": payload["exceptionReason"]}))
+                                  "after": {k: payload[k] for k in COUNT_FIELDS}, "openingBasis": payload.get("openingBasis"), "reason": payload["exceptionReason"]}))
                 g.db.commit()
                 flash(f"{entry_type} count saved for {selected}. The owner can review it now.", "success")
                 return redirect(url_for("daily_cash_page", date=selected.isoformat(), entryType=entry_type))

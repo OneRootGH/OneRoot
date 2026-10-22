@@ -17,13 +17,17 @@
   <form method="post" id="daily-cash-form">
     <input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="entryType" value="{{ entry_type }}"><input type="hidden" name="expectedUpdatedAt" value="{{ expected_updated_at }}">
     <fieldset {% if locked %}disabled{% endif %}>
+    {% if entry_type == 'Opening' %}
+    <label>What are you recording?<select name="openingBasis" id="opening-basis"><option {% if payload.get('openingBasis') == 'Petty allocation' %}selected{% endif %}>Petty allocation</option><option {% if payload.get('openingBasis') != 'Petty allocation' %}selected{% endif %}>Full cash count</option></select></label>
+    <p>Petty allocation: enter only the cash you decide to leave in each shop for today. Zero means no petty cash was allocated. Full cash count: enter all physical shop cash, including petty cash.</p>
+    {% endif %}
     <label>Shop cash arrangement <select name="cashMode" id="cash-mode"><option value="Separate" {% if mode == 'Separate' %}selected{% endif %}>Count the two shops separately</option><option value="Combined" {% if mode == 'Combined' %}selected{% endif %}>Shop cash has been combined — split unknown</option></select></label>
     <div data-cash-mode="Combined" {% if mode != 'Combined' %}hidden{% endif %}><label>Combined physical cash from both shops, including petty cash (GH₵)<input name="combinedCash" type="number" min="0" step="0.01" value="{{ payload.get('combinedCash', (payload.get('groceriesCash',0)|float + payload.get('foodCash',0)|float)) }}" {% if mode != 'Combined' %}disabled{% else %}required{% endif %}></label><p>We will not pretend this amount belongs to one shop.</p></div>
     <div class="card-grid two">
     {% for title, cash, petty in [('Groceries & More', 'groceriesCash', 'groceriesPetty'), ('Cold Store & Kitchen', 'foodCash', 'foodPetty')] %}
       <section><h3>{{ title }}</h3><div class="form-grid">
-        <label data-cash-mode="Separate" {% if mode != 'Separate' %}hidden{% endif %}>Total physical cash, including petty cash (GH₵)<input type="number" name="{{ cash }}" step="0.01" min="0" value="{{ payload.get(cash, '') }}" {% if mode != 'Separate' %}disabled{% else %}required{% endif %}></label>
-        <label>{{ 'Petty cash to keep for today' if entry_type == 'Opening' else 'Actual petty cash remaining at closing' }} (GH₵)<input type="number" name="{{ petty }}" step="0.01" min="0" value="{{ payload.get(petty, 0) }}" required></label>
+        <label data-cash-mode="Separate" {% if mode != 'Separate' %}hidden{% endif %}><span data-shop-cash-label>Total physical cash, including petty cash (GH₵)</span><input type="number" name="{{ cash }}" step="0.01" min="0" value="{{ payload.get(cash, '') }}" {% if mode != 'Separate' %}disabled{% else %}required{% endif %}></label>
+        <label data-petty-detail>{{ 'Petty cash to keep for today' if entry_type == 'Opening' else 'Actual petty cash remaining at closing' }} (GH₵)<input type="number" name="{{ petty }}" step="0.01" min="0" value="{{ payload.get(petty, 0) }}" required></label>
       </div><p data-cash-mode="Separate" {% if mode != 'Separate' %}hidden{% endif %}>Counter cash excluding petty cash: <strong data-remainder="{{ cash }}">—</strong></p></section>
     {% endfor %}
     </div>
@@ -45,7 +49,7 @@
   {% for note in warnings %}<p class="muted">{{ note }}</p>{% endfor %}
   <p>Recorded movements are a guide, not proof of loss. Service cash is assigned to Cold Store &amp; Kitchen. MoMo fees follow the MoMo counter's cash-fee treatment; verify if your provider credits fees differently.</p>
   <div class="table-wrap"><table><thead><tr><th>Balance</th><th>{{ 'Previous Closing' if entry_type == 'Opening' else 'Opening' }}</th><th>Recorded Movement</th><th>Expected</th><th>Counted</th><th>Difference</th></tr></thead><tbody>
-  {% for row in comparison %}<tr><td>{{ row.label }}</td><td>{{ row.opening|currency }}</td><td>{{ row.movement|currency }}</td><td>{{ row.expected|currency }}</td><td>{{ row.actual|currency if saved_record else 'Not submitted' }}</td><td>{{ row.variance|currency if saved_record else '—' }}</td></tr>{% else %}<tr><td colspan="6">Expected balances are unavailable without a prior closing / opening count. Submit actual balances and explain for owner review.</td></tr>{% endfor %}
+  {% for row in comparison %}<tr><td>{{ row.label }}</td><td>{{ row.opening|currency }}</td><td>{{ 'Not a cash movement' if row.get('allocation') else row.movement|currency }}</td><td>{{ 'Chosen by management' if row.get('allocation') else row.expected|currency }}</td><td>{{ row.actual|currency if saved_record else 'Not submitted' }}</td><td>{{ 'Allocation, not shortage' if row.get('allocation') else (row.variance|currency if saved_record else '—') }}</td></tr>{% else %}<tr><td colspan="6">Expected balances are unavailable without a prior closing / opening count. Submit actual balances and explain for owner review.</td></tr>{% endfor %}
   </tbody></table></div>
   {% if can_correct_date and saved_record %}
   <form method="post" action="{{ url_for('daily_cash_review') }}" class="form-grid">
@@ -94,13 +98,23 @@
 (() => {
   const form = document.getElementById('daily-cash-form');
   const mode = document.getElementById('cash-mode');
+  const basis = document.getElementById('opening-basis');
   const money = n => new Intl.NumberFormat('en-GH', {style:'currency', currency:'GHS'}).format(n);
   const value = name => Number(form.elements[name].value) || 0;
   function update() {
+    const allocation = basis && basis.value === 'Petty allocation';
+    if (allocation) mode.value = 'Separate';
+    mode.disabled = Boolean(allocation) || {{ 'true' if locked else 'false' }};
     for (const group of form.querySelectorAll('[data-cash-mode]')) {
       const active = group.dataset.cashMode === mode.value;
       group.hidden = !active;
       for (const input of group.querySelectorAll('input')) { input.disabled = !active || {{ 'true' if locked else 'false' }}; input.required = active; }
+    }
+    for (const label of form.querySelectorAll('[data-shop-cash-label]')) label.textContent = allocation ? 'Petty cash allocated for today (GH₵)' : 'Total physical cash, including petty cash (GH₵)';
+    for (const label of form.querySelectorAll('[data-petty-detail]')) label.hidden = Boolean(allocation);
+    if (allocation) {
+      form.elements.groceriesPetty.value = value('groceriesCash');
+      form.elements.foodPetty.value = value('foodCash');
     }
     const shop = mode.value === 'Combined' ? value('combinedCash') : value('groceriesCash') + value('foodCash');
     document.getElementById('physical-total').textContent = money(shop + value('momoCash'));

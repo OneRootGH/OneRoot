@@ -104,3 +104,14 @@ def compare_counts(counted, baseline, effects, *, combined=False):
 
 def review_needed(comparison, warnings):
     return bool(warnings or any(abs(row["variance"]) >= .01 for row in comparison))
+
+
+def opening_comparison(counted, baseline, *, combined=False):
+    rows = compare_counts(counted, baseline, {}, combined=combined)
+    rows = [row for row in rows if row["key"] not in {"groceriesPetty", "foodPetty"}]
+    if counted.get("openingBasis") == "Petty allocation":
+        for row in rows:
+            if row["key"] in {"groceriesCash", "foodCash", "combinedCash"}:
+                row.update(allocation=True, expected=None, variance=0.0)
+                row["label"] = row["label"].replace("total physical cash", "petty cash allocated for today")
+    return rows
