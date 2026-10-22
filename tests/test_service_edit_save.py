@@ -20,6 +20,25 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_owner_corrects_service_payment_date_without_duplicate_collection(self):
+        db = self.sessions()
+        r = db.get(ModuleRecord, "test-rental")
+        old = dict(r.payload)
+        target = date.today() - timedelta(days=1)
+        url = "/app/services/equipment_rental_bookings/test-rental/payments/payment-1/date"
+        data = dict(paymentDate=target.isoformat(), reason="Received later than rental", expectedUpdatedAt=r.updated_at.isoformat())
+        self.assertEqual(self.client.post(url, data=data).status_code, 302)
+        db = self.sessions(); r = db.get(ModuleRecord, "test-rental")
+        self.assertEqual(len(r.payload["paymentEntries"]), 1)
+        self.assertEqual(r.payload["paymentEntries"][0]["amountPaid"], 100)
+        self.assertEqual(r.payload["paymentEntries"][0]["paymentDate"], target.isoformat())
+        self.assertEqual(r.payload["returnDate"], old["returnDate"])
+        sale = db.scalar(select(ModuleRecord).where(ModuleRecord.reference == "equipment-rental-payment|test-rental|payment-1"))
+        self.assertEqual(sale.record_date, target)
+        self.assertEqual(self.client.post(url, data=data).status_code, 409)
+        with self.client.session_transaction() as session: session["user_id"] = "cashier"
+        self.assertEqual(self.client.post(url, data=data).status_code, 403)
+
     def test_wheelbarrow_fleet_counts_out_quantities_independent_of_payment_and_filters(self):
         from oneroot_erp.app import wheelbarrow_availability
         today = date.today()

@@ -22699,6 +22699,43 @@ def create_app(config: AppConfig | None = None) -> Flask:
             },
         )
 
+    @app.route("/app/services/<module_key>/<record_id>/payments/<payment_id>/date", methods=["POST"])
+    @login_required
+    def service_payment_correct_date(module_key, record_id, payment_id):
+        if not user_is_owner(g.current_user):
+            return "Only the owner can correct a payment date.", 403
+        if module_key not in SERVICE_MODULE_AREA_IDS:
+            return "Invalid service.", 404
+        record = g.db.scalar(select(ModuleRecord).where(ModuleRecord.id == record_id,
+            ModuleRecord.module_key == module_key).with_for_update().execution_options(populate_existing=True))
+        if not record:
+            return "Service not found.", 404
+        day = parse_date(request.form.get("paymentDate"))
+        reason = normalize_text(request.form.get("reason"))[:1000]
+        if not day or day > current_local_datetime().date() or not reason:
+            return "Enter an actual payment date, not in the future, and a correction reason.", 400
+        if record.updated_at.isoformat() != request.form.get("expectedUpdatedAt"):
+            return "This rental changed. Refresh before correcting the payment.", 409
+        previous = dict(record.payload or {})
+        payload = dict(previous)
+        entries = [dict(entry) for entry in service_payment_entries(module_key, payload)]
+        payment = next((entry for entry in entries if entry["id"] == payment_id), None)
+        if not payment:
+            return "Payment not found.", 404
+        old_date = payment["paymentDate"]
+        payment["paymentDate"] = day.isoformat()
+        payment["notes"] = (payment.get("notes", "") + f"\nPayment date corrected from {old_date} to {day}: {reason}").strip()
+        payload[SERVICE_PAYMENT_ENTRIES_KEY] = entries
+        apply_service_payment_rollup(module_key, payload)
+        set_module_record_metadata(record, MODULES[module_key], payload)
+        sync_generated_sales_for_module_record(record)
+        sync_service_collection_closeouts(module_key, payload, previous)
+        audit(module_key, MODULES[module_key].label, "correct-payment-date", record.title, record.id,
+              f"Payment {payment_id}; amount {payment['amountPaid']:.2f}; {old_date} -> {day}; {reason}")
+        g.db.commit()
+        flash("Payment date corrected. Daily Sales and service collection closeouts have been updated; no extra payment was added.", "success")
+        return redirect(url_for("service_payment_form", module_key=module_key, record_id=record_id))
+
     @app.route("/app/services/<module_key>/<record_id>/payments/<payment_id>/delete", methods=["POST"])
     @login_required
     def service_payment_delete(module_key: str, record_id: str, payment_id: str):

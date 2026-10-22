@@ -263,6 +263,14 @@
               <td>{{ payment.paymentReference or '—' }}</td>
               <td>{{ payment.profitAmount|currency }}</td>
               <td>
+                {% if can_approve_morning_return %}<details><summary>Correct Payment Date</summary>
+                  <form method="post" action="{{ url_for('service_payment_correct_date', module_key=definition.key, record_id=record.id, payment_id=payment.id) }}">
+                    <input type="hidden" name="expectedUpdatedAt" value="{{ record.updated_at.isoformat() }}">
+                    <label>Actual date received<input name="paymentDate" type="date" value="{{ payment.paymentDate }}" required></label>
+                    <label>Correction reason<input name="reason" maxlength="1000" required></label>
+                    <button class="button subtle" type="submit">Correct Date Only</button>
+                  </form>
+                </details>{% endif %}
                 {% if definition.key != 'equipment_rental_bookings' or can_approve_morning_return %}
                   <form method="post" action="{{ url_for('service_payment_delete', module_key=definition.key, record_id=record.id, payment_id=payment.id) }}" onsubmit="return confirm('Delete this payment entry? This will also re-sync Daily Sales.');">
                     <button class="text-button danger-text" type="submit">Delete</button>
