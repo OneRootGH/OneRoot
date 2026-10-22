@@ -20,6 +20,32 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_dashboard_includes_momo_commission_and_legacy_periods_once(self):
+        from oneroot_erp.app import momo_commission_by_date
+        today = date.today()
+        yesterday = today - timedelta(days=1)
+        db = self.sessions()
+        rows = [
+            ModuleRecord(id="dash-sale", module_key="sales", amount=139, record_date=today,
+                         business_area_id="groceries", payload={"sourceType":"manual-sale"}),
+            ModuleRecord(id="dash-momo", module_key="mobile_money_transactions", record_date=today,
+                         payload=dict(status="Completed", transactionValue=2020, salesAmount=20)),
+            ModuleRecord(id="dash-pending", module_key="mobile_money_transactions", record_date=today,
+                         payload=dict(status="Pending", transactionValue=999, salesAmount=99)),
+            ModuleRecord(id="dash-reconciliation", module_key="mobile_money_reconciliations", record_date=today,
+                         payload=dict(serviceFees=20)),
+            ModuleRecord(id="dash-legacy", module_key="mobile_money_reconciliations", record_date=yesterday,
+                         payload=dict(serviceFees=4)),
+        ]
+        db.add_all(rows); db.commit()
+        self.assertEqual(momo_commission_by_date(rows), {today:20, yesterday:4})
+        with patch("oneroot_erp.app.render_template", return_value="dashboard") as render:
+            self.assertEqual(self.client.get("/app/").status_code, 200)
+            c = render.call_args.kwargs
+        self.assertEqual(c["today_sales_total"], 159)
+        self.assertEqual(c["month_sales_total"], 163 if yesterday.month == today.month else 159)
+        self.assertEqual(c["today_profit_total"], 20)
+
     def test_shop_to_momo_transfer_moves_cash_once_without_sales_or_expenses(self):
         db = self.sessions()
         before = daily_cash_movement_context(db, date.today())["effects"]

@@ -14,8 +14,8 @@
 
   <section class="card-grid four dashboard-key-metrics">
     <article class="metric-card"><span>Needs Your Attention</span><strong><a href="{{ url_for('attention_inbox') }}">Open Review Inbox</a></strong><small>Cash differences, overdue credit, unpaid services and recent audit events. Review flags, not accusations.</small></article>
-    <article class="metric-card"><span>Sales Today</span><strong>{{ today_sales_total|currency }}</strong><small>Paid sales and customer credit collected; unpaid credit, internal Kitchen payments and MoMo are excluded.</small></article>
-    <article class="metric-card"><span>This Month Sales</span><strong>{{ month_sales_total|currency }}</strong><small>Paid sales and external customer credit collections across business areas</small></article>
+    <article class="metric-card"><span>Sales Today</span><strong>{{ today_sales_total|currency }}</strong><small>Paid sales, external customer credit collected and earned MoMo commission. Unpaid credit, internal Kitchen payments and MoMo handled value are excluded.</small></article>
+    <article class="metric-card"><span>This Month Sales</span><strong>{{ month_sales_total|currency }}</strong><small>Paid sales, external customer credit collections and earned MoMo commission across business areas</small></article>
     <article class="metric-card"><span>This Month Gross Profit</span><strong>{{ month_profit_total|currency }}</strong><small>Includes completed MoMo commission less direct costs; before overheads</small></article>
     <article class="metric-card {% if apartment_due > 0 %}warning{% endif %}"><span>Open Customer & Tenant Balances</span><strong>{{ apartment_due|currency }}</strong><small>Apartment balances needing follow-up</small></article>
   </section>

@@ -7443,6 +7443,23 @@ def momo_profit_for_records(records, *, on_date=None, month="") -> float:
         and (not month or (r.record_date and r.record_date.strftime("%Y-%m") == month))), 2)
 
 
+def momo_commission_by_date(records):
+    """Recognise completed fees once; legacy reconciliation is a fallback, not extra sales."""
+    fees = defaultdict(float)
+    reconciliations = defaultdict(list)
+    for record in records:
+        if not record.record_date:
+            continue
+        if record.module_key == "mobile_money_transactions" and mobile_money_transaction_is_completed(record.payload or {}):
+            fees[record.record_date] += parse_amount((record.payload or {}).get("salesAmount"))
+        elif record.module_key == "mobile_money_reconciliations":
+            reconciliations[record.record_date].append(record)
+    for day, rows in reconciliations.items():
+        if fees[day] <= 0:
+            fees[day] = mobile_money_reconciliation_breakdown(rows)["serviceFeesTotal"]
+    return {day: round(amount, 2) for day, amount in fees.items()}
+
+
 BUSINESS_RESPONSIBILITIES = [
     ("Cooking for staff", "Suzzy Agyemang", "Weekly", "0,1,2,3,4,5", "08:00", "07:45"),
     ("Pumping of water into Polytank", "Daniel Agyei", "Daily", "", "07:30", "07:15"),
@@ -18658,7 +18675,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def dashboard():
         # Keep the first page after sign-in deliberately light. Detailed CRM,
         # reporting, and AI analysis are opened from their own desks.
-        today = date.today()
+        today = current_local_datetime().date()
         # POS sales are derived from saved counter orders. Refresh both desks so
         # the dashboard agrees with the counter even after a browser reload.
         refresh_pos_generated_sales_for_date(today)
@@ -18666,6 +18683,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         dashboard_record_keys = {
             "sales",
             "mobile_money_transactions",
+            "mobile_money_reconciliations",
             "customer_credit_accounts",
             "apartments",
             "recurring_controls",
@@ -18696,9 +18714,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         sales_total = sum(record.amount for record in paid_sales_records)
         profit_total = sum(module_record_profit_amount(record) for record in paid_sales_records)
         credit_collections = external_credit_collection_totals(all_records)
+        momo_commissions = momo_commission_by_date(all_records)
+        sales_total = round(sales_total + sum(momo_commissions.values()), 2)
         today_sales_total = sum(
             record.amount for record in paid_sales_records if record.record_date == today
-        ) + credit_collections.get(today, 0)
+        ) + credit_collections.get(today, 0) + momo_commissions.get(today, 0)
         today_profit_total = sum(
             module_record_profit_amount(record)
             for record in paid_sales_records
@@ -18752,6 +18772,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 sales_by_area_map[record.business_area_id or "shared-operations"] += max(
                     parse_amount((record.payload or {}).get("amount")), 0
                 )
+        sales_by_area_map["mobile-money"] += sum(amount for day, amount in momo_commissions.items()
+                                                if day.strftime("%Y-%m") == current_month)
         monthly_sales_by_area = sorted(
             [
                 {
@@ -18791,7 +18813,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 "amount": round(sum(
                     record.amount for record in paid_sales_records
                     if record.record_date == sales_date
-                ) + weekly_credit_collections.get(sales_date, 0), 2),
+                ) + weekly_credit_collections.get(sales_date, 0) + momo_commissions.get(sales_date, 0), 2),
             })
         online_orders = [
             serialize_online_order(record) for record in all_records if record.module_key == "online_orders"
