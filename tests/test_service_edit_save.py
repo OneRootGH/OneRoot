@@ -139,7 +139,7 @@ class ServiceEditSaveTests(unittest.TestCase):
         from oneroot_erp.app import pos_desk_area_ids, is_orderable_area
         from oneroot_erp.registry import BUSINESS_AREA_OPTIONS, INVENTORY_CATEGORY_LIBRARY
         db = self.sessions()
-        for area in ["bedding-linen", "gift-care-packages"]:
+        for area in ["bedding-linen", "gift-care-packages", "reseller-supply-packs"]:
             self.assertIn(area, dict(BUSINESS_AREA_OPTIONS))
             self.assertIn(area, pos_desk_area_ids("groceries"))
             self.assertNotIn(area, pos_desk_area_ids("food"))
@@ -155,6 +155,8 @@ class ServiceEditSaveTests(unittest.TestCase):
         form = self.client.get("/app/modules/expenses/new").get_data(as_text=True)
         self.assertIn('value="bedding-linen"', form)
         self.assertIn('value="gift-care-packages"', form)
+        self.assertIn('value="reseller-supply-packs"', form)
+        self.assertIn("test-reseller-supply-packs", {i["id"] for i in catalog["items"]})
 
     def test_attention_credit_groups_payments_and_excludes_internal_kitchen(self):
         db = self.sessions()

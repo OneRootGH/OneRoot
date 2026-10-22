@@ -1612,6 +1612,8 @@
         return "Bedsheets, pillowcases, mattress protectors, towels, and bedding sets.";
       case "gift-care-packages":
         return "Grocery hampers, birthday gifts, baby essentials, and household care packages.";
+      case "reseller-supply-packs":
+        return "Drinks, snacks, pantry goods and household supply packs for local sellers.";
       case "construction-consumables":
         return "Nails, fasteners, fittings, sealants, safety supplies, and quick repair essentials.";
       case "plumbing-electrical":
@@ -1679,6 +1681,8 @@
         return "#286b78";
       case "gift-care-packages":
         return "#a85f35";
+      case "reseller-supply-packs":
+        return "#786126";
       case "construction-consumables":
         return "#b56720";
       case "plumbing-electrical":

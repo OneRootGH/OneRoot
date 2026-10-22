@@ -81,6 +81,7 @@ POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables", "
 POS_GROCERIES_MORE_AREA_IDS = {
     "bedding-linen",
     "gift-care-packages",
+    "reseller-supply-packs",
     "groceries",
     "fresh-foods-drinks",
     "water-equipment",
@@ -149,6 +150,7 @@ PRODUCT_IMAGE_AREA_COLORS = {
     "phone-accessories-charging": "#2459a6",
     "bedding-linen": "#286b78",
     "gift-care-packages": "#a85f35",
+    "reseller-supply-packs": "#786126",
     "construction-consumables": "#b56720",
     "plumbing-electrical": "#277c87",
     "shared-operations": "#50606f",
@@ -1909,7 +1911,7 @@ def reclassify_inventory_product(product: Product) -> bool:
     category_key = normalize_text(product.category).lower()
     name_key = normalize_text(product.name).lower()
     source_key = normalize_text(product.source_category).lower()
-    if area_id in {"bedding-linen", "gift-care-packages"}:
+    if area_id in {"bedding-linen", "gift-care-packages", "reseller-supply-packs"}:
         return False
     text_blob = product_text_blob(product)
 
@@ -2211,7 +2213,7 @@ def default_warehouse_location(product: Product) -> str:
         return "groceries-counter"
     if area_id == "bedding-linen":
         return "groceries-shelves"
-    if area_id == "gift-care-packages":
+    if area_id in {"gift-care-packages", "reseller-supply-packs"}:
         return "warehouse-back-store"
     if area_id in {"construction-consumables", "plumbing-electrical"}:
         return "warehouse-equipment-water"
@@ -14300,6 +14302,7 @@ def is_orderable_area(area_id: str) -> bool:
     return area_id in {
         "bedding-linen",
         "gift-care-packages",
+        "reseller-supply-packs",
         "water-equipment",
         "cold-store-groceries",
         "groceries",

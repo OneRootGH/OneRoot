@@ -9,6 +9,7 @@ BUSINESS_AREAS = [
     {"id": "groceries", "label": "OneRoot Groceries & More", "short": "Groceries & More"},
     {"id": "bedding-linen", "label": "OneRoot Bedding & Linen Service", "short": "Bedding & Linen"},
     {"id": "gift-care-packages", "label": "OneRoot Gift & Care Packages", "short": "Gift & Care Packages"},
+    {"id": "reseller-supply-packs", "label": "OneRoot Reseller Supply Packs", "short": "Reseller Supply Packs"},
     {"id": "phone-accessories-charging", "label": "OneRoot Phone Accessories & Charging", "short": "Phone & Charging"},
     {"id": "construction-consumables", "label": "OneRoot Construction Consumables Express", "short": "Construction Express"},
     {"id": "plumbing-electrical", "label": "OneRoot Plumbing & Electrical Essentials", "short": "Plumbing & Electrical"},
@@ -24,6 +25,7 @@ BUSINESS_AREA_SHORT = {item["id"]: item["short"] for item in BUSINESS_AREAS}
 INVENTORY_CATEGORY_LIBRARY = {
     "bedding-linen": ["Bedsheets & Pillowcases", "Mattress Protectors", "Towels & Bath Linen", "Duvets & Blankets", "Bedding Sets"],
     "gift-care-packages": ["Grocery Hampers", "New Baby Essentials", "Birthday Packages", "Household Care Packages", "Custom Gift Packages"],
+    "reseller-supply-packs": ["Drinks Reseller Packs", "Snacks Reseller Packs", "Pantry Reseller Packs", "Household Supplies Packs", "Personal Care Packs", "Mixed Starter Packs"],
     "water-equipment": [
         "Water Supply",
         "Water Delivery",
