@@ -45,7 +45,8 @@
     {% if payload.get('recordedAt') %}<p>Saved by {{ payload.recordedBy }} · {{ payload.recordedAt }} UTC. Corrections are audited.</p>{% endif %}
   </form>
 </section>
-<section class="card"><h3>Expected Versus Counted — {{ 'Last Saved Comparison' if saved_record else 'Preview' }}</h3>
+<section class="card"><h3>Expected Versus Counted — {{ 'Updated Preview — Resave Count' if comparison_changed else ('Last Saved Comparison' if saved_record else 'Preview') }}</h3>
+  {% if comparison_changed %}<p>Movements or source checks changed. The comparison below is recalculated using the saved count. Review and save the count again before approval; no cash amounts have been changed automatically.</p>{% endif %}
   {% for note in warnings %}<p class="muted">{{ note }}</p>{% endfor %}
   <p>Recorded movements are a guide, not proof of loss. Service cash is assigned to Cold Store &amp; Kitchen. MoMo fees follow the MoMo counter's cash-fee treatment; verify if your provider credits fees differently.</p>
   <div class="table-wrap"><table><thead><tr><th>Balance</th><th>{{ 'Previous Closing' if entry_type == 'Opening' else 'Opening' }}</th><th>Recorded Movement</th><th>Expected</th><th>Counted</th><th>Difference</th></tr></thead><tbody>
@@ -60,6 +61,19 @@
   </form>
   {% if not locked %}<details><summary>Owner: Correct Record Date</summary><form method="post" action="{{ url_for('daily_cash_correct_date') }}" class="form-grid"><input type="hidden" name="sourceDate" value="{{ selected }}"><input type="hidden" name="entryType" value="{{ entry_type }}"><input type="hidden" name="expectedUpdatedAt" value="{{ expected_updated_at }}"><label>Correct date<input type="date" name="targetDate" required></label><label>Reason<input name="reason" maxlength="1000" required></label><button class="button subtle" type="submit">Move Record to Correct Date</button></form></details>{% endif %}
   {% endif %}
+</section>
+<section class="card"><h3>Move Shop Sales Cash to MoMo</h3>
+  <p>Use this whenever cash collected in either shop is added to MoMo physical cash. It reduces the shop balance and increases MoMo cash by the same amount. Sales and profit do not change. Do not enter the same top-up again in Cashbook or reconciliation.</p>
+  {% if not locked %}<form method="post" action="{{ url_for('daily_cash_transfer') }}" class="form-grid">
+    <input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="destination" value="momoCash">
+    <label>Cash taken from<select name="source" required><option value="">Choose shop / cash source</option><option value="groceries">Groceries &amp; More sales cash</option><option value="food">Cold Store &amp; Kitchen sales cash</option><option value="groceriesPetty">Groceries petty cash</option><option value="foodPetty">Cold Store &amp; Kitchen petty cash</option></select></label>
+    <label>Actual amount moved (GH₵)<input name="amount" type="number" min="0.01" step="0.01" required></label>
+    <label>Received by<input name="recipient" maxlength="200" required></label>
+    <label>Transfer reference<input name="reference" value="{{ momo_transfer_reference }}" maxlength="100" required></label>
+    <label>Note<input name="notes" maxlength="2000" placeholder="When the cash was handed over and why"></label>
+    <button class="button primary" type="submit">Record Shop → MoMo Transfer</button>
+  </form>{% else %}<p>Ask the owner to reopen the approved closing count before recording a transfer for this date.</p>{% endif %}
+  <p>Selected date: <strong>{{ selected }}</strong>. Enter the date the money actually moved. Record each shop separately if both contributed. An unexplained difference is not automatically treated as a transfer.</p>
 </section>
 <section class="card"><h3>Record Expenses</h3><p>Save actual spending here once. It appears in Expenses, Cashbook and the cash comparison. Setting petty cash aside is not spending.</p>
   {% if not locked and 'expenses' in current_access_keys %}<form method="post" action="{{ url_for('daily_cash_expense') }}" enctype="multipart/form-data" class="form-grid">

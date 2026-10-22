@@ -7650,7 +7650,7 @@ def daily_cash_movement_context(db, day):
         for payment in service_payment_entries(service.module_key, service.payload or {}):
             if parse_date(payment.get("paymentDate")) == day and normalize_text(payment.get("paymentMethod")).lower() in POS_CASH_PAYMENT_METHODS:
                 add("Service cash collected", "foodCash", parse_amount(payment.get("amountPaid")), service.id)
-    generated = {"pos-summary", "laundry-payment", "equipment-rental-payment", "kitchen-order-payment", "mobile-money-transaction"}
+    generated = {"pos-summary", "bread-pos-summary", "laundry-payment", "equipment-rental-payment", "kitchen-order-payment", "mobile-money-transaction"}
     for sale in [r for r in records if r.module_key == "sales"]:
         p = sale.payload or {}
         source = normalize_text(p.get("sourceType"))
@@ -19793,7 +19793,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         for error in dict.fromkeys(errors):
             flash(error, "error")
         comparison, warnings = comparison_for(payload) if not errors else ([], [])
-        if record and (record.payload or {}).get("controlVersion") == 2:
+        comparison_changed = bool(record and entry_type == "Closing" and (
+            (record.payload or {}).get("sourceSignature") != movements["signature"]
+            or (record.payload or {}).get("warnings", []) != warnings))
+        if record and (record.payload or {}).get("controlVersion") == 2 and not comparison_changed:
             comparison, warnings = (record.payload or {}).get("comparison", []), (record.payload or {}).get("warnings", [])
         date_from = parse_date(request.args.get("date_from")) or today - timedelta(days=30)
         date_to = parse_date(request.args.get("date_to")) or today
@@ -19806,6 +19809,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                                expected_updated_at=record.updated_at.isoformat() if record else "",
                                entry_type=entry_type, previous_close=previous_close, opening=opening,
                                comparison=comparison, warnings=warnings, movement_context=movements, wallets=WALLETS,
+                               comparison_changed=comparison_changed,
+                               momo_transfer_reference="SHOP-MOMO-" + uuid4().hex[:20],
                                expense_request_id=uuid4().hex,
                                daily_expenses=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "expenses", ModuleRecord.record_date == selected)
                                    .order_by(desc(ModuleRecord.updated_at))).all(),

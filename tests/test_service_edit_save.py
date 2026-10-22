@@ -20,6 +20,29 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_shop_to_momo_transfer_moves_cash_once_without_sales_or_expenses(self):
+        db = self.sessions()
+        before = daily_cash_movement_context(db, date.today())["effects"]
+        for source, amount, ref in [("groceries", "50", "SHOP-MOMO-A"), ("food", "30", "SHOP-MOMO-B")]:
+            data=dict(date=date.today().isoformat(), source=source, destination="momoCash", amount=amount,
+                      recipient="MoMo agent", reference=ref)
+            self.assertEqual(self.client.post("/app/daily-cash/transfer", data=data).status_code, 302)
+            self.client.post("/app/daily-cash/transfer", data=data)
+        c = daily_cash_movement_context(db, date.today())
+        self.assertEqual(c["effects"]["groceriesCash"] - before["groceriesCash"], -50)
+        self.assertEqual(c["effects"]["foodCash"] - before["foodCash"], -30)
+        self.assertEqual(c["effects"]["momoCash"] - before["momoCash"], 80)
+        self.assertEqual(c["effects"]["momoECash"] - before["momoECash"], 0)
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_movements")).all()), 2)
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(["sales","expenses"]))).all())
+        db.add(ModuleRecord(id="bread-summary-test", module_key="sales", record_date=date.today(), amount=25,
+                            title="Bread POS", payload=dict(sourceType="bread-pos-summary", paymentMethod="Cash")))
+        db.commit()
+        updated = daily_cash_movement_context(db, date.today())
+        self.assertEqual(updated["effects"], c["effects"])
+        self.assertFalse(any("Bread POS" in w for w in updated["warnings"]))
+        self.assertIn("Move Shop Sales Cash to MoMo", self.client.get("/app/daily-cash").get_data(as_text=True))
+
     def test_opening_petty_allocation_is_not_a_shop_shortage(self):
         from oneroot_erp.cash_controls import opening_comparison
         prior = dict(groceriesCash=358.90, foodCash=187, momoCash=4762, momoECash=8295.66)
