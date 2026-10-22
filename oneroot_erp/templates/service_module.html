@@ -15,6 +15,18 @@
       </div>
     </div>
 
+    {% if wheelbarrows %}
+    <div class="card-grid three">
+      <article class="metric-card"><span>Wheelbarrows — Total Owned</span><strong>{{ wheelbarrows.total }}</strong></article>
+      <article class="metric-card"><span>Wheelbarrows Currently Out</span><strong>{{ wheelbarrows.out }}</strong></article>
+      <article class="metric-card"><span>Wheelbarrows Remaining</span><strong>{{ wheelbarrows.available }}</strong></article>
+    </div>
+    <p class="muted">Live fleet balance across all rental records, independent of the filters below. Only issued rentals marked Out are deducted, including overdue and fully paid rentals. Returned, cancelled and not-yet-issued bookings are not deducted. Remaining means not recorded out, not a damage or maintenance inspection.</p>
+    {% if wheelbarrows.excess %}<p><strong>Review required: {{ wheelbarrows.excess }} more wheelbarrows are recorded out than the fleet of 26. Check rental quantities and returns.</strong></p>{% endif %}
+    <details><summary>Who has the {{ wheelbarrows.out }} wheelbarrows?</summary><div class="table-wrap"><table><thead><tr><th>Customer</th><th>Phone</th><th>Quantity Out</th><th>Issued</th><th>Due</th><th>Rental</th></tr></thead><tbody>
+    {% for r in wheelbarrows.rentals %}<tr><td>{{ r.customer }}</td><td>{{ r.phone }}</td><td>{{ r.quantity }}</td><td>{{ r.outDate or 'Not saved' }}</td><td>{{ r.dueDate or 'Not saved' }}</td><td><a href="{{ url_for('module_form', module_key='equipment_rental_bookings', record_id=r.id) }}">Open Rental</a></td></tr>{% else %}<tr><td colspan="6">No wheelbarrows are recorded as currently out.</td></tr>{% endfor %}
+    </tbody></table></div></details>
+    {% endif %}
     <form method="get" class="form-grid module-filter-grid compact-filter-grid">
       <label class="span-2">
         <span>Search</span>

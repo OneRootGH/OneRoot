@@ -6969,6 +6969,30 @@ def build_laundry_service_rows(records: list[ModuleRecord]) -> list[dict[str, An
     return rows
 
 
+def wheelbarrow_availability(records, on_date=None):
+    today = on_date or date.today()
+    out = []
+    for record in records:
+        p = record.payload or {}
+        if normalize_text(p.get("status")).casefold() != "out":
+            continue
+        returned, issued = parse_date(p.get("returnDate")), parse_date(p.get("outDate"))
+        if (returned and returned <= today) or (issued and issued > today):
+            continue
+        lines = service_line_items("equipment_rental_bookings", p)
+        if not lines:
+            lines = [dict(name=p.get("equipmentItem", ""), quantity=p.get("itemQuantityTotal") or p.get("quantity") or 1)]
+        quantity = sum(max(int(parse_amount(line.get("quantity"))), 0) for line in lines
+                       if "wheelbarrow" in re.sub(r"[^a-z]", "", normalize_text(line.get("name")).lower()))
+        if quantity:
+            out.append(dict(id=record.id, customer=normalize_text(p.get("customerName")) or record.title,
+                            phone=normalize_text(p.get("customerPhone")), quantity=quantity,
+                            outDate=issued, dueDate=parse_date(p.get("dueDate"))))
+    issued_total = sum(r["quantity"] for r in out)
+    return dict(total=26, out=issued_total, available=max(26-issued_total, 0),
+                excess=max(issued_total-26, 0), rentals=out)
+
+
 def build_equipment_service_rows(records: list[ModuleRecord]) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     today = date.today()
@@ -21045,6 +21069,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 )
             return render_template(
                 "service_module.html",
+                wheelbarrows=wheelbarrow_availability(all_records, current_local_datetime().date()) if module_key == "equipment_rental_bookings" else None,
                 page_title=definition.label,
                 definition=definition,
                 search=search,

@@ -20,6 +20,27 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_wheelbarrow_fleet_counts_out_quantities_independent_of_payment_and_filters(self):
+        from oneroot_erp.app import wheelbarrow_availability
+        today = date.today()
+        def rental(identity, status, quantity, **extra):
+            return ModuleRecord(id=identity, module_key="equipment_rental_bookings", payload=dict(
+                status=status, customerName=identity, outDate=today.isoformat(),
+                lineItems=[dict(name="Wheelbarrow", quantity=quantity), dict(name="Hammer", quantity=9)], **extra))
+        rows = [rental("out", "Out", 4, amountPaid=10000), rental("booked", "Booked", 8),
+                rental("returned", "Returned", 2), rental("cancelled", "Cancelled", 3),
+                rental("date-returned", "Out", 2, returnDate=today.isoformat()),
+                ModuleRecord(id="legacy", module_key="equipment_rental_bookings", payload=dict(
+                    status="Out", equipmentItem="Wheel Barrow", itemQuantityTotal=3, customerName="Legacy"))]
+        result = wheelbarrow_availability(rows, today)
+        self.assertEqual((result["total"], result["out"], result["available"]), (26, 7, 19))
+        db = self.sessions(); db.add_all(rows); db.commit()
+        page = self.client.get("/app/modules/equipment_rental_bookings?status=Returned&q=nothing").get_data(as_text=True)
+        self.assertIn("Wheelbarrows Currently Out</span><strong>7</strong>", page)
+        self.assertIn("Wheelbarrows Remaining</span><strong>19</strong>", page)
+        excess = wheelbarrow_availability([rental("too-many", "Out", 28)], today)
+        self.assertEqual((excess["available"], excess["excess"]), (0, 2))
+
     def test_dashboard_includes_momo_commission_and_legacy_periods_once(self):
         from oneroot_erp.app import momo_commission_by_date
         today = date.today()
