@@ -30,7 +30,7 @@ from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 from .config import AppConfig, load_config
 from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
-                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison)
+                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary)
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
@@ -19864,6 +19864,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                                entry_type=entry_type, previous_close=previous_close, opening=opening,
                                comparison=comparison, warnings=warnings, movement_context=movements, wallets=WALLETS,
                                comparison_changed=comparison_changed,
+                               overall_cash=overall_cash_summary(payload, base, movements) if entry_type == "Closing" else None,
                                momo_transfer_reference="SHOP-MOMO-" + uuid4().hex[:20],
                                expense_request_id=uuid4().hex,
                                daily_expenses=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "expenses", ModuleRecord.record_date == selected)

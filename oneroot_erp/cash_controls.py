@@ -115,3 +115,29 @@ def opening_comparison(counted, baseline, *, combined=False):
                 row.update(allocation=True, expected=None, variance=0.0)
                 row["label"] = row["label"].replace("total physical cash", "petty cash allocated for today")
     return rows
+
+
+def overall_cash_summary(counted, baseline, movements):
+    """Petty is included in shop cash. Internal transfers cancel across wallets."""
+    keys = ("groceriesCash", "foodCash", "momoCash", "momoECash")
+    actual = round(sum(float(counted.get(k, 0) or 0) for k in keys), 2)
+    if baseline is None:
+        return dict(actual=actual, opening=None, movement=None, expected=None, variance=None, wallets=[])
+    rows = []
+    for key in keys:
+        lines = [r for r in movements["lines"] if r["wallet"] == key]
+        transfers = [r for r in lines if str(r.get("reference", "")).startswith("cash-control|")]
+        transfer_in = round(sum(r["effect"] for r in transfers if r["effect"] > 0), 2)
+        transfer_out = round(-sum(r["effect"] for r in transfers if r["effect"] < 0), 2)
+        other = [r for r in lines if r not in transfers]
+        incoming = round(sum(r["effect"] for r in other if r["effect"] > 0), 2)
+        outgoing = round(-sum(r["effect"] for r in other if r["effect"] < 0), 2)
+        opening = round(float(baseline.get(key, 0) or 0), 2)
+        expected = round(opening + movements["effects"].get(key, 0), 2)
+        rows.append(dict(key=key, opening=opening, incoming=incoming, outgoing=outgoing,
+                         transferIn=transfer_in, transferOut=transfer_out, expected=expected))
+    opening = round(sum(r["opening"] for r in rows), 2)
+    movement = round(sum(movements["effects"].get(k, 0) for k in keys), 2)
+    expected = round(opening + movement, 2)
+    return dict(actual=actual, opening=opening, movement=movement, expected=expected,
+                variance=round(actual-expected, 2), wallets=rows)

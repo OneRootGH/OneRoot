@@ -46,6 +46,21 @@
   </form>
 </section>
 <section class="card"><h3>Expected Versus Counted — {{ 'Updated Preview — Resave Count' if comparison_changed else ('Last Saved Comparison' if saved_record else 'Preview') }}</h3>
+  {% if overall_cash %}
+  <h3>Overall Money — Shops + MoMo Physical Cash + MoMo E-Cash</h3>
+  <p>Petty cash is already inside shop cash and is not added again. Opening + recorded net inflow = expected closing. Moving cash from a shop to MoMo changes the wallet, not the overall total. Only cash receipts belong in physical cash; card, bank and shop-wallet payments are not physical cash.</p>
+  <div class="card-grid four">
+    <article class="metric-card"><span>Opening Total</span><strong>{{ overall_cash.opening|currency if overall_cash.opening is not none else 'Unknown' }}</strong></article>
+    <article class="metric-card"><span>Net Recorded Change</span><strong>{{ overall_cash.movement|currency if overall_cash.movement is not none else 'Unknown' }}</strong></article>
+    <article class="metric-card"><span>Expected Closing Total</span><strong>{{ overall_cash.expected|currency if overall_cash.expected is not none else 'Unknown' }}</strong></article>
+    <article class="metric-card"><span>Counted Closing Total</span><strong>{{ overall_cash.actual|currency if saved_record else 'Not submitted' }}</strong></article>
+  </div>
+  <p>Overall difference: <strong>{{ overall_cash.variance|currency if saved_record and overall_cash.variance is not none else 'Unknown' }}</strong>. A balanced overall total can still hide an incorrect wallet allocation. Bank accounts and the shop MoMo collection wallet are outside this count.</p>
+  <div class="table-wrap"><table><thead><tr><th>Wallet</th><th>Opening</th><th>Receipts / Net MoMo Inflow</th><th>Expenses / Net MoMo Outflow</th><th>Transfers In</th><th>Transfers Out</th><th>Expected</th></tr></thead><tbody>
+  {% for r in overall_cash.wallets %}<tr><td>{{ {'groceriesCash':'Groceries physical cash','foodCash':'Cold Store physical cash','momoCash':'MoMo physical cash','momoECash':'MoMo e-cash'}[r.key] }}</td><td>{{ r.opening|currency }}</td><td>{{ r.incoming|currency }}</td><td>{{ r.outgoing|currency }}</td><td>{{ r.transferIn|currency }}</td><td>{{ r.transferOut|currency }}</td><td>{{ r.expected|currency }}</td></tr>{% endfor %}
+  </tbody></table></div>
+  <p>MoMo customer cash-in increases physical cash and reduces e-cash. Customer cash-out reduces physical cash and increases e-cash. These principal movements cancel in the combined total; cash commission adds income once.</p>
+  {% endif %}
   {% if comparison_changed %}<p>Movements or source checks changed. The comparison below is recalculated using the saved count. Review and save the count again before approval; no cash amounts have been changed automatically.</p>{% endif %}
   {% for note in warnings %}<p class="muted">{{ note }}</p>{% endfor %}
   <p>Recorded movements are a guide, not proof of loss. Service cash is assigned to Cold Store &amp; Kitchen. MoMo fees follow the MoMo counter's cash-fee treatment; verify if your provider credits fees differently.</p>

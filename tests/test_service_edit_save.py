@@ -20,6 +20,27 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_overall_cash_includes_receipts_and_cancels_internal_transfers(self):
+        from oneroot_erp.cash_controls import overall_cash_summary
+        baseline=dict(groceriesCash=101.90,foodCash=0,momoCash=5200,momoECash=8295.66,groceriesPetty=101.90)
+        counted=dict(groceriesCash=648.90,foodCash=150,momoCash=3858,momoECash=9660.66,groceriesPetty=101.90)
+        movements=dict(effects=dict(groceriesCash=-361,foodCash=-100,momoCash=2833,momoECash=-1675),lines=[
+            dict(wallet="groceriesCash",effect=524,reference="pos-payment|x"),
+            dict(wallet="groceriesCash",effect=-885,reference="cash-control|a"),
+            dict(wallet="foodCash",effect=150,reference="pos-payment|y"),
+            dict(wallet="foodCash",effect=-250,reference="cash-control|b"),
+            dict(wallet="momoCash",effect=1135,reference="cash-control|c"),
+            dict(wallet="momoCash",effect=1698,reference=""),
+            dict(wallet="momoECash",effect=-1675,reference="")])
+        s=overall_cash_summary(counted,baseline,movements)
+        self.assertEqual(s["opening"],13597.56)
+        self.assertEqual(s["movement"],697)
+        self.assertEqual(s["expected"],14294.56)
+        self.assertEqual(s["actual"],14317.56)
+        self.assertEqual(s["variance"],23)
+        self.assertEqual(s["wallets"][0]["incoming"],524)
+        self.assertEqual(s["wallets"][0]["transferOut"],885)
+
     def test_owner_corrects_service_payment_date_without_duplicate_collection(self):
         db = self.sessions()
         r = db.get(ModuleRecord, "test-rental")
