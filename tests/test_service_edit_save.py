@@ -20,6 +20,17 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_daily_cash_history_shows_total_without_counting_petty_twice(self):
+        db=self.sessions()
+        db.add(ModuleRecord(id="daily-total-test",module_key="daily_cash_positions",record_date=date.today(),
+            payload=dict(entryType="Closing",groceriesCash=648.9,foodCash=150,momoCash=3858,momoECash=9660.66,
+                         groceriesPetty=101.9,foodPetty=0,pettyTotal=101.9)))
+        db.commit()
+        page=self.client.get("/app/daily-cash").get_data(as_text=True)
+        self.assertIn("<th>Total Money Held</th>",page)
+        self.assertIn("GH₵14,317.56",page)
+        self.assertIn('id="money-held-total"',page)
+
     def test_overall_cash_includes_receipts_and_cancels_internal_transfers(self):
         from oneroot_erp.cash_controls import overall_cash_summary
         baseline=dict(groceriesCash=101.90,foodCash=0,momoCash=5200,momoECash=8295.66,groceriesPetty=101.90)

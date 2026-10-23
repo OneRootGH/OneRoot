@@ -25,6 +25,8 @@
     <article class="card">
       <div class="card-header"><h3>Latest Daily Cash · {{ latest_cash_position.record_date }} · {{ latest_cash_position.payload.get('entryType','Legacy Closing') }}</h3><a class="button subtle" href="{{ url_for('daily_cash_page', date=latest_cash_position.record_date, entryType=latest_cash_position.payload.get('entryType','Closing')) }}">View Daily Records</a></div>
       {% set cash = latest_cash_position.payload %}
+      <p>Total Money Held <strong>{{ (cash.get('groceriesCash',0)|float + cash.get('foodCash',0)|float + cash.get('momoCash',0)|float + cash.get('momoECash',0)|float)|currency }}</strong></p>
+      <small>Both shops + MoMo physical cash + phone e-cash. Petty cash included once. As of the dated saved count, not a live balance. Bank and shop collection wallets excluded.</small>
       <p><strong>{{ latest_cash_position.status or 'Needs owner review' }}</strong></p>
       {% if cash_mode(cash) == 'Combined' %}
       <p>Combined shop cash, including petty cash <strong>{{ (cash.get('groceriesCash',0) + cash.get('foodCash',0))|currency }}</strong>. Individual shop split not confirmed.</p>
