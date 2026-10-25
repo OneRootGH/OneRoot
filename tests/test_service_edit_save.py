@@ -20,6 +20,34 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_private_property_sites_have_separate_balances_and_editable_status(self):
+        from oneroot_erp.family_support import support_context
+        db=self.sessions()
+        context=support_context(db,date.today(),"medie")
+        self.assertEqual(context["project"]["landStatus"],"Purchased")
+        self.assertEqual(context["project"]["developmentStatus"],"Development Ongoing")
+        self.assertEqual(context["cycles"],[])
+        self.assertEqual(support_context(db,date.today(),"sefwi-wiawso")["project"]["developmentStatus"],"Not Started")
+        data=dict(action="payment",project="medie",paymentDate=date.today().isoformat(),amountPaid="2000",
+            paymentMethod="Bank Transfer",bankLabel="Private project bank",paymentReference="MED-001",requestId="e"*32)
+        self.assertEqual(self.client.post("/app/property-projects",data=data).status_code,302)
+        db=self.sessions()
+        self.assertEqual(support_context(db,date.today(),"medie")["balance"],2000)
+        self.assertEqual(support_context(db,date.today(),"samsam")["balance"],0)
+        self.assertEqual(support_context(db,date.today())["balance"],0)
+        spend=dict(action="spending",project="samsam",paymentDate=date.today().isoformat(),amountPaid="1",
+                   paymentMethod="Bank Transfer",category="Materials",requestId="f"*32)
+        self.assertEqual(self.client.post("/app/property-projects",data=spend).status_code,400)
+        self.assertEqual(self.client.post("/app/property-projects",data=dict(action="project-settings",project="medie",
+            landStatus="Purchased",developmentStatus="On Hold",projectNotes="Waiting for materials")).status_code,302)
+        self.assertEqual(support_context(self.sessions(),date.today(),"medie")["project"]["developmentStatus"],"On Hold")
+        page=self.client.get("/app/property-projects?project=medie")
+        self.assertEqual(page.status_code,200)
+        self.assertIn('name="project" value="medie"',page.get_data(as_text=True))
+        self.assertEqual(self.client.get("/app/property-projects?project=unknown").status_code,400)
+        with self.client.session_transaction() as session:session["user_id"]="cashier"
+        self.assertEqual(self.client.get("/app/property-projects?project=medie").status_code,403)
+
     def test_project_funding_withdrawal_spending_and_old_support_stay_separate(self):
         from oneroot_erp.family_support import support_context
         first=date.today().isoformat()

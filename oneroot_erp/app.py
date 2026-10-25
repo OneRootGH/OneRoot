@@ -34,7 +34,7 @@ from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
-from .family_support import support_context, RECIPIENTS
+from .family_support import support_context, RECIPIENTS, PROJECTS
 from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
 from .phone_catalog import PHONE_CHARGING_ITEMS
 from .registry import (
@@ -18706,19 +18706,36 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
     @app.route("/app/family-support", methods=["GET", "POST"])
     @app.route("/app/kumasi-rental-project", methods=["GET", "POST"])
+    @app.route("/app/property-projects", methods=["GET", "POST"])
     @login_required
     def family_support_page():
         if not user_is_owner(g.current_user):
             return "This is a private owner-only record.", 403
         today = current_local_datetime().date()
-        context = support_context(g.db, today)
+        project_id = normalize_text(request.values.get("project")) or "kumasi"
+        if project_id not in PROJECTS:
+            return "Choose a valid project.", 400
+        context = support_context(g.db, today, project_id)
         if request.method == "POST":
             if g.db.bind.dialect.name == "postgresql":
                 g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext('owner-family-support'))"))
                 g.db.expire_all()
-                context = support_context(g.db, today)
+                context = support_context(g.db, today, project_id)
             action = request.form.get("action")
-            if action == "schedule":
+            if action == "project-settings":
+                land = normalize_text(request.form.get("landStatus"))
+                development = normalize_text(request.form.get("developmentStatus"))
+                if land not in {"Not Recorded", "Purchased"} or development not in {"Planning", "Not Started", "Development Ongoing", "Completed", "On Hold"}:
+                    return "Choose valid land and development statuses.", 400
+                setting = g.db.get(AppSetting, "owner-property-project|" + project_id) or AppSetting(key="owner-property-project|" + project_id)
+                setting.value = dict(landStatus=land, developmentStatus=development,
+                    notes=normalize_text(request.form.get("projectNotes"))[:2000])
+                g.db.add(setting)
+                audit("family_support_payments", "Private Property Projects", "project-status", context["project"]["name"],
+                    detail=f"Land: {land}; development: {development}; {setting.value['notes']}")
+            elif action == "schedule":
+                if project_id != "kumasi":
+                    return "The two-month savings commitment applies only to the Kumasi project.", 400
                 first = parse_date(request.form.get("firstDueDate"))
                 if not first or not date(2020,1,1) <= first <= date(today.year+2,12,31):
                     return "Choose a valid first due date.", 400
@@ -18738,13 +18755,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     return "Refresh the payment form.", 400
                 identity = "family-pay-" + token
                 if g.db.get(ModuleRecord, identity):
-                    return redirect(url_for("family_support_page"))
+                    return redirect(url_for("family_support_page", project=project_id))
                 try:
                     amount = cash_money(request.form.get("amountPaid"))
                 except ValueError as error:
                     return str(error), 400
                 method = normalize_text(request.form.get("paymentMethod"))
-                limit = context["balance"] if action == "spending" else (row["remaining"] if row else 0)
+                limit = context["balance"] if action == "spending" else (row["remaining"] if row else (float("inf") if project_id != "kumasi" else 0))
                 if not paid_date or paid_date > today or not 0 < amount <= limit or method not in {"Cash", "Mobile Money", "Bank Transfer"}:
                     return "Check the recipient, cycle, actual date, payment method and amount. Payment cannot exceed the cycle balance.", 400
                 bank = normalize_text(request.form.get("bankLabel"))[:150]
@@ -18759,7 +18776,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         and (r.payload or {}).get("entryType") == "Bank Contribution"
                         and normalize_text((r.payload or {}).get("bankLabel")).casefold() == bank.casefold()
                         and normalize_text((r.payload or {}).get("paymentReference")).casefold() == reference.casefold()
-                        for r in context["payments"]):
+                        for r in context["allPayments"]):
                     return "That bank transfer reference is already recorded. Check the existing contribution.", 409
                 if action == "spending" and category not in {"Land", "Design & Permits", "Materials", "Labour", "Transport", "Other"}:
                     return "Choose a project spending category.", 400
@@ -18774,23 +18791,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         movement_id = movement.id
                     except ValueError as error:
                         return str(error), 400
-                record = ModuleRecord(id=identity, module_key="family_support_payments", title="Kumasi Rental Project",
+                record = ModuleRecord(id=identity, module_key="family_support_payments", title=context["project"]["name"],
                     record_date=paid_date, amount=amount, status="Paid", reference=token,
-                    payload=dict(recipient="project", dueDate=due.isoformat() if action == "payment" else "", paymentDate=paid_date.isoformat(),
+                    payload=dict(recipient="project", projectId=project_id, dueDate=due.isoformat() if action == "payment" and due else "", paymentDate=paid_date.isoformat(),
                         amountPaid=amount, paymentMethod=method, paymentReference=reference,
                         entryType="Project Spending" if action == "spending" else "Bank Contribution", bankLabel=bank,
                         fundingSource=source, linkedCashMovementId=movement_id, category=category,
                         notes=normalize_text(request.form.get("notes"))[:1000], recordedBy=g.current_user.full_name,
-                        classification="Private Kumasi rental project; not a business expense or payment to parents"))
+                        classification="Private property project; not a business expense or payment to parents"))
                 g.db.add(record)
-                audit("family_support_payments", "Private Rental Project", action, "Kumasi Rental Project", identity,
+                audit("family_support_payments", "Private Property Projects", action, context["project"]["name"], identity,
                       f"{amount:.2f}; cycle {due}; actual date {paid_date}; {method}; {source}; linked owner withdrawal {movement_id or 'none'}. No business expense created.")
             else:
                 return "Choose a valid action.", 400
             g.db.commit()
             flash("Private rental project record saved. No money was sent automatically.", "success")
-            return redirect(url_for("family_support_page"))
-        return render_template("family_support.html", page_title="Kumasi Rental Project", support=context, today=today, request_id=uuid4().hex)
+            return redirect(url_for("family_support_page", project=project_id))
+        return render_template("family_support.html", page_title="Private Property Projects", support=context, today=today, request_id=uuid4().hex)
 
     @app.route("/app/")
     @access_required("dashboard")

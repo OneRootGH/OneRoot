@@ -2387,7 +2387,7 @@ MODULES: dict[str, ModuleDefinition] = {
         ],
     ),
     "family_support_payments": ModuleDefinition(
-        key="family_support_payments", label="Kumasi Rental Project - Mum & Dad", legacy_collection="familySupportPayments",
+        key="family_support_payments", label="Private Property Projects", legacy_collection="familySupportPayments",
         menu_group="Owner Private", amount_field="amountPaid", date_field="paymentDate", title_field="recipient",
         editable=False, fields=[]),
     "family_education_payments": ModuleDefinition(

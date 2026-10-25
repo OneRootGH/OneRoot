@@ -1,0 +1,10 @@
+<form method="post" class="form-grid">
+<input type="hidden" name="project" value="{{ support.projectId }}"><input type="hidden" name="action" value="payment"><input type="hidden" name="recipient" value="project"><input type="hidden" name="dueDate" value="{{ r.due }}"><input type="hidden" name="requestId" value="{{ request_id }}"><input type="hidden" name="paymentMethod" value="Bank Transfer">
+<label>Amount transferred<input type="number" name="amountPaid" min="0.01" {% if r.remaining %}max="{{ r.remaining }}" value="{{ r.remaining }}"{% endif %} step="0.01" required></label>
+<label>Actual transfer date<input type="date" name="paymentDate" value="{{ today }}" max="{{ today }}" required></label>
+<label>Destination bank / account label<input name="bankLabel" maxlength="150" placeholder="Bank name and last four digits only" required></label>
+<label>Transfer reference<input name="paymentReference" maxlength="200" required></label>
+<label>Money came from<select name="fundingSource"><option value="personal">Personal funds — no business cash movement</option><option value="groceries">Groceries sales cash</option><option value="food">Cold Store &amp; Kitchen sales cash</option><option value="momoCash">MoMo physical cash</option><option value="momoECash">MoMo e-cash</option><option value="bank">Business bank account</option></select></label>
+<p>A business source creates one linked owner withdrawal in Daily Cash and Cashbook. Do not enter that withdrawal again. No business expense is created.</p>
+<label>Note<input name="notes" maxlength="1000"></label><button class="button primary" type="submit">Save Confirmed Contribution</button>
+</form>

@@ -21,9 +21,10 @@
   </section>
 
   <section class="dashboard-chart-grid">
-    {% if family_support %}<article class="card"><div class="card-header"><h3>Kumasi Rental Project</h3><a href="{{ url_for('family_support_page') }}">Mum &amp; Dad Project Fund</a></div>
+    {% if family_support %}<article class="card"><div class="card-header"><h3>Private Property Projects</h3><a href="{{ url_for('family_support_page') }}">Open Projects</a></div>
       {% if family_support.first %}<p>{{ family_support.due_count }} due / overdue savings cycle(s) · <strong>{{ family_support.outstanding|currency }}</strong> still to save.</p>{% else %}<p>Set the first contribution date to start the schedule.</p>{% endif %}
-      <p>Recorded fund balance: <strong>{{ family_support.balance|currency }}</strong></p>
+      <p>Kumasi recorded fund balance: <strong>{{ family_support.balance|currency }}</strong></p>
+      {% for id,p in family_support.projects.items() %}<p><a href="{{ url_for('family_support_page', project=id) }}">{{ p.name }}</a> · {{ p.landStatus }} · {{ p.developmentStatus }}</p>{% endfor %}
       <small>GH₵1,400 every two months towards a Kumasi rental apartment for Mum and Dad. Owner only. Not a business expense.</small></article>{% endif %}
     {% if latest_cash_position %}
     <article class="card">
