@@ -7609,6 +7609,41 @@ def prepaid_balance(records, phone):
                      for r in records if normalize_phone((r.payload or {}).get("customerPhone")) == normalize_phone(phone)), 2)
 
 
+def daily_shop_mobile_money_collections(db, day):
+    """Confirmed shop receipts, separate from agency float and Cashbook copies."""
+    rows = []
+    def add(area, amount, source, reference):
+        desk = "food" if area in POS_FOOD_SALES_AREA_IDS or area == "laundry-services" else "groceries" if area in POS_GROCERIES_MORE_AREA_IDS else ""
+        amount = round(parse_amount(amount), 2)
+        if desk and math.isfinite(amount) and amount > 0:
+            rows.append(dict(desk=desk, amount=amount, source=source, reference=reference))
+    orders = db.scalars(select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == day)).all()
+    for order in orders:
+        if normalize_text(order.payment_method).lower() != "mobile money" or is_kitchen_stock_issue(order):
+            continue
+        for line in order.lines:
+            add(line.business_area_id, line.total_amount, "POS", order.order_number)
+    records = db.scalars(select(ModuleRecord).where(or_(
+        ModuleRecord.module_key.in_(["kitchen_orders", "laundry_tickets", "equipment_rental_bookings"]),
+        and_(ModuleRecord.record_date == day, ModuleRecord.module_key.in_(["sales", "customer_credit_accounts"]))
+    ))).all()
+    generated = {"pos-summary", "bread-pos-summary", "laundry-payment", "equipment-rental-payment", "kitchen-order-payment", "mobile-money-transaction"}
+    for record in records:
+        p = record.payload or {}
+        if record.module_key in {"kitchen_orders", "laundry_tickets", "equipment_rental_bookings"}:
+            for payment in service_payment_entries(record.module_key, p):
+                if parse_date(payment.get("paymentDate")) == day and normalize_text(payment.get("paymentMethod")).lower() == "mobile money":
+                    add(record.business_area_id or SERVICE_MODULE_AREA_IDS[record.module_key], payment.get("amountPaid"), "Service payment", record.id)
+        elif record.record_date == day and normalize_text(p.get("paymentMethod")).lower() == "mobile money":
+            if record.module_key == "customer_credit_accounts":
+                if p.get("transactionType") == "Payment Received" and not is_internal_kitchen_credit_payment(p):
+                    add(record.business_area_id, p.get("amount"), "Credit collection", record.id)
+            elif normalize_text(p.get("sourceType")) not in generated and not is_mobile_money_daily_sales_record(record):
+                add(record.business_area_id, record.amount, "Manual / online collection", record.reference or record.id)
+    totals = {desk: round(sum(r["amount"] for r in rows if r["desk"] == desk), 2) for desk in ("groceries", "food")}
+    return dict(rows=rows, totals=totals, total=round(sum(totals.values()), 2))
+
+
 def daily_cash_movement_context(db, day):
     """Use source collections once; cashbook copies do not create extra receipts."""
     effects = {key: 0.0 for key in COUNT_FIELDS}
@@ -20005,6 +20040,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ModuleRecord.record_date >= date_from, ModuleRecord.record_date <= date_to)
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
+                               shop_mobile_collections=daily_shop_mobile_money_collections(g.db, selected),
                                selected=selected, history=history, date_from=date_from, date_to=date_to,
                                can_correct_date=user_is_owner(g.current_user),
                                expected_updated_at=record.updated_at.isoformat() if record else "",

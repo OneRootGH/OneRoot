@@ -46,6 +46,10 @@
     {% if payload.get('recordedAt') %}<p>Saved by {{ payload.recordedBy }} · {{ payload.recordedAt }} UTC. Corrections are audited.</p>{% endif %}
   </form>
 </section>
+<section class="card"><h3>Shop Mobile Money Payments · {{ selected }}</h3>
+<div class="card-grid three"><article class="metric-card"><span>Groceries &amp; More</span><strong>{{ shop_mobile_collections.totals.groceries|currency }}</strong></article><article class="metric-card"><span>Cold Store &amp; Kitchen</span><strong>{{ shop_mobile_collections.totals.food|currency }}</strong></article><article class="metric-card"><span>Total Mobile Money Collected</span><strong>{{ shop_mobile_collections.total|currency }}</strong></article></div>
+<p>Customer payments received by Mobile Money, including recorded service payments and external credit collections. These are not physical cash or MoMo agency cash-in/cash-out. This is today's collections, not the wallet's available balance, and does not add sales a second time.</p>
+<details><summary>View payment details</summary><div class="table-wrap"><table><thead><tr><th>Counter</th><th>Source</th><th>Reference</th><th>Received</th></tr></thead><tbody>{% for r in shop_mobile_collections.rows %}<tr><td>{{ 'Cold Store & Kitchen' if r.desk == 'food' else 'Groceries & More' }}</td><td>{{ r.source }}</td><td>{{ r.reference }}</td><td>{{ r.amount|currency }}</td></tr>{% else %}<tr><td colspan="4">No Mobile Money collections recorded for this date.</td></tr>{% endfor %}</tbody></table></div></details></section>
 <section class="card"><h3>Expected Versus Counted — {{ 'Updated Preview — Resave Count' if comparison_changed else ('Last Saved Comparison' if saved_record else 'Preview') }}</h3>
   {% if overall_cash %}
   <h3>Overall Money — Shops + MoMo Physical Cash + MoMo E-Cash</h3>

@@ -20,6 +20,28 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_daily_cash_shop_mobile_collections_exclude_float_and_generated_copies(self):
+        from oneroot_erp.app import daily_shop_mobile_money_collections
+        db = self.sessions()
+        for identity, key, area, amount, payload in [
+            ("shop-mm", "sales", "groceries", 30, {"paymentMethod": "Mobile Money"}),
+            ("food-mm", "sales", "cold-store-groceries", 40, {"paymentMethod": "Mobile Money"}),
+            ("copy-mm", "sales", "groceries", 30, {"paymentMethod": "Mobile Money", "sourceType": "pos-summary"}),
+            ("cash-mm", "sales", "groceries", 90, {"paymentMethod": "Cash"}),
+            ("float-mm", "mobile_money_transactions", "mobile-money", 500, {"paymentMethod": "Mobile Money"}),
+            ("credit-mm", "customer_credit_accounts", "groceries", 10,
+             {"paymentMethod": "Mobile Money", "transactionType": "Payment Received", "amount": 10}),
+        ]:
+            db.add(ModuleRecord(id=identity, module_key=key, business_area_id=area,
+                                record_date=date.today(), amount=amount, payload=payload))
+        db.commit()
+        summary = daily_shop_mobile_money_collections(db, date.today())
+        self.assertEqual(summary["totals"], {"groceries": 40, "food": 40})
+        self.assertEqual(summary["total"], 80)
+        page = self.client.get("/app/daily-cash")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Shop Mobile Money Payments", page.get_data(as_text=True))
+
     def test_construction_meals_use_existing_kitchen_workflow(self):
         from oneroot_erp.registry import BUSINESS_AREA_LABELS
         from oneroot_erp.app import POS_FOOD_SALES_AREA_IDS
