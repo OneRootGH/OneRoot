@@ -18705,6 +18705,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         return redirect(url_for("users_page", edit=user.id))
 
     @app.route("/app/family-support", methods=["GET", "POST"])
+    @app.route("/app/kumasi-rental-project", methods=["GET", "POST"])
     @login_required
     def family_support_page():
         if not user_is_owner(g.current_user):
@@ -18724,10 +18725,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if context["payments"] and first != context["first"]:
                     return "Payments already exist. The schedule anchor cannot be changed without reviewing payment history.", 409
                 setting = g.db.get(AppSetting, "owner-family-support") or AppSetting(key="owner-family-support")
-                setting.value = dict(firstDueDate=first.isoformat())
+                setting.value = dict(firstDueDate=first.isoformat(), purpose="Kumasi Rental Project", cycleAmount=1400)
                 g.db.add(setting)
-                audit("family_support_payments", "Private Family Support", "schedule", "Mum and Dad", detail=f"First due {first}; every two months; Mum 800; Dad 600.")
-            elif action == "payment":
+                audit("family_support_payments", "Private Rental Project", "schedule", "Kumasi Rental Project", detail=f"First due {first}; project savings target 1400 every two months; replaces direct Mum and Dad support commitments.")
+            elif action in {"payment", "spending"}:
                 recipient = request.form.get("recipient")
                 due = parse_date(request.form.get("dueDate"))
                 row = next((r for r in context["cycles"] if r["recipient"] == recipient and r["due"] == due), None)
@@ -18743,23 +18744,53 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 except ValueError as error:
                     return str(error), 400
                 method = normalize_text(request.form.get("paymentMethod"))
-                if not row or not paid_date or paid_date > today or not 0 < amount <= row["remaining"] or method not in {"Cash", "Mobile Money", "Bank Transfer"}:
+                limit = context["balance"] if action == "spending" else (row["remaining"] if row else 0)
+                if not paid_date or paid_date > today or not 0 < amount <= limit or method not in {"Cash", "Mobile Money", "Bank Transfer"}:
                     return "Check the recipient, cycle, actual date, payment method and amount. Payment cannot exceed the cycle balance.", 400
-                record = ModuleRecord(id=identity, module_key="family_support_payments", title=row["name"],
+                bank = normalize_text(request.form.get("bankLabel"))[:150]
+                reference = normalize_text(request.form.get("paymentReference"))[:200]
+                category = normalize_text(request.form.get("category"))[:100]
+                source = normalize_text(request.form.get("fundingSource")) or "personal"
+                if action == "payment" and (not bank or not reference):
+                    return "Enter the destination bank account label and actual transfer reference.", 400
+                if action == "payment" and method != "Bank Transfer":
+                    return "Record the actual bank transfer for this contribution.", 400
+                if action == "payment" and any((r.payload or {}).get("recipient") == "project"
+                        and (r.payload or {}).get("entryType") == "Bank Contribution"
+                        and normalize_text((r.payload or {}).get("bankLabel")).casefold() == bank.casefold()
+                        and normalize_text((r.payload or {}).get("paymentReference")).casefold() == reference.casefold()
+                        for r in context["payments"]):
+                    return "That bank transfer reference is already recorded. Check the existing contribution.", 409
+                if action == "spending" and category not in {"Land", "Design & Permits", "Materials", "Labour", "Transport", "Other"}:
+                    return "Choose a project spending category.", 400
+                if source not in {"personal", "groceries", "food", "momoCash", "momoECash", "bank"}:
+                    return "Choose the actual source of funding.", 400
+                movement_id = ""
+                if action == "payment" and source != "personal":
+                    try:
+                        movement = save_cash_transfer(paid_date, source, "owner", amount,
+                            g.current_user.full_name or g.current_user.username, "OWNER-PROJECT-" + token,
+                            "Owner withdrawal for private project; not a business expense.")
+                        movement_id = movement.id
+                    except ValueError as error:
+                        return str(error), 400
+                record = ModuleRecord(id=identity, module_key="family_support_payments", title="Kumasi Rental Project",
                     record_date=paid_date, amount=amount, status="Paid", reference=token,
-                    payload=dict(recipient=recipient, dueDate=due.isoformat(), paymentDate=paid_date.isoformat(),
-                        amountPaid=amount, paymentMethod=method, paymentReference=normalize_text(request.form.get("paymentReference"))[:200],
+                    payload=dict(recipient="project", dueDate=due.isoformat() if action == "payment" else "", paymentDate=paid_date.isoformat(),
+                        amountPaid=amount, paymentMethod=method, paymentReference=reference,
+                        entryType="Project Spending" if action == "spending" else "Bank Contribution", bankLabel=bank,
+                        fundingSource=source, linkedCashMovementId=movement_id, category=category,
                         notes=normalize_text(request.form.get("notes"))[:1000], recordedBy=g.current_user.full_name,
-                        classification="Private family support; not a business expense"))
+                        classification="Private Kumasi rental project; not a business expense or payment to parents"))
                 g.db.add(record)
-                audit("family_support_payments", "Private Family Support", "payment", row["name"], identity,
-                      f"{amount:.2f}; cycle {due}; received {paid_date}; {method}. No business expense or cashbook entry created.")
+                audit("family_support_payments", "Private Rental Project", action, "Kumasi Rental Project", identity,
+                      f"{amount:.2f}; cycle {due}; actual date {paid_date}; {method}; {source}; linked owner withdrawal {movement_id or 'none'}. No business expense created.")
             else:
                 return "Choose a valid action.", 400
             g.db.commit()
-            flash("Private family support record saved. No money was sent automatically.", "success")
+            flash("Private rental project record saved. No money was sent automatically.", "success")
             return redirect(url_for("family_support_page"))
-        return render_template("family_support.html", page_title="Family Support", support=context, today=today, request_id=uuid4().hex)
+        return render_template("family_support.html", page_title="Kumasi Rental Project", support=context, today=today, request_id=uuid4().hex)
 
     @app.route("/app/")
     @access_required("dashboard")

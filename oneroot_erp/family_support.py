@@ -1,11 +1,11 @@
-"""Private family support ledger, separate from business expenses and profit."""
+"""Private Kumasi project fund; legacy parental support is preserved as history."""
 import calendar
 from datetime import date
 
 from sqlalchemy import select
 from .models import AppSetting, ModuleRecord
 
-RECIPIENTS = {"mum": ("Mum", 800.0), "dad": ("Dad", 600.0)}
+RECIPIENTS = {"project": ("Kumasi Rental Project", 1400.0)}
 
 
 def cycle_date(first, offset):
@@ -21,8 +21,16 @@ def support_context(db, today):
     payments = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "family_support_payments")
                           .order_by(ModuleRecord.record_date.desc(), ModuleRecord.created_at.desc())).all()
     totals = {}
+    contributions = spending = 0.0
     for r in payments:
         p = r.payload or {}
+        if p.get("recipient") != "project":
+            continue  # Keep any old direct-support payments as history, not project savings.
+        amount = float(p.get("amountPaid", 0))
+        if p.get("entryType") == "Project Spending":
+            spending += amount
+            continue
+        contributions += amount
         key = (p.get("recipient"), p.get("dueDate"))
         totals[key] = round(totals.get(key, 0) + float(p.get("amountPaid", 0)), 2)
     cycles = []
@@ -37,5 +45,6 @@ def support_context(db, today):
             if due > today:
                 break
     return dict(first=first, cycles=cycles, payments=payments,
+                contributions=round(contributions,2), spending=round(spending,2), balance=round(contributions-spending,2),
                 outstanding=round(sum(r["remaining"] for r in cycles if r["due"] <= today), 2),
                 due_count=sum(r["remaining"] > 0 and r["due"] <= today for r in cycles))

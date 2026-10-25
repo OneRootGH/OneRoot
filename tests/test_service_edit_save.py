@@ -20,6 +20,31 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_project_funding_withdrawal_spending_and_old_support_stay_separate(self):
+        from oneroot_erp.family_support import support_context
+        first=date.today().isoformat()
+        self.client.post("/app/family-support",data=dict(action="schedule",firstDueDate=first))
+        db=self.sessions()
+        before=daily_cash_movement_context(db,date.today())["effects"]["groceriesCash"]
+        contribution=dict(action="payment",recipient="project",dueDate=first,paymentDate=first,
+            amountPaid="1400",paymentMethod="Bank Transfer",bankLabel="Project 1234",paymentReference="P-1",
+            fundingSource="groceries",requestId="a"*32)
+        self.assertEqual(self.client.post("/app/family-support",data=contribution).status_code,302)
+        self.assertEqual(self.client.post("/app/family-support",data=contribution).status_code,302)
+        db=self.sessions()
+        self.assertEqual(daily_cash_movement_context(db,date.today())["effects"]["groceriesCash"],before-1400)
+        spend=dict(action="spending",paymentDate=first,amountPaid="200",category="Materials",paymentMethod="Bank Transfer",requestId="b"*32,notes="Supplier")
+        self.assertEqual(self.client.post("/app/family-support",data=spend).status_code,302)
+        db=self.sessions()
+        db.add(ModuleRecord(id="old-mum-support",module_key="family_support_payments",amount=800,
+                            payload=dict(recipient="mum",amountPaid=800,dueDate=first)))
+        db.commit()
+        c=support_context(db,date.today())
+        self.assertEqual((c["contributions"],c["spending"],c["balance"]),(1400,200,1200))
+        self.assertEqual(c["outstanding"],0)
+        self.assertEqual(self.client.post("/app/family-support",data={**spend,"amountPaid":"1300","requestId":"d"*32}).status_code,400)
+        self.assertFalse(self.sessions().scalars(select(ModuleRecord).where(ModuleRecord.module_key=="expenses")).all())
+
     def test_family_support_owner_only_two_month_cycle_and_no_business_expense(self):
         from oneroot_erp.family_support import support_context, cycle_date
         self.assertEqual(cycle_date(date(2026,12,31),1),date(2027,2,28))
@@ -28,8 +53,8 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertIsNone(support_context(db,date.today())["first"])
         first=date.today()-timedelta(days=1)
         self.assertEqual(self.client.post("/app/family-support",data=dict(action="schedule",firstDueDate=first.isoformat())).status_code,302)
-        data=dict(action="payment",recipient="mum",dueDate=first.isoformat(),paymentDate=date.today().isoformat(),
-                  amountPaid="800",paymentMethod="Mobile Money",requestId="c"*32)
+        data=dict(action="payment",recipient="project",dueDate=first.isoformat(),paymentDate=date.today().isoformat(),
+                  amountPaid="800",paymentMethod="Bank Transfer",bankLabel="Project bank 1234",paymentReference="TEST-1",requestId="c"*32)
         self.assertEqual(self.client.post("/app/family-support",data=data).status_code,302)
         self.assertEqual(self.client.post("/app/family-support",data=data).status_code,302)
         db=self.sessions()
