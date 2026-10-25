@@ -20,6 +20,26 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_construction_meals_use_existing_kitchen_workflow(self):
+        from oneroot_erp.registry import BUSINESS_AREA_LABELS
+        from oneroot_erp.app import POS_FOOD_SALES_AREA_IDS
+        self.assertIn("construction-worker-meals", POS_FOOD_SALES_AREA_IDS)
+        self.assertEqual(BUSINESS_AREA_LABELS["construction-worker-meals"], "OneRoot Construction Worker Meal Supply")
+        page = self.client.get("/app/modules/kitchen_orders/new")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('name="siteName"', page.get_data(as_text=True))
+        data = dict(orderDate=date.today().isoformat(), businessAreaId="cold-store-groceries",
+                    customerName="Site Customer", orderType="Construction Worker Meal Supply",
+                    kitchenItem="Jollof rice", itemQuantity="10", amountDue="150", costAmount="90",
+                    status="Received", siteName="Medie building site", workerCount="10")
+        response = self.client.post("/app/modules/kitchen_orders/new", data=data)
+        self.assertEqual(response.status_code, 302)
+        db = self.sessions()
+        record = db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "kitchen_orders"))
+        self.assertEqual(record.business_area_id, "construction-worker-meals")
+        self.assertEqual(record.payload["siteName"], "Medie building site")
+        self.assertEqual(self.client.post("/app/modules/kitchen_orders/new", data=dict(data, workerCount="0")).status_code, 400)
+
     def test_property_name_choices_use_existing_records_and_allow_custom_names(self):
         from oneroot_erp.family_support import project_name_options, project_register_entry
         db = self.sessions()

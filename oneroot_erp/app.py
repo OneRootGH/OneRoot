@@ -78,7 +78,7 @@ KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
 KITCHEN_MEAL_ITEMS_KEY = "mealItems"
 # Cold Store & Kitchen handles its food range and the fast-moving construction
 # consumables counter. Groceries & More remains the retail home for phone stock.
-POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables", "plumbing-electrical"}
+POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables", "plumbing-electrical", "construction-worker-meals"}
 POS_GROCERIES_MORE_AREA_IDS = {
     "bedding-linen",
     "gift-care-packages",
@@ -6699,6 +6699,11 @@ SERVICE_MODULE_SECTIONS = {
         ),
     ],
     "kitchen_orders": [
+        (
+            "Construction Worker Meal Supply",
+            "Select Construction Worker Meal Supply as the order type for site meals. Choose meals and total portions below; record payments only when received.",
+            ["siteName", "siteContact", "workerCount"],
+        ),
         (
             "Order Intake",
             "Capture the order source, customer, and service mode first so the kitchen can act quickly without missing direct walk-ins, takeaways, or website food requests.",
@@ -21904,7 +21909,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         parsed_line_items = []
                     if isinstance(parsed_line_items, list):
                         payload[SERVICE_LINE_ITEMS_KEY] = parsed_line_items
-                payload["businessAreaId"] = SERVICE_MODULE_AREA_IDS[module_key]
+                payload["businessAreaId"] = ("construction-worker-meals"
+                    if module_key == "kitchen_orders" and payload.get("orderType") == "Construction Worker Meal Supply"
+                    else SERVICE_MODULE_AREA_IDS[module_key])
+                if payload["businessAreaId"] == "construction-worker-meals":
+                    workers = parse_amount(payload.get("workerCount"))
+                    if not normalize_text(payload.get("siteName")) or workers < 1 or workers != int(workers):
+                        return "Enter the construction site and a whole number of workers (at least one).", 400
                 hydrate_service_cost_payload(g.db, module_key, payload)
                 sync_service_line_item_rollup(module_key, payload)
                 apply_service_payment_rollup(module_key, payload)

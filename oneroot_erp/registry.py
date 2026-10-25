@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 
 BUSINESS_AREAS = [
+    {"id": "construction-worker-meals", "label": "OneRoot Construction Worker Meal Supply", "short": "Construction Worker Meals"},
     {"id": "water-equipment", "label": "OneRoot Water & Equipment Rentals", "short": "Water & Equipment"},
     {"id": "cold-store-groceries", "label": "OneRoot Cold Store & Kitchen", "short": "Cold Store & Kitchen"},
     {"id": "groceries", "label": "OneRoot Groceries & More", "short": "Groceries & More"},
@@ -23,6 +24,7 @@ BUSINESS_AREA_OPTIONS = [(item["id"], item["label"]) for item in BUSINESS_AREAS]
 BUSINESS_AREA_LABELS = {item["id"]: item["label"] for item in BUSINESS_AREAS}
 BUSINESS_AREA_SHORT = {item["id"]: item["short"] for item in BUSINESS_AREAS}
 INVENTORY_CATEGORY_LIBRARY = {
+    "construction-worker-meals": ["Site Breakfast", "Site Lunch", "Site Supper", "Worker Meal Packs", "Water & Meal Add-ons"],
     "bedding-linen": ["Bedsheets & Pillowcases", "Mattress Protectors", "Towels & Bath Linen", "Duvets & Blankets", "Bedding Sets"],
     "gift-care-packages": ["Grocery Hampers", "New Baby Essentials", "Birthday Packages", "Household Care Packages", "Custom Gift Packages"],
     "reseller-supply-packs": ["Drinks Reseller Packs", "Snacks Reseller Packs", "Pantry Reseller Packs", "Household Supplies Packs", "Personal Care Packs", "Mixed Starter Packs"],
@@ -697,6 +699,7 @@ EQUIPMENT_RENTAL_CATEGORY_OPTIONS = [
 EQUIPMENT_RENTAL_STATUSES = ["Booked", "Out", "Returned", "Cancelled"]
 EQUIPMENT_CONDITIONS = ["Good", "Fair", "Damaged"]
 KITCHEN_ORDER_TYPES = [
+    ("Construction Worker Meal Supply", "Construction Worker Meal Supply"),
     ("Breakfast", "Breakfast"),
     ("Meal Plan", "Meal Plan"),
     ("Walk-in", "Walk-in"),
@@ -1435,7 +1438,7 @@ MODULES: dict[str, ModuleDefinition] = {
     ),
     "kitchen_orders": ModuleDefinition(
         key="kitchen_orders",
-        label="Kitchen, Breakfast & Meal Plans",
+        label="Kitchen, Meal Plans & Site Meals",
         legacy_collection="kitchenOrders",
         menu_group="Services",
         amount_field="amountDue",
@@ -1448,6 +1451,9 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("customerName", "Customer Name", "text"),
             FieldDefinition("customerPhone", "Customer Phone", "text"),
             FieldDefinition("orderType", "Order Type", "select", True, KITCHEN_ORDER_TYPES),
+            FieldDefinition("siteName", "Construction Site / Project", "text"),
+            FieldDefinition("siteContact", "Site Supervisor / Contact", "text"),
+            FieldDefinition("workerCount", "Workers To Serve", "number", False, step="1"),
             FieldDefinition("deliveryMode", "Delivery Mode", "select", False, [(item, item) for item in KITCHEN_DELIVERY_MODES]),
             FieldDefinition("kitchenCategory", "Kitchen Category", "select", False, KITCHEN_ORDER_CATEGORY_OPTIONS),
             FieldDefinition("kitchenItem", "Kitchen Item", "text", True),
