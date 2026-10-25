@@ -21,6 +21,9 @@
   </section>
 
   <section class="dashboard-chart-grid">
+    {% if family_support %}<article class="card"><div class="card-header"><h3>Private Family Support</h3><a href="{{ url_for('family_support_page') }}">Mum &amp; Dad Payments</a></div>
+      {% if family_support.first %}<p>{{ family_support.due_count }} due / overdue payment(s) · <strong>{{ family_support.outstanding|currency }}</strong> outstanding.</p>{% else %}<p>Set the first due date to start the two-month schedule.</p>{% endif %}
+      <small>Mum GH₵800 + Dad GH₵600 every two months. Owner only. Not a business expense.</small></article>{% endif %}
     {% if latest_cash_position %}
     <article class="card">
       <div class="card-header"><h3>Latest Daily Cash · {{ latest_cash_position.record_date }} · {{ latest_cash_position.payload.get('entryType','Legacy Closing') }}</h3><a class="button subtle" href="{{ url_for('daily_cash_page', date=latest_cash_position.record_date, entryType=latest_cash_position.payload.get('entryType','Closing')) }}">View Daily Records</a></div>

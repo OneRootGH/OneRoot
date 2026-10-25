@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card"><div class="card-header"><div><h3>Family Support — Mum &amp; Dad</h3><p>Private owner records. GH₵800 for Mum and GH₵600 for Dad every two calendar months: GH₵1,400 per cycle.</p></div><a class="button" href="{{ url_for('dashboard') }}">Dashboard</a></div>
+<p>No automatic bank or MoMo transfer is made. These payments do not create business expenses or reduce business profit. If business funds are used, separately record the actual owner withdrawal once in Daily Cash / Cashbook.</p>
+<form method="post" class="toolbar"><input type="hidden" name="action" value="schedule"><label>First due date<input type="date" name="firstDueDate" value="{{ support.first or '' }}" required></label><button class="button" type="submit">Save Schedule</button></form>
+{% if not support.first %}<p><strong>Schedule not started.</strong> Set the first due date before reminders or payments are shown. No arrears have been assumed.</p>{% endif %}
+<p>Due / overdue balance: <strong>{{ support.outstanding|currency }}</strong>. {{ support.due_count }} recipient payment(s) need attention.</p>
+<div class="table-wrap"><table><thead><tr><th>Recipient</th><th>Due Date</th><th>Scheduled</th><th>Paid</th><th>Remaining</th><th>Status</th><th>Payment</th></tr></thead><tbody>
+{% for r in support.cycles %}<tr><td>{{ r.name }}</td><td>{{ r.due }}</td><td>{{ r.amount|currency }}</td><td>{{ r.paid|currency }}</td><td>{{ r.remaining|currency }}</td><td>{{ r.status }}</td><td>
+{% if r.remaining %}<details><summary>Record Payment</summary><form method="post" class="form-grid"><input type="hidden" name="action" value="payment"><input type="hidden" name="recipient" value="{{ r.recipient }}"><input type="hidden" name="dueDate" value="{{ r.due }}"><input type="hidden" name="requestId" value="{{ request_id }}">
+<label>Amount paid<input type="number" name="amountPaid" min="0.01" max="{{ r.remaining }}" step="0.01" value="{{ r.remaining }}" required></label>
+<label>Actual payment date<input type="date" name="paymentDate" value="{{ today }}" max="{{ today }}" required></label>
+<label>Method<select name="paymentMethod"><option>Cash</option><option>Mobile Money</option><option>Bank Transfer</option></select></label>
+<label>Reference<input name="paymentReference" maxlength="200"></label><label>Note<input name="notes" maxlength="1000"></label><button class="button primary" type="submit">Save Actual Payment</button>
+</form></details>{% else %}Fully paid{% endif %}</td></tr>{% endfor %}
+</tbody></table></div></section>
+<section class="card"><h3>Payment History</h3><div class="table-wrap"><table><thead><tr><th>Paid Date</th><th>Recipient</th><th>Cycle Due</th><th>Amount</th><th>Method / Reference</th><th>Notes</th></tr></thead><tbody>
+{% for r in support.payments %}<tr><td>{{ r.record_date }}</td><td>{{ r.title }}</td><td>{{ r.payload.get('dueDate') }}</td><td>{{ r.amount|currency }}</td><td>{{ r.payload.get('paymentMethod') }} · {{ r.payload.get('paymentReference') }}</td><td>{{ r.payload.get('notes') }}</td></tr>{% else %}<tr><td colspan="6">No family support payments recorded.</td></tr>{% endfor %}
+</tbody></table></div></section>
+{% endblock %}

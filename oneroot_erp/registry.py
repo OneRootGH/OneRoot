@@ -500,6 +500,7 @@ ROLE_ACCESS_KEYS["owner"].add("staff_documents")
 # Family education records are private and deliberately excluded from all
 # business finance, staff, and administrator roles.
 ROLE_ACCESS_KEYS["owner"].add("family_education_payments")
+ROLE_ACCESS_KEYS["owner"].add("family_support_payments")
 ROLE_ACCESS_KEYS["admin"].add("staff_documents")
 ROLE_ACCESS_KEYS["operations"].add("staff_documents")
 ROLE_ACCESS_KEYS["hr-payroll"].add("staff_documents")
@@ -2385,6 +2386,10 @@ MODULES: dict[str, ModuleDefinition] = {
             FieldDefinition("notes", "Notes", "textarea"),
         ],
     ),
+    "family_support_payments": ModuleDefinition(
+        key="family_support_payments", label="Family Support - Mum & Dad", legacy_collection="familySupportPayments",
+        menu_group="Owner Private", amount_field="amountPaid", date_field="paymentDate", title_field="recipient",
+        editable=False, fields=[]),
     "family_education_payments": ModuleDefinition(
         key="family_education_payments",
         label="Children's School Payments",
@@ -2566,7 +2571,7 @@ MENU_GROUPS = [
         [
             ("Planning & Reporting", ["attention", "forecast_plans", "recurring_controls", "pos_closeouts", "loss_prevention_controls"]),
             ("Assets & Admin", ["asset_records", "audit", "users"]),
-            ("Owner Private Records", ["family_education_payments"]),
+            ("Owner Private Records", ["family_education_payments", "family_support_payments"]),
         ],
     ),
 ]

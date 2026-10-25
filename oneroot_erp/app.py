@@ -34,6 +34,7 @@ from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
+from .family_support import support_context, RECIPIENTS
 from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
 from .phone_catalog import PHONE_CHARGING_ITEMS
 from .registry import (
@@ -6409,6 +6410,8 @@ def user_access_keys(user: User | None) -> set[str]:
 
 
 def user_has_access(user: User | None, key: str) -> bool:
+    if key == "family_support_payments":
+        return normalize_role_key(getattr(user, "role", "")) == "owner"
     return key in user_access_keys(user)
 
 
@@ -16805,6 +16808,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
 
         module_records = g.db.scalars(select(ModuleRecord)).all()
         for record in module_records:
+            if record.module_key == "family_support_payments" and not user_is_owner(g.current_user):
+                continue
             legacy_key = MODULE_TO_LEGACY.get(record.module_key)
             if not legacy_key:
                 continue
@@ -16880,7 +16885,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 }
             )
 
-        audits = g.db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(2500)).all()
+        audits = g.db.scalars(select(AuditLog).where(
+            True if user_is_owner(g.current_user) else AuditLog.module_key != "family_support_payments"
+        ).order_by(desc(AuditLog.created_at)).limit(2500)).all()
         workspace["auditTrail"] = [
             {
                 "id": entry.id,
@@ -18697,6 +18704,63 @@ def create_app(config: AppConfig | None = None) -> Flask:
         flash("Expense permission updated. The account role is unchanged.", "success")
         return redirect(url_for("users_page", edit=user.id))
 
+    @app.route("/app/family-support", methods=["GET", "POST"])
+    @login_required
+    def family_support_page():
+        if not user_is_owner(g.current_user):
+            return "This is a private owner-only record.", 403
+        today = current_local_datetime().date()
+        context = support_context(g.db, today)
+        if request.method == "POST":
+            if g.db.bind.dialect.name == "postgresql":
+                g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext('owner-family-support'))"))
+                g.db.expire_all()
+                context = support_context(g.db, today)
+            action = request.form.get("action")
+            if action == "schedule":
+                first = parse_date(request.form.get("firstDueDate"))
+                if not first or not date(2020,1,1) <= first <= date(today.year+2,12,31):
+                    return "Choose a valid first due date.", 400
+                if context["payments"] and first != context["first"]:
+                    return "Payments already exist. The schedule anchor cannot be changed without reviewing payment history.", 409
+                setting = g.db.get(AppSetting, "owner-family-support") or AppSetting(key="owner-family-support")
+                setting.value = dict(firstDueDate=first.isoformat())
+                g.db.add(setting)
+                audit("family_support_payments", "Private Family Support", "schedule", "Mum and Dad", detail=f"First due {first}; every two months; Mum 800; Dad 600.")
+            elif action == "payment":
+                recipient = request.form.get("recipient")
+                due = parse_date(request.form.get("dueDate"))
+                row = next((r for r in context["cycles"] if r["recipient"] == recipient and r["due"] == due), None)
+                paid_date = parse_date(request.form.get("paymentDate"))
+                token = normalize_text(request.form.get("requestId"))
+                if not re.fullmatch(r"[a-f0-9]{32}", token):
+                    return "Refresh the payment form.", 400
+                identity = "family-pay-" + token
+                if g.db.get(ModuleRecord, identity):
+                    return redirect(url_for("family_support_page"))
+                try:
+                    amount = cash_money(request.form.get("amountPaid"))
+                except ValueError as error:
+                    return str(error), 400
+                method = normalize_text(request.form.get("paymentMethod"))
+                if not row or not paid_date or paid_date > today or not 0 < amount <= row["remaining"] or method not in {"Cash", "Mobile Money", "Bank Transfer"}:
+                    return "Check the recipient, cycle, actual date, payment method and amount. Payment cannot exceed the cycle balance.", 400
+                record = ModuleRecord(id=identity, module_key="family_support_payments", title=row["name"],
+                    record_date=paid_date, amount=amount, status="Paid", reference=token,
+                    payload=dict(recipient=recipient, dueDate=due.isoformat(), paymentDate=paid_date.isoformat(),
+                        amountPaid=amount, paymentMethod=method, paymentReference=normalize_text(request.form.get("paymentReference"))[:200],
+                        notes=normalize_text(request.form.get("notes"))[:1000], recordedBy=g.current_user.full_name,
+                        classification="Private family support; not a business expense"))
+                g.db.add(record)
+                audit("family_support_payments", "Private Family Support", "payment", row["name"], identity,
+                      f"{amount:.2f}; cycle {due}; received {paid_date}; {method}. No business expense or cashbook entry created.")
+            else:
+                return "Choose a valid action.", 400
+            g.db.commit()
+            flash("Private family support record saved. No money was sent automatically.", "success")
+            return redirect(url_for("family_support_page"))
+        return render_template("family_support.html", page_title="Family Support", support=context, today=today, request_id=uuid4().hex)
+
     @app.route("/app/")
     @access_required("dashboard")
     def dashboard():
@@ -18854,13 +18918,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
             sum(max(parse_amount(order.get("totalAmount")) - parse_amount(order.get("paidAmount")), 0) for order in online_orders),
             2,
         )
-        latest_audit = g.db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(12)).all()
+        latest_audit = g.db.scalars(select(AuditLog).where(
+            True if user_is_owner(g.current_user) else AuditLog.module_key != "family_support_payments"
+        ).order_by(desc(AuditLog.created_at)).limit(12)).all()
         counts = defaultdict(int)
         for record in all_records:
             counts[record.module_key] += 1
 
         return render_template(
             "dashboard.html",
+            family_support=support_context(g.db, today) if user_is_owner(g.current_user) else None,
             latest_cash_position=(g.db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")
                 .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at)).limit(1)) if user_has_access(g.current_user, "daily_cash_positions") else None),
             page_title="Dashboard",
@@ -20048,7 +20115,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             near_stock_out_risk_count=sum(1 for row in inventory_risk_rows if row["isNearStockOut"]),
             stock_out_risk_count=sum(1 for row in inventory_risk_rows if row["isStockOut"]),
             business_area_options=BUSINESS_AREA_OPTIONS,
-            recent_audits=g.db.scalars(select(AuditLog).order_by(desc(AuditLog.created_at)).limit(10)).all(),
+            recent_audits=g.db.scalars(select(AuditLog).where(
+                True if user_is_owner(g.current_user) else AuditLog.module_key != "family_support_payments"
+            ).order_by(desc(AuditLog.created_at)).limit(10)).all(),
         )
 
     @app.route("/app/reports/export.csv")
@@ -20431,6 +20500,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             audits = g.db.scalars(
                 select(AuditLog)
                 .where(
+                    True if user_is_owner(g.current_user) else AuditLog.module_key != "family_support_payments",
                     or_(
                         AuditLog.title.ilike(like_value),
                         AuditLog.detail.ilike(like_value),
@@ -20763,6 +20833,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key == "family_support_payments":
+            return redirect(url_for("family_support_page"))
         if module_key in {"staff_reporting_schedule", "workforce_attendance"}:
             ensure_reporting_schedule(g.db, set_module_record_metadata, MODULES["staff_reporting_schedule"])
         if module_key == "staff_reporting_schedule":
@@ -25211,6 +25283,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             select(AuditLog.action).distinct().order_by(AuditLog.action)
         ).all()
         query = select(AuditLog)
+        if not user_is_owner(g.current_user):
+            query = query.where(AuditLog.module_key != "family_support_payments")
         if action_filter:
             query = query.where(AuditLog.action == action_filter)
         audits = g.db.scalars(query.order_by(desc(AuditLog.created_at)).limit(250)).all()

@@ -20,6 +20,31 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_family_support_owner_only_two_month_cycle_and_no_business_expense(self):
+        from oneroot_erp.family_support import support_context, cycle_date
+        self.assertEqual(cycle_date(date(2026,12,31),1),date(2027,2,28))
+        self.assertEqual(cycle_date(date(2026,12,31),2),date(2027,4,30))
+        db=self.sessions()
+        self.assertIsNone(support_context(db,date.today())["first"])
+        first=date.today()-timedelta(days=1)
+        self.assertEqual(self.client.post("/app/family-support",data=dict(action="schedule",firstDueDate=first.isoformat())).status_code,302)
+        data=dict(action="payment",recipient="mum",dueDate=first.isoformat(),paymentDate=date.today().isoformat(),
+                  amountPaid="800",paymentMethod="Mobile Money",requestId="c"*32)
+        self.assertEqual(self.client.post("/app/family-support",data=data).status_code,302)
+        self.assertEqual(self.client.post("/app/family-support",data=data).status_code,302)
+        db=self.sessions()
+        rows=db.scalars(select(ModuleRecord).where(ModuleRecord.module_key=="family_support_payments")).all()
+        self.assertEqual(len(rows),1)
+        context=support_context(db,date.today())
+        self.assertEqual(context["outstanding"],600)
+        self.assertEqual(context["due_count"],1)
+        self.assertFalse(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(["expenses","cashbook_entries"]))).all())
+        self.assertEqual(self.client.post("/app/family-support",data={**data,"requestId":"d"*32}).status_code,400)
+        with self.client.session_transaction() as session:session["user_id"]="cashier"
+        self.assertEqual(self.client.get("/app/family-support").status_code,403)
+        self.assertNotEqual(self.client.get("/app/modules/family_support_payments/export.csv").status_code,200)
+        self.assertEqual(self.client.post("/app/family-support",data=data).status_code,403)
+
     def test_daily_cash_history_shows_total_without_counting_petty_twice(self):
         db=self.sessions()
         db.add(ModuleRecord(id="daily-total-test",module_key="daily_cash_positions",record_date=date.today(),
