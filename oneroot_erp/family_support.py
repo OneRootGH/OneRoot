@@ -1,5 +1,6 @@
 """Private Kumasi project fund; legacy parental support is preserved as history."""
 import calendar
+import math
 from datetime import date
 
 from sqlalchemy import select
@@ -12,6 +13,66 @@ PROJECTS = {
     "samsam": dict(name="Samsam", landStatus="Purchased", developmentStatus="Development Ongoing"),
     "sefwi-wiawso": dict(name="Sefwi Wiawso", landStatus="Purchased", developmentStatus="Not Started"),
 }
+
+PROJECT_REGISTERS = {
+    "stages": ("Not Started", "In Progress", "Completed", "On Hold"),
+    "tasks": ("Open", "In Progress", "Completed", "Blocked"),
+    "contractors": ("Proposed", "Active", "Completed", "On Hold"),
+    "units": ("Planned", "Under Construction", "Ready", "Handed Over"),
+    "documents": ("Pending", "Received", "Approved", "Expired"),
+}
+
+
+def project_register_entry(form, identity):
+    kind = form.get("register", "")
+    status = form.get("status", "")
+    title = (form.get("title") or "").strip()[:200]
+    if kind not in PROJECT_REGISTERS or status not in PROJECT_REGISTERS[kind] or not title:
+        raise ValueError("Enter a title and choose a valid register and status.")
+    row = dict(id=identity, title=title, status=status)
+    for key in ("responsible", "notes", "reference", "stageId"):
+        row[key] = (form.get(key) or "").strip()[:2000]
+    for key in ("startDate", "dueDate"):
+        raw = form.get(key) or ""
+        row[key] = date.fromisoformat(raw).isoformat() if raw else ""
+    if row["startDate"] and row["dueDate"] and row["dueDate"] < row["startDate"]:
+        raise ValueError("The due date cannot precede the start date.")
+    for key in ("budget", "progress", "monthlyRent"):
+        value = float(form.get(key) or 0)
+        if not math.isfinite(value) or value < 0 or (key == "progress" and value > 100):
+            raise ValueError("Amounts must be positive and progress must be between 0 and 100.")
+        row[key] = round(value, 2)
+    if kind == "stages" and status == "Completed":
+        row["progress"] = 100
+    if row["reference"] and not row["reference"].startswith("https://"):
+        raise ValueError("Document links must start with https://. Use notes for paper-file references.")
+    return kind, row
+
+
+def project_management_context(project, payments, today):
+    registers = {key: [dict(row) for row in project.get(key, [])] for key in PROJECT_REGISTERS}
+    spending = [r for r in payments if (r.payload or {}).get("entryType") == "Project Spending"]
+    for kind in ("stages", "contractors"):
+        for row in registers[kind]:
+            link = "stageId" if kind == "stages" else "contractorId"
+            row["paid"] = round(sum(float(r.payload.get("amountPaid", 0)) for r in spending
+                                    if r.payload.get(link) == row["id"]), 2)
+            row["remaining"] = round(row.get("budget", 0) - row["paid"], 2)
+    for rows in registers.values():
+        for row in rows:
+            row["overdue"] = bool(row.get("dueDate") and row["dueDate"] < today.isoformat()
+                                  and row["status"] not in {"Completed", "Handed Over", "Approved"})
+    budget = round(sum(r.get("budget", 0) for r in registers["stages"]), 2)
+    actual = round(sum(float(r.payload.get("amountPaid", 0)) for r in spending), 2)
+    stages = registers["stages"]
+    progress = (sum(r.get("progress", 0) * r.get("budget", 0) for r in stages) / budget if budget
+                else sum(r.get("progress", 0) for r in stages) / len(stages) if stages else None)
+    return dict(registers=registers, budget=budget, actual=actual, budgetRemaining=round(budget-actual, 2),
+                progress=round(progress, 1) if progress is not None else None,
+                contractorOutstanding=round(sum(max(r["remaining"], 0) for r in registers["contractors"]), 2),
+                rentPotential=round(sum(r.get("monthlyRent", 0) for r in registers["units"]), 2),
+                overdue=sum(r["overdue"] for rows in registers.values() for r in rows),
+                unallocated=round(sum(float(r.payload.get("amountPaid", 0)) for r in spending if not r.payload.get("stageId")), 2))
 
 
 def property_projects(db):
@@ -58,7 +119,7 @@ def support_context(db, today, project_id="kumasi"):
                                    status="Paid" if not remaining else ("Overdue" if due < today else "Due Today" if due == today else "Upcoming")))
             if due > today:
                 break
-    return dict(first=first, cycles=cycles, payments=payments,
+    return dict(management=project_management_context(projects[project_id], payments, today), first=first, cycles=cycles, payments=payments,
                 allPayments=all_payments, projects=projects, projectId=project_id, project=projects[project_id],
                 contributions=round(contributions,2), spending=round(spending,2), balance=round(contributions-spending,2),
                 outstanding=round(sum(r["remaining"] for r in cycles if r["due"] <= today), 2),

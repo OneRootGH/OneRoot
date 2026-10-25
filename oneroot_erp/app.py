@@ -34,7 +34,7 @@ from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
-from .family_support import support_context, RECIPIENTS, PROJECTS
+from .family_support import support_context, RECIPIENTS, PROJECTS, PROJECT_REGISTERS, project_register_entry
 from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
 from .phone_catalog import PHONE_CHARGING_ITEMS
 from .registry import (
@@ -18722,13 +18722,34 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 g.db.expire_all()
                 context = support_context(g.db, today, project_id)
             action = request.form.get("action")
-            if action == "project-settings":
+            if action == "project-register":
+                kind = request.form.get("register")
+                if kind not in PROJECT_REGISTERS:
+                    return "Choose a valid project register.", 400
+                identity = normalize_text(request.form.get("entryId")) or uuid4().hex
+                rows = list(context["project"].get(kind, []))
+                existing = next((r for r in rows if r["id"] == identity), None)
+                if request.form.get("entryId") and not existing:
+                    return "This entry does not belong to this project.", 404
+                try:
+                    _, entry = project_register_entry(request.form, identity)
+                except (ValueError, OverflowError) as error:
+                    return str(error), 400
+                if entry.get("stageId") and not any(r["id"] == entry["stageId"] for r in context["project"].get("stages", [])):
+                    return "Choose a stage from this project.", 400
+                rows = [entry if r["id"] == identity else r for r in rows] if existing else rows + [entry]
+                setting = g.db.get(AppSetting, "owner-property-project|" + project_id) or AppSetting(key="owner-property-project|" + project_id)
+                setting.value = dict(setting.value or {}, **{kind: rows})
+                g.db.add(setting)
+                audit("family_support_payments", "Private Property Projects", "project-register", entry["title"], identity,
+                      f"{project_id}; {kind}; previous {existing}; saved {entry}")
+            elif action == "project-settings":
                 land = normalize_text(request.form.get("landStatus"))
                 development = normalize_text(request.form.get("developmentStatus"))
                 if land not in {"Not Recorded", "Purchased"} or development not in {"Planning", "Not Started", "Development Ongoing", "Completed", "On Hold"}:
                     return "Choose valid land and development statuses.", 400
                 setting = g.db.get(AppSetting, "owner-property-project|" + project_id) or AppSetting(key="owner-property-project|" + project_id)
-                setting.value = dict(landStatus=land, developmentStatus=development,
+                setting.value = dict(setting.value or {}, landStatus=land, developmentStatus=development,
                     notes=normalize_text(request.form.get("projectNotes"))[:2000])
                 g.db.add(setting)
                 audit("family_support_payments", "Private Property Projects", "project-status", context["project"]["name"],
@@ -18783,6 +18804,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if source not in {"personal", "groceries", "food", "momoCash", "momoECash", "bank"}:
                     return "Choose the actual source of funding.", 400
                 movement_id = ""
+                stage_id = normalize_text(request.form.get("stageId")) if action == "spending" else ""
+                contractor_id = normalize_text(request.form.get("contractorId")) if action == "spending" else ""
+                for kind, linked_id in (("stages", stage_id), ("contractors", contractor_id)):
+                    if linked_id and not any(r["id"] == linked_id for r in context["project"].get(kind, [])):
+                        return "Choose a stage or contractor belonging to this project.", 400
                 if action == "payment" and source != "personal":
                     try:
                         movement = save_cash_transfer(paid_date, source, "owner", amount,
@@ -18796,7 +18822,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     payload=dict(recipient="project", projectId=project_id, dueDate=due.isoformat() if action == "payment" and due else "", paymentDate=paid_date.isoformat(),
                         amountPaid=amount, paymentMethod=method, paymentReference=reference,
                         entryType="Project Spending" if action == "spending" else "Bank Contribution", bankLabel=bank,
-                        fundingSource=source, linkedCashMovementId=movement_id, category=category,
+                        fundingSource=source, linkedCashMovementId=movement_id, category=category, stageId=stage_id, contractorId=contractor_id,
                         notes=normalize_text(request.form.get("notes"))[:1000], recordedBy=g.current_user.full_name,
                         classification="Private property project; not a business expense or payment to parents"))
                 g.db.add(record)
@@ -18807,7 +18833,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             g.db.commit()
             flash("Private rental project record saved. No money was sent automatically.", "success")
             return redirect(url_for("family_support_page", project=project_id))
-        return render_template("family_support.html", page_title="Private Property Projects", support=context, today=today, request_id=uuid4().hex)
+        return render_template("family_support.html", page_title="Private Property Projects", support=context, today=today, request_id=uuid4().hex, project_registers=PROJECT_REGISTERS)
 
     @app.route("/app/")
     @access_required("dashboard")

@@ -20,6 +20,43 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_property_construction_registers_and_linked_spending(self):
+        from oneroot_erp.family_support import support_context
+        base = dict(project="medie", action="project-register", register="stages", title="Foundation",
+                    status="In Progress", budget="1000", progress="25", dueDate="2020-01-01")
+        self.assertEqual(self.client.post("/app/property-projects", data=base).status_code, 302)
+        context = support_context(self.sessions(), date.today(), "medie")
+        stage = context["management"]["registers"]["stages"][0]
+        self.assertEqual(context["management"]["budget"], 1000)
+        self.assertEqual(context["management"]["progress"], 25)
+        self.assertTrue(stage["overdue"])
+        self.assertEqual(self.client.post("/app/property-projects", data=dict(base, progress="nan")).status_code, 400)
+        self.assertEqual(self.client.post("/app/property-projects", data=dict(base, project="samsam", entryId=stage["id"])).status_code, 404)
+        contractor = dict(base, register="contractors", title="Builder", status="Active", budget="500")
+        self.assertEqual(self.client.post("/app/property-projects", data=contractor).status_code, 302)
+        context = support_context(self.sessions(), date.today(), "medie")
+        contractor_id = context["management"]["registers"]["contractors"][0]["id"]
+        funding = dict(action="payment", project="medie", paymentDate=date.today().isoformat(), amountPaid="500",
+                       paymentMethod="Bank Transfer", bankLabel="Project", paymentReference="BUILD-1", requestId="1"*32)
+        self.assertEqual(self.client.post("/app/property-projects", data=funding).status_code, 302)
+        spend = dict(action="spending", project="medie", paymentDate=date.today().isoformat(), amountPaid="200",
+                     paymentMethod="Cash", category="Labour", stageId=stage["id"], contractorId=contractor_id, requestId="2"*32)
+        self.assertEqual(self.client.post("/app/property-projects", data=spend).status_code, 302)
+        self.assertEqual(self.client.post("/app/property-projects", data=spend).status_code, 302)
+        context = support_context(self.sessions(), date.today(), "medie")
+        self.assertEqual(context["balance"], 300)
+        self.assertEqual(context["management"]["budgetRemaining"], 800)
+        self.assertEqual(context["management"]["contractorOutstanding"], 300)
+        self.assertEqual(context["management"]["registers"]["stages"][0]["paid"], 200)
+        self.client.post("/app/property-projects", data=dict(action="project-settings", project="medie",
+                         landStatus="Purchased", developmentStatus="On Hold"))
+        self.assertEqual(len(support_context(self.sessions(), date.today(), "medie")["project"]["stages"]), 1)
+        document = dict(base, register="documents", status="Received", reference="javascript:alert(1)")
+        self.assertEqual(self.client.post("/app/property-projects", data=document).status_code, 400)
+        page = self.client.get("/app/property-projects?project=medie")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn("Contractors &amp; Suppliers", page.get_data(as_text=True))
+
     def test_private_property_sites_have_separate_balances_and_editable_status(self):
         from oneroot_erp.family_support import support_context
         db=self.sessions()

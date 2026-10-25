@@ -1,0 +1,35 @@
+{% macro entry_form(kind, statuses, row={}) %}
+<form method="post" class="form-grid">
+<input type="hidden" name="project" value="{{ support.projectId }}"><input type="hidden" name="action" value="project-register"><input type="hidden" name="register" value="{{ kind }}"><input type="hidden" name="entryId" value="{{ row.get('id','') }}">
+<label>{{ {'stages':'Stage name','tasks':'Task / defect','contractors':'Contractor / supplier','units':'Apartment / unit name','documents':'Document name'}[kind] }}<input name="title" value="{{ row.get('title','') }}" maxlength="200" required></label>
+<label>Status<select name="status">{% for status in statuses %}<option {% if row.get('status') == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></label>
+<label>{{ 'Contact / phone' if kind == 'contractors' else 'Responsible person' }}<input name="responsible" value="{{ row.get('responsible','') }}"></label>
+<label>Start date<input type="date" name="startDate" value="{{ row.get('startDate','') }}"></label><label>{{ 'Expiry / review date' if kind == 'documents' else 'Target / due date' }}<input type="date" name="dueDate" value="{{ row.get('dueDate','') }}"></label>
+{% if kind in ['stages','contractors'] %}<label>{{ 'Agreed contract amount' if kind == 'contractors' else 'Stage budget (include contingency if needed)' }} (GH₵)<input name="budget" type="number" min="0" step="0.01" value="{{ row.get('budget',0) }}"></label>{% endif %}
+{% if kind == 'stages' %}<label>Progress %<input name="progress" type="number" min="0" max="100" step="0.1" value="{{ row.get('progress',0) }}"></label>{% endif %}
+{% if kind in ['tasks','units','documents'] %}<label>Construction stage<select name="stageId"><option value="">Not assigned</option>{% for stage in support.management.registers.stages %}<option value="{{ stage.id }}" {% if row.get('stageId') == stage.id %}selected{% endif %}>{{ stage.title }}</option>{% endfor %}</select></label>{% endif %}
+{% if kind == 'units' %}<label>Planned monthly rent (GH₵)<input type="number" name="monthlyRent" min="0" step="0.01" value="{{ row.get('monthlyRent',0) }}"></label>{% endif %}
+{% if kind == 'documents' %}<label>Private document link (optional HTTPS)<input name="reference" type="url" value="{{ row.get('reference','') }}" placeholder="https://..."></label>{% endif %}
+<label>Notes / scope / specifications<textarea name="notes" maxlength="2000">{{ row.get('notes','') }}</textarea></label><button class="button" type="submit">Save {{ kind|title }}</button>
+</form>
+{% endmacro %}
+<div id="project-management">
+<h3>Construction &amp; Apartment Delivery</h3>
+<div class="card-grid three">
+<article class="metric-card"><span>Stage budgets</span><strong>{{ support.management.budget|currency }}</strong><small>Budget remaining {{ support.management.budgetRemaining|currency }}</small></article>
+<article class="metric-card"><span>Construction progress</span><strong>{{ (support.management.progress|string ~ '%') if support.management.progress is not none else 'Not recorded' }}</strong><small>{{ support.management.overdue }} overdue entries</small></article>
+<article class="metric-card"><span>Contract commitments remaining</span><strong>{{ support.management.contractorOutstanding|currency }}</strong><small>Planned monthly rent {{ support.management.rentPotential|currency }}</small></article>
+</div>
+<p>Budgets and contracts are plans, not payments. Only recorded project spending reduces the fund. Unallocated spending: {{ support.management.unallocated|currency }}. Progress is weighted by stage budgets when available; otherwise it is the average of recorded stages.</p>
+{% for kind,statuses in project_registers.items() %}
+<details class="card" {% if kind == 'stages' %}open{% endif %}><summary><strong>{{ {'stages':'Stages & Budgets','tasks':'Tasks, Defects & Inspections','contractors':'Contractors & Suppliers','units':'Apartment Units & Handover','documents':'Plans, Permits & Documents'}[kind] }}</strong> · {{ support.management.registers[kind]|length }}</summary>
+<details><summary>Add {{ kind|title }}</summary>{{ entry_form(kind,statuses) }}</details>
+<div class="table-wrap"><table><thead><tr><th>Name</th><th>Status / Due</th><th>Responsible</th><th>Position</th><th>Details</th></tr></thead><tbody>
+{% for row in support.management.registers[kind] %}<tr><td>{{ row.title }}</td><td>{{ row.status }}<br>{{ row.dueDate or 'No due date' }}{% if row.overdue %}<strong> · Overdue</strong>{% endif %}</td><td>{{ row.responsible }}</td><td>
+{% if kind in ['stages','contractors'] %}{{ row.budget|currency }} planned<br>{{ row.paid|currency }} paid · {{ row.remaining|currency }} remaining{% if kind == 'stages' %}<br><progress max="100" value="{{ row.progress }}">{{ row.progress }}%</progress> {{ row.progress }}%{% endif %}
+{% elif kind == 'units' %}{{ row.monthlyRent|currency }} / month{% elif kind == 'documents' and row.reference %}<a href="{{ row.reference }}" target="_blank" rel="noopener noreferrer">Open Document</a>{% else %}{{ row.notes }}{% endif %}</td>
+<td><details><summary>Edit / View</summary>{{ entry_form(kind,statuses,row) }}</details></td></tr>{% else %}<tr><td colspan="5">No entries yet. Add only confirmed project information.</td></tr>{% endfor %}
+</tbody></table></div></details>
+{% endfor %}
+<p>Document links should point to access-controlled files. This register stores references, not uploaded files. Apartment rent shown here is a forecast, not rent collected.</p>
+</div>

@@ -5,6 +5,9 @@
 <p>Owner only. Select a site to view its own contributions, spending and balance. Land status is a record of your description, not legal title verification. No purchase cost, historical spending or land value has been assumed.</p></section>
 <section class="card"><h3>{{ support.project.name }}</h3>
 <p>Land: <strong>{{ support.project.landStatus }}</strong> · Development: <strong>{{ support.project.developmentStatus }}</strong></p>
+<nav class="toolbar" aria-label="Project sections"><a class="button" href="#project-management">Construction &amp; Apartments</a><a class="button" href="#project-funding">Funding</a><a class="button" href="#project-spending">Payments</a></nav>
+{% include 'property_management.html' %}
+<div id="project-funding"></div>
 <details><summary>Edit Site Status &amp; Notes</summary><form method="post" class="form-grid"><input type="hidden" name="project" value="{{ support.projectId }}"><input type="hidden" name="action" value="project-settings">
 <label>Land status<select name="landStatus">{% for s in ['Not Recorded','Purchased'] %}<option {% if s == support.project.landStatus %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
 <label>Development status<select name="developmentStatus">{% for s in ['Planning','Not Started','Development Ongoing','Completed','On Hold'] %}<option {% if s == support.project.developmentStatus %}selected{% endif %}>{{ s }}</option>{% endfor %}</select></label>
@@ -21,10 +24,12 @@
 {% if r.remaining %}<details><summary>Record Bank Contribution</summary>{% include 'project_contribution_form.html' %}</details>{% else %}Cycle funded{% endif %}</td></tr>{% endfor %}
 </tbody></table></div>
 {% else %}<p>No recurring savings amount has been set for this site. Record actual contributions as needed.</p><details><summary>Record Bank Contribution</summary>{% set r = {'due':'','remaining':''} %}{% include 'project_contribution_form.html' %}</details>{% endif %}</section>
-<section class="card"><h3>Record Project Spending</h3><p>Use only for money actually spent from the recorded project fund. Spending cannot exceed its recorded balance.</p>
+<section class="card" id="project-spending"><h3>Record Project Spending</h3><p>Use only for money actually spent from the recorded project fund. Spending cannot exceed its recorded balance. Select the construction stage and contractor to update their actual costs automatically.</p>
 <form method="post" class="form-grid"><input type="hidden" name="project" value="{{ support.projectId }}"><input type="hidden" name="action" value="spending"><input type="hidden" name="requestId" value="{{ request_id }}">
 <label>Actual payment date<input name="paymentDate" type="date" value="{{ today }}" max="{{ today }}" required></label><label>Amount spent<input name="amountPaid" type="number" min="0.01" step="0.01" max="{{ support.balance }}" required></label>
 <label>Category<select name="category">{% for c in ['Land','Design & Permits','Materials','Labour','Transport','Other'] %}<option>{{ c }}</option>{% endfor %}</select></label>
+<label>Construction stage<select name="stageId"><option value="">Unallocated</option>{% for r in support.management.registers.stages %}<option value="{{ r.id }}">{{ r.title }}</option>{% endfor %}</select></label>
+<label>Contractor / supplier<select name="contractorId"><option value="">None / direct purchase</option>{% for r in support.management.registers.contractors %}<option value="{{ r.id }}">{{ r.title }}</option>{% endfor %}</select></label>
 <label>Payment method<select name="paymentMethod"><option>Bank Transfer</option><option>Cash</option><option>Mobile Money</option></select></label>
 <label>Receipt / reference<input name="paymentReference" maxlength="200"></label><label>Paid to / what was purchased<input name="notes" maxlength="1000" required></label><button class="button" type="submit">Save Project Spending</button></form></section>
 <section class="card"><h3>Project Transaction History</h3><div class="table-wrap"><table><thead><tr><th>Date</th><th>Type</th><th>Cycle / Category</th><th>Amount</th><th>Bank / Reference</th><th>Notes</th></tr></thead><tbody>
