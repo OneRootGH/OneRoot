@@ -23,7 +23,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from zoneinfo import ZoneInfo
 
 from flask import Flask, Response, flash, g, jsonify, redirect, render_template, request, send_file, send_from_directory, session, url_for
-from sqlalchemy import create_engine, desc, func, inspect, or_, select, text
+from sqlalchemy import and_, create_engine, desc, func, inspect, or_, select, text
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
