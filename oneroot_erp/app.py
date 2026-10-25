@@ -34,7 +34,7 @@ from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
-from .family_support import support_context, RECIPIENTS, PROJECTS, PROJECT_REGISTERS, project_register_entry
+from .family_support import support_context, RECIPIENTS, PROJECTS, PROJECT_REGISTERS, project_register_entry, project_name_options
 from .plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
 from .phone_catalog import PHONE_CHARGING_ITEMS
 from .registry import (
@@ -18833,7 +18833,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             g.db.commit()
             flash("Private rental project record saved. No money was sent automatically.", "success")
             return redirect(url_for("family_support_page", project=project_id))
-        return render_template("family_support.html", page_title="Private Property Projects", support=context, today=today, request_id=uuid4().hex, project_registers=PROJECT_REGISTERS)
+        return render_template("family_support.html", page_title="Private Property Projects", support=context, today=today, request_id=uuid4().hex, project_registers=PROJECT_REGISTERS,
+                               project_name_options=project_name_options(g.db, context["project"]))
 
     @app.route("/app/")
     @access_required("dashboard")

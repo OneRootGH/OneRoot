@@ -1,7 +1,8 @@
 {% macro entry_form(kind, statuses, row={}) %}
 <form method="post" class="form-grid">
 <input type="hidden" name="project" value="{{ support.projectId }}"><input type="hidden" name="action" value="project-register"><input type="hidden" name="register" value="{{ kind }}"><input type="hidden" name="entryId" value="{{ row.get('id','') }}">
-<label>{{ {'stages':'Stage name','tasks':'Task / defect','contractors':'Contractor / supplier','units':'Apartment / unit name','documents':'Document name'}[kind] }}<input name="title" value="{{ row.get('title','') }}" maxlength="200" required></label>
+<label>{{ {'stages':'Stage name','tasks':'Task / defect','contractors':'Contractor / supplier','units':'Apartment / unit name','documents':'Document name'}[kind] }}<select name="titleChoice" required><option value="">Select a name</option>{% for name in project_name_options[kind] %}<option value="{{ name }}" {% if row.get('title') == name %}selected{% endif %}>{{ name }}</option>{% endfor %}<option value="__custom__">Other - enter a new name below</option></select></label>
+<label>New name (only when Other is selected)<input name="title" maxlength="200" placeholder="Type a new name if needed"></label>
 <label>Status<select name="status">{% for status in statuses %}<option {% if row.get('status') == status %}selected{% endif %}>{{ status }}</option>{% endfor %}</select></label>
 <label>{{ 'Contact / phone' if kind == 'contractors' else 'Responsible person' }}<input name="responsible" value="{{ row.get('responsible','') }}"></label>
 <label>Start date<input type="date" name="startDate" value="{{ row.get('startDate','') }}"></label><label>{{ 'Expiry / review date' if kind == 'documents' else 'Target / due date' }}<input type="date" name="dueDate" value="{{ row.get('dueDate','') }}"></label>
@@ -15,6 +16,7 @@
 {% endmacro %}
 <div id="project-management">
 <h3>Construction &amp; Apartment Delivery</h3>
+<p><strong>Recording for: {{ support.project.name }}</strong>. Lists suggest names only; saving creates an entry for this site. Existing suites are not moved or copied automatically. Suppliers are drawn from your supplier records.</p>
 <div class="card-grid three">
 <article class="metric-card"><span>Stage budgets</span><strong>{{ support.management.budget|currency }}</strong><small>Budget remaining {{ support.management.budgetRemaining|currency }}</small></article>
 <article class="metric-card"><span>Construction progress</span><strong>{{ (support.management.progress|string ~ '%') if support.management.progress is not none else 'Not recorded' }}</strong><small>{{ support.management.overdue }} overdue entries</small></article>

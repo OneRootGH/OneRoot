@@ -5,6 +5,7 @@ from datetime import date
 
 from sqlalchemy import select
 from .models import AppSetting, ModuleRecord
+from .registry import SUITE_NAMES
 
 RECIPIENTS = {"project": ("Kumasi Rental Project", 1400.0)}
 PROJECTS = {
@@ -22,11 +23,54 @@ PROJECT_REGISTERS = {
     "documents": ("Pending", "Received", "Approved", "Expired"),
 }
 
+PROJECT_NAME_OPTIONS = {
+    "stages": ["Land & Site Preparation", "Survey & Design", "Permits & Approvals", "Excavation & Foundation",
+               "Ground Floor Slab", "Blockwork & Structural Frame", "Roofing", "Plumbing & Drainage",
+               "Electrical Installation", "Plastering & Screeding", "Doors & Windows", "Tiling & Flooring",
+               "Painting & Finishes", "Kitchen & Bathroom Fittings", "External Works & Landscaping",
+               "Testing, Inspection & Handover"],
+    "tasks": ["Site clearing", "Boundary verification", "Prepare drawings", "Obtain building permit",
+              "Order construction materials", "Inspect foundation", "Inspect blockwork", "Inspect roofing",
+              "Plumbing pressure test", "Electrical safety inspection", "Repair water leak", "Repair wall cracks",
+              "Repair roof leak", "Fix drainage", "Replace damaged tiles", "Repair door / window",
+              "Painting touch-up", "Final cleaning", "Snag inspection", "Unit handover"],
+    "documents": ["Land Purchase Agreement", "Indenture / Conveyance", "Site Plan", "Land Registration Document",
+                  "Survey Report", "Architectural Drawings", "Structural Drawings", "Building Permit",
+                  "Bill of Quantities", "Contractor Agreement", "Supplier Quotation", "Invoice", "Payment Receipt",
+                  "Progress Photograph", "Inspection Report", "Electrical Test Report", "Completion Certificate",
+                  "Warranty", "Unit Handover Checklist", "Tenancy Agreement"],
+}
+
+
+def project_name_options(db, project):
+    options = {key: list(PROJECT_NAME_OPTIONS.get(key, [])) for key in PROJECT_REGISTERS}
+    options["units"] = list(SUITE_NAMES)
+    records = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(
+        ["supplier_directory", "suppliers", "apartments"]))).all()
+    for record in records:
+        payload = record.payload or {}
+        if record.module_key == "apartments":
+            name = str(payload.get("suite") or "").strip()
+            kind = "units"
+        else:
+            name = str(payload.get("supplierName") or record.title or "").strip()
+            kind = "contractors"
+        if name:
+            options[kind].append(name)
+    for kind in options:
+        options[kind].extend(row["title"] for row in project.get(kind, []))
+        unique = {}
+        for name in options[kind]:
+            unique.setdefault(name.casefold(), name)
+        options[kind] = list(unique.values())
+    return options
+
 
 def project_register_entry(form, identity):
     kind = form.get("register", "")
     status = form.get("status", "")
-    title = (form.get("title") or "").strip()[:200]
+    choice = (form.get("titleChoice") or "").strip()
+    title = (choice if choice and choice != "__custom__" else form.get("title") or "").strip()[:200]
     if kind not in PROJECT_REGISTERS or status not in PROJECT_REGISTERS[kind] or not title:
         raise ValueError("Enter a title and choose a valid register and status.")
     row = dict(id=identity, title=title, status=status)

@@ -20,6 +20,28 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_property_name_choices_use_existing_records_and_allow_custom_names(self):
+        from oneroot_erp.family_support import project_name_options, project_register_entry
+        db = self.sessions()
+        db.add(ModuleRecord(id="project-supplier", module_key="supplier_directory", title="Test Builder",
+                            payload={"supplierName": "Test Builder"}))
+        db.add(ModuleRecord(id="project-suite", module_key="apartments", title="New Suite",
+                            payload={"suite": "New Suite"}))
+        db.commit()
+        options = project_name_options(db, {})
+        self.assertIn("Test Builder", options["contractors"])
+        self.assertIn("Peace", options["units"])
+        self.assertIn("New Suite", options["units"])
+        self.assertIn("Building Permit", options["documents"])
+        _, row = project_register_entry(dict(register="tasks", status="Open", titleChoice="Site clearing"), "test")
+        self.assertEqual(row["title"], "Site clearing")
+        _, row = project_register_entry(dict(register="tasks", status="Open", titleChoice="__custom__", title="Custom task"), "test")
+        self.assertEqual(row["title"], "Custom task")
+        page = self.client.get("/app/property-projects?project=medie")
+        self.assertEqual(page.status_code, 200)
+        self.assertIn('name="titleChoice"', page.get_data(as_text=True))
+        self.assertIn('Test Builder', page.get_data(as_text=True))
+
     def test_property_construction_registers_and_linked_spending(self):
         from oneroot_erp.family_support import support_context
         base = dict(project="medie", action="project-register", register="stages", title="Foundation",
