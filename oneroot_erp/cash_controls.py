@@ -7,8 +7,9 @@ from sqlalchemy import desc, select
 from .models import ModuleRecord
 
 
-COUNT_FIELDS = ("groceriesCash", "foodCash", "momoCash", "momoECash", "groceriesPetty", "foodPetty")
+COUNT_FIELDS = ("groceriesCash", "foodCash", "momoCash", "momoECash", "groceriesPetty", "foodPetty", "merchantECash")
 WALLETS = {
+    "merchantECash": ("Merchant e-cash - shop payments", "OneRoot MoMo Collection Wallet", "groceries"),
     "groceries": ("Groceries counter cash", "Main Cash Drawer", "groceries"),
     "food": ("Cold Store & Kitchen counter cash", "Main Cash Drawer", "cold-store-groceries"),
     "groceriesPetty": ("Groceries petty cash", "Petty Cash Float", "groceries"),
@@ -20,8 +21,8 @@ WALLETS = {
 }
 
 ACCOUNTABILITY_BASELINE = {
-    "date": "2026-10-26", "sourceDate": "2026-10-25", "total": 15686.56,
-    "combinedCash": 1112.90, "momoCash": 6817.50, "momoECash": 7756.16,
+    "date": "2026-10-26", "sourceDate": "2026-10-25", "total": 17015.06,
+    "combinedCash": 1112.90, "momoCash": 6817.50, "momoECash": 7756.16, "merchantECash": 1328.50,
 }
 
 
@@ -39,12 +40,12 @@ def approved_opening_payload(source, approver):
         raise ValueError("The source amounts changed. Review the baseline again before activation.")
     payload = dict(date=plan["date"], entryType="Opening", openingBasis="Full cash count", cashMode="Combined",
                    groceriesCash=shop, foodCash=0, combinedCash=shop, groceriesPetty=0, foodPetty=0,
-                   momoCash=plan["momoCash"], momoECash=plan["momoECash"],
+                   momoCash=plan["momoCash"], momoECash=plan["momoECash"], merchantECash=plan["merchantECash"],
                    accountabilityBaseline=True, sourceClosingId=source.id,
                    sourceClosingUpdatedAt=source.updated_at.isoformat(),
-                   exceptionReason="Owner accepted the 25 October closing balances as the new accountability baseline; historical differences remain unresolved.",
+                   exceptionReason="Owner approved a fresh start before trading on 26 October, including merchant e-cash. Pre-start movements and historical differences are excluded, not deleted.",
                    notes="Combined shop cash; split unknown. No sales, expense or transfer created.",
-                   controlVersion=2, comparison=[], warnings=[], reviewStatus="Approved", reviewedBy=approver)
+                   controlVersion=3, comparison=[], warnings=[], reviewStatus="Approved", reviewedBy=approver)
     return summarize_counts(payload)
 
 
@@ -78,12 +79,22 @@ def cash_mode(payload):
 def latest_close(db, before):
     records = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions",
         ModuleRecord.record_date < before).order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))).all()
-    return next((r for r in records if (r.payload or {}).get("entryType", "Closing") == "Closing"), None)
+    start = date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]) if fresh_accountability_active(db, before) else None
+    return next((r for r in records if (r.payload or {}).get("entryType", "Closing") == "Closing"
+                 and (not start or (r.record_date >= start and r.status == "Approved"
+                                    and (r.payload or {}).get("controlVersion") == 3))), None)
+
+
+def fresh_accountability_active(db, day):
+    start = date.fromisoformat(ACCOUNTABILITY_BASELINE["date"])
+    opening = find_snapshot(db, start, "Opening") if day >= start else None
+    return bool(opening and (opening.payload or {}).get("accountabilityBaseline")
+                and (opening.payload or {}).get("controlVersion") == 3)
 
 
 def summarize_counts(payload):
     for key in COUNT_FIELDS:
-        payload[key] = money(payload.get(key))
+        payload[key] = money(payload.get(key, 0) if key == "merchantECash" else payload.get(key))
     if cash_mode(payload) == "Combined":
         payload["groceriesCash"] = money(payload.get("combinedCash"))
         payload["foodCash"] = 0.0
@@ -113,7 +124,9 @@ def compare_counts(counted, baseline, effects, *, combined=False):
     keys = [("combinedCash", "Combined shop cash")] if combined else [
         ("groceriesCash", "Groceries total physical cash"), ("foodCash", "Cold Store total physical cash")]
     keys += [("groceriesPetty", "Groceries petty cash"), ("foodPetty", "Cold Store petty cash"),
-             ("momoCash", "MoMo physical cash"), ("momoECash", "MoMo e-cash")]
+             ("momoCash", "MoMo physical cash"), ("momoECash", "MoMo agent e-cash")]
+    if "merchantECash" in counted or "merchantECash" in baseline:
+        keys.append(("merchantECash", "Merchant e-cash"))
     rows = []
     for key, label in keys:
         if key == "combinedCash":
@@ -168,7 +181,7 @@ def opening_comparison(counted, baseline, *, combined=False):
 
 def overall_cash_summary(counted, baseline, movements):
     """Petty is included in shop cash. Internal transfers cancel across wallets."""
-    keys = ("groceriesCash", "foodCash", "momoCash", "momoECash")
+    keys = ("groceriesCash", "foodCash", "momoCash", "momoECash", "merchantECash")
     actual = round(sum(float(counted.get(k, 0) or 0) for k in keys), 2)
     if baseline is None:
         return dict(actual=actual, opening=None, movement=None, expected=None, variance=None, wallets=[])
@@ -185,6 +198,11 @@ def overall_cash_summary(counted, baseline, movements):
         expected = round(opening + movements["effects"].get(key, 0), 2)
         rows.append(dict(key=key, opening=opening, incoming=incoming, outgoing=outgoing,
                          transferIn=transfer_in, transferOut=transfer_out, expected=expected))
+    if cash_mode(counted) == "Combined" or cash_mode(baseline) == "Combined":
+        shops = [r for r in rows if r["key"] in {"groceriesCash", "foodCash"}]
+        combined = dict(key="combinedCash", **{field: round(sum(r[field] for r in shops), 2)
+                        for field in ("opening", "incoming", "outgoing", "transferIn", "transferOut", "expected")})
+        rows = [combined] + [r for r in rows if r["key"] not in {"groceriesCash", "foodCash"}]
     opening = round(sum(r["opening"] for r in rows), 2)
     movement = round(sum(movements["effects"].get(k, 0) for k in keys), 2)
     expected = round(opening + movement, 2)

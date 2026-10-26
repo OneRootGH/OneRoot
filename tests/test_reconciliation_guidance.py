@@ -15,7 +15,7 @@ class ReconciliationGuidanceTests(unittest.TestCase):
         self.assertEqual(source.payload, before)
         self.assertEqual(payload["cashMode"], "Combined")
         self.assertEqual(payload["openingBasis"], "Full cash count")
-        self.assertEqual(round(payload["totalPhysical"]+payload["momoECash"],2),15686.56)
+        self.assertEqual(round(payload["totalPhysical"]+payload["momoECash"]+payload["merchantECash"],2),17015.06)
         self.assertEqual(payload["pettyTotal"], 0)
         self.assertEqual(payload["sourceClosingId"], source.id)
         source.payload["momoCash"] = 6800

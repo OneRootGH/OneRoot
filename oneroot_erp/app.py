@@ -31,7 +31,7 @@ from .config import AppConfig, load_config
 from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
                             cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary, reconciliation_guidance,
-                            ACCOUNTABILITY_BASELINE, approved_opening_payload)
+                            ACCOUNTABILITY_BASELINE, approved_opening_payload, fresh_accountability_active)
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
@@ -7648,6 +7648,9 @@ def daily_shop_mobile_money_collections(db, day):
 def daily_cash_movement_context(db, day):
     """Use source collections once; cashbook copies do not create extra receipts."""
     effects = {key: 0.0 for key in COUNT_FIELDS}
+    fresh = fresh_accountability_active(db, day)
+    merchant = daily_shop_mobile_money_collections(db, day) if fresh else None
+    merchant_references = {r["reference"] for r in merchant["rows"] if r["reference"]} if merchant else set()
     warnings, lines = [], []
     records = db.scalars(select(ModuleRecord).where(ModuleRecord.record_date == day,
         ModuleRecord.module_key.in_(["cashbook_entries", "expenses", "sales", "customer_credit_accounts",
@@ -7688,7 +7691,12 @@ def daily_cash_movement_context(db, day):
             if p.get("entryType") == "Transfer":
                 warnings.append("A legacy one-line Cashbook transfer needs review; it is not counted twice or assigned automatically.")
             continue
-        if account in {"MTN MoMo Physical Cash Float", "MTN MoMo E-Cash Float"}:
+        if fresh and account == "OneRoot MoMo Collection Wallet":
+            # Source collections below are authoritative; only independent entries
+            # and transfer legs belong here, not generated Cashbook copies.
+            if ref not in merchant_references and not ref.startswith(("pos-payment|", "customer-credit-payment|", "kitchen-order-payment|", "laundry-payment|", "equipment-rental-payment|")):
+                add("Merchant wallet movement", "merchantECash", effect, ref)
+        elif account in {"MTN MoMo Physical Cash Float", "MTN MoMo E-Cash Float"}:
             add("Recorded MoMo float transfer", "momoECash" if "E-Cash" in account else "momoCash", effect, ref)
         elif account in {"Main Cash Drawer", "Petty Cash Float"}:
             desk = normalize_text(p.get("cashDesk")) or side(record.business_area_id)
@@ -7701,6 +7709,11 @@ def daily_cash_movement_context(db, day):
         desk = side(expense.business_area_id)
         paid_from = normalize_text(p.get("paidFromAccount")) or ("Main Cash Drawer" if normalize_text(p.get("paymentMethod")).lower() == "cash" else "Business Bank Account")
         if normalize_text(p.get("paymentMethod")).lower() in {"credit", "pay on pickup", "cash on delivery"}:
+            continue
+        electronic_wallet = {"OneRoot MoMo Collection Wallet": "merchantECash", "MTN MoMo E-Cash Float": "momoECash"}.get(paid_from)
+        if fresh and electronic_wallet:
+            if f"expense-payment|{expense.id}" not in references:
+                add("Electronic expense (no Cashbook copy)", electronic_wallet, -abs(parse_amount(p.get("amount"))), expense.id)
             continue
         if paid_from not in {"Main Cash Drawer", "Petty Cash Float"}:
             continue
@@ -7753,9 +7766,24 @@ def daily_cash_movement_context(db, day):
         else:
             warnings.append(f"Cash sales entry {sale.title}: choose which shop received it.")
     momo = mobile_money_transaction_day_rollup(db, day, "MTN Mobile Money")
-    add("Completed MoMo cash-in / cash-out and fees", "momoCash",
-        momo["cashInValueTotal"] - momo["cashOutValueTotal"] + momo["feeTotal"])
+    add("Completed MoMo cash-in / cash-out" if fresh else "Completed MoMo cash-in / cash-out and fees", "momoCash",
+        momo["cashInValueTotal"] - momo["cashOutValueTotal"] + (0 if fresh else momo["feeTotal"]))
     add("Completed MoMo e-cash movements", "momoECash", momo["cashOutValueTotal"] - momo["cashInValueTotal"])
+    if fresh:
+        for receipt in merchant["rows"]:
+            add(receipt["source"] + " - merchant receipt", "merchantECash", receipt["amount"], receipt["reference"])
+        transactions = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "mobile_money_transactions",
+                                                            ModuleRecord.record_date == day)).all()
+        for transaction in transactions:
+            p = transaction.payload or {}
+            if not mobile_money_transaction_is_completed(p):
+                continue
+            fee = parse_amount(p.get("salesAmount"))
+            wallet = normalize_text(p.get("commissionWallet"))
+            if fee and wallet in {"momoCash", "momoECash", "merchantECash"}:
+                add("Commission received", wallet, fee, transaction.id)
+            elif fee:
+                warnings.append(f"MoMo {transaction.title or transaction.id}: confirm where commission was received; it is not assumed to be cash.")
     for record in records:
         if record.module_key == "mobile_money_reconciliations" and any(parse_amount((record.payload or {}).get(k)) for k in
                 ("cashTopUp", "cashRemoved", "eCashTopUp", "eCashRemoved", "operatingExpense")):
@@ -7763,7 +7791,7 @@ def daily_cash_movement_context(db, day):
     effects = {k: round(v, 2) for k, v in effects.items()}
     lines.sort(key=lambda row: (row["wallet"], row["reference"] or "", row["label"], row["effect"]))
     return dict(effects=effects, warnings=sorted(set(warnings)), lines=lines,
-                momo=momo, signature=hashlib.sha256(json.dumps(dict(effects=effects, lines=lines), sort_keys=True).encode()).hexdigest())
+                momo=momo, signature=hashlib.sha256(json.dumps(dict(effects=effects, lines=lines, fresh=fresh), sort_keys=True).encode()).hexdigest())
 
 
 def validate_prepaid_entry(db, payload, *, is_owner=False):
@@ -19717,7 +19745,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 continue
             cash_id = "cash-leg-" + hashlib.sha256(f"{identity}|{wallet}".encode()).hexdigest()[:32]
             cash_payload = dict(id=cash_id, date=day.isoformat(), businessAreaId=area, accountName=account,
-                entryType=direction, amount=amount, paymentMethod="Cash" if wallet != "momoECash" else "Mobile Money",
+                entryType=direction, amount=amount, paymentMethod="Mobile Money" if wallet in {"momoECash", "merchantECash"} else "Cash",
                 reference=f"cash-control|{identity}|{wallet}", cashDesk="food" if wallet.startswith("food") else ("groceries" if wallet.startswith("groceries") else ""),
                 sourceType="cash-control-transfer", linkedCashMovementId=identity,
                 notes=f"Transfer, not sales or expense. {reference}; received by {recipient}. {notes}")
@@ -19748,7 +19776,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         vendor = normalize_text(request.form.get("vendor"))[:200]
         category = normalize_text(request.form.get("category"))[:150]
         if (not day or day > datetime.now(ZoneInfo("Africa/Accra")).date() or wallet not in
-                {"groceries", "food", "groceriesPetty", "foodPetty", "momoCash", "momoECash"}
+                {"groceries", "food", "groceriesPetty", "foodPetty", "momoCash", "momoECash", "merchantECash"}
                 or not re.fullmatch(r"[a-f0-9]{32}", token) or not vendor or not category):
             return "Choose an actual date, payment source, supplier, category and valid form reference.", 400
         try:
@@ -19768,7 +19796,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             label, account, area = WALLETS[wallet]
             payload = dict(id=identity, date=day.isoformat(), vendor=vendor, businessAreaId=area,
                 category=category, description=normalize_text(request.form.get("description"))[:2000],
-                amount=amount, paymentMethod="Mobile Money" if wallet == "momoECash" else "Cash", paidFromAccount=account,
+                amount=amount, paymentMethod="Mobile Money" if wallet in {"momoECash", "merchantECash"} else "Cash", paidFromAccount=account,
                 receiptReference=normalize_text(request.form.get("receiptReference"))[:150],
                 receiptAttachmentUrl=attachment_url, receiptAttachmentName=attachment_name, receiptAttachmentType=attachment_type,
                 receiptStatus="Uploaded" if attachment_url else "Pending", notes="Entered from Daily Cash & Petty Cash; " + label)
@@ -19916,7 +19944,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def daily_cash_activate_baseline():
         if not user_is_owner(g.current_user):
             return "Only the owner can activate the accountability baseline.", 403
-        if request.form.get("confirmBaseline") != "2026-10-26|15686.56":
+        if request.form.get("confirmBaseline") != "2026-10-26|17015.06":
             return "Confirm the exact baseline date and amount first.", 400
         day = date.fromisoformat(ACCOUNTABILITY_BASELINE["date"])
         if day > current_local_datetime().date():
@@ -19927,11 +19955,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
             g.db.expire_all()
         existing = find_snapshot(g.db, day, "Opening")
         if existing:
-            if (existing.payload or {}).get("accountabilityBaseline"):
+            if (existing.payload or {}).get("accountabilityBaseline") and (existing.payload or {}).get("controlVersion") == 3:
                 return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
-            return "An opening already exists. Nothing was overwritten; review it with the owner.", 409
-        if find_snapshot(g.db, day, "Closing"):
-            return "A closing already exists. Review that day before creating a new baseline.", 409
+            if not (existing.payload or {}).get("accountabilityBaseline"):
+                return "A different opening exists. Nothing was overwritten; review it with the owner.", 409
+            if request.form.get("openingUpdatedAt") != existing.updated_at.isoformat():
+                return "The opening changed. Refresh and review before correcting it.", 409
+        close = find_snapshot(g.db, day, "Closing")
+        if close and close.status == "Approved":
+            return "Reopen the approved closing before correcting this opening baseline.", 409
         source = find_snapshot(g.db, day-timedelta(days=1), "Closing")
         if not source or request.form.get("sourceUpdatedAt") != source.updated_at.isoformat():
             return "The source changed. Refresh and review the baseline again.", 409
@@ -19942,15 +19974,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
         identity = snapshot_id(day, "Opening")
         payload.update(id=identity, recordedBy=payload["reviewedBy"], recordedById=g.current_user.id,
                        recordedAt=datetime.utcnow().isoformat(), reviewedAt=datetime.utcnow().isoformat())
-        record = ModuleRecord(id=identity, module_key="daily_cash_positions")
+        previous = dict(existing.payload or {}) if existing else None
+        if previous:
+            revisions = list(previous.get("baselineRevisions") or [])
+            revisions.append(dict(payload=previous, correctedAt=datetime.utcnow().isoformat(), correctedBy=payload["reviewedBy"]))
+            payload["baselineRevisions"] = revisions
+        record = existing or ModuleRecord(id=identity, module_key="daily_cash_positions")
         set_module_record_metadata(record, MODULES["daily_cash_positions"], payload)
         record.status = "Approved"
         g.db.add(record)
         audit("daily_cash_positions", "Accountability Baseline", "activate-baseline", day.isoformat(), identity,
-              json.dumps(dict(source=source.id, amounts={k:payload[k] for k in COUNT_FIELDS}, total=ACCOUNTABILITY_BASELINE["total"],
+              json.dumps(dict(source=source.id, before=previous, amounts={k:payload[k] for k in COUNT_FIELDS}, total=ACCOUNTABILITY_BASELINE["total"],
                               reason=payload["exceptionReason"])))
         g.db.commit()
-        flash("Approved opening baseline activated. Earlier records were preserved; no money movement was created.", "success")
+        flash("Fresh-start opening approved at GHS17,015.06. Previous values were preserved in the audit history; no money movement was created.", "success")
         return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
 
     @app.route("/app/daily-cash", methods=["GET", "POST"])
@@ -19964,6 +20001,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         record = find_snapshot(g.db, selected, entry_type)
         opening = find_snapshot(g.db, selected, "Opening")
         previous_close = latest_close(g.db, selected)
+        fresh = fresh_accountability_active(g.db, selected)
+        if fresh and entry_type == "Opening" and previous_close and previous_close.status != "Approved":
+            previous_close = None
         baseline = previous_close if entry_type == "Opening" else opening
         payload = dict(record.payload or {}) if record else {"date": selected.isoformat(), "entryType": entry_type}
         if entry_type == "Opening":
@@ -19976,9 +20016,13 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["cashMode"] = "Separate"
                 for prefix in ("groceries", "food"):
                     payload[prefix + "Cash"] = payload[prefix + "Petty"] = ""
+        if fresh:
+            payload.setdefault("merchantECash", 0)
         movements = daily_cash_movement_context(g.db, selected)
         base = baseline.payload if baseline else None
         def comparison_for(counts):
+            if entry_type == "Opening" and counts.get("accountabilityBaseline") and counts.get("controlVersion") == 3:
+                return [], []
             warnings = list(movements["warnings"]) if entry_type == "Closing" else []
             effects = movements["effects"] if entry_type == "Closing" else {k: 0 for k in COUNT_FIELDS}
             if not baseline:
@@ -20000,6 +20044,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return rows, warnings
         errors = []
         if request.method == "POST":
+            if fresh and entry_type == "Closing" and (not opening or opening.status != "Approved"):
+                errors.append("An approved opening is required before submitting a fresh-start closing. Ask the owner to review the opening first.")
             if not parse_date(request.form.get("date")) or selected > today:
                 errors.append("Choose today or an earlier date for the actual count.")
             if request.form.get("confirmedDate") != f"{selected.isoformat()}|{entry_type}":
@@ -20008,7 +20054,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if payload["cashMode"] not in {"Separate", "Combined"}:
                 errors.append("Choose Separate or Combined shop cash.")
             for key in COUNT_FIELDS:
-                payload[key] = request.form.get(key, "0" if payload["cashMode"] == "Combined" and key in {"groceriesCash", "foodCash"} else "")
+                payload[key] = request.form.get(key, "0" if (payload["cashMode"] == "Combined" and key in {"groceriesCash", "foodCash"}) or (key == "merchantECash" and not fresh) else "")
             payload["combinedCash"] = request.form.get("combinedCash", 0)
             if entry_type == "Opening":
                 payload["openingBasis"] = normalize_text(request.form.get("openingBasis")) or "Full cash count"
@@ -20047,7 +20093,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 expected = normalize_text(request.form.get("expectedUpdatedAt"))
                 if record and expected != record.updated_at.isoformat():
                     return "The saved count changed. Refresh and review it before saving.", 409
-                if entry_type == "Opening" and (close := find_snapshot(g.db, selected, "Closing")) and (close.payload or {}).get("controlVersion") == 2:
+                if entry_type == "Opening" and (close := find_snapshot(g.db, selected, "Closing")) and (close.payload or {}).get("controlVersion", 0) >= 2:
                     if not user_is_owner(g.current_user) or close.status == "Approved":
                         return "A closing count already exists. The owner must reopen it before correcting the opening.", 409
                 baseline = latest_close(g.db, selected) if entry_type == "Opening" else find_snapshot(g.db, selected, "Opening")
@@ -20057,7 +20103,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if review_needed(comparison, warnings) and not payload["exceptionReason"]:
                     return "Source records changed. Refresh, review the new comparison and explain any difference before saving.", 409
                 previous = dict(record.payload or {}) if record else {}
-                payload.update(id=identity, controlVersion=2, comparison=comparison, warnings=warnings,
+                payload.update(id=identity, controlVersion=3 if fresh else 2, comparison=comparison, warnings=warnings,
                     sourceSignature=movements["signature"] if entry_type == "Closing" else "",
                     baselineId=baseline.id if baseline else "", baselineUpdatedAt=baseline.updated_at.isoformat() if baseline else "",
                     reviewStatus="Difference to Review" if review_needed(comparison, warnings) else "Submitted",
@@ -20079,8 +20125,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         comparison, warnings = comparison_for(payload) if not errors else ([], [])
         comparison_changed = bool(record and entry_type == "Closing" and (
             (record.payload or {}).get("sourceSignature") != movements["signature"]
-            or (record.payload or {}).get("warnings", []) != warnings))
-        if record and (record.payload or {}).get("controlVersion") == 2 and not comparison_changed:
+            or (record.payload or {}).get("warnings", []) != warnings
+            or (baseline and (record.payload or {}).get("baselineUpdatedAt") != baseline.updated_at.isoformat())))
+        if record and (record.payload or {}).get("controlVersion", 0) >= 2 and not comparison_changed:
             comparison, warnings = (record.payload or {}).get("comparison", []), (record.payload or {}).get("warnings", [])
         date_from = parse_date(request.args.get("date_from")) or today - timedelta(days=30)
         date_to = parse_date(request.args.get("date_to")) or today
@@ -20104,7 +20151,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                                expense_request_id=uuid4().hex,
                                daily_expenses=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "expenses", ModuleRecord.record_date == selected)
                                    .order_by(desc(ModuleRecord.updated_at))).all(),
-                               source_changed=bool(record and entry_type == "Closing" and (record.payload or {}).get("controlVersion") == 2
+                               source_changed=bool(record and entry_type == "Closing" and (record.payload or {}).get("controlVersion", 0) >= 2
                                    and (record.payload or {}).get("sourceSignature") != movements["signature"]),
                                saved_record=record, locked=bool(record and record.status == "Approved"),
                                transfers=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_movements",

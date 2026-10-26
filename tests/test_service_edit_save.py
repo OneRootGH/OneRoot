@@ -20,6 +20,72 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_fresh_start_merchants_commission_transfers_and_legacy_cutoff(self):
+        from oneroot_erp.cash_controls import latest_close, overall_cash_summary
+        day = date(2026,10,26)
+        db = self.sessions()
+        fixture_rental = db.get(ModuleRecord, "test-rental")
+        if fixture_rental:
+            db.delete(fixture_rental)
+        opening_payload = dict(entryType="Opening",accountabilityBaseline=True, controlVersion=3, cashMode="Combined",
+            groceriesCash=1112.9, foodCash=0, groceriesPetty=0, foodPetty=0,
+            momoCash=6817.5, momoECash=7756.16, merchantECash=1328.5)
+        db.add(ModuleRecord(id="daily-cash-2026-10-26-opening", module_key="daily_cash_positions",
+                           record_date=day, status="Approved", payload=opening_payload))
+        db.add(ModuleRecord(id="legacy-close", module_key="daily_cash_positions", record_date=date(2026,10,25),
+                           status="Approved", payload=dict(entryType="Closing",groceriesCash=99999)))
+        for identity,key,area,amount,p in [
+            ("cash-receipt","cashbook_entries","groceries",100,dict(accountName="Main Cash Drawer",entryType="Cash In",amount=100)),
+            ("merchant-sale","sales","groceries",40,dict(paymentMethod="Mobile Money")),
+            ("merchant-copy","sales","groceries",40,dict(paymentMethod="Mobile Money",sourceType="pos-summary")),
+            ("merchant-cashbook-copy","cashbook_entries","groceries",40,dict(accountName="OneRoot MoMo Collection Wallet",entryType="Cash In",amount=40)),
+            ("merchant-expense","cashbook_entries","groceries",5,dict(accountName="OneRoot MoMo Collection Wallet",entryType="Cash Out",amount=5)),
+            ("transfer-out","cashbook_entries","groceries",20,dict(accountName="OneRoot MoMo Collection Wallet",entryType="Cash Out",amount=20)),
+            ("transfer-in","cashbook_entries","mobile-money",20,dict(accountName="MTN MoMo Physical Cash Float",entryType="Cash In",amount=20)),
+            ("agency-in","mobile_money_transactions","mobile-money",2,dict(status="Completed",provider="MTN Mobile Money",serviceType="Cash In",floatImpact="Cash In",transactionValue=100,salesAmount=2,commissionWallet="merchantECash")),
+            ("agency-out","mobile_money_transactions","mobile-money",3,dict(status="Completed",provider="MTN Mobile Money",serviceType="Cash Out",floatImpact="Cash Out",transactionValue=50,salesAmount=3,commissionWallet="momoECash")),
+            ("fee-unconfirmed","mobile_money_transactions","mobile-money",7,dict(status="Completed",provider="MTN Mobile Money",serviceType="Other",floatImpact="No Cash Movement",transactionValue=0,salesAmount=7)),
+        ]:
+            ref = "cash-control|"+identity if identity.startswith("transfer-") else "pos-payment|copy" if identity == "merchant-cashbook-copy" else identity
+            db.add(ModuleRecord(id=identity,module_key=key,business_area_id=area,record_date=day,amount=amount,reference=ref,payload=p))
+        db.add(ModuleRecord(id="legacy-sale",module_key="sales",business_area_id="groceries",record_date=date(2026,10,25),
+                           amount=10000,payload=dict(paymentMethod="Mobile Money")))
+        db.commit()
+        movements = daily_cash_movement_context(db,day)
+        self.assertEqual(movements["effects"]["groceriesCash"],100)
+        self.assertEqual(movements["effects"]["momoCash"],70)
+        self.assertEqual(movements["effects"]["momoECash"],-47)
+        self.assertEqual(movements["effects"]["merchantECash"],17)
+        self.assertTrue(any("confirm where commission" in warning for warning in movements["warnings"]))
+        self.assertIsNone(latest_close(db,day+timedelta(days=1)))
+        summary = overall_cash_summary(opening_payload,opening_payload,movements)
+        self.assertEqual(summary["opening"],17015.06)
+        self.assertEqual(summary["movement"],140)
+        self.assertEqual(summary["expected"],17155.06)
+        self.assertEqual(summary["wallets"][0]["key"],"combinedCash")
+        self.assertEqual(len(summary["wallets"]),4)
+        page = self.client.get("/app/daily-cash?date=2026-10-26&entryType=Closing")
+        self.assertEqual(page.status_code,200)
+        self.assertIn('name="merchantECash"',page.get_data(as_text=True))
+
+    def test_fresh_baseline_correction_retains_old_payload_and_rejects_stale_form(self):
+        from oneroot_erp.cash_controls import find_snapshot
+        db=self.sessions()
+        source=ModuleRecord(id="daily-cash-2026-10-25-closing",module_key="daily_cash_positions",record_date=date(2026,10,25),
+                            payload=dict(entryType="Closing",groceriesCash=1112.9,foodCash=0,momoCash=6817.5,momoECash=7756.16))
+        old=ModuleRecord(id="daily-cash-2026-10-26-opening",module_key="daily_cash_positions",record_date=date(2026,10,26),status="Approved",
+                         payload=dict(accountabilityBaseline=True,controlVersion=2,groceriesCash=1112.9,foodCash=0,momoCash=6817.5,momoECash=7756.16))
+        db.add_all([source,old]);db.commit()
+        data=dict(confirmBaseline="2026-10-26|17015.06",sourceUpdatedAt=source.updated_at.isoformat(),openingUpdatedAt="stale")
+        with patch("oneroot_erp.app.current_local_datetime",return_value=datetime(2026,10,26,12)):
+            self.assertEqual(self.client.post("/app/daily-cash/activate-baseline",data=data).status_code,409)
+            data["openingUpdatedAt"]=old.updated_at.isoformat()
+            self.assertEqual(self.client.post("/app/daily-cash/activate-baseline",data=data).status_code,302)
+        updated=find_snapshot(self.sessions(),date(2026,10,26),"Opening")
+        self.assertEqual(updated.payload["merchantECash"],1328.5)
+        self.assertEqual(updated.payload["baselineRevisions"][0]["payload"]["controlVersion"],2)
+        self.assertTrue(self.sessions().scalar(select(AuditLog).where(AuditLog.action=="activate-baseline")))
+
     def test_owner_baseline_activation_is_explicit_idempotent_and_preserves_history(self):
         from oneroot_erp.cash_controls import find_snapshot
         day = date(2026,10,26)
@@ -29,7 +95,7 @@ class ServiceEditSaveTests(unittest.TestCase):
             payload=dict(entryType="Closing", groceriesCash=1112.90, foodCash=0,
                          momoCash=6817.50, momoECash=7756.16))
         db.add(source); db.commit()
-        data = dict(confirmBaseline="2026-10-26|15686.56",sourceUpdatedAt=source.updated_at.isoformat())
+        data = dict(confirmBaseline="2026-10-26|17015.06",sourceUpdatedAt=source.updated_at.isoformat())
         with patch("oneroot_erp.app.current_local_datetime", return_value=datetime(2026,10,26,12)):
             self.assertEqual(self.client.post("/app/daily-cash/activate-baseline",data={}).status_code,400)
             self.assertIsNone(find_snapshot(self.sessions(),day,"Opening"))
