@@ -106,6 +106,27 @@ def review_needed(comparison, warnings):
     return bool(warnings or any(abs(row["variance"]) >= .01 for row in comparison))
 
 
+def reconciliation_guidance(comparison):
+    """Explain differences without inventing a balancing transfer or receipt."""
+    wallets = [r for r in comparison if r["key"] not in {"groceriesPetty", "foodPetty"}
+               and not r.get("allocation")]
+    differences = [r for r in wallets if abs(r["variance"]) >= .01]
+    total = round(sum(r["variance"] for r in wallets), 2) if wallets else None
+    messages = []
+    if total is not None and differences and abs(total) < .01:
+        messages.append("The overall money balances, but it is in different wallets. Check shop-to-MoMo transfers or the counter allocation; do not enter another sale.")
+    for row in differences:
+        if row["expected"] < 0:
+            messages.append(f"{row['label']}: expected balance is negative. Check for a missing opening balance, receipt or transfer in, or a duplicated outgoing payment.")
+    for debit in [r for r in differences if r["variance"] < 0]:
+        for credit in [r for r in differences if r["variance"] > 0]:
+            if abs(debit["variance"] + credit["variance"]) < .01:
+                messages.append(f"Possible unrecorded transfer: {abs(debit['variance']):.2f} from {debit['label']} to {credit['label']}. Confirm the actual movement before recording it.")
+    if differences and not messages:
+        messages.append("Review the receipt details, payment methods, expenses and transfers for this date. Do not change the counted money merely to match the expected amount.")
+    return dict(messages=messages, difference=total, balanced=bool(wallets) and not differences)
+
+
 def opening_comparison(counted, baseline, *, combined=False):
     rows = compare_counts(counted, baseline, {}, combined=combined)
     rows = [row for row in rows if row["key"] not in {"groceriesPetty", "foodPetty"}]

@@ -30,7 +30,7 @@ from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 from .config import AppConfig, load_config
 from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
-                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary)
+                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary, reconciliation_guidance)
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
@@ -20040,6 +20040,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ModuleRecord.record_date >= date_from, ModuleRecord.record_date <= date_to)
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
+                               reconciliation_help=reconciliation_guidance(comparison),
                                shop_mobile_collections=daily_shop_mobile_money_collections(g.db, selected),
                                selected=selected, history=history, date_from=date_from, date_to=date_to,
                                can_correct_date=user_is_owner(g.current_user),
