@@ -30,7 +30,8 @@ from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 from .config import AppConfig, load_config
 from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
-                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary, reconciliation_guidance)
+                            cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary, reconciliation_guidance,
+                            ACCOUNTABILITY_BASELINE, approved_opening_payload)
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
@@ -19910,6 +19911,48 @@ def create_app(config: AppConfig | None = None) -> Flask:
         flash(f"Cash record moved from {source} to {target}. Amounts and original recorder were preserved.", "success")
         return redirect(url_for("daily_cash_page", date=target.isoformat(), entryType=entry_type))
 
+    @app.route("/app/daily-cash/activate-baseline", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_activate_baseline():
+        if not user_is_owner(g.current_user):
+            return "Only the owner can activate the accountability baseline.", 403
+        if request.form.get("confirmBaseline") != "2026-10-26|15686.56":
+            return "Confirm the exact baseline date and amount first.", 400
+        day = date.fromisoformat(ACCOUNTABILITY_BASELINE["date"])
+        if day > current_local_datetime().date():
+            return "The opening date cannot be in the future.", 400
+        if g.db.bind.dialect.name == "postgresql":
+            for lock_day in (day - timedelta(days=1), day):
+                g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": "cash-control|" + lock_day.isoformat()})
+            g.db.expire_all()
+        existing = find_snapshot(g.db, day, "Opening")
+        if existing:
+            if (existing.payload or {}).get("accountabilityBaseline"):
+                return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
+            return "An opening already exists. Nothing was overwritten; review it with the owner.", 409
+        if find_snapshot(g.db, day, "Closing"):
+            return "A closing already exists. Review that day before creating a new baseline.", 409
+        source = find_snapshot(g.db, day-timedelta(days=1), "Closing")
+        if not source or request.form.get("sourceUpdatedAt") != source.updated_at.isoformat():
+            return "The source changed. Refresh and review the baseline again.", 409
+        try:
+            payload = approved_opening_payload(source, g.current_user.full_name or g.current_user.username)
+        except ValueError as error:
+            return str(error), 409
+        identity = snapshot_id(day, "Opening")
+        payload.update(id=identity, recordedBy=payload["reviewedBy"], recordedById=g.current_user.id,
+                       recordedAt=datetime.utcnow().isoformat(), reviewedAt=datetime.utcnow().isoformat())
+        record = ModuleRecord(id=identity, module_key="daily_cash_positions")
+        set_module_record_metadata(record, MODULES["daily_cash_positions"], payload)
+        record.status = "Approved"
+        g.db.add(record)
+        audit("daily_cash_positions", "Accountability Baseline", "activate-baseline", day.isoformat(), identity,
+              json.dumps(dict(source=source.id, amounts={k:payload[k] for k in COUNT_FIELDS}, total=ACCOUNTABILITY_BASELINE["total"],
+                              reason=payload["exceptionReason"])))
+        g.db.commit()
+        flash("Approved opening baseline activated. Earlier records were preserved; no money movement was created.", "success")
+        return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
+
     @app.route("/app/daily-cash", methods=["GET", "POST"])
     @access_required("daily_cash_positions")
     def daily_cash_page():
@@ -19924,7 +19967,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         baseline = previous_close if entry_type == "Opening" else opening
         payload = dict(record.payload or {}) if record else {"date": selected.isoformat(), "entryType": entry_type}
         if entry_type == "Opening":
-            payload.setdefault("openingBasis", "Full cash count" if record else "Petty allocation")
+            payload.setdefault("openingBasis", "Full cash count")
         if not record and entry_type == "Opening" and previous_close:
             payload.update({k: (previous_close.payload or {}).get(k, 0) for k in COUNT_FIELDS})
             payload["cashMode"] = cash_mode(previous_close.payload or {})
@@ -19971,6 +20014,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["openingBasis"] = normalize_text(request.form.get("openingBasis")) or "Full cash count"
                 if payload["openingBasis"] not in {"Full cash count", "Petty allocation"}:
                     errors.append("Choose a valid opening basis.")
+                active_baseline = find_snapshot(g.db, date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]), "Opening")
+                if (active_baseline and (active_baseline.payload or {}).get("accountabilityBaseline")
+                        and selected >= date.fromisoformat(ACCOUNTABILITY_BASELINE["date"])
+                        and payload["openingBasis"] != "Full cash count"):
+                    errors.append("The accountability flow requires a full opening count. Set petty cash inside that count; record money removed as a transfer.")
                 if payload["openingBasis"] == "Petty allocation":
                     if payload["cashMode"] != "Separate":
                         errors.append("Enter the chosen petty cash allocation separately for each shop.")
@@ -20040,6 +20088,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ModuleRecord.record_date >= date_from, ModuleRecord.record_date <= date_to)
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
+                               baseline_plan=ACCOUNTABILITY_BASELINE,
+                               baseline_source=find_snapshot(g.db, date.fromisoformat(ACCOUNTABILITY_BASELINE["sourceDate"]), "Closing"),
+                               baseline_opening=find_snapshot(g.db, date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]), "Opening"),
                                reconciliation_help=reconciliation_guidance(comparison),
                                shop_mobile_collections=daily_shop_mobile_money_collections(g.db, selected),
                                selected=selected, history=history, date_from=date_from, date_to=date_to,

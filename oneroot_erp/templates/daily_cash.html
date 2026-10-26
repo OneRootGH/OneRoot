@@ -1,6 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
 {% set mode = payload.get('cashMode') or ('Combined' if 'combined' in payload.get('notes', '')|lower else 'Separate') %}
+<section class="card"><h3>Daily Accountability</h3><div class="toolbar"><a class="button" href="{{ url_for('daily_cash_page',date=selected,entryType='Opening') }}">1. Confirm Opening</a><a class="button" href="#daily-movements">2. Record Expenses &amp; Transfers</a><a class="button" href="{{ url_for('daily_cash_page',date=selected,entryType='Closing') }}">3. Count Closing</a><span>4. Owner Reviews &amp; Approves</span></div>
+<p>Count all the money still held. Petty cash is part of shop cash. Shop Mobile Money receipts are shown separately; MoMo agency cash and phone e-cash have their own balances. A transfer changes the wallet, not total income.</p></section>
+{% if can_correct_date %}
+<section class="card"><h3>Approved Starting Plan · 26 October 2026</h3>
+<div class="table-wrap"><table><thead><tr><th>Balance</th><th>Opening</th></tr></thead><tbody><tr><td>Combined shop physical cash — split unknown</td><td>{{ baseline_plan.combinedCash|currency }}</td></tr><tr><td>MoMo physical cash</td><td>{{ baseline_plan.momoCash|currency }}</td></tr><tr><td>MoMo phone e-cash</td><td>{{ baseline_plan.momoECash|currency }}</td></tr><tr><th>Total money held</th><th>{{ baseline_plan.total|currency }}</th></tr></tbody></table></div>
+{% if baseline_opening and baseline_opening.payload.get('accountabilityBaseline') %}<p><strong>Baseline activated.</strong> Earlier differences were preserved, not written off. <a href="{{ url_for('daily_cash_page',date=baseline_plan.date,entryType='Opening') }}">View Approved Opening</a></p>
+{% elif baseline_opening %}<p>An opening already exists for this date. Activation is blocked to prevent overwriting it.</p>
+{% elif baseline_source %}<details><summary>Owner: Activate Agreed Opening</summary><p>This creates an approved opening only. It does not approve the old closing, create sales or change historical transactions. Existing counts will not be overwritten.</p><form method="post" action="{{ url_for('daily_cash_activate_baseline') }}"><input type="hidden" name="sourceUpdatedAt" value="{{ baseline_source.updated_at.isoformat() }}"><label><input type="checkbox" name="confirmBaseline" value="2026-10-26|15686.56" required> I approve GH₵15,686.56 as the opening for 26 October 2026 with the breakdown above.</label><button class="button primary">Activate Opening Baseline</button></form></details>
+{% else %}<p>Source closing record is missing. Baseline activation is unavailable.</p>{% endif %}</section>
+{% endif %}
 <section class="card">
   <div class="card-header"><div><h3>Daily Cash &amp; Petty Cash</h3><p class="muted">Opening before trading · Closing after cash movements and the final count.</p></div><strong>{{ saved_record.status or 'Legacy count — review required' if saved_record else 'Not Submitted' }}</strong></div>
   <form method="get" class="toolbar">
@@ -19,7 +29,7 @@
     <fieldset {% if locked %}disabled{% endif %}>
     {% if entry_type == 'Opening' %}
     <label>What are you recording?<select name="openingBasis" id="opening-basis"><option {% if payload.get('openingBasis') == 'Petty allocation' %}selected{% endif %}>Petty allocation</option><option {% if payload.get('openingBasis') != 'Petty allocation' %}selected{% endif %}>Full cash count</option></select></label>
-    <p>Petty allocation: enter only the cash you decide to leave in each shop for today. Zero means no petty cash was allocated. Full cash count: enter all physical shop cash, including petty cash.</p>
+    <p>Recommended: Full cash count carries all money forward. Enter petty cash to keep in the boxes below; it stays inside the total. Use Petty allocation only when recording a limited allocation, not a complete opening; document where the rest of the money went.</p>
     {% endif %}
     <label>Shop cash arrangement <select name="cashMode" id="cash-mode"><option value="Separate" {% if mode == 'Separate' %}selected{% endif %}>Count the two shops separately</option><option value="Combined" {% if mode == 'Combined' %}selected{% endif %}>Shop cash has been combined — split unknown</option></select></label>
     <div data-cash-mode="Combined" {% if mode != 'Combined' %}hidden{% endif %}><label>Combined physical cash from both shops, including petty cash (GH₵)<input name="combinedCash" type="number" min="0" step="0.01" value="{{ payload.get('combinedCash', (payload.get('groceriesCash',0)|float + payload.get('foodCash',0)|float)) }}" {% if mode != 'Combined' %}disabled{% else %}required{% endif %}></label><p>We will not pretend this amount belongs to one shop.</p></div>
@@ -98,7 +108,7 @@
   </form>{% else %}<p>Ask the owner to reopen the approved closing count before recording a transfer for this date.</p>{% endif %}
   <p>Selected date: <strong>{{ selected }}</strong>. Enter the date the money actually moved. Record each shop separately if both contributed. An unexplained difference is not automatically treated as a transfer.</p>
 </section>
-<section class="card"><h3>Record Expenses</h3><p>Save actual spending here once. It appears in Expenses, Cashbook and the cash comparison. Setting petty cash aside is not spending.</p>
+<section class="card" id="daily-movements"><h3>Record Expenses</h3><p>Save actual spending here once. It appears in Expenses, Cashbook and the cash comparison. Setting petty cash aside is not spending.</p>
   {% if not locked and 'expenses' in current_access_keys %}<form method="post" action="{{ url_for('daily_cash_expense') }}" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="requestId" value="{{ expense_request_id }}">
     <label>Paid from<select name="wallet" required><option value="">Choose source</option>{% for key in ['groceries','groceriesPetty','food','foodPetty','momoCash','momoECash'] %}<option value="{{ key }}">{{ wallets[key][0] }}</option>{% endfor %}</select></label>

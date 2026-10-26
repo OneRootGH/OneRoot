@@ -20,6 +20,34 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_owner_baseline_activation_is_explicit_idempotent_and_preserves_history(self):
+        from oneroot_erp.cash_controls import find_snapshot
+        day = date(2026,10,26)
+        db = self.sessions()
+        source = ModuleRecord(id="daily-cash-2026-10-25-closing", module_key="daily_cash_positions",
+            record_date=date(2026,10,25), status="Difference to Review",
+            payload=dict(entryType="Closing", groceriesCash=1112.90, foodCash=0,
+                         momoCash=6817.50, momoECash=7756.16))
+        db.add(source); db.commit()
+        data = dict(confirmBaseline="2026-10-26|15686.56",sourceUpdatedAt=source.updated_at.isoformat())
+        with patch("oneroot_erp.app.current_local_datetime", return_value=datetime(2026,10,26,12)):
+            self.assertEqual(self.client.post("/app/daily-cash/activate-baseline",data={}).status_code,400)
+            self.assertIsNone(find_snapshot(self.sessions(),day,"Opening"))
+            self.assertEqual(self.client.post("/app/daily-cash/activate-baseline",data=data).status_code,302)
+            self.assertEqual(self.client.post("/app/daily-cash/activate-baseline",data=data).status_code,302)
+        db = self.sessions()
+        opening = find_snapshot(db,day,"Opening")
+        self.assertEqual(opening.status,"Approved")
+        self.assertTrue(opening.payload["accountabilityBaseline"])
+        self.assertEqual(find_snapshot(db,date(2026,10,25),"Closing").status,"Difference to Review")
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key=="daily_cash_positions",
+                                                                  ModuleRecord.record_date==day)).all()),1)
+        with self.client.session_transaction() as session:session["user_id"]="cashier"
+        response = self.client.post("/app/daily-cash/activate-baseline",data=data)
+        self.assertIn(response.status_code, (302,403))
+        if response.status_code == 302:
+            self.assertNotIn("entryType=Closing", response.location)
+
     def test_daily_cash_shop_mobile_collections_exclude_float_and_generated_copies(self):
         from oneroot_erp.app import daily_shop_mobile_money_collections
         db = self.sessions()

@@ -19,6 +19,34 @@ WALLETS = {
     "bank": ("Business bank account", "Business Bank Account", "shared-operations"),
 }
 
+ACCOUNTABILITY_BASELINE = {
+    "date": "2026-10-26", "sourceDate": "2026-10-25", "total": 15686.56,
+    "combinedCash": 1112.90, "momoCash": 6817.50, "momoECash": 7756.16,
+}
+
+
+def approved_opening_payload(source, approver):
+    """Create an explicit opening reset, never alter or approve historical counts."""
+    plan = ACCOUNTABILITY_BASELINE
+    if not source or source.record_date != date.fromisoformat(plan["sourceDate"]):
+        raise ValueError("The agreed source closing count was not found.")
+    p = source.payload or {}
+    if p.get("entryType", "Closing") != "Closing":
+        raise ValueError("The source must be a closing count.")
+    shop = round(money(p.get("groceriesCash", 0)) + money(p.get("foodCash", 0)), 2)
+    if (shop != plan["combinedCash"] or money(p.get("momoCash")) != plan["momoCash"]
+            or money(p.get("momoECash")) != plan["momoECash"]):
+        raise ValueError("The source amounts changed. Review the baseline again before activation.")
+    payload = dict(date=plan["date"], entryType="Opening", openingBasis="Full cash count", cashMode="Combined",
+                   groceriesCash=shop, foodCash=0, combinedCash=shop, groceriesPetty=0, foodPetty=0,
+                   momoCash=plan["momoCash"], momoECash=plan["momoECash"],
+                   accountabilityBaseline=True, sourceClosingId=source.id,
+                   sourceClosingUpdatedAt=source.updated_at.isoformat(),
+                   exceptionReason="Owner accepted the 25 October closing balances as the new accountability baseline; historical differences remain unresolved.",
+                   notes="Combined shop cash; split unknown. No sales, expense or transfer created.",
+                   controlVersion=2, comparison=[], warnings=[], reviewStatus="Approved", reviewedBy=approver)
+    return summarize_counts(payload)
+
 
 def money(value):
     try:
