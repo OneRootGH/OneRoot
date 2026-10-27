@@ -212,7 +212,7 @@
               {% if customer.needsPhone %}
                 <a class="button subtle button-small" href="{{ url_for('module_form', module_key='customer_credit_accounts', record_id=customer.sourceRecordId) }}">Add Mobile Number</a>
               {% else %}
-                <a class="button primary button-small" href="{{ url_for('module_form', module_key='customer_credit_accounts', creditAccountId=customer.sourceRecordId) }}">Receive {{ customer.balance|currency }}</a>
+                <a class="button primary button-small" href="{{ url_for('module_form', module_key='customer_credit_accounts', creditAccountId=customer.sourceRecordId) }}">Receive Full / Part Payment</a>
               {% endif %}
               <a class="button subtle button-small" href="{{ url_for('module_list', module_key='customer_credit_accounts', q=customer.customerPhone or customer.customerName) }}">View Account</a>
             </div>

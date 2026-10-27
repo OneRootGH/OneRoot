@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% if definition.key == 'customer_credit_accounts' %}<section class="card"><h3>Credit Item Part Payments</h3><p>Open the customer's unpaid account and choose Receive Full / Part Payment. Keep the linked credit sale, enter only the amount received and its actual date and payment method, then save. For a GH₵100 credit item with GH₵30 paid, record GH₵30, not GH₵100; GH₵70 remains owed. Record each later payment separately. Do not edit the original sale amount or create another credit sale.</p></section>{% endif %}
   <article class="card module-hero">
     <div class="card-header">
       <div>

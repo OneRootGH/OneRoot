@@ -20,6 +20,49 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_daily_review_recomputes_differences_and_assigns_one_task(self):
+        from oneroot_erp.app import daily_accountability_review
+        db=self.sessions();day=date.today()-timedelta(days=1)
+        base=dict(entryType="Opening",cashMode="Combined",groceriesCash=100,foodCash=0,momoCash=200,momoECash=300,merchantECash=50)
+        for kind,p in [("Opening",base),("Closing",dict(base,entryType="Closing",groceriesCash=110,momoCash=195))]:
+            db.add(ModuleRecord(id=f"daily-cash-{day}-{kind.lower()}",module_key="daily_cash_positions",record_date=day,
+                                status="Submitted",payload=p))
+        db.commit()
+        review=daily_accountability_review(db,day)
+        self.assertEqual(review["overall"]["variance"],5)
+        self.assertIn("Daniel",review["message"])
+        url="/app/daily-cash/request-rectification"
+        self.assertEqual(self.client.post(url,data=dict(date=day.isoformat())).status_code,302)
+        self.assertEqual(self.client.post(url,data=dict(date=day.isoformat())).status_code,302)
+        tasks=self.sessions().scalars(select(ModuleRecord).where(ModuleRecord.id=="cash-rectify-"+str(day))).all()
+        self.assertEqual(len(tasks),1)
+        self.assertEqual(tasks[0].payload["officer"],"Daniel Agyei")
+        self.assertEqual(self.client.get(f"/app/daily-cash?date={day}&entryType=Closing").status_code,200)
+
+    def test_equipment_advance_and_part_payments_keep_rental_open(self):
+        from oneroot_erp.app import service_payment_summary
+        db=self.sessions();record=db.get(ModuleRecord,"test-rental")
+        p=dict(record.payload,returnDate="",status="Out",outDate=date.today().isoformat(),
+               dueDate=date.today().isoformat(),rentalDays=1,rentalFee=100,costAmount=20,paymentEntries=[],amountPaid=0)
+        set_module_record_metadata(record,MODULES[record.module_key],p);db.commit()
+        url="/app/services/equipment_rental_bookings/test-rental/payment"
+        data=dict(paymentDate=date.today().isoformat(),paymentMethod="Cash",amountPaid="250",
+                  advanceThroughDate=(date.today()+timedelta(days=2)).isoformat())
+        self.assertEqual(self.client.post(url,data=data).status_code,302)
+        saved=self.sessions().get(ModuleRecord,"test-rental")
+        self.assertEqual(saved.payload["amountPaid"],250)
+        self.assertFalse(saved.payload.get("returnDate"))
+        self.assertEqual(saved.payload["status"],"Out")
+        summary=service_payment_summary("equipment_rental_bookings",saved.payload)
+        self.assertEqual(summary["advanceHeld"],150)
+        self.assertEqual(summary["profitRecognized"],80)
+        self.assertEqual(self.client.get(url).status_code,200)
+        # Any smaller amount is allowed against the remaining covered period.
+        self.assertEqual(self.client.post(url,data=dict(data,amountPaid="25")).status_code,302)
+        self.assertEqual(self.sessions().get(ModuleRecord,"test-rental").payload["amountPaid"],275)
+        self.client.post(url,data=dict(data,amountPaid="100"))
+        self.assertEqual(self.sessions().get(ModuleRecord,"test-rental").payload["amountPaid"],275)
+
     def test_fresh_start_merchants_commission_transfers_and_legacy_cutoff(self):
         from oneroot_erp.cash_controls import latest_close, overall_cash_summary
         day = date(2026,10,26)

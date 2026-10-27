@@ -1,0 +1,11 @@
+{% if cash_review %}
+<section class="card"><h3>Daily Accountability Review · {{ cash_review.day }}</h3>
+<p>Recalculated from saved source records, not a guess about missing money. No transactions are changed by this review.</p>
+{% if cash_review.overall and cash_review.overall.expected is not none %}<p>Expected <strong>{{ cash_review.overall.expected|currency }}</strong> · Counted <strong>{{ cash_review.overall.actual|currency }}</strong> · Overall difference <strong>{{ cash_review.overall.variance|currency }}</strong></p>{% endif %}
+<div class="table-wrap"><table><thead><tr><th>Account</th><th>Expected</th><th>Counted</th><th>Difference</th></tr></thead><tbody>{% for r in cash_review.rows if r.key not in ['groceriesPetty','foodPetty'] %}<tr><td>{{ r.label }}</td><td>{{ r.expected|currency }}</td><td>{{ r.actual|currency }}</td><td>{{ r.variance|currency }}</td></tr>{% endfor %}</tbody></table></div>
+{% for issue in cash_review.issues %}<p>{{ issue }}</p>{% endfor %}
+<details><summary>Instructions for Daniel</summary><p>{{ cash_review.message }}</p></details>
+<a class="button" href="{{ url_for('daily_cash_page',date=cash_review.day,entryType='Closing') }}">Open Closing</a>
+{% if can_assign_cash_review %}<form method="post" action="{{ url_for('daily_cash_request_rectification') }}"><input type="hidden" name="date" value="{{ cash_review.day }}"><button class="button">Assign Daniel a Correction Reminder</button></form>{% endif %}
+</section>
+{% endif %}

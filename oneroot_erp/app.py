@@ -5586,7 +5586,8 @@ def service_payment_summary(module_key: str, payload: dict[str, Any]) -> dict[st
         else:
             payment_cost = 0.0
         cost_recognized_total = round(cost_recognized_total + payment_cost, 2)
-        payment_profit = round(paid_amount - payment_cost, 2)
+        recognized_payment = max(min(paid_total, total_due) - min(prior_paid, total_due), 0)
+        payment_profit = round(recognized_payment - payment_cost, 2)
         balance = round(max(total_due - paid_total, 0), 2)
         rows.append(
             {
@@ -5603,6 +5604,7 @@ def service_payment_summary(module_key: str, payload: dict[str, Any]) -> dict[st
         "costRecognized": round(cost_recognized_total, 2),
         "profitRecognized": round(sum(parse_amount(entry.get("profitAmount")) for entry in rows), 2),
         "balance": round(max(total_due - paid_total, 0), 2),
+        "advanceHeld": round(max(paid_total - total_due, 0), 2),
         "totalDue": round(total_due, 2),
         "totalCost": round(total_cost, 2),
     }
@@ -7643,6 +7645,34 @@ def daily_shop_mobile_money_collections(db, day):
                 add(record.business_area_id, record.amount, "Manual / online collection", record.reference or record.id)
     totals = {desk: round(sum(r["amount"] for r in rows if r["desk"] == desk), 2) for desk in ("groceries", "food")}
     return dict(rows=rows, totals=totals, total=round(sum(totals.values()), 2))
+
+
+def daily_accountability_review(db, day):
+    opening = find_snapshot(db, day, "Opening")
+    closing = find_snapshot(db, day, "Closing")
+    movements = daily_cash_movement_context(db, day)
+    rows = compare_counts(closing.payload or {}, opening.payload or {}, movements["effects"],
+                          combined=cash_mode(opening.payload or {}) == "Combined" or cash_mode(closing.payload or {}) == "Combined") if opening and closing else []
+    overall = overall_cash_summary(closing.payload or {}, opening.payload if opening else None, movements) if closing else None
+    guidance = reconciliation_guidance(rows)
+    issues = list(guidance["messages"]) + list(movements["warnings"])
+    if not opening:
+        issues.insert(0, "Opening count is missing. Expected balances cannot be confirmed.")
+    if not closing:
+        issues.insert(0, "Closing count is missing. Count and submit the actual balances.")
+    if opening and closing:
+        for row in rows:
+            if row["key"] in {"groceriesPetty", "foodPetty"} and abs(row["variance"]) >= .01:
+                issues.append(f"{row['label']}: allocation differs by {row['variance']:.2f}. Confirm the amount set aside or replenished within store cash; do not add it to total money again.")
+        if closing.status != "Approved":
+            issues.append("Closing is awaiting owner review; do not approve until differences are explained.")
+    message = f"Daniel, please review Daily Cash & Petty Cash for {day.isoformat()}. "
+    if overall and overall["variance"] is not None:
+        message += f"Expected total GHS{overall['expected']:.2f}; counted GHS{overall['actual']:.2f}; difference GHS{overall['variance']:+.2f}. "
+    message += " ".join(f"{r['label']}: GHS{r['variance']:+.2f}." for r in rows if r['key'] not in {'groceriesPetty','foodPetty'} and abs(r['variance']) >= .01)
+    message += " Check actual receipts, payment methods, provider statements, expenses and transfers. Correct the original wrong entry or document the actual missing movement; never force the count to balance. Explain petty cash allocations separately. Tell Philip when ready for approval."
+    return dict(day=day, opening=opening, closing=closing, rows=rows, overall=overall,
+                issues=list(dict.fromkeys(issues)), message=message)
 
 
 def daily_cash_movement_context(db, day):
@@ -19298,6 +19328,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             assistant=assistant,
             ai_question=ai_question,
             ai_answer=ai_owner_question_answer(ai_question, assistant),
+            cash_review=daily_accountability_review(g.db, briefing_date-timedelta(days=1)),
+            can_assign_cash_review=user_can_view_dashboard(g.current_user),
         )
 
     @app.route("/app/export/backup.json")
@@ -19939,6 +19971,30 @@ def create_app(config: AppConfig | None = None) -> Flask:
         flash(f"Cash record moved from {source} to {target}. Amounts and original recorder were preserved.", "success")
         return redirect(url_for("daily_cash_page", date=target.isoformat(), entryType=entry_type))
 
+    @app.route("/app/daily-cash/request-rectification", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_request_rectification():
+        if not user_can_view_dashboard(g.current_user):
+            return "Management access required.", 403
+        day = parse_date(request.form.get("date"))
+        today = current_local_datetime().date()
+        if not day or day >= today:
+            return "Choose a completed past day.", 400
+        review = daily_accountability_review(g.db, day)
+        identity = "cash-rectify-" + day.isoformat()
+        task = g.db.get(ModuleRecord, identity)
+        if not task:
+            payload = dict(title=f"Review cash closing for {day}", officer="Daniel Agyei", frequency="Daily",
+                nextDueDate=today.isoformat(), dueTime="08:00", startMode="Fixed time", reminderTime="08:00", reminder="Enabled",
+                status="Active", notes=review["message"], reviewDate=day.isoformat())
+            task = ModuleRecord(id=identity, module_key="business_calendar", title=payload["title"],
+                                record_date=today, status="Active", payload=payload)
+            g.db.add(task)
+            audit("daily_cash_positions", "Daily Cash Review", "request-rectification", day.isoformat(), identity, review["message"])
+            g.db.commit()
+        flash("Daniel's correction task is available in the Business Obligations Calendar. It repeats until management deactivates it after resolution.", "success")
+        return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
+
     @app.route("/app/daily-cash/activate-baseline", methods=["POST"])
     @access_required("daily_cash_positions")
     def daily_cash_activate_baseline():
@@ -20135,6 +20191,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ModuleRecord.record_date >= date_from, ModuleRecord.record_date <= date_to)
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
+                               cash_review=daily_accountability_review(g.db, selected) if selected < today else None,
+                               can_assign_cash_review=user_can_view_dashboard(g.current_user),
                                baseline_plan=ACCOUNTABILITY_BASELINE,
                                baseline_source=find_snapshot(g.db, date.fromisoformat(ACCOUNTABILITY_BASELINE["sourceDate"]), "Closing"),
                                baseline_opening=find_snapshot(g.db, date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]), "Opening"),
@@ -22803,6 +22861,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
         previous_payload = dict(payload)
         payment_summary = service_payment_summary(module_key, payload)
         if request.method == "POST":
+            record = g.db.scalar(select(ModuleRecord).where(ModuleRecord.id == record_id,
+                ModuleRecord.module_key == module_key).with_for_update().execution_options(populate_existing=True))
+            payload = dict(record.payload or {})
+            previous_payload = dict(payload)
+            payment_summary = service_payment_summary(module_key, payload)
             if module_key == "equipment_rental_bookings" and request.form.get("ownerApproveMorningReturn") == "yes":
                 requested_return_date = normalize_text(payload.get("returnDayApprovalRequestedReturnDate"))
                 requested_return_time = normalize_text(payload.get("returnDayApprovalRequestedReturnTime"))
@@ -22899,17 +22962,35 @@ def create_app(config: AppConfig | None = None) -> Flask:
             amount_paid = round(parse_amount(request.form.get("amountPaid")), 2)
             payment_method = normalize_text(request.form.get("paymentMethod"))
             remaining_balance = round(parse_amount(payment_summary["balance"]), 2)
+            advance_through = parse_date(request.form.get("advanceThroughDate"))
+            advance_limit = remaining_balance
+            if module_key == "equipment_rental_bookings" and advance_through:
+                out = parse_date(payload.get("outDate"))
+                if (not out or advance_through < out or advance_through > current_local_datetime().date()+timedelta(days=366)
+                        or payload.get("returnDate") or payload.get("status") == "Cancelled"):
+                    return_date_error = "Advance coverage must be a valid date for an open rental, no more than 366 days ahead."
+                else:
+                    projected = dict(payload, returnDate=advance_through.isoformat())
+                    projected[SERVICE_LINE_ITEMS_KEY] = service_line_items(module_key, payload)
+                    sync_service_line_item_rollup(module_key, projected)
+                    advance_limit = max(remaining_balance, round(service_total_due(module_key, projected)-payment_summary["paidTotal"],2))
+            elif module_key != "equipment_rental_bookings" and advance_through:
+                return_date_error = "Advance rental coverage applies only to equipment."
             if return_date_error:
                 flash(return_date_error, "error")
-            elif amount_paid <= 0:
+            elif not math.isfinite(amount_paid) or amount_paid <= 0:
                 flash("Enter a payment amount greater than zero.", "error")
             elif not payment_method:
                 flash("Choose how the customer paid before saving the collection.", "error")
-            elif remaining_balance <= 0:
+            elif not parse_date(payment_date) or parse_date(payment_date) > current_local_datetime().date():
+                flash("Enter the actual payment date, not a future date.", "error")
+            elif payment_method not in {"Cash", "Mobile Money", "Bank Transfer", "Card"}:
+                flash("Choose a received payment method, not credit or a payment promise.", "error")
+            elif advance_limit <= 0:
                 flash("This request is already fully paid. Edit the request first if a new charge needs to be added.", "warning")
-            elif amount_paid > remaining_balance + 0.009:
+            elif amount_paid > advance_limit + 0.009:
                 flash(
-                    f"The collection cannot be more than the remaining balance of {format_currency(remaining_balance)}.",
+                    f"The collection cannot exceed {format_currency(advance_limit)}. For future rental days, select the advance coverage date.",
                     "error",
                 )
             else:
@@ -22934,6 +23015,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "id": uuid4().hex,
                         "paymentDate": payment_date,
                         "amountPaid": amount_paid,
+                        "advanceThroughDate": advance_through.isoformat() if advance_through else "",
                         "paymentMethod": payment_method,
                         "paymentReference": normalize_text(request.form.get("paymentReference")),
                         "receivedBy": normalize_text(request.form.get("receivedBy")) or g.current_user.full_name or g.current_user.username,
@@ -22985,6 +23067,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payment_methods=PAYMENT_METHODS,
             today_iso=date.today().isoformat(),
             payment_amount_default=payment_amount_default,
+            advance_held=service_payment_summary(module_key, payload).get("advanceHeld", 0),
             payment_method_default=normalize_text(request.args.get("method")) or "Cash",
             can_approve_morning_return=user_is_owner(g.current_user),
             return_day_approval={

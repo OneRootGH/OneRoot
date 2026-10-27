@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% include 'cash_review.html' %}
 {% set mode = payload.get('cashMode') or ('Combined' if 'combined' in payload.get('notes', '')|lower else 'Separate') %}
 <section class="card"><h3>Daily Accountability</h3><div class="toolbar"><a class="button" href="{{ url_for('daily_cash_page',date=selected,entryType='Opening') }}">1. Confirm Opening</a><a class="button" href="#daily-movements">2. Record Expenses &amp; Transfers</a><a class="button" href="{{ url_for('daily_cash_page',date=selected,entryType='Closing') }}">3. Count Closing</a><span>4. Owner Reviews &amp; Approves</span></div>
 <p>Count all the money still held. Petty cash is part of shop cash. Merchant e-cash and MoMo agent e-cash are separate accounts. A transfer changes the wallet, not total income. The fresh-start opening applies before trading on 26 October 2026; earlier movements stay in history.</p></section>

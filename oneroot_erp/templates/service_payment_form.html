@@ -162,9 +162,11 @@
           <h3>Capture Payment</h3>
         </div>
       </div>
-      {% if service_row.balance > 0 %}
+      {% if service_row.balance > 0 or (definition.key == 'equipment_rental_bookings' and not payload.get('returnDate') and payload.get('status') != 'Cancelled') %}
         <form method="post" class="form-grid service-collection-form" data-offline-queue data-offline-label="{{ definition.label }} payment" data-offline-reset="amountPaid,paymentReference,receivedBy,notes">
           {% if definition.key == 'equipment_rental_bookings' %}
+            <label><span>Advance payment covers through (optional)</span><input type="date" name="advanceThroughDate" min="{{ service_row.outDate or '' }}"><small>For several days paid ahead, select the last day covered and enter the actual amount received. Leave the return date blank until the equipment returns. You can also collect any part of the permitted amount.</small></label>
+            <p class="span-2">Advance held against future rental use: <strong>{{ advance_held|currency }}</strong>. Final charges still follow the actual return date; excess money requires review, not automatic profit.</p>
             <div class="span-2 rental-payment-shortcuts">
               <p><strong>Fast collection:</strong> choose one rental day for a part-payment today, or use the full current balance. The rental stays open until the equipment is returned and the balance is cleared.</p>
               <div class="quick-choice-row">
@@ -195,15 +197,15 @@
           {% endif %}
           <label>
             <span>Amount Received</span>
-            <input type="number" min="0.01" max="{{ service_row.balance }}" step="0.01" name="amountPaid" value="{{ payment_amount_default if payment_amount_default > 0 else '' }}" required>
-            <small class="muted form-helper" id="equipment-payment-amount-helper">Maximum collection: {{ service_row.balance|currency }}</small>
+            <input type="number" min="0.01" {% if definition.key != 'equipment_rental_bookings' %}max="{{ service_row.balance }}"{% endif %} step="0.01" name="amountPaid" value="{{ payment_amount_default if payment_amount_default > 0 else '' }}" required>
+            <small class="muted form-helper" id="equipment-payment-amount-helper">Current balance: {{ service_row.balance|currency }}. For equipment paid ahead, select the advance coverage date; the server checks the allowed amount.</small>
           </label>
           <label>
             <span>Payment Method</span>
             <select name="paymentMethod" required>
               <option value="">Select payment method</option>
               {% for method in payment_methods %}
-                <option value="{{ method }}" {% if payment_method_default == method %}selected{% endif %}>{{ method }}</option>
+                {% if method in ['Cash','Mobile Money','Bank Transfer','Card'] %}<option value="{{ method }}" {% if payment_method_default == method %}selected{% endif %}>{{ method }}</option>{% endif %}
               {% endfor %}
             </select>
           </label>
@@ -322,7 +324,7 @@
           }
           const days = Math.round((end - start) / 86400000) + 1;
           const balance = Math.max((dailyRate * days) + damageCharge - collected, 0);
-          amountField.max = balance.toFixed(2);
+          amountField.removeAttribute('max');
           if (!amountField.value || Math.abs(Number(amountField.value) - startingBalance) < 0.01) {
             amountField.value = balance.toFixed(2);
           }
