@@ -19822,6 +19822,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def daily_cash_mtn_commission():
         day = parse_date(request.form.get("date"))
         month = normalize_text(request.form.get("commissionMonth"))
+        commission_type = normalize_text(request.form.get("commissionType")) or "MoMo Commission"
+        if commission_type not in {"MoMo Commission", "Airtime Commission"}:
+            return "Choose MoMo Commission or Airtime Commission.", 400
         wallet = normalize_text(request.form.get("wallet"))
         reference = normalize_text(request.form.get("reference"))[:150]
         token = normalize_text(request.form.get("requestId"))
@@ -19851,14 +19854,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         label, account, _ = WALLETS[wallet]
         payload = dict(id=identity, date=day.isoformat(), businessAreaId="mobile-money", accountName=account,
             entryType="Cash In", amount=amount, paymentMethod="Cash" if wallet == "momoCash" else "Bank Transfer" if wallet == "bank" else "Mobile Money",
-            category="MTN Monthly Commission Received", counterparty="MTN", commissionMonth=month,
+            category="MTN Airtime Commission Received" if commission_type == "Airtime Commission" else "MTN Monthly Commission Received",
+            counterparty="MTN", commissionMonth=month, commissionType=commission_type,
             sourceType="mtn-commission-settlement", reference="mtn-commission|" + reference,
             commissionWallet=wallet, recordedBy=g.current_user.full_name or g.current_user.username,
             notes="Actual monthly commission settlement. Not another sale or a second recognition of earned commission. " + normalize_text(request.form.get("notes"))[:1000])
         record = ModuleRecord(id=identity, module_key="cashbook_entries")
         set_module_record_metadata(record, MODULES["cashbook_entries"], payload)
         g.db.add(record)
-        audit("daily_cash_positions", "MTN Commission Receipt", "commission-received", month, identity,
+        audit("daily_cash_positions", "MTN Commission Receipt", "commission-received", commission_type + " " + month, identity,
               f"{amount:.2f}; received {day}; {label}; MTN reference {reference}. Settlement only; no duplicate earned income.")
         g.db.commit()
         flash("MTN commission payment recorded once in Cashbook and the receiving account. Earned commission was not counted again.", "success")

@@ -112,9 +112,10 @@
   </form>{% else %}<p>Ask the owner to reopen the approved closing count before recording a transfer for this date.</p>{% endif %}
   <p>Selected date: <strong>{{ selected }}</strong>. Enter the date the money actually moved. Record each shop separately if both contributed. An unexplained difference is not automatically treated as a transfer.</p>
 </section>
-<section class="card"><h3>MTN Monthly Commission Paid</h3><p>Record this whenever MTN actually pays commission. Use the receipt date, not the month it was earned. Select the account that received it. Do not also enter it as a float top-up, manual Cashbook receipt or another commission sale.</p>
+<section class="card"><h3>MTN MoMo &amp; Airtime Commission Paid</h3><p>Record MoMo or Airtime Commission whenever MTN actually pays it. Use the receipt date, not the month it was earned. Select the account that received it. Do not also enter it as a float top-up, manual Cashbook receipt or another commission sale.</p>
 {% if not locked %}<form method="post" action="{{ url_for('daily_cash_mtn_commission') }}" class="form-grid">
 <input type="hidden" name="requestId" value="{{ commission_request_id }}">
+<label>Commission type<select name="commissionType" required><option>MoMo Commission</option><option>Airtime Commission</option></select></label>
 <label>Payment received on<input name="date" type="date" value="{{ selected }}" max="{{ today }}" required></label>
 <label>Commission month covered<input name="commissionMonth" type="month" max="{{ selected.strftime('%Y-%m') }}" required></label>
 <label>Amount received (GH₵)<input name="amount" type="number" min="0.01" step="0.01" required></label>
@@ -122,7 +123,7 @@
 <label>MTN payment reference<input name="reference" maxlength="150" required></label><label>Note<input name="notes" maxlength="1000"></label><button class="button primary">Record MTN Commission Payment</button></form>
 {% else %}<p>This date is approved. Ask the owner to reopen it before adding a commission payment.</p>{% endif %}
 <p>This records money received, not a second profit entry for commission already earned. A bank receipt is recorded in Cashbook but remains outside the four-account cash total. Commission already recorded as received through a transaction must not be entered again here.</p>
-<div class="table-wrap"><table><thead><tr><th>Received</th><th>Month Covered</th><th>Account</th><th>Amount</th><th>Reference</th></tr></thead><tbody>{% for r in commission_receipts %}<tr><td>{{ r.record_date }}</td><td>{{ r.payload.get('commissionMonth') }}</td><td>{{ r.payload.get('accountName') }}</td><td>{{ r.amount|currency }}</td><td>{{ r.reference }}</td></tr>{% else %}<tr><td colspan="5">No MTN commission payment recorded for this date.</td></tr>{% endfor %}</tbody></table></div></section>
+<div class="table-wrap"><table><thead><tr><th>Received</th><th>Type</th><th>Month Covered</th><th>Account</th><th>Amount</th><th>Reference</th></tr></thead><tbody>{% for r in commission_receipts %}<tr><td>{{ r.record_date }}</td><td>{{ r.payload.get('commissionType','MoMo Commission') }}</td><td>{{ r.payload.get('commissionMonth') }}</td><td>{{ r.payload.get('accountName') }}</td><td>{{ r.amount|currency }}</td><td>{{ r.reference }}</td></tr>{% else %}<tr><td colspan="6">No MTN commission payment recorded for this date.</td></tr>{% endfor %}</tbody></table></div></section>
 <section class="card" id="daily-movements"><h3>Record Expenses</h3><p>Save actual spending here once. It appears in Expenses, Cashbook and the cash comparison. Setting petty cash aside is not spending.</p>
   {% if not locked and 'expenses' in current_access_keys %}<form method="post" action="{{ url_for('daily_cash_expense') }}" enctype="multipart/form-data" class="form-grid">
     <input type="hidden" name="date" value="{{ selected }}"><input type="hidden" name="requestId" value="{{ expense_request_id }}">

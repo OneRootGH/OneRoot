@@ -20,6 +20,18 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_airtime_commission_receipt_is_distinct_and_updates_selected_account(self):
+        db=self.sessions();day=date.today()
+        base=daily_cash_movement_context(db,day)["effects"]["momoECash"]
+        data=dict(date=day.isoformat(),commissionMonth=day.strftime("%Y-%m"),commissionType="Airtime Commission",
+                  wallet="momoECash",amount="15",reference="AIRTIME-001",requestId="f"*32)
+        self.assertEqual(self.client.post("/app/daily-cash/mtn-commission",data=data).status_code,302)
+        db=self.sessions();r=db.get(ModuleRecord,"mtn-commission-"+"f"*32)
+        self.assertEqual(r.payload["commissionType"],"Airtime Commission")
+        self.assertEqual(r.payload["category"],"MTN Airtime Commission Received")
+        self.assertEqual(daily_cash_movement_context(db,day)["effects"]["momoECash"],base+15)
+        self.assertEqual(self.client.post("/app/daily-cash/mtn-commission",data=dict(data,commissionType="Invalid")).status_code,400)
+
     def test_ai_closing_schedule_does_not_invent_actual_counts_and_is_idempotent(self):
         from oneroot_erp.ai_closing import prepare_due_closings
         from oneroot_erp.cash_controls import find_snapshot
@@ -65,7 +77,7 @@ class ServiceEditSaveTests(unittest.TestCase):
         self.assertEqual(self.client.post(url,data=dict(data,amount="nan",requestId="e"*32,reference="INVALID")).status_code,400)
         page=self.client.get(f"/app/daily-cash?date={day}")
         self.assertEqual(page.status_code,200)
-        self.assertIn("MTN Monthly Commission Paid",page.get_data(as_text=True))
+        self.assertIn("MTN MoMo &amp; Airtime Commission Paid",page.get_data(as_text=True))
         self.assertIn("MTN-MONTH-001",page.get_data(as_text=True))
 
     def test_daily_review_recomputes_differences_and_assigns_one_task(self):
