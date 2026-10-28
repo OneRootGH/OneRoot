@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% if ai_preparation %}<section class="card"><h3>AI Prepared Closing · {{ selected }}</h3><p>Prepared by {{ ai_preparation.payload.preparedBy }} at {{ ai_preparation.payload.preparedAt }}. This is an expected-balance draft, not a cash count or approval.</p><p>Expected at preparation: <strong>{{ ai_preparation.payload.expectedTotal|currency if ai_preparation.payload.expectedTotal is not none else 'Opening missing' }}</strong>. The live comparison below recalculates when transactions change.</p><div class="table-wrap"><table><thead><tr><th>Account</th><th>Expected at preparation</th></tr></thead><tbody>{% for row in ai_preparation.payload.expectedAccounts %}<tr><td>{{ row.key }}</td><td>{{ row.expected|currency }}</td></tr>{% endfor %}</tbody></table></div><p>Daniel: enter the actual cash and phone balances below, correct verified source mistakes, explain differences, and confirm review before opening the next day.</p></section>{% endif %}
 {% include 'cash_review.html' %}
 {% set mode = payload.get('cashMode') or ('Combined' if 'combined' in payload.get('notes', '')|lower else 'Separate') %}
 <section class="card"><h3>Daily Accountability</h3><div class="toolbar"><a class="button" href="{{ url_for('daily_cash_page',date=selected,entryType='Opening') }}">1. Confirm Opening</a><a class="button" href="#daily-movements">2. Record Expenses &amp; Transfers</a><a class="button" href="{{ url_for('daily_cash_page',date=selected,entryType='Closing') }}">3. Count Closing</a><span>4. Owner Reviews &amp; Approves</span></div>
@@ -53,6 +54,7 @@
     <label>Other note<textarea name="notes" rows="2" maxlength="2000">{{ payload.get('notes','') }}</textarea></label>
     <p class="muted">Allocating petty cash does not spend it or reduce total physical cash. Record purchases in Expenses, choosing the correct business area and Paid From account. Record transfers below once. Never add daily balance snapshots together as income.</p>
     <label><input type="checkbox" name="confirmedDate" value="{{ selected }}|{{ entry_type }}" required> I confirm this is the actual <strong>{{ entry_type }}</strong> count for <strong>{{ selected.strftime('%d %B %Y') }}</strong>.</label>
+    {% if entry_type == 'Closing' %}<label><input type="checkbox" name="reviewedActualCounts" value="yes"> I counted the actual money and checked the phone balances, reviewed all movements and explained differences. Ready for next-day opening.</label><p>Completing this review does not remove differences or replace owner approval. New edits must be reviewed again.</p>{% endif %}
     <button class="button primary" type="submit" {% if locked %}disabled{% endif %}>Save {{ entry_type }} Count</button>
     </fieldset>
     {% if payload.get('recordedAt') %}<p>Saved by {{ payload.recordedBy }} · {{ payload.recordedAt }} UTC. Corrections are audited.</p>{% endif %}

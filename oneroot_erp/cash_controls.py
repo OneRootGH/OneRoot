@@ -81,7 +81,7 @@ def latest_close(db, before):
         ModuleRecord.record_date < before).order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))).all()
     start = date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]) if fresh_accountability_active(db, before) else None
     return next((r for r in records if (r.payload or {}).get("entryType", "Closing") == "Closing"
-                 and (not start or (r.record_date >= start and r.status == "Approved"
+                 and (not start or (r.record_date >= start and (r.status == "Approved" or (r.payload or {}).get("danielReviewed"))
                                     and (r.payload or {}).get("controlVersion") == 3))), None)
 
 

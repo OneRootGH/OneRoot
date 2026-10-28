@@ -20,6 +20,33 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_ai_closing_schedule_does_not_invent_actual_counts_and_is_idempotent(self):
+        from oneroot_erp.ai_closing import prepare_due_closings
+        from oneroot_erp.cash_controls import find_snapshot
+        from zoneinfo import ZoneInfo
+        db=self.sessions();day=date(2026,10,28)
+        db.delete(db.get(ModuleRecord,"test-rental"))
+        db.add(ModuleRecord(id=f"daily-cash-{day}-opening",module_key="daily_cash_positions",record_date=day,status="Approved",
+            payload=dict(entryType="Opening",cashMode="Combined",groceriesCash=100,foodCash=0,momoCash=200,momoECash=300,merchantECash=50)))
+        db.commit()
+        before=datetime(2026,10,29,1,59,tzinfo=ZoneInfo("Africa/Accra"))
+        after=datetime(2026,10,29,2,0,tzinfo=ZoneInfo("Africa/Accra"))
+        self.assertEqual(prepare_due_closings(db,daily_cash_movement_context,before),0)
+        self.assertEqual(prepare_due_closings(db,daily_cash_movement_context,after),1)
+        self.assertEqual(prepare_due_closings(db,daily_cash_movement_context,after),0)
+        self.assertIsNone(find_snapshot(db,day,"Closing"))
+        draft=db.get(ModuleRecord,"ai-closing-2026-10-28")
+        self.assertIsNone(draft.payload["actualCounts"])
+        self.assertEqual(draft.payload["expectedTotal"],650)
+        actor=db.get(User,"oneroot-ai-closing")
+        self.assertFalse(actor.login_enabled)
+        self.assertFalse(actor.active)
+        task=db.get(ModuleRecord,"ai-closing-review-2026-10-28")
+        self.assertEqual(task.payload["officer"],"Daniel Agyei")
+        response=self.client.get("/app/daily-cash?date=2026-10-28&entryType=Closing")
+        self.assertEqual(response.status_code,200)
+        self.assertIn("AI Prepared Closing",response.get_data(as_text=True))
+
     def test_monthly_mtn_commission_receipt_moves_wallet_once_without_duplicate_sales(self):
         day=date.today(); db=self.sessions()
         before=daily_cash_movement_context(db,day)["effects"]["momoECash"]

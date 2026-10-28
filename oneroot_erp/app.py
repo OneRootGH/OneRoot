@@ -15,7 +15,7 @@ from datetime import date, datetime, timedelta
 from functools import wraps
 from io import BytesIO, StringIO
 from pathlib import Path
-from threading import Lock
+from threading import Lock, Thread, Event
 from typing import Any
 from urllib.parse import quote
 from uuid import uuid4
@@ -28,6 +28,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import scoped_session, selectinload, sessionmaker
 
 from .config import AppConfig, load_config
+from .ai_closing import prepare_due_closings
 from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
                             cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary, reconciliation_guidance,
@@ -17758,6 +17759,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
             app.config["DATABASE_NEXT_RETRY_AT"] = 0.0
             return True
 
+    ai_closing_start_lock = Lock()
+
+    def ai_closing_loop():
+        interval = Event()
+        while True:
+            try:
+                prepare_due_closings(SessionLocal(), daily_cash_movement_context)
+            except Exception:
+                SessionLocal().rollback()
+                app.logger.exception("AI closing preparation failed; retrying next minute")
+            finally:
+                SessionLocal.remove()
+            interval.wait(60)
+
     @app.before_request
     def open_session():
         g.current_user = None
@@ -17766,6 +17781,11 @@ def create_app(config: AppConfig | None = None) -> Flask:
             g.db = None
             return database_unavailable_response()
         g.db = app.config["SESSION_LOCAL"]()
+        if app.config["DATABASE_READY"] and engine.dialect.name == "postgresql" and not app.config.get("AI_CLOSING_THREAD_STARTED"):
+            with ai_closing_start_lock:
+                if not app.config.get("AI_CLOSING_THREAD_STARTED"):
+                    app.config["AI_CLOSING_THREAD_STARTED"] = True
+                    Thread(target=ai_closing_loop, name="oneroot-ai-closing", daemon=True).start()
 
         user_id = session.get("user_id")
         pending_login_user = normalize_text(session.get("pending_login_user")).lower()
@@ -20147,8 +20167,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return rows, warnings
         errors = []
         if request.method == "POST":
-            if fresh and entry_type == "Closing" and (not opening or opening.status != "Approved"):
+            if fresh and entry_type == "Closing" and (not opening or not (opening.status == "Approved" or (opening.payload or {}).get("openingConfirmed"))):
                 errors.append("An approved opening is required before submitting a fresh-start closing. Ask the owner to review the opening first.")
+            if fresh and entry_type == "Opening":
+                prior = find_snapshot(g.db, selected-timedelta(days=1), "Closing")
+                if selected > date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]) and (not prior or not (prior.status == "Approved" or (prior.payload or {}).get("danielReviewed"))):
+                    errors.append("Review yesterday's actual closing and explain its differences before opening this day.")
+                elif prior and (prior.payload or {}).get("sourceSignature") != daily_cash_movement_context(g.db, selected-timedelta(days=1))["signature"]:
+                    errors.append("Yesterday's receipts or movements changed after review. Review and resave that closing before opening today.")
             if not parse_date(request.form.get("date")) or selected > today:
                 errors.append("Choose today or an earlier date for the actual count.")
             if request.form.get("confirmedDate") != f"{selected.isoformat()}|{entry_type}":
@@ -20212,6 +20238,12 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     reviewStatus="Difference to Review" if review_needed(comparison, warnings) else "Submitted",
                     recordedBy=g.current_user.full_name or g.current_user.username,
                     recordedById=g.current_user.id, recordedAt=datetime.utcnow().isoformat())
+                if entry_type == "Closing":
+                    payload["danielReviewed"] = request.form.get("reviewedActualCounts") == "yes"
+                    payload["countedBy"] = g.current_user.full_name or g.current_user.username
+                    payload["countReviewedAt"] = datetime.utcnow().isoformat() if payload["danielReviewed"] else ""
+                elif fresh:
+                    payload["openingConfirmed"] = True
                 record = record or ModuleRecord(id=identity, module_key="daily_cash_positions")
                 set_module_record_metadata(record, MODULES["daily_cash_positions"], payload)
                 record.status = payload["reviewStatus"]
@@ -20239,6 +20271,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
                                today=today,
+                               ai_preparation=g.db.get(ModuleRecord, "ai-closing-"+selected.isoformat()) if entry_type == "Closing" else None,
                                cash_review=daily_accountability_review(g.db, selected) if selected < today else None,
                                can_assign_cash_review=user_can_view_dashboard(g.current_user),
                                baseline_plan=ACCOUNTABILITY_BASELINE,
