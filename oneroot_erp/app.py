@@ -19797,6 +19797,53 @@ def create_app(config: AppConfig | None = None) -> Flask:
               f"{amount:.2f}; {reference}; recipient {recipient}; {notes}")
         return record
 
+    @app.route("/app/daily-cash/mtn-commission", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_mtn_commission():
+        day = parse_date(request.form.get("date"))
+        month = normalize_text(request.form.get("commissionMonth"))
+        wallet = normalize_text(request.form.get("wallet"))
+        reference = normalize_text(request.form.get("reference"))[:150]
+        token = normalize_text(request.form.get("requestId"))
+        if (not day or day > current_local_datetime().date() or not parse_month(month)
+                or month > day.strftime("%Y-%m") or wallet not in {"momoCash", "momoECash", "merchantECash", "bank"}
+                or not reference or not re.fullmatch(r"[a-f0-9]{32}", token)):
+            return "Enter the actual receipt date, month covered, receiving account and MTN reference.", 400
+        try:
+            amount = cash_money(request.form.get("amount"))
+            if amount <= 0:
+                raise ValueError("Commission received must be greater than zero.")
+        except ValueError as error:
+            return str(error), 400
+        if g.db.bind.dialect.name == "postgresql":
+            g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"), {"day": "cash-control|" + day.isoformat()})
+            g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:reference))"), {"reference": "mtn-commission|" + reference.casefold()})
+        identity = "mtn-commission-" + token
+        if g.db.get(ModuleRecord, identity):
+            return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
+        closing = find_snapshot(g.db, day, "Closing")
+        if closing and closing.status == "Approved":
+            return "Ask the owner to reopen the approved closing before recording this payment.", 409
+        duplicate = g.db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "cashbook_entries",
+            func.lower(ModuleRecord.reference) == ("mtn-commission|" + reference).lower()))
+        if duplicate:
+            return "This MTN commission reference is already recorded. Do not enter it twice.", 409
+        label, account, _ = WALLETS[wallet]
+        payload = dict(id=identity, date=day.isoformat(), businessAreaId="mobile-money", accountName=account,
+            entryType="Cash In", amount=amount, paymentMethod="Cash" if wallet == "momoCash" else "Bank Transfer" if wallet == "bank" else "Mobile Money",
+            category="MTN Monthly Commission Received", counterparty="MTN", commissionMonth=month,
+            sourceType="mtn-commission-settlement", reference="mtn-commission|" + reference,
+            commissionWallet=wallet, recordedBy=g.current_user.full_name or g.current_user.username,
+            notes="Actual monthly commission settlement. Not another sale or a second recognition of earned commission. " + normalize_text(request.form.get("notes"))[:1000])
+        record = ModuleRecord(id=identity, module_key="cashbook_entries")
+        set_module_record_metadata(record, MODULES["cashbook_entries"], payload)
+        g.db.add(record)
+        audit("daily_cash_positions", "MTN Commission Receipt", "commission-received", month, identity,
+              f"{amount:.2f}; received {day}; {label}; MTN reference {reference}. Settlement only; no duplicate earned income.")
+        g.db.commit()
+        flash("MTN commission payment recorded once in Cashbook and the receiving account. Earned commission was not counted again.", "success")
+        return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
+
     @app.route("/app/daily-cash/expense", methods=["POST"])
     @access_required("daily_cash_positions")
     def daily_cash_expense():
@@ -20191,6 +20238,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ModuleRecord.record_date >= date_from, ModuleRecord.record_date <= date_to)
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
+                               today=today,
                                cash_review=daily_accountability_review(g.db, selected) if selected < today else None,
                                can_assign_cash_review=user_can_view_dashboard(g.current_user),
                                baseline_plan=ACCOUNTABILITY_BASELINE,
@@ -20207,6 +20255,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
                                overall_cash=overall_cash_summary(payload, base, movements) if entry_type == "Closing" else None,
                                momo_transfer_reference="SHOP-MOMO-" + uuid4().hex[:20],
                                expense_request_id=uuid4().hex,
+                               commission_request_id=uuid4().hex,
+                               commission_receipts=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "cashbook_entries",
+                                   ModuleRecord.reference.like("mtn-commission|%"), ModuleRecord.record_date == selected)
+                                   .order_by(desc(ModuleRecord.updated_at))).all(),
                                daily_expenses=g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "expenses", ModuleRecord.record_date == selected)
                                    .order_by(desc(ModuleRecord.updated_at))).all(),
                                source_changed=bool(record and entry_type == "Closing" and (record.payload or {}).get("controlVersion", 0) >= 2

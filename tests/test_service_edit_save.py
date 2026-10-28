@@ -20,6 +20,27 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_monthly_mtn_commission_receipt_moves_wallet_once_without_duplicate_sales(self):
+        day=date.today(); db=self.sessions()
+        before=daily_cash_movement_context(db,day)["effects"]["momoECash"]
+        data=dict(date=day.isoformat(),commissionMonth=day.strftime("%Y-%m"),wallet="momoECash",
+                  amount="125.50",reference="MTN-MONTH-001",requestId="c"*32)
+        url="/app/daily-cash/mtn-commission"
+        self.assertEqual(self.client.post(url,data=data).status_code,302)
+        self.assertEqual(self.client.post(url,data=data).status_code,302)
+        self.assertEqual(self.client.post(url,data=dict(data,requestId="d"*32)).status_code,409)
+        db=self.sessions()
+        self.assertEqual(daily_cash_movement_context(db,day)["effects"]["momoECash"],round(before+125.5,2))
+        rows=db.scalars(select(ModuleRecord).where(ModuleRecord.reference=="mtn-commission|MTN-MONTH-001")).all()
+        self.assertEqual(len(rows),1)
+        self.assertEqual(rows[0].module_key,"cashbook_entries")
+        self.assertEqual(rows[0].payload["commissionMonth"],day.strftime("%Y-%m"))
+        self.assertEqual(self.client.post(url,data=dict(data,amount="nan",requestId="e"*32,reference="INVALID")).status_code,400)
+        page=self.client.get(f"/app/daily-cash?date={day}")
+        self.assertEqual(page.status_code,200)
+        self.assertIn("MTN Monthly Commission Paid",page.get_data(as_text=True))
+        self.assertIn("MTN-MONTH-001",page.get_data(as_text=True))
+
     def test_daily_review_recomputes_differences_and_assigns_one_task(self):
         from oneroot_erp.app import daily_accountability_review
         db=self.sessions();day=date.today()-timedelta(days=1)
