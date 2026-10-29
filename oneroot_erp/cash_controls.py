@@ -7,8 +7,10 @@ from sqlalchemy import desc, select
 from .models import ModuleRecord
 
 
-COUNT_FIELDS = ("groceriesCash", "foodCash", "momoCash", "momoECash", "groceriesPetty", "foodPetty", "merchantECash")
+COUNT_FIELDS = ("groceriesCash", "foodCash", "momoCash", "momoECash", "groceriesPetty", "foodPetty", "merchantECash", "momoPay", "commissionBalance")
 WALLETS = {
+    "momoPay": ("MoMo Pay Merchant", "OneRoot MoMo Pay Merchant", "groceries"),
+    "commissionBalance": ("Paid commission on merchant phone", "OneRoot Paid Commission Balance", "mobile-money"),
     "merchantECash": ("Merchant e-cash - shop payments", "OneRoot MoMo Collection Wallet", "groceries"),
     "groceries": ("Groceries counter cash", "Main Cash Drawer", "groceries"),
     "food": ("Cold Store & Kitchen counter cash", "Main Cash Drawer", "cold-store-groceries"),
@@ -24,6 +26,19 @@ ACCOUNTABILITY_BASELINE = {
     "date": "2026-10-26", "sourceDate": "2026-10-25", "total": 17015.06,
     "combinedCash": 1112.90, "momoCash": 6817.50, "momoECash": 7756.16, "merchantECash": 1328.50,
 }
+
+SIX_ACCOUNT_BASELINE = dict(date="2026-10-29", combinedCash=200.90, momoCash=9604.00,
+    momoECash=7598.82, merchantECash=1379.67, momoPay=311.50, commissionBalance=339.31, total=19434.20)
+
+
+def six_account_opening(approver):
+    plan = SIX_ACCOUNT_BASELINE
+    p = dict(plan, entryType="Opening", cashMode="Combined", openingBasis="Full cash count",
+        groceriesCash=plan["combinedCash"], foodCash=0, groceriesPetty=plan["combinedCash"], foodPetty=0,
+        accountabilityBaseline=True, controlVersion=4, floatTarget=200,
+        reviewStatus="Approved", reviewedBy=approver, comparison=[], warnings=[],
+        notes="Owner-confirmed opening before trading. Commission already paid and included; not new income. Shop cash combined; petty allocation is included once.")
+    return summarize_counts(p)
 
 
 def approved_opening_payload(source, approver):
@@ -79,13 +94,17 @@ def cash_mode(payload):
 def latest_close(db, before):
     records = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions",
         ModuleRecord.record_date < before).order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))).all()
-    start = date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]) if fresh_accountability_active(db, before) else None
+    reset = find_snapshot(db, date(2026,10,29), "Opening") if before >= date(2026,10,29) else None
+    start = date(2026,10,29) if reset and (reset.payload or {}).get("controlVersion") == 4 else date.fromisoformat(ACCOUNTABILITY_BASELINE["date"]) if fresh_accountability_active(db, before) else None
     return next((r for r in records if (r.payload or {}).get("entryType", "Closing") == "Closing"
                  and (not start or (r.record_date >= start and (r.status == "Approved" or (r.payload or {}).get("danielReviewed"))
-                                    and (r.payload or {}).get("controlVersion") == 3))), None)
+                                    and (r.payload or {}).get("controlVersion") in {3,4}))), None)
 
 
 def fresh_accountability_active(db, day):
+    reset = find_snapshot(db,date(2026,10,29),"Opening") if day >= date(2026,10,29) else None
+    if reset and (reset.payload or {}).get("controlVersion") == 4:
+        return True
     start = date.fromisoformat(ACCOUNTABILITY_BASELINE["date"])
     opening = find_snapshot(db, start, "Opening") if day >= start else None
     return bool(opening and (opening.payload or {}).get("accountabilityBaseline")
@@ -94,7 +113,7 @@ def fresh_accountability_active(db, day):
 
 def summarize_counts(payload):
     for key in COUNT_FIELDS:
-        payload[key] = money(payload.get(key, 0) if key == "merchantECash" else payload.get(key))
+        payload[key] = money(payload.get(key, 0) if key in {"merchantECash","momoPay","commissionBalance"} else payload.get(key))
     if cash_mode(payload) == "Combined":
         payload["groceriesCash"] = money(payload.get("combinedCash"))
         payload["foodCash"] = 0.0
@@ -127,6 +146,9 @@ def compare_counts(counted, baseline, effects, *, combined=False):
              ("momoCash", "MoMo physical cash"), ("momoECash", "MoMo agent e-cash")]
     if "merchantECash" in counted or "merchantECash" in baseline:
         keys.append(("merchantECash", "Merchant e-cash"))
+    for key,label in [("momoPay","MoMo Pay Merchant"),("commissionBalance","Paid commission balance")]:
+        if key in counted or key in baseline:
+            keys.append((key,label))
     rows = []
     for key, label in keys:
         if key == "combinedCash":
@@ -181,12 +203,14 @@ def opening_comparison(counted, baseline, *, combined=False):
 
 def overall_cash_summary(counted, baseline, movements):
     """Petty is included in shop cash. Internal transfers cancel across wallets."""
-    keys = ("groceriesCash", "foodCash", "momoCash", "momoECash", "merchantECash")
+    keys = ("groceriesCash", "foodCash", "momoCash", "momoECash", "merchantECash", "momoPay", "commissionBalance")
     actual = round(sum(float(counted.get(k, 0) or 0) for k in keys), 2)
     if baseline is None:
         return dict(actual=actual, opening=None, movement=None, expected=None, variance=None, wallets=[])
     rows = []
     for key in keys:
+        if key in {"momoPay","commissionBalance"} and key not in baseline and key not in counted:
+            continue
         lines = [r for r in movements["lines"] if r["wallet"] == key]
         transfers = [r for r in lines if str(r.get("reference", "")).startswith("cash-control|")]
         transfer_in = round(sum(r["effect"] for r in transfers if r["effect"] > 0), 2)

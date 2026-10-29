@@ -32,7 +32,7 @@ from .ai_closing import prepare_due_closings
 from .staff_roster import ensure_reporting_schedule, reporting_rows, reporting_form_errors
 from .cash_controls import (COUNT_FIELDS, WALLETS, money as cash_money, snapshot_id, find_snapshot,
                             cash_mode, latest_close, summarize_counts, compare_counts, review_needed, opening_comparison, overall_cash_summary, reconciliation_guidance,
-                            ACCOUNTABILITY_BASELINE, approved_opening_payload, fresh_accountability_active)
+                            ACCOUNTABILITY_BASELINE, approved_opening_payload, fresh_accountability_active, SIX_ACCOUNT_BASELINE, six_account_opening)
 from .importer import bootstrap_database
 from .models import AppSetting, AuditLog, Base, ModuleRecord, OfflineSubmission, PosOrder, PosOrderLine, Product, TenantPortalAccount, User
 from .review_inbox import exception_item, apply_reviews
@@ -7620,7 +7620,10 @@ def daily_shop_mobile_money_collections(db, day):
         desk = "food" if area in POS_FOOD_SALES_AREA_IDS or area == "laundry-services" else "groceries" if area in POS_GROCERIES_MORE_AREA_IDS else ""
         amount = round(parse_amount(amount), 2)
         if desk and math.isfinite(amount) and amount > 0:
-            rows.append(dict(desk=desk, amount=amount, source=source, reference=reference))
+            allocation=db.get(AppSetting,"receipt-wallet|"+hashlib.sha256(f"{day}|{reference}".encode()).hexdigest()[:32])
+            wallet=(allocation.value or {}).get("wallet") if allocation else "merchantECash"
+            rows.append(dict(desk=desk, amount=amount, source=source, reference=reference,
+                             wallet=wallet if wallet in {"merchantECash","momoPay"} else "merchantECash"))
     orders = db.scalars(select(PosOrder).options(selectinload(PosOrder.lines)).where(PosOrder.order_date == day)).all()
     for order in orders:
         if normalize_text(order.payment_method).lower() != "mobile money" or is_kitchen_stock_issue(order):
@@ -7722,7 +7725,9 @@ def daily_cash_movement_context(db, day):
             if p.get("entryType") == "Transfer":
                 warnings.append("A legacy one-line Cashbook transfer needs review; it is not counted twice or assigned automatically.")
             continue
-        if fresh and account == "OneRoot MoMo Collection Wallet":
+        if fresh and account in {"OneRoot MoMo Pay Merchant", "OneRoot Paid Commission Balance"}:
+            add("Electronic wallet movement", "momoPay" if account == "OneRoot MoMo Pay Merchant" else "commissionBalance", effect, ref)
+        elif fresh and account == "OneRoot MoMo Collection Wallet":
             # Source collections below are authoritative; only independent entries
             # and transfer legs belong here, not generated Cashbook copies.
             if ref not in merchant_references and not ref.startswith(("pos-payment|", "customer-credit-payment|", "kitchen-order-payment|", "laundry-payment|", "equipment-rental-payment|")):
@@ -7802,7 +7807,7 @@ def daily_cash_movement_context(db, day):
     add("Completed MoMo e-cash movements", "momoECash", momo["cashOutValueTotal"] - momo["cashInValueTotal"])
     if fresh:
         for receipt in merchant["rows"]:
-            add(receipt["source"] + " - merchant receipt", "merchantECash", receipt["amount"], receipt["reference"])
+            add(receipt["source"] + " - merchant receipt", receipt["wallet"], receipt["amount"], receipt["reference"])
         transactions = db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "mobile_money_transactions",
                                                             ModuleRecord.record_date == day)).all()
         for transaction in transactions:
@@ -7811,7 +7816,7 @@ def daily_cash_movement_context(db, day):
                 continue
             fee = parse_amount(p.get("salesAmount"))
             wallet = normalize_text(p.get("commissionWallet"))
-            if fee and wallet in {"momoCash", "momoECash", "merchantECash"}:
+            if fee and wallet in {"momoCash", "momoECash", "merchantECash", "momoPay", "commissionBalance"}:
                 add("Commission received", wallet, fee, transaction.id)
             elif fee:
                 warnings.append(f"MoMo {transaction.title or transaction.id}: confirm where commission was received; it is not assumed to be cash.")
@@ -19797,7 +19802,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 continue
             cash_id = "cash-leg-" + hashlib.sha256(f"{identity}|{wallet}".encode()).hexdigest()[:32]
             cash_payload = dict(id=cash_id, date=day.isoformat(), businessAreaId=area, accountName=account,
-                entryType=direction, amount=amount, paymentMethod="Mobile Money" if wallet in {"momoECash", "merchantECash"} else "Cash",
+                entryType=direction, amount=amount, paymentMethod="Mobile Money" if wallet in {"momoECash", "merchantECash", "momoPay", "commissionBalance"} else "Cash",
                 reference=f"cash-control|{identity}|{wallet}", cashDesk="food" if wallet.startswith("food") else ("groceries" if wallet.startswith("groceries") else ""),
                 sourceType="cash-control-transfer", linkedCashMovementId=identity,
                 notes=f"Transfer, not sales or expense. {reference}; received by {recipient}. {notes}")
@@ -19829,7 +19834,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         reference = normalize_text(request.form.get("reference"))[:150]
         token = normalize_text(request.form.get("requestId"))
         if (not day or day > current_local_datetime().date() or not parse_month(month)
-                or month > day.strftime("%Y-%m") or wallet not in {"momoCash", "momoECash", "merchantECash", "bank"}
+                or month > day.strftime("%Y-%m") or wallet not in {"momoCash", "momoECash", "merchantECash", "momoPay", "commissionBalance", "bank"}
                 or not reference or not re.fullmatch(r"[a-f0-9]{32}", token)):
             return "Enter the actual receipt date, month covered, receiving account and MTN reference.", 400
         try:
@@ -19879,7 +19884,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         vendor = normalize_text(request.form.get("vendor"))[:200]
         category = normalize_text(request.form.get("category"))[:150]
         if (not day or day > datetime.now(ZoneInfo("Africa/Accra")).date() or wallet not in
-                {"groceries", "food", "groceriesPetty", "foodPetty", "momoCash", "momoECash", "merchantECash"}
+                {"groceries", "food", "groceriesPetty", "foodPetty", "momoCash", "momoECash", "merchantECash", "momoPay", "commissionBalance"}
                 or not re.fullmatch(r"[a-f0-9]{32}", token) or not vendor or not category):
             return "Choose an actual date, payment source, supplier, category and valid form reference.", 400
         try:
@@ -19899,7 +19904,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             label, account, area = WALLETS[wallet]
             payload = dict(id=identity, date=day.isoformat(), vendor=vendor, businessAreaId=area,
                 category=category, description=normalize_text(request.form.get("description"))[:2000],
-                amount=amount, paymentMethod="Mobile Money" if wallet in {"momoECash", "merchantECash"} else "Cash", paidFromAccount=account,
+                amount=amount, paymentMethod="Mobile Money" if wallet in {"momoECash", "merchantECash", "momoPay", "commissionBalance"} else "Cash", paidFromAccount=account,
                 receiptReference=normalize_text(request.form.get("receiptReference"))[:150],
                 receiptAttachmentUrl=attachment_url, receiptAttachmentName=attachment_name, receiptAttachmentType=attachment_type,
                 receiptStatus="Uploaded" if attachment_url else "Pending", notes="Entered from Daily Cash & Petty Cash; " + label)
@@ -20066,6 +20071,64 @@ def create_app(config: AppConfig | None = None) -> Flask:
         flash("Daniel's correction task is available in the Business Obligations Calendar. It repeats until management deactivates it after resolution.", "success")
         return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
 
+    @app.route("/app/daily-cash/receipt-wallet", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def daily_cash_receipt_wallet():
+        day=parse_date(request.form.get("date"));ref=normalize_text(request.form.get("reference"));wallet=request.form.get("wallet")
+        if not day or wallet not in {"merchantECash","momoPay"}:
+            return "Choose a receipt date and merchant account.",400
+        if g.db.bind.dialect.name=="postgresql":
+            g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"),{"day":"cash-control|"+str(day)})
+        closing=find_snapshot(g.db,day,"Closing")
+        if closing and closing.status=="Approved":
+            return "Reopen the closing before correcting a receipt account.",409
+        if not any(r["reference"]==ref for r in daily_shop_mobile_money_collections(g.db,day)["rows"]):
+            return "Original customer receipt not found.",404
+        key="receipt-wallet|"+hashlib.sha256(f"{day}|{ref}".encode()).hexdigest()[:32]
+        setting=g.db.get(AppSetting,key) or AppSetting(key=key)
+        previous=setting.value
+        setting.value=dict(wallet=wallet,reference=ref,date=str(day))
+        g.db.add(setting)
+        audit("daily_cash_positions","Merchant Receipt Account","allocate-receipt",ref,detail=f"Previous {previous}; actual receiving account {wallet}; no new money or sales.")
+        g.db.commit()
+        return redirect(url_for("daily_cash_page",date=day,entryType="Closing"))
+
+    @app.route("/app/daily-cash/activate-six-account-baseline", methods=["POST"])
+    @access_required("daily_cash_positions")
+    def activate_six_account_baseline():
+        if not user_is_owner(g.current_user):
+            return "Owner access required.",403
+        if request.form.get("confirmation") != "2026-10-29|19434.20":
+            return "Confirm the six-account opening and date.",400
+        day=date(2026,10,29)
+        if day > current_local_datetime().date():
+            return "Cannot activate a future opening.",400
+        if g.db.bind.dialect.name == "postgresql":
+            g.db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:day))"),{"day":"cash-control|"+str(day)})
+            g.db.expire_all()
+        old=find_snapshot(g.db,day,"Opening")
+        if old and (old.payload or {}).get("controlVersion") == 4:
+            return redirect(url_for("daily_cash_page",date=day,entryType="Opening"))
+        if old and request.form.get("expectedUpdatedAt") != old.updated_at.isoformat():
+            return "Opening changed; refresh and review before replacing it.",409
+        closing=find_snapshot(g.db,day,"Closing")
+        if closing and closing.status == "Approved":
+            return "Reopen today's approved closing before resetting the opening.",409
+        before=dict(old.payload or {}) if old else None
+        p=six_account_opening(g.current_user.full_name or g.current_user.username)
+        p.update(id=snapshot_id(day,"Opening"),recordedBy=p["reviewedBy"],recordedById=g.current_user.id,
+                 recordedAt=datetime.utcnow().isoformat(),reviewedAt=datetime.utcnow().isoformat(),priorOpening=before)
+        record=old or ModuleRecord(id=p["id"],module_key="daily_cash_positions")
+        set_module_record_metadata(record,MODULES["daily_cash_positions"],p)
+        record.status="Approved"
+        g.db.add(record)
+        audit("daily_cash_positions","Six Account Fresh Start","reset-baseline",str(day),record.id,
+              json.dumps(dict(before=before,after={key:p[key] for key in COUNT_FIELDS},total=19434.20,
+                              reason="Owner-confirmed opening before today's sales; no income or transfer created.")))
+        g.db.commit()
+        flash("Six-account baseline activated. Earlier records preserved; today's activity is applied once.","success")
+        return redirect(url_for("daily_cash_page",date=day,entryType="Closing"))
+
     @app.route("/app/daily-cash/activate-baseline", methods=["POST"])
     @access_required("daily_cash_positions")
     def daily_cash_activate_baseline():
@@ -20129,8 +20192,6 @@ def create_app(config: AppConfig | None = None) -> Flask:
         opening = find_snapshot(g.db, selected, "Opening")
         previous_close = latest_close(g.db, selected)
         fresh = fresh_accountability_active(g.db, selected)
-        if fresh and entry_type == "Opening" and previous_close and previous_close.status != "Approved":
-            previous_close = None
         baseline = previous_close if entry_type == "Opening" else opening
         payload = dict(record.payload or {}) if record else {"date": selected.isoformat(), "entryType": entry_type}
         if entry_type == "Opening":
@@ -20145,10 +20206,16 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     payload[prefix + "Cash"] = payload[prefix + "Petty"] = ""
         if fresh:
             payload.setdefault("merchantECash", 0)
+        six_active=find_snapshot(g.db,date(2026,10,29),"Opening") if selected>=date(2026,10,29) else None
+        if six_active and (six_active.payload or {}).get("controlVersion")==4:
+            if not record:
+                payload.setdefault("cashMode","Combined")
+            for key in ("momoPay","commissionBalance"):
+                payload.setdefault(key,0)
         movements = daily_cash_movement_context(g.db, selected)
         base = baseline.payload if baseline else None
         def comparison_for(counts):
-            if entry_type == "Opening" and counts.get("accountabilityBaseline") and counts.get("controlVersion") == 3:
+            if entry_type == "Opening" and counts.get("accountabilityBaseline") and counts.get("controlVersion") in {3,4}:
                 return [], []
             warnings = list(movements["warnings"]) if entry_type == "Closing" else []
             effects = movements["effects"] if entry_type == "Closing" else {k: 0 for k in COUNT_FIELDS}
@@ -20171,6 +20238,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             return rows, warnings
         errors = []
         if request.method == "POST":
+            if six_active and (six_active.payload or {}).get("controlVersion")==4 and request.form.get("cashMode")!="Combined":
+                errors.append("The fresh-start cash is combined for both shops. Choose Combined shop cash until an owner-confirmed split is available.")
             if fresh and entry_type == "Closing" and (not opening or not (opening.status == "Approved" or (opening.payload or {}).get("openingConfirmed"))):
                 errors.append("An approved opening is required before submitting a fresh-start closing. Ask the owner to review the opening first.")
             if fresh and entry_type == "Opening":
@@ -20187,7 +20256,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if payload["cashMode"] not in {"Separate", "Combined"}:
                 errors.append("Choose Separate or Combined shop cash.")
             for key in COUNT_FIELDS:
-                payload[key] = request.form.get(key, "0" if (payload["cashMode"] == "Combined" and key in {"groceriesCash", "foodCash"}) or (key == "merchantECash" and not fresh) else "")
+                payload[key] = request.form.get(key, "0" if (payload["cashMode"] == "Combined" and key in {"groceriesCash", "foodCash"}) or key in {"momoPay","commissionBalance"} or (key == "merchantECash" and not fresh) else "")
             payload["combinedCash"] = request.form.get("combinedCash", 0)
             if entry_type == "Opening":
                 payload["openingBasis"] = normalize_text(request.form.get("openingBasis")) or "Full cash count"
@@ -20236,7 +20305,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 if review_needed(comparison, warnings) and not payload["exceptionReason"]:
                     return "Source records changed. Refresh, review the new comparison and explain any difference before saving.", 409
                 previous = dict(record.payload or {}) if record else {}
-                payload.update(id=identity, controlVersion=3 if fresh else 2, comparison=comparison, warnings=warnings,
+                reset=find_snapshot(g.db,date(2026,10,29),"Opening") if selected>=date(2026,10,29) else None
+                payload.update(id=identity, controlVersion=4 if reset and (reset.payload or {}).get("controlVersion")==4 else 3 if fresh else 2, comparison=comparison, warnings=warnings,
                     sourceSignature=movements["signature"] if entry_type == "Closing" else "",
                     baselineId=baseline.id if baseline else "", baselineUpdatedAt=baseline.updated_at.isoformat() if baseline else "",
                     reviewStatus="Difference to Review" if review_needed(comparison, warnings) else "Submitted",
@@ -20275,6 +20345,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .order_by(desc(ModuleRecord.record_date)).limit(100)).all()
         return render_template("daily_cash.html", page_title="Daily Cash & Petty Cash", payload=payload,
                                today=today,
+                               six_plan=SIX_ACCOUNT_BASELINE,
+                               six_opening=find_snapshot(g.db,date(2026,10,29),"Opening"),
                                ai_preparation=g.db.get(ModuleRecord, "ai-closing-"+selected.isoformat()) if entry_type == "Closing" else None,
                                cash_review=daily_accountability_review(g.db, selected) if selected < today else None,
                                can_assign_cash_review=user_can_view_dashboard(g.current_user),

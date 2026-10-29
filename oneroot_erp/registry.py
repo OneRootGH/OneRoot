@@ -2471,6 +2471,8 @@ MODULES.update({
                 FieldDefinition("momoCash", "MoMo Physical Cash", "number", True),
                 FieldDefinition("momoECash", "MoMo Phone E-Cash", "number", True),
                 FieldDefinition("merchantECash", "Merchant E-Cash", "number"),
+                FieldDefinition("momoPay", "MoMo Pay Merchant", "number"),
+                FieldDefinition("commissionBalance", "Paid Commission Balance", "number"),
                 FieldDefinition("groceriesPetty", "Groceries Petty Cash", "number", True),
                 FieldDefinition("foodPetty", "Cold Store & Kitchen Petty Cash", "number", True),
                 FieldDefinition("groceriesRemaining", "Groceries Cash Remaining", "number"),

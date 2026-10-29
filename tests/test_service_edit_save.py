@@ -20,6 +20,22 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_six_account_reset_is_explicit_and_does_not_create_income(self):
+        from oneroot_erp.cash_controls import find_snapshot,latest_close
+        data=dict(confirmation="2026-10-29|19434.20")
+        with patch("oneroot_erp.app.current_local_datetime",return_value=datetime(2026,10,29,10)):
+            self.assertEqual(self.client.post("/app/daily-cash/activate-six-account-baseline",data={}).status_code,400)
+            self.assertIsNone(find_snapshot(self.sessions(),date(2026,10,29),"Opening"))
+            self.assertEqual(self.client.post("/app/daily-cash/activate-six-account-baseline",data=data).status_code,302)
+            self.assertEqual(self.client.post("/app/daily-cash/activate-six-account-baseline",data=data).status_code,302)
+        db=self.sessions();p=find_snapshot(db,date(2026,10,29),"Opening").payload
+        self.assertEqual(p["controlVersion"],4)
+        self.assertEqual(p["momoPay"],311.50)
+        self.assertEqual(p["commissionBalance"],339.31)
+        self.assertIsNone(latest_close(db,date(2026,10,30)))
+        self.assertEqual(len(db.scalars(select(ModuleRecord).where(ModuleRecord.module_key=="cashbook_entries")).all()),0)
+        self.assertEqual(self.client.get("/app/daily-cash?date=2026-10-29").status_code,200)
+
     def test_airtime_commission_receipt_is_distinct_and_updates_selected_account(self):
         db=self.sessions();day=date.today()
         base=daily_cash_movement_context(db,day)["effects"]["momoECash"]

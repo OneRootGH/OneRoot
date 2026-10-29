@@ -6,6 +6,17 @@ from oneroot_erp.cash_controls import compare_counts, reconciliation_guidance, a
 
 
 class ReconciliationGuidanceTests(unittest.TestCase):
+    def test_six_account_opening_counts_paid_commission_and_petty_once(self):
+        from oneroot_erp.cash_controls import six_account_opening, overall_cash_summary
+        p=six_account_opening("Owner")
+        self.assertEqual(p["pettyTotal"],200.90)
+        self.assertEqual(p["combinedCash"],200.90)
+        summary=overall_cash_summary(p,p,dict(effects={},lines=[]))
+        self.assertEqual(summary["actual"],19434.20)
+        self.assertEqual(summary["opening"],19434.20)
+        self.assertEqual(len(summary["wallets"]),6)
+        self.assertEqual(p["commissionBalance"],339.31)
+
     def test_agreed_baseline_preserves_source_and_combined_cash(self):
         source = SimpleNamespace(id="old-closing", record_date=date(2026,10,25), updated_at=datetime(2026,10,25),
                                  payload=dict(entryType="Closing", groceriesCash=1112.90, foodCash=0,
