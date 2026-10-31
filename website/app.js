@@ -1191,6 +1191,7 @@
               alt="${escapeHtml(item.name)}"
             >
             <span class="service-quick-pick-copy">
+              <small>${escapeHtml(item.availabilityLabel || "Availability confirmed on request")}</small>
               <strong>${escapeHtml(item.name)}</strong>
               <small>${escapeHtml(getServiceCategoryLabel(item.category, serviceType) || "Service Item")}</small>
               <span>${escapeHtml(salesPrice > 0 ? formatCurrency(salesPrice) : "Quote")}</span>
@@ -1259,7 +1260,7 @@
     }
 
     const salesPrice = Number(item.salesPrice || 0);
-    const priceLabel = salesPrice > 0 ? formatCurrency(salesPrice) : "Quote";
+    const priceLabel = (salesPrice > 0 ? formatCurrency(salesPrice) : "Quote") + " · " + (item.availabilityLabel || "Availability confirmed on request");
     const note = normalizeText(item.notes);
     container.innerHTML = `
       <article class="service-preview-card">
@@ -1891,6 +1892,7 @@
         </div>
 
         <div class="catalog-card-footer">
+          <small class="catalog-stock-status">${escapeHtml(item.availabilityLabel || "Availability confirmed on request")}</small>
           <label class="quantity-field">
             <span>Qty</span>
             <input

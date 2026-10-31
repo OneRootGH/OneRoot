@@ -15,6 +15,20 @@
   </section>
 
   {% if definition.key == 'equipment_rental_bookings' %}
+    <section class="card">
+      <p>Original charge: {{ (service_row.totalDue + (payload.ownerDiscount|default(0)|float))|currency }} · Owner discount: {{ payload.ownerDiscount|default(0)|currency }} · After discount: {{ service_row.totalDue|currency }}</p>
+      {% if payload.discountReason %}<p>Discount reason: {{ payload.discountReason }}</p>{% endif %}
+      {% if can_approve_morning_return %}
+      <details><summary>Owner: Apply or Change Discount</summary>
+        <form method="post" class="form-grid">
+          <input type="hidden" name="saveOwnerDiscount" value="yes">
+          <label>Discount (GH₵)<input type="number" name="ownerDiscount" min="0" step="0.01" value="{{ payload.ownerDiscount|default(0) }}" required></label>
+          <label>Reason<input name="discountReason" maxlength="1000" value="{{ payload.discountReason|default('') }}" required></label>
+          <button class="button" type="submit">Save Discount</button>
+        </form>
+      </details>
+      {% endif %}
+    </section>
     <section class="rental-collection-banner">
       <div>
         <span class="eyebrow">Collection For</span>

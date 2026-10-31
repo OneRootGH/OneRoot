@@ -5125,14 +5125,14 @@ def service_total_due(module_key: str, payload: dict[str, Any]) -> float:
         # Rental damage is an additional charge, not a rental line. Keep it in
         # the balance whenever equipment has one or more selected items.
         if module_key == "equipment_rental_bookings":
-            return round(line_total + parse_amount(payload.get("damageCharge")), 2)
+            return round(max(line_total + parse_amount(payload.get("damageCharge")) - max(parse_amount(payload.get("ownerDiscount")), 0), 0), 2)
         return line_total
     if module_key == "laundry_tickets":
         return round(parse_amount(payload.get("amountDue")), 2)
     if module_key == "kitchen_orders":
         return round(parse_amount(payload.get("amountDue")), 2)
     if module_key == "equipment_rental_bookings":
-        return round(parse_amount(payload.get("rentalFee")) + parse_amount(payload.get("damageCharge")), 2)
+        return round(max(parse_amount(payload.get("rentalFee")) + parse_amount(payload.get("damageCharge")) - max(parse_amount(payload.get("ownerDiscount")), 0), 0), 2)
     return 0.0
 
 
@@ -15146,6 +15146,30 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     "source": "service-offer",
                 }
             )
+        rental_records = g.db.scalars(select(ModuleRecord).where(
+            ModuleRecord.module_key == "equipment_rental_bookings",
+            ModuleRecord.status == "Out")).all()
+        for item in items:
+            item["availabilityLabel"] = "Availability confirmed on request"
+            if item["trackInventory"] and item["quantityKnown"]:
+                source = next((p for p in products if p.id == item.get("stockSourceProductId")), None)
+                quantity = (parse_amount(source.quantity_on_hand) / max(parse_amount(item.get("stockUnitsPerSale")), 1)
+                            if source else parse_amount(item["quantityOnHand"]))
+                item["availabilityLabel"] = "In stock" if quantity > 0 else "Out of stock"
+            if "wheelbarrow" in compact_catalog_name_key(item["name"]) and normalize_text(item["category"]).casefold() == "rent":
+                available = wheelbarrow_availability(rental_records, current_local_datetime().date())["available"]
+                item["availabilityLabel"] = f"{available} available to rent" if available else "All currently rented out"
+            elif normalize_text(item["category"]).casefold() == "rent" and item["quantityKnown"]:
+                issued = 0
+                for rental in rental_records:
+                    p = rental.payload or {}
+                    if p.get("returnDate") or (parse_date(p.get("outDate")) and parse_date(p.get("outDate")) > current_local_datetime().date()):
+                        continue
+                    lines = service_line_items("equipment_rental_bookings", p) or [dict(name=p.get("equipmentItem"), quantity=p.get("itemQuantityTotal") or 1)]
+                    issued += sum(parse_amount(line.get("quantity")) for line in lines
+                                  if compact_catalog_name_key(line.get("name")) == compact_catalog_name_key(item["name"]))
+                available = max(parse_amount(item["quantityOnHand"]) - issued, 0)
+                item["availabilityLabel"] = f"{available:g} available to rent" if available else "Currently unavailable"
         items.sort(key=lambda item: (item["businessAreaLabel"], item["category"], item["name"]))
         return items
 
@@ -23027,6 +23051,29 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload = dict(record.payload or {})
             previous_payload = dict(payload)
             payment_summary = service_payment_summary(module_key, payload)
+            if request.form.get("saveOwnerDiscount") == "yes":
+                if module_key != "equipment_rental_bookings" or not user_is_owner(g.current_user):
+                    return "Only the owner can change rental discounts.", 403
+                amount = parse_amount(request.form.get("ownerDiscount"))
+                reason = normalize_text(request.form.get("discountReason"))[:1000]
+                gross = service_total_due(module_key, dict(payload, ownerDiscount=0))
+                if not math.isfinite(amount) or amount < 0 or amount > gross or not reason:
+                    flash("Enter a discount between zero and the original charge, and give a reason.", "error")
+                elif amount > max(gross - payment_summary["paidTotal"], 0):
+                    flash("The discount cannot reduce the charge below payments already received. Review any refund separately.", "error")
+                else:
+                    payload.update(ownerDiscount=round(amount, 2), discountReason=reason,
+                                   discountApprovedBy=g.current_user.username,
+                                   discountApprovedAt=datetime.utcnow().isoformat())
+                    apply_service_payment_rollup(module_key, payload)
+                    set_module_record_metadata(record, definition, payload)
+                    sync_generated_sales_for_module_record(record)
+                    sync_service_collection_closeouts(module_key, payload, previous_payload)
+                    audit(module_key, definition.label, "discount", record.title, record.id,
+                          f"Owner discount changed from {parse_amount(previous_payload.get('ownerDiscount')):.2f} to {amount:.2f}. Reason: {reason}")
+                    g.db.commit()
+                    flash("Rental discount saved. No payment was created.", "success")
+                return redirect(url_for("service_payment_form", module_key=module_key, record_id=record.id))
             if module_key == "equipment_rental_bookings" and request.form.get("ownerApproveMorningReturn") == "yes":
                 requested_return_date = normalize_text(payload.get("returnDayApprovalRequestedReturnDate"))
                 requested_return_time = normalize_text(payload.get("returnDayApprovalRequestedReturnTime"))
