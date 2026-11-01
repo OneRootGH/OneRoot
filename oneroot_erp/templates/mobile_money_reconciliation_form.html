@@ -63,7 +63,7 @@
     <article class="metric-card">
       <span>Fees Earned</span>
       <strong>{{ payload.get('serviceFees', 0)|currency }}</strong>
-      <small>Commission already pulled from completed mobile money sales</small>
+      <small>Customer fees collected at Groceries; excluded from MoMo float</small>
     </article>
   </section>
 
@@ -209,7 +209,7 @@
           <article class="mini-card">
             <span>Fees Earned</span>
             <strong>{{ payload.get('serviceFees', 0)|currency }}</strong>
-            <small>Commission saved from mobile money sales</small>
+            <small>Customer fees saved from mobile money sales; held at Groceries</small>
           </article>
           <article class="mini-card">
             <span>Cash Top-Up</span>
@@ -341,7 +341,7 @@
         const ecashRemoved = numberValue("momo-ecash-removed");
         const operatingExpense = numberValue("momo-operating-expense");
 
-        const expectedCash = openingCash + cashTopUp + cashIn + fees - cashOut - cashRemoved - operatingExpense;
+        const expectedCash = openingCash + cashTopUp + cashIn - cashOut - cashRemoved - operatingExpense;
         const expectedECash = openingECash + ecashTopUp + cashOut - cashIn - ecashRemoved;
         const cashCountInput = document.getElementById("momo-closing-cash");
         const ecashCountInput = document.getElementById("momo-closing-ecash");

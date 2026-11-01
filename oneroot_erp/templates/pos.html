@@ -45,7 +45,7 @@
       <article class="pos-counter-pill">
         <span class="pos-counter-label">Desk Sales</span>
         <strong id="pos-counter-total">{{ counter_summary.deskSalesTotal|currency }}</strong>
-        {% if not food_pos_mode %}<small>Includes MoMo commission, not handled value</small>{% endif %}
+        {% if not food_pos_mode %}<small>Includes customer service fees, not MoMo handled value</small>{% endif %}
       </article>
       {% if can_view_desk_profit %}
         <article class="pos-counter-pill">
@@ -76,7 +76,7 @@
       {% if not food_pos_mode %}<article class="pos-counter-pill pos-counter-pill-highlight">
         <span class="pos-counter-label">MoMo Handled</span>
         <strong id="pos-momo-handled-ribbon">{{ counter_summary.mobileMoneyHandledValue|currency }}</strong>
-        <small>Commission <b id="pos-momo-commission-ribbon">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</b></small>
+        <small>Customer fees <b id="pos-momo-commission-ribbon">{{ counter_summary.mobileMoneyCommissionEarned|currency }}</b></small>
       </article>{% endif %}
       {% if food_pos_mode %}<article class="pos-counter-pill pos-counter-pill-highlight">
         <span class="pos-counter-label">Service Collections</span>
@@ -201,7 +201,7 @@
             </div>
             <div class="pos-ticket-inline pos-ticket-inline-tight">
               <span>Cash Sales <strong id="pos-cash-sales">{{ counter_summary.cashSalesTotal|currency }}</strong></span>
-              {% if not food_pos_mode %}<span>MoMo Commission Cash <strong id="pos-momo-commission-cash">{{ counter_summary.momoCommissionCashTotal|currency }}</strong></span>{% endif %}
+              {% if not food_pos_mode %}<span>MoMo Service Fees Collected <strong id="pos-momo-commission-cash">{{ counter_summary.momoCommissionCashTotal|currency }}</strong></span>{% endif %}
               <span>Credit Paid Cash <strong id="pos-credit-cash">{{ counter_summary.creditCashCollectionsTotal|currency }}</strong></span>
               {% if food_pos_mode %}<span>Laundry Cash <strong id="pos-laundry-cash">{{ counter_summary.laundryCashCollectionsTotal|currency }}</strong></span><span>Equipment Cash <strong id="pos-equipment-cash">{{ counter_summary.equipmentCashCollectionsTotal|currency }}</strong></span>{% endif %}
               <span>Sales Cash Expected <strong id="pos-expected-cash">{{ counter_summary.salesCashExpected|currency }}</strong></span>
@@ -209,7 +209,7 @@
               <span>Variance <strong id="pos-cash-variance">{{ counter_summary.cashVariance|currency }}</strong></span>
             </div>
             <p class="muted">Credit Paid Cash is a recovery of an earlier credit sale. It is shown separately from today’s sales cash, but is included in Total Cash To Count because it is physical cash received at this counter.</p>
-            {% if not food_pos_mode %}<p class="muted">Sales Cash Expected includes MoMo cash commission, not the amount handled. Count the commission once. In Daily Cash, leave it under MoMo physical cash unless it was transferred to the shop.</p>{% endif %}
+            {% if not food_pos_mode %}<p class="muted">Customer service fees flow here automatically from Mobile Money Sales. Count them once in Groceries cash, not in MoMo float. Do not enter another POS sale for these fees.</p>{% endif %}
             {% if food_pos_mode %}<p class="muted">Laundry and equipment payments received today are included in this Cold Store & Kitchen cash closeout.</p>{% endif %}
             <p class="muted pos-closeout-note" id="pos-closeout-meta">
               {% if counter_summary.lastCloseout %}Last closeout saved {{ counter_summary.lastCloseout.closedAt[:16]|replace('T', ' ') }} by {{ counter_summary.lastCloseout.closedBy }}.{% else %}No closeout has been saved for this counter day yet.{% endif %}

@@ -7495,9 +7495,9 @@ def mobile_money_transaction_profit(payload: dict[str, Any]) -> float:
 
 
 def momo_profit_for_records(records, *, on_date=None, month="") -> float:
-    return round(sum(mobile_money_transaction_profit(r.payload or {}) for r in records
-        if r.module_key == "mobile_money_transactions"
-        and mobile_money_transaction_is_completed(r.payload or {})
+    return round(sum((parse_amount(r.amount) if is_mtn_commission_receipt(r) else mobile_money_transaction_profit(r.payload or {})) for r in records
+        if (is_mtn_commission_receipt(r) or (r.module_key == "mobile_money_transactions"
+        and mobile_money_transaction_is_completed(r.payload or {})))
         and (not on_date or r.record_date == on_date)
         and (not month or (r.record_date and r.record_date.strftime("%Y-%m") == month))), 2)
 
@@ -7517,6 +7517,12 @@ def momo_commission_by_date(records):
         if fees[day] <= 0:
             fees[day] = mobile_money_reconciliation_breakdown(rows)["serviceFeesTotal"]
     return {day: round(amount, 2) for day, amount in fees.items()}
+
+
+def is_mtn_commission_receipt(record):
+    p = record.payload or {}
+    return (record.module_key == "cashbook_entries" and p.get("sourceType") == "mtn-commission-settlement"
+            and p.get("entryType") == "Cash In" and parse_amount(record.amount) > 0)
 
 
 BUSINESS_RESPONSIBILITIES = [
@@ -7836,11 +7842,8 @@ def daily_cash_movement_context(db, day):
             if not mobile_money_transaction_is_completed(p):
                 continue
             fee = parse_amount(p.get("salesAmount"))
-            wallet = normalize_text(p.get("commissionWallet"))
-            if fee and wallet in {"momoCash", "momoECash", "merchantECash", "momoPay", "commissionBalance"}:
-                add("Commission received", wallet, fee, transaction.id)
-            elif fee:
-                warnings.append(f"MoMo {transaction.title or transaction.id}: confirm where commission was received; it is not assumed to be cash.")
+            if fee:
+                add("MoMo customer service fee — Groceries counter", "groceriesCash", fee, transaction.id)
     for record in records:
         if record.module_key == "mobile_money_reconciliations" and any(parse_amount((record.payload or {}).get(k)) for k in
                 ("cashTopUp", "cashRemoved", "eCashTopUp", "eCashRemoved", "operatingExpense")):
@@ -8001,7 +8004,7 @@ def mobile_money_transaction_breakdown(records: list[ModuleRecord | dict[str, An
         else:
             no_cash_movement_total = round(no_cash_movement_total + transaction_value, 2)
 
-    net_cash_movement_total = round(cash_in_total + fee_total - cash_out_total, 2)
+    net_cash_movement_total = round(cash_in_total - cash_out_total, 2)
     average_fee = round(fee_total / completed_count, 2) if completed_count > 0 else 0.0
     top_service_type = max(service_fee_totals.items(), key=lambda item: item[1])[0] if service_fee_totals else "No Completed Transactions"
 
@@ -9088,7 +9091,6 @@ def mobile_money_expected_closing(payload: dict[str, Any]) -> float:
         parse_amount(payload.get("openingCash"))
         + parse_amount(payload.get("cashTopUp"))
         + parse_amount(payload.get("cashInValue"))
-        + parse_amount(payload.get("serviceFees"))
         - parse_amount(payload.get("cashOutValue"))
         - parse_amount(payload.get("cashRemoved"))
         - parse_amount(payload.get("operatingExpense"))
@@ -9227,7 +9229,6 @@ def mobile_money_live_balance_snapshot(db_session, target_date: date | None, pro
         opening_cash
         + cash_top_up
         + transaction_rollup["cashInValueTotal"]
-        + transaction_rollup["feeTotal"]
         - transaction_rollup["cashOutValueTotal"]
         - cash_removed
         - operating_expense,
@@ -11612,7 +11613,7 @@ def management_report_records(db_session, month_value: str, *, include_exposure:
     month_key = parse_month(month_value)
     start = date.fromisoformat(f"{month_key}-01")
     end = date(start.year + (start.month == 12), start.month % 12 + 1, 1)
-    monthly_keys = ["sales", "mobile_money_transactions", "expenses", "salary_records", "petty_cash", "maintenance_records", "forecast_plans"]
+    monthly_keys = ["sales", "mobile_money_transactions", "cashbook_entries", "expenses", "salary_records", "petty_cash", "maintenance_records", "forecast_plans"]
     if include_exposure:
         monthly_keys += ["apartments", "online_orders"]
     # Assets depreciate across months; supplier balances include earlier bills.
@@ -12006,7 +12007,7 @@ def daily_sales_summary_context(db_session, sale_date: date, area_id: str = "") 
     total_cost = round(sum(row["costTotal"] for row in area_map.values()), 2)
     total_profit = round(sum(row["profitTotal"] for row in area_map.values()), 2)
     momo_records = db_session.scalars(select(ModuleRecord).where(
-        ModuleRecord.module_key == "mobile_money_transactions", ModuleRecord.record_date == sale_date
+        ModuleRecord.module_key.in_(["mobile_money_transactions", "cashbook_entries"]), ModuleRecord.record_date == sale_date
     )).all() if mobile_money_in_scope else []
     momo_commission_profit = momo_profit_for_records(momo_records, on_date=sale_date)
     total_profit = round(total_profit + momo_commission_profit, 2)
@@ -13467,7 +13468,8 @@ def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: s
     rows: list[dict[str, Any]] = []
     for record in records:
         is_momo = record.module_key == "mobile_money_transactions"
-        if record.module_key != "sales" and not is_momo:
+        is_provider_commission = is_mtn_commission_receipt(record)
+        if record.module_key != "sales" and not is_momo and not is_provider_commission:
             continue
         if is_momo and not mobile_money_transaction_is_completed(record.payload or {}):
             continue
@@ -13480,7 +13482,7 @@ def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: s
         source_type = "mobile-money-commission" if is_momo else (normalize_text(payload.get("sourceType")).lower() or "manual-sale")
         amount = round(parse_amount(payload.get("salesAmount")) if is_momo else parse_amount(record.amount), 2)
         cost_total = round(parse_amount(payload.get("costAmount")) if is_momo else module_record_cost_amount(record), 2)
-        profit_total = round(mobile_money_transaction_profit(payload) if is_momo else module_record_profit_amount(record), 2)
+        profit_total = round(parse_amount(record.amount) if is_provider_commission else mobile_money_transaction_profit(payload) if is_momo else module_record_profit_amount(record), 2)
         transaction_count = max(int(parse_amount(payload.get("transactionCount"))), 1)
         rows.append(
             {
@@ -13492,7 +13494,7 @@ def profit_detail_rows(records: list[ModuleRecord], month_value: str, area_id: s
                 "areaLabel": BUSINESS_AREA_LABELS.get(business_area_id, business_area_id),
                 "areaShort": BUSINESS_AREA_SHORT.get(business_area_id, business_area_id),
                 "sourceType": source_type,
-                "sourceLabel": "MoMo Commission / Fees (not handled value)" if is_momo else (normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type)),
+                "sourceLabel": "MTN Commission Received" if is_provider_commission else "MoMo Customer Service Fees" if is_momo else (normalize_text(payload.get("sourceLabel")) or profit_source_label(source_type)),
                 "transactionCount": transaction_count,
                 "salesTotal": amount,
                 "costTotal": cost_total,
@@ -17349,7 +17351,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         )
         closeout_payload = serialize_module_record(closeout_record) if closeout_record else None
         cash_sales_total = pos_cash_sales_total(counter_payment_mix)
-        desk_momo_included = desk_key != "food" and (not selected_area or selected_area == "mobile-money")
+        desk_momo_included = desk_key != "food" and (not selected_area or selected_area in {"groceries", "mobile-money"})
         desk_momo_commission = mobile_money_snapshot["recognizedSalesTotal"] if desk_momo_included else 0.0
         desk_momo_profit = mobile_money_snapshot["recognizedProfitTotal"] if desk_momo_included else 0.0
         # Customer credit repayments are real cash received, but they are not
@@ -17477,7 +17479,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "mobileMoneyStatusLabel": "Separate MoMo Counter",
             "mobileMoneyUsesReconciliationFallback": False,
             "mobileMoneySourceLabel": "Mobile Money",
-            "mobileMoneySummaryNote": "MoMo commission is included once in Groceries & More desk sales and sales cash expected. Handled value is excluded. In Daily Cash it remains in MoMo physical cash; do not count that same commission again as shop cash unless transferred.",
+            "mobileMoneySummaryNote": "Customer service fees are automatically included once in Groceries & More desk sales and cash expected. MoMo handled value stays separate. MTN commission is separate income recorded when MTN pays it.",
             "orders": order_rows[:20],
             "businessAreaIds": sorted(business_areas),
             "lastCloseout": closeout_payload,
@@ -19023,6 +19025,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         dashboard_record_keys = {
             "sales",
             "mobile_money_transactions",
+            "cashbook_entries",
             "mobile_money_reconciliations",
             "customer_credit_accounts",
             "apartments",
@@ -19441,7 +19444,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             .where(ModuleRecord.module_key == "sales")
             .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
-        detail_rows = profit_detail_rows(sales_records + [r for r in all_records if r.module_key == "mobile_money_transactions"], month_filter, area_filter)
+        detail_rows = profit_detail_rows(sales_records + [r for r in all_records if r.module_key == "mobile_money_transactions" or is_mtn_commission_receipt(r)], month_filter, area_filter)
         reporting_area_rows = report_area_rows(all_records, month_filter)
         if area_filter:
             reporting_area_rows = [row for row in reporting_area_rows if row["areaId"] == area_filter]
@@ -19702,7 +19705,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         area_filter = normalize_text(request.args.get("area"))
         sales_records = g.db.scalars(
             select(ModuleRecord)
-            .where(ModuleRecord.module_key == "sales")
+            .where(ModuleRecord.module_key.in_(["sales", "mobile_money_transactions", "cashbook_entries"]))
             .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
         ).all()
         rows = profit_detail_rows(sales_records, month_filter, area_filter)
@@ -19917,14 +19920,14 @@ def create_app(config: AppConfig | None = None) -> Flask:
             counterparty="MTN", commissionMonth=month, commissionType=commission_type,
             sourceType="mtn-commission-settlement", reference="mtn-commission|" + reference,
             commissionWallet=wallet, recordedBy=g.current_user.full_name or g.current_user.username,
-            notes="Actual monthly commission settlement. Not another sale or a second recognition of earned commission. " + normalize_text(request.form.get("notes"))[:1000])
+            notes="Separate MTN commission income received; not a customer service fee and not transaction handled value. " + normalize_text(request.form.get("notes"))[:1000])
         record = ModuleRecord(id=identity, module_key="cashbook_entries")
         set_module_record_metadata(record, MODULES["cashbook_entries"], payload)
         g.db.add(record)
         audit("daily_cash_positions", "MTN Commission Receipt", "commission-received", commission_type + " " + month, identity,
-              f"{amount:.2f}; received {day}; {label}; MTN reference {reference}. Settlement only; no duplicate earned income.")
+              f"{amount:.2f}; received {day}; {label}; MTN reference {reference}. Separate MTN commission income, not a customer service fee.")
         g.db.commit()
-        flash("MTN commission payment recorded once in Cashbook and the receiving account. Earned commission was not counted again.", "success")
+        flash("MTN commission recorded once as separate income and added to the receiving account. Customer service fees are unchanged.", "success")
         return redirect(url_for("daily_cash_page", date=day, entryType="Closing"))
 
     @app.route("/app/daily-cash/expense", methods=["POST"])
@@ -22409,6 +22412,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["cashOutValue"] = round(day_rollup["cashOutValueTotal"], 2)
                 payload["serviceFees"] = round(day_rollup["feeTotal"], 2)
             elif module_key == "mobile_money_transactions":
+                payload["commissionWallet"] = "groceries"
                 payload["businessAreaId"] = "mobile-money"
                 payload["floatImpact"] = normalize_text(payload.get("floatImpact")) or mobile_money_default_float_impact(payload.get("serviceType"))
                 payload["profitAmount"] = round(parse_amount(payload.get("salesAmount")) - parse_amount(payload.get("costAmount")), 2)
