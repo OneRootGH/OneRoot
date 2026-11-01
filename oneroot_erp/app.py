@@ -11434,6 +11434,8 @@ def staff_document_pack_placeholders(profile: dict[str, Any]) -> dict[str, str]:
         salary_label = " + ".join(parts) or "To be agreed"
     else:
         salary_label = f"{format_currency(monthly_salary)} per month" if monthly_salary > 0 else "To be agreed"
+    if profile.get("automaticPayslips"):
+        salary_label = "Agreed net base " + format_currency(profile.get("netBaseSalary", 0)) + " plus allowance " + format_currency(profile.get("monthlyAllowance", 0)) + "; total monthly take-home " + format_currency(monthly_salary)
     emergency_parts = [
         normalize_text(profile.get("emergencyContact")),
         normalize_text(profile.get("emergencyRelationship")),
@@ -17795,6 +17797,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
         while True:
             try:
                 prepare_due_closings(SessionLocal(), daily_cash_movement_context)
+                from .staff_payroll import prepare_monthly_payslips
+                prepare_monthly_payslips(SessionLocal(), current_local_datetime().date(), set_module_record_metadata, MODULES, salary_rollup)
+                SessionLocal().commit()
             except Exception:
                 SessionLocal().rollback()
                 app.logger.exception("AI closing preparation failed; retrying next minute")
@@ -21291,6 +21296,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         access_response = enforce_module_access(module_key)
         if access_response:
             return access_response
+        if module_key in {"salary_records", "staff_documents"}:
+            from .staff_payroll import prepare_monthly_payslips
+            prepare_monthly_payslips(g.db, current_local_datetime().date(), set_module_record_metadata, MODULES, salary_rollup)
+            g.db.commit()
         if module_key == "family_support_payments":
             return redirect(url_for("family_support_page"))
         if module_key in {"staff_reporting_schedule", "workforce_attendance"}:
@@ -23741,6 +23750,23 @@ def create_app(config: AppConfig | None = None) -> Flask:
             "reviewFrequency": "Monthly", "onboardingStatus": "Ready for Signing",
         }, staff_role_options=STAFF_WORK_ROLES)
 
+    @app.route("/app/staff-payroll/approved-roster", methods=["POST"])
+    @access_required("staff_documents")
+    def approved_staff_payroll_roster():
+        if not user_is_owner(g.current_user):
+            return "Owner access required.", 403
+        if request.form.get("confirmation") != "five-staff-net-plus-allowances-2026":
+            return "Confirmation required.", 400
+        from .staff_payroll import configure_staff, prepare_monthly_payslips
+        if g.db.get(AppSetting, "staff-payroll-schedule-enabled"):
+            return "Approved roster is already configured. Edit staff settings instead.", 409
+        configure_staff(g.db, g.current_user.username, set_module_record_metadata, MODULES)
+        count = prepare_monthly_payslips(g.db, current_local_datetime().date(), set_module_record_metadata, MODULES, salary_rollup)
+        audit("salary_records", "Payroll & Payslips", "configure", "Five staff monthly schedules", "approved-roster-2026",
+              f"Owner approved net base plus allowances; prepared {count} unpaid payslips. Old document registers superseded, personal details and payment history retained.")
+        g.db.commit()
+        return jsonify(ok=True, preparedPayslips=count)
+
     @app.route("/app/staff-onboarding/<profile_id>/pay-settings", methods=["POST"])
     @access_required("staff_documents")
     def staff_pay_settings(profile_id: str):
@@ -23757,7 +23783,10 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = dict(profile.payload or {})
         old_salary = parse_amount(payload.get("monthlySalary"))
         old_payday = normalize_text(payload.get("payday"))
-        payload.update(monthlySalary=salary, payBasis="Monthly", payFrequency="Monthly",
+        allowance = parse_amount(request.form.get("monthlyAllowance", payload.get("monthlyAllowance", 0)))
+        if not math.isfinite(allowance) or allowance < 0 or allowance > salary:
+            return "Allowance must be between zero and total monthly take-home.", 400
+        payload.update(monthlySalary=salary, netBaseSalary=round(salary-allowance,2), monthlyAllowance=allowance, payBasis="Fixed Monthly", payFrequency="Monthly",
                        paydayDay=payday, payday=f"Day {payday} of each month")
         profile.payload = payload
         profile.updated_at = datetime.utcnow()

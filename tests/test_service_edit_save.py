@@ -20,6 +20,28 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_approved_staff_monthly_payroll(self):
+        from oneroot_erp.staff_payroll import prepare_monthly_payslips
+        from oneroot_erp.app import salary_rollup
+        self.assertEqual(self.client.post("/app/staff-payroll/approved-roster",data={}).status_code,400)
+        with patch("oneroot_erp.app.current_local_datetime",return_value=datetime(2026,11,1)):
+            result=self.client.post("/app/staff-payroll/approved-roster",data=dict(confirmation="five-staff-net-plus-allowances-2026"))
+        self.assertEqual(result.status_code,200)
+        self.assertEqual(result.json["preparedPayslips"],8)
+        db=self.sessions()
+        salaries=db.scalars(select(ModuleRecord).where(ModuleRecord.module_key=="salary_records")).all()
+        totals={r.payload["staffName"]:r.payload["netPay"] for r in salaries}
+        self.assertEqual(totals["Daniel Agyei"],1000)
+        self.assertEqual(totals["Philip Boakye"],2000)
+        self.assertEqual(totals["Suzzy Agyemang"],1400)
+        self.assertEqual(totals["Faustina Nti Nyamekye Alexandra"],900)
+        self.assertEqual(totals["Erica Asare"],500)
+        self.assertTrue(all(r.payload["amountPaid"]==0 for r in salaries))
+        self.assertEqual(prepare_monthly_payslips(db,date(2026,11,1),set_module_record_metadata,MODULES,salary_rollup),0)
+        self.assertEqual(prepare_monthly_payslips(db,date(2027,2,1),set_module_record_metadata,MODULES,salary_rollup),15)
+        feb=db.get(ModuleRecord,__import__('oneroot_erp.staff_payroll',fromlist=['identity']).identity("monthly-payroll|"+next(r.payload["onboardingProfileId"] for r in salaries if r.title=="Daniel Agyei")+"|2027-02"))
+        self.assertEqual(feb.payload["paymentDueDate"],"2027-02-28")
+
     def test_six_account_reset_is_explicit_and_does_not_create_income(self):
         from oneroot_erp.cash_controls import find_snapshot,latest_close
         data=dict(confirmation="2026-10-29|19434.20")
