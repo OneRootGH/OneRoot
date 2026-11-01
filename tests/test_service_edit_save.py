@@ -20,6 +20,32 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_paid_salary_status_saves_full_payment_and_requires_details(self):
+        from oneroot_erp.app import validate_salary_payment
+        payload=dict(baseSalary=800,allowance=200,amountPaid=0)
+        self.assertEqual(len(validate_salary_payment(payload,"Paid",date(2026,11,1))),2)
+        payload.update(paymentDate="2026-10-31",paymentMethod="Mobile Money")
+        self.assertEqual(validate_salary_payment(payload,"Paid",date(2026,11,1)),[])
+        self.assertEqual((payload["amountPaid"],payload["status"],payload["balanceDue"]),(1000,"Paid",0))
+        payload["amountPaid"]=300
+        self.assertEqual(validate_salary_payment(payload,"Part Paid",date(2026,11,1)),[])
+        self.assertEqual((payload["status"],payload["balanceDue"]),("Part Paid",700))
+        payload["paymentDate"]="2026-12-01"
+        self.assertTrue(validate_salary_payment(payload,"Part Paid",date(2026,11,1)))
+
+    def test_payroll_form_paid_selection_persists_after_reload(self):
+        data=dict(staffName="Daniel Agyei",month="2026-10",payBasis="Fixed Monthly",baseSalary=800,
+                  allowance=200,amountPaid=0,status="Paid",paymentDate="2026-10-31",paymentMethod="Cash")
+        with patch("oneroot_erp.app.current_local_datetime",return_value=datetime(2026,11,1)):
+            response=self.client.post("/app/modules/salary_records/new",data=data)
+        self.assertEqual(response.status_code,302)
+        db=self.sessions();record=db.scalar(select(ModuleRecord).where(ModuleRecord.module_key=="salary_records",ModuleRecord.title=="Daniel Agyei"))
+        self.assertIsNotNone(record)
+        self.assertEqual(record.status,"Paid")
+        self.assertEqual(record.payload["amountPaid"],1000)
+        self.assertEqual(record.payload["balanceDue"],0)
+        self.assertEqual(self.client.get("/app/modules/salary_records/"+record.id+"/edit").status_code,200)
+
     def test_approved_staff_monthly_payroll(self):
         from oneroot_erp.staff_payroll import prepare_monthly_payslips
         from oneroot_erp.app import salary_rollup

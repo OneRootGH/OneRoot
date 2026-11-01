@@ -753,6 +753,8 @@
         const amountPaidField = document.querySelector('input[name="amountPaid"]');
         const balanceField = document.querySelector('input[name="balanceDue"]');
         const statusField = document.querySelector('select[name="status"]');
+        const salaryPaymentDate = document.querySelector('input[name="paymentDate"]');
+        const salaryPaymentMethod = document.querySelector('select[name="paymentMethod"]');
         if (!baseSalaryField || !grossField || !netPayField || !balanceField) {
           return;
         }
@@ -792,6 +794,8 @@
           const netPay = Math.max(grossPay - totalDeductions, 0);
           const amountPaid = parseNumber(amountPaidField && amountPaidField.value);
           const balanceDue = Math.max(netPay - amountPaid, 0);
+          if (salaryPaymentDate) salaryPaymentDate.required = amountPaid > 0;
+          if (salaryPaymentMethod) salaryPaymentMethod.required = amountPaid > 0;
           grossField.value = grossPay.toFixed(2);
           if (totalDeductionsField) {
             totalDeductionsField.value = totalDeductions.toFixed(2);
@@ -822,6 +826,19 @@
           field.addEventListener("input", updatePayroll);
           field.addEventListener("change", updatePayroll);
         });
+        if (statusField) {
+          const help = document.createElement("small");
+          help.textContent = "Paid fills the full net pay. Enter the actual payment date and method, then save. For part-payment, enter the amount received by the staff member.";
+          statusField.insertAdjacentElement("afterend", help);
+          statusField.addEventListener("change", function () {
+            if (statusField.value === "Paid" && amountPaidField) {
+              amountPaidField.value = netPayField.value;
+              updatePayroll();
+            } else if (statusField.value === "Part Paid" && amountPaidField) {
+              amountPaidField.focus();
+            }
+          });
+        }
         updatePayroll();
       })();
     </script>

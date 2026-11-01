@@ -5760,6 +5760,27 @@ def salary_rollup(payload: dict[str, Any]) -> None:
     payload["status"] = salary_payment_status(payload)
 
 
+def validate_salary_payment(payload: dict[str, Any], requested_status: str, today: date) -> list[str]:
+    """An explicit Paid selection means full settlement, never a status-only override."""
+    salary_rollup(payload)
+    if requested_status == "Paid":
+        payload["amountPaid"] = payload["netPay"]
+    salary_rollup(payload)
+    errors = []
+    paid = parse_amount(payload.get("amountPaid"))
+    if not math.isfinite(paid) or paid < 0 or paid > payload["netPay"]:
+        errors.append("Amount paid must be between zero and the net pay.")
+    if requested_status == "Part Paid" and not 0 < paid < payload["netPay"]:
+        errors.append("For Part Paid, enter an amount greater than zero and less than the net pay.")
+    if paid > 0:
+        payment_date = parse_date(payload.get("paymentDate"))
+        if not payment_date or payment_date > today:
+            errors.append("Enter the actual salary payment date, not a future date.")
+        if payload.get("paymentMethod") not in {"Cash", "Mobile Money", "Bank Transfer", "Card"}:
+            errors.append("Choose the method used to pay the salary: Cash, Mobile Money, Bank Transfer or Card.")
+    return errors
+
+
 def salary_pay_basis(payload: dict[str, Any]) -> str:
     return "Fixed Monthly" if normalize_text(payload.get("payBasis")) == "Fixed Monthly" else "Hourly"
 
@@ -22439,6 +22460,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
                 payload["documentAttachmentType"] = document_attachment_type
             payload["updatedAt"] = datetime.utcnow().isoformat()
             form_errors = mobile_money_form_errors(module_key, payload)
+            if module_key == "salary_records":
+                form_errors.extend(validate_salary_payment(payload, normalize_text(request.form.get("status")), current_local_datetime().date()))
             if module_key == "daily_handovers" and payload.get("handoverTimeError"):
                 form_errors.append(payload.pop("handoverTimeError"))
             if module_key == "daily_handovers":
