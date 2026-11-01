@@ -20,6 +20,21 @@ from oneroot_erp.registry import MODULES
 
 
 class ServiceEditSaveTests(unittest.TestCase):
+    def test_owner_corrects_historical_rent_date_without_changing_payment(self):
+        db=self.sessions();record=ModuleRecord(id="historical-rent",module_key="apartments")
+        p=dict(suite="Hope",tenantName="Favour Donkor",month="2025-11",rentDue=4800,rentPaid=4800,rentPaymentDate="2026-11-12",rentCoverageStartDate="2025-11-12")
+        set_module_record_metadata(record,MODULES["apartments"],p);db.add(record);db.commit()
+        version=record.updated_at.isoformat()
+        with patch("oneroot_erp.app.current_local_datetime",return_value=datetime(2026,11,1)):
+            r=self.client.post("/app/apartments/historical-rent/correct",data=dict(targetId=record.id,version=version,correctionType="payment-date",dateField="rentPaymentDate",correctedPaymentDate="2025-11-12",reason="Owner confirmed actual payment date"))
+        self.assertEqual(r.status_code,302)
+        db=self.sessions();db.expire_all();record=db.get(ModuleRecord,"historical-rent")
+        self.assertEqual(record.payload["rentPaid"],4800)
+        self.assertEqual(record.payload["rentPaymentDate"],"2025-11-12")
+        sale=db.scalar(select(ModuleRecord).where(ModuleRecord.module_key=="sales",ModuleRecord.reference=="apartment-rent-payment|historical-rent"))
+        self.assertEqual(sale.record_date,date(2025,11,12))
+        self.assertEqual(sale.amount,4800)
+
     def test_paid_salary_status_saves_full_payment_and_requires_details(self):
         from oneroot_erp.app import validate_salary_payment
         payload=dict(baseSalary=800,allowance=200,amountPaid=0)

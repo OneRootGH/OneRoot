@@ -23945,7 +23945,19 @@ def create_app(config: AppConfig | None = None) -> Flask:
                     if not math.isfinite(value) or value < 0:
                         raise ValueError("Correction amounts must be zero or greater.")
                     return round(value, 2)
-                if kind == "charges":
+                if kind == "payment-date":
+                    if not user_is_owner(g.current_user):
+                        raise ValueError("Only the owner can correct a historical payment date.")
+                    if payload.get("apartmentPaymentEntries"):
+                        raise ValueError("This month has individual payment entries. Correct the relevant receipt instead of its summary date.")
+                    field = request.form.get("dateField")
+                    corrected = parse_date(request.form.get("correctedPaymentDate"))
+                    if field not in {"rentPaymentDate", "billPaymentDate"} or not corrected or corrected > current_local_datetime().date():
+                        raise ValueError("Choose rent or bills and enter the actual payment date, not a future date.")
+                    before[field] = payload.get(field, "")
+                    changes[field] = corrected.isoformat()
+                    payload.update(changes)
+                elif kind == "charges":
                     for key, _ in fields:
                         before[key] = parse_amount(payload.get(key))
                         changes[key] = amount(key)

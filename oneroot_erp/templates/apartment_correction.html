@@ -10,7 +10,12 @@
   <form method="post" id="apartment-correction" class="form-grid">
     <input type="hidden" name="targetId" value="{{ target.id }}">
     <input type="hidden" name="version" value="{{ target.updated_at.isoformat() }}">
-    <label class="span-2"><span>What Needs Correction?</span><select name="correctionType"><option value="charges">Rent / Bill Charges</option><option value="payment">A Recorded Payment</option></select></label>
+    <label class="span-2"><span>What Needs Correction?</span><select name="correctionType"><option value="charges">Rent / Bill Charges</option><option value="payment">A Recorded Payment</option><option value="payment-date">Owner: Historical Payment Date</option></select></label>
+    <section class="span-2" id="correction-date" hidden>
+      <label>Payment Type<select name="dateField"><option value="rentPaymentDate">Rent</option><option value="billPaymentDate">Bills</option></select></label>
+      <label>Actual Payment Date<input type="date" name="correctedPaymentDate" required></label>
+      <p>Changes the date only, not the amount received. Available for older records without individual receipt entries.</p>
+    </section>
     <section class="span-2" id="correction-charges"><div class="form-grid">
       {% for key, label in fields %}<label><span>{{ label }}{% if key == 'customChargeAmount' %} &middot; {{ payload.get('customChargeLabel', '') }}{% elif key == 'customChargeTwoAmount' %} &middot; {{ payload.get('customChargeTwoLabel', '') }}{% endif %}</span><input type="number" step="0.01" min="0" name="{{ key }}" value="{{ payload.get(key) or 0 }}" required></label>{% endfor %}
     </div></section>
@@ -41,7 +46,8 @@
   }
   function applyLogic() {
     const payment = form.elements.correctionType.value === 'payment';
-    for (const [id, show] of [['correction-charges', !payment], ['correction-payment', payment]]) {
+    const dateOnly = form.elements.correctionType.value === 'payment-date';
+    for (const [id, show] of [['correction-charges', !payment && !dateOnly], ['correction-payment', payment], ['correction-date', dateOnly]]) {
       const section = document.getElementById(id); section.hidden = !show;
       for (const input of section.querySelectorAll('input,select')) input.disabled = !show;
     }
