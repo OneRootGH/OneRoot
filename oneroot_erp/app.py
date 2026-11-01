@@ -23783,12 +23783,20 @@ def create_app(config: AppConfig | None = None) -> Flask:
         payload = dict(profile.payload or {})
         old_salary = parse_amount(payload.get("monthlySalary"))
         old_payday = normalize_text(payload.get("payday"))
+        staff_role = normalize_text(request.form.get("staffRole")) or payload.get("staffRole", "")
+        if request.form.get("staffRole") and staff_role not in dict(STAFF_WORK_ROLES):
+            return "Choose a valid staff role.", 400
         allowance = parse_amount(request.form.get("monthlyAllowance", payload.get("monthlyAllowance", 0)))
         if not math.isfinite(allowance) or allowance < 0 or allowance > salary:
             return "Allowance must be between zero and total monthly take-home.", 400
         payload.update(monthlySalary=salary, netBaseSalary=round(salary-allowance,2), monthlyAllowance=allowance, payBasis="Fixed Monthly", payFrequency="Monthly",
                        paydayDay=payday, payday=f"Day {payday} of each month")
         profile.payload = payload
+        profile.payload = dict(payload, staffRole=staff_role)
+        linked = g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key.in_(["staff_documents", "salary_records"]))).all()
+        for item in linked:
+            if (item.payload or {}).get("onboardingProfileId") == profile.id:
+                item.payload = dict(item.payload or {}, staffRole=staff_role)
         profile.updated_at = datetime.utcnow()
         audit("staff_onboarding_profiles", "Staff Payroll Settings", "update", profile.title, profile.id,
               f"Monthly salary {old_salary:.2f} to {salary:.2f}; payday {old_payday} to {payday}. No payment recorded.")

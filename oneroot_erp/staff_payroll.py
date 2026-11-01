@@ -38,6 +38,8 @@ def configure_staff(db, actor, metadata, modules):
                  automaticPayslips=True, onboardingStatus="Ready for Signing",
                  supervisor=p.get("supervisor") or "Philip Boakye")
         p["staffRole"] = p.get("staffRole") or (user.staff_role if user else "") or "Support Staff"
+        if name == "Philip Boakye":
+            p["staffRole"] = "Owner & Business Manager"
         if user:
             p["systemUsername"] = user.username
         profile.payload=p; profile.title=name; profile.status="Active"
