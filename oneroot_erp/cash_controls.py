@@ -201,6 +201,17 @@ def opening_comparison(counted, baseline, *, combined=False):
     return rows
 
 
+def saved_cash_dashboard_summary(payload):
+    """Summarize saved counts only; an approval is not a reconciled balance."""
+    total = overall_cash_summary(payload, None, {})["actual"]
+    rows = [r for r in payload.get("comparison", []) if r.get("key") not in {"groceriesPetty", "foodPetty"}]
+    complete = bool(rows) and all(r.get("expected") is not None and r.get("variance") is not None for r in rows)
+    variance = round(sum(r["variance"] for r in rows), 2) if complete else None
+    return dict(total=total, variance=variance,
+                expected=round(total-variance, 2) if complete else None,
+                needsReview=variance is None or abs(variance) >= .01 or bool(payload.get("warnings")))
+
+
 def overall_cash_summary(counted, baseline, movements):
     """Petty is included in shop cash. Internal transfers cancel across wallets."""
     keys = ("groceriesCash", "foodCash", "momoCash", "momoECash", "merchantECash", "momoPay", "commissionBalance")

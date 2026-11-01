@@ -19174,11 +19174,15 @@ def create_app(config: AppConfig | None = None) -> Flask:
         for record in all_records:
             counts[record.module_key] += 1
 
+        from .cash_controls import saved_cash_dashboard_summary
+        latest_cash_position = (g.db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")
+            .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at)).limit(1))
+            if user_has_access(g.current_user, "daily_cash_positions") else None)
         return render_template(
             "dashboard.html",
             family_support=support_context(g.db, today) if user_is_owner(g.current_user) else None,
-            latest_cash_position=(g.db.scalar(select(ModuleRecord).where(ModuleRecord.module_key == "daily_cash_positions")
-                .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at)).limit(1)) if user_has_access(g.current_user, "daily_cash_positions") else None),
+            latest_cash_position=latest_cash_position,
+            latest_cash_summary=saved_cash_dashboard_summary(latest_cash_position.payload or {}) if latest_cash_position else None,
             page_title="Dashboard",
             counts=counts,
             expenses_total=expenses_total,
