@@ -19438,12 +19438,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
     def profits_page():
         month_filter = parse_month(request.args.get("month")) or date.today().strftime("%Y-%m")
         area_filter = normalize_text(request.args.get("area"))
-        all_records = g.db.scalars(select(ModuleRecord).order_by(desc(ModuleRecord.updated_at))).all()
-        sales_records = g.db.scalars(
-            select(ModuleRecord)
-            .where(ModuleRecord.module_key == "sales")
-            .order_by(desc(ModuleRecord.record_date), desc(ModuleRecord.updated_at))
-        ).all()
+        all_records = management_report_records(g.db, month_filter)
+        sales_records = [record for record in all_records if record.module_key == "sales"]
         detail_rows = profit_detail_rows(sales_records + [r for r in all_records if r.module_key == "mobile_money_transactions" or is_mtn_commission_receipt(r)], month_filter, area_filter)
         reporting_area_rows = report_area_rows(all_records, month_filter)
         if area_filter:

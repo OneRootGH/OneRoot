@@ -309,7 +309,7 @@
           {% if definition.key == 'mobile_money_transactions' and field.name == 'transactionValue' %}
             <small class="muted form-helper">Enter the full customer amount handled for this transaction.</small>
           {% elif definition.key == 'mobile_money_transactions' and field.name == 'salesAmount' %}
-            <small class="muted form-helper">Enter only the fee or commission OneRoot earns here, not the full transfer amount.</small>
+            <small class="muted form-helper">Enter the customer service fee once. It automatically goes to Groceries counter cash, not MoMo float. Record separate MTN commission in Daily Cash.</small>
           {% elif definition.key == 'mobile_money_transactions' and field.name == 'date' %}
             <small class="muted form-helper">Use the actual transaction date. Future dates are blocked.</small>
           {% elif definition.key == 'mobile_money_reconciliations' and field.name == 'openingCash' %}
