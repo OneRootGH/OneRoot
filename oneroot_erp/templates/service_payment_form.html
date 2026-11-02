@@ -173,16 +173,17 @@
       <div class="card-header">
         <div>
           <p class="eyebrow">New Collection</p>
-          <h3>Capture Payment</h3>
+          <h3>Receive Payment</h3>
         </div>
       </div>
       {% if service_row.balance > 0 or (definition.key == 'equipment_rental_bookings' and not payload.get('returnDate') and payload.get('status') != 'Cancelled') %}
         <form method="post" class="form-grid service-collection-form" data-offline-queue data-offline-label="{{ definition.label }} payment" data-offline-reset="amountPaid,paymentReference,receivedBy,notes">
           {% if definition.key == 'equipment_rental_bookings' %}
-            <label><span>Advance payment covers through (optional)</span><input type="date" name="advanceThroughDate" min="{{ service_row.outDate or '' }}"><small>For several days paid ahead, select the last day covered and enter the actual amount received. Leave the return date blank until the equipment returns. You can also collect any part of the permitted amount.</small></label>
-            <p class="span-2">Advance held against future rental use: <strong>{{ advance_held|currency }}</strong>. Final charges still follow the actual return date; excess money requires review, not automatic profit.</p>
+            <label class="span-2"><span>What is happening?</span><select id="rental-payment-action"><option value="payment">Receive money only — equipment stays out</option><option value="advance">Customer is paying for future days</option><option value="return">Equipment is being returned with payment</option></select></label>
+            <label data-rental-flow="advance"><span>Paid through which date?</span><input type="date" name="advanceThroughDate" min="{{ service_row.outDate or '' }}"><small>Select the last rental day being paid for.</small></label>
+            {% if advance_held > 0 %}<p class="span-2">Already paid ahead: <strong>{{ advance_held|currency }}</strong>.</p>{% endif %}
             <div class="span-2 rental-payment-shortcuts">
-              <p><strong>Fast collection:</strong> choose one rental day for a part-payment today, or use the full current balance. The rental stays open until the equipment is returned and the balance is cleared.</p>
+              <p>Enter the money actually received. A part-payment is allowed.</p>
               <div class="quick-choice-row">
                 <button class="button subtle" type="button" data-rental-day-payment="{{ [service_row.dailyRate, service_row.balance]|min }}">Take one day {{ [service_row.dailyRate, service_row.balance]|min|currency }}</button>
                 <button class="button primary" type="button" data-full-balance="{{ service_row.balance }}">Use full balance {{ service_row.balance|currency }}</button>
@@ -193,17 +194,17 @@
             </div>
           {% endif %}
           <label>
-            <span>Collection Date (Money Received)</span>
+            <span>Payment Date</span>
             <input type="date" name="paymentDate" value="{{ today_iso }}" required>
-            <small class="muted form-helper">This is the day the money was collected. It determines the POS collection list, Daily Sales date, and counter closeout.</small>
+            <small class="muted form-helper">Use the day you received the money.</small>
           </label>
           {% if definition.key == 'equipment_rental_bookings' %}
-            <label>
+            <label data-rental-flow="return">
               <span>Actual Return Date (Charge Ends)</span>
               <input type="date" name="returnDate" id="equipment-payment-return-date" value="{{ service_row.returnDate or '' }}" min="{{ service_row.outDate or '' }}">
               <small class="muted form-helper">Enter this when equipment returns. OneRoot charges from the out date through this date, including both days.</small>
             </label>
-            <label>
+            <label data-rental-flow="return">
               <span>Actual Return Time</span>
               <input type="time" name="returnTime" value="{{ payload.returnTime or '' }}">
               <small class="muted form-helper">A return on the next morning can use a one-day charge only after the Owner approves it.</small>
@@ -212,7 +213,7 @@
           <label>
             <span>Amount Received</span>
             <input type="number" min="0.01" {% if definition.key != 'equipment_rental_bookings' %}max="{{ service_row.balance }}"{% endif %} step="0.01" name="amountPaid" value="{{ payment_amount_default if payment_amount_default > 0 else '' }}" required>
-            <small class="muted form-helper" id="equipment-payment-amount-helper">Current balance: {{ service_row.balance|currency }}. For equipment paid ahead, select the advance coverage date; the server checks the allowed amount.</small>
+            <small class="muted form-helper" id="equipment-payment-amount-helper">Balance now: {{ service_row.balance|currency }}. Enter a full or part-payment.</small>
           </label>
           <label>
             <span>Payment Method</span>
@@ -223,6 +224,7 @@
               {% endfor %}
             </select>
           </label>
+          <details class="span-2"><summary>Reference, staff name or note (optional)</summary>
           <label>
             <span>Reference</span>
             <input type="text" name="paymentReference" placeholder="Transaction or receipt reference">
@@ -235,8 +237,9 @@
             <span>Notes</span>
             <textarea name="notes" rows="3" placeholder="Optional collection note"></textarea>
           </label>
+          </details>
           <div class="form-actions span-2">
-            <button class="button primary" type="submit">Save Collection</button>
+            <button class="button primary" type="submit">Save Payment</button>
           </div>
         </form>
       {% else %}
@@ -303,6 +306,33 @@
       </table>
     </div>
   </section>
+{% if definition.key == 'equipment_rental_bookings' %}
+<style>[data-rental-flow][hidden]{display:none!important}</style>
+<script>
+(() => {
+  const choice = document.getElementById('rental-payment-action');
+  if (!choice) return;
+  const returned = {{ (service_row.returnDate is not none and service_row.returnDate != '')|tojson }};
+  if (returned) {
+    choice.options[0].textContent = 'Receive money — equipment already returned';
+    choice.options[1].disabled = true;
+    choice.options[2].textContent = 'Review return date and receive money';
+  }
+  function update() {
+    document.querySelectorAll('[data-rental-flow]').forEach(section => {
+      const show = section.dataset.rentalFlow === choice.value;
+      section.hidden = !show;
+      section.querySelectorAll('input').forEach(input => {
+        input.disabled = !show;
+        input.required = show && (input.name === 'advanceThroughDate' || input.name === 'returnDate');
+      });
+    });
+  }
+  choice.addEventListener('change', update);
+  update();
+})();
+</script>
+{% endif %}
 {% endblock %}
 {% block scripts %}
   {% if definition.key == 'equipment_rental_bookings' %}
