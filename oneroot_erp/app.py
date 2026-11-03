@@ -22249,6 +22249,9 @@ def create_app(config: AppConfig | None = None) -> Flask:
             payload = dict(record_payload)
             payload.setdefault("id", record.id if record else uuid4().hex)
             payload.setdefault("createdAt", record.created_at.isoformat() if record else datetime.utcnow().isoformat())
+            if module_key in SERVICE_MODULE_AREA_IDS:
+                payload.setdefault("serviceProvidedBy", g.current_user.full_name or g.current_user.username)
+                payload["lastUpdatedBy"] = g.current_user.full_name or g.current_user.username
             if module_key == "customer_prepaid" and record:
                 flash("Posted prepaid entries cannot be edited. Record an owner-approved refund or a new transaction instead.", "error")
                 return redirect(url_for("module_list", module_key=module_key))
@@ -23262,7 +23265,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
                         "advanceThroughDate": advance_through.isoformat() if advance_through else "",
                         "paymentMethod": payment_method,
                         "paymentReference": normalize_text(request.form.get("paymentReference")),
-                        "receivedBy": normalize_text(request.form.get("receivedBy")) or g.current_user.full_name or g.current_user.username,
+                        "receivedBy": g.current_user.full_name or g.current_user.username,
                         "notes": normalize_text(request.form.get("notes")),
                         "createdAt": recorded_at,
                         "recordedAt": recorded_at,
@@ -25160,6 +25163,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         ]
         return render_template(
             "pos_receipt.html",
+            served_by=g.db.scalar(select(AuditLog.actor_name).where(AuditLog.module_key == "pos", AuditLog.record_id == order.id, AuditLog.action == "create").order_by(AuditLog.created_at).limit(1)) or "Not recorded",
             page_title=f"POS Receipt - {order.order_number}",
             back_url=url_for("pos_page"),
             auto_print=normalize_text(request.args.get("autoprint")).lower() in {"1", "true", "yes"},

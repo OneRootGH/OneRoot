@@ -1,0 +1,14 @@
+<section class="card"><h3>Weekly Cooking Schedule</h3><p>Banku every day, plus one other main. Confirm availability and prices before taking orders.</p>
+<div class="table-wrap"><table><thead><tr><th>Day</th><th>Banku option</th><th>Other main</th><th>Proteins</th></tr></thead><tbody>
+{% for day, sauce, meal, proteins in [
+('Monday','Okro Stew','Jollof Rice','Chicken / Beef'),
+('Tuesday','Stew','Fried Yam','Fish / Fried Pork'),
+('Wednesday','Soup','Spaghetti / Indomie','Goat / Chicken'),
+('Thursday','Okro Stew','Plain Rice with Stew','Beef / Fish'),
+('Friday','Stew','Fried Rice','Chicken / Fried Pork'),
+('Saturday','Okro Stew','Jollof Rice','Goat / Fish'),
+('Sunday','Soup','Fried Yam','Goat / Fried Pork')] %}
+<tr><th>{{ day }}</th><td>Banku with {{ sauce }}</td><td>{{ meal }}</td><td>{{ proteins }}</td></tr>
+{% endfor %}</tbody></table></div>
+<p>Breakfast: Mon / Thu / Sat — Tom Brown and bread; Tue / Fri — tea and bread; Wed — oats; Sun — tea and bread, subject to availability.</p>
+<details><summary>Kitchen staff checklist</summary><p>Agree portions and prices. Issue ingredients once through Kitchen Production. Prepare small batches; record portions produced, sold, staff meals and waste separately. Record each payment once. Confirm prices for goat, beef, fried pork and Banku with Okro Stew before payment.</p></details></section>

@@ -17,6 +17,7 @@
       <div><span>Receipt</span><strong>{{ order.orderNumber }}</strong></div>
       <div><span>Date</span><strong>{{ order.createdAt[:16]|replace('T', ' ') }}</strong></div>
       <div><span>Payment</span><strong>{{ order.paymentMethod }}</strong></div>
+      <div><span>Served by</span><strong>{{ served_by }}</strong></div>
       <div><span>Items</span><strong>{{ order.itemCount|round(2) }}</strong></div>
       {% if order.customerName and order.customerName != 'Walk-in Customer' %}
         <div><span>Customer</span><strong>{{ order.customerName }}</strong></div>
