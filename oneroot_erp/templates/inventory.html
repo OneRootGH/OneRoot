@@ -176,6 +176,13 @@
           <a class="button subtle" href="{{ url_for('warehouse_page') }}">Warehouse</a>
           <a class="button subtle" href="{{ url_for('inventory_barcode') }}">Barcode Update</a>
           <a class="button subtle" href="{{ url_for('inventory_export', q=search, area=area_filter, category=category_filter, expiry=expiry_filter, location=location_filter, stock=stock_filter) }}">Export CSV</a>
+          <details class="inventory-export-options">
+            <summary>Export by Business Area</summary>
+            <a class="table-link" href="{{ url_for('inventory_export') }}">Export All Business Areas</a>
+            {% for value, label in business_area_options %}
+              <div><a class="table-link" href="{{ url_for('inventory_export', area=value) }}">{{ label }}</a></div>
+            {% endfor %}
+          </details>
         </div>
       </div>
       <div class="table-wrap tall">
