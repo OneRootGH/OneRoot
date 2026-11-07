@@ -2,7 +2,7 @@ import unittest
 from sqlalchemy import create_engine, select
 from sqlalchemy.orm import Session
 
-from oneroot_erp.app import POS_FOOD_SALES_AREA_IDS, is_orderable_area, reclassify_inventory_product, seed_plumbing_electrical_inventory
+from oneroot_erp.app import POS_FOOD_SALES_AREA_IDS, POS_GROCERIES_MORE_AREA_IDS, is_orderable_area, reclassify_inventory_product, seed_plumbing_electrical_inventory
 from oneroot_erp.models import Base, Product
 from oneroot_erp.plumbing_catalog import PLUMBING_ELECTRICAL_ITEMS
 from oneroot_erp.registry import BUSINESS_AREA_LABELS, INVENTORY_CATEGORY_LIBRARY
@@ -11,7 +11,8 @@ from oneroot_erp.registry import BUSINESS_AREA_LABELS, INVENTORY_CATEGORY_LIBRAR
 class PlumbingElectricalTests(unittest.TestCase):
     def test_area_is_available_for_inventory_counter_and_website(self):
         self.assertIn("plumbing-electrical", BUSINESS_AREA_LABELS)
-        self.assertIn("plumbing-electrical", POS_FOOD_SALES_AREA_IDS)
+        self.assertNotIn("plumbing-electrical", POS_FOOD_SALES_AREA_IDS)
+        self.assertIn("plumbing-electrical", POS_GROCERIES_MORE_AREA_IDS)
         self.assertTrue(is_orderable_area("plumbing-electrical"))
         self.assertEqual(len(INVENTORY_CATEGORY_LIBRARY["plumbing-electrical"]), 6)
 

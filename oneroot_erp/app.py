@@ -80,8 +80,9 @@ KITCHEN_INGREDIENT_ITEMS_KEY = "ingredientItems"
 KITCHEN_MEAL_ITEMS_KEY = "mealItems"
 # Cold Store & Kitchen handles its food range and the fast-moving construction
 # consumables counter. Groceries & More remains the retail home for phone stock.
-POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables", "plumbing-electrical", "construction-worker-meals"}
+POS_FOOD_SALES_AREA_IDS = {"cold-store-groceries", "construction-consumables", "construction-worker-meals"}
 POS_GROCERIES_MORE_AREA_IDS = {
+    "plumbing-electrical",
     "bedding-linen",
     "gift-care-packages",
     "reseller-supply-packs",
