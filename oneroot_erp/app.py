@@ -14154,7 +14154,6 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
         "costPrice",
         "expiryDate",
         "expiryStatus",
-        "imageUrl",
         "createdAt",
         "updatedAt",
     ]
@@ -14176,7 +14175,6 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
             "costPrice": item.cost_price,
             "expiryDate": item.expiry_date.isoformat() if item.expiry_date else "",
             "expiryStatus": product_expiry_status(item)["label"],
-            "imageUrl": item.image_url,
             "createdAt": item.created_at.isoformat(),
             "updatedAt": item.updated_at.isoformat(),
         }
