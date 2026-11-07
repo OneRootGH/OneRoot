@@ -14138,9 +14138,7 @@ def build_module_export_rows(records: list[ModuleRecord], definition: ModuleDefi
 
 def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], list[dict[str, Any]]]:
     headers = [
-        "id",
         "name",
-        "businessAreaId",
         "businessArea",
         "category",
         "sku",
@@ -14157,17 +14155,12 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
         "expiryDate",
         "expiryStatus",
         "imageUrl",
-        "trackInventory",
-        "active",
-        "notes",
         "createdAt",
         "updatedAt",
     ]
     rows = [
         {
-            "id": item.id,
             "name": item.name,
-            "businessAreaId": item.business_area_id,
             "businessArea": BUSINESS_AREA_LABELS.get(item.business_area_id, item.business_area_id),
             "category": item.category,
             "sku": item.sku,
@@ -14184,9 +14177,6 @@ def build_inventory_export_rows(products: list[Product]) -> tuple[list[str], lis
             "expiryDate": item.expiry_date.isoformat() if item.expiry_date else "",
             "expiryStatus": product_expiry_status(item)["label"],
             "imageUrl": item.image_url,
-            "trackInventory": product_tracks_inventory(item),
-            "active": item.active,
-            "notes": item.notes,
             "createdAt": item.created_at.isoformat(),
             "updatedAt": item.updated_at.isoformat(),
         }
