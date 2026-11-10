@@ -24,7 +24,7 @@
           </div>
         </div>
         {% for group in sidebar_items %}
-          <details class="menu-group" {% if group.is_active or loop.first or group.group == 'Accounts & Calendar' %}open{% endif %}>
+          <details class="menu-group" {% if group.is_active %}open{% endif %}>
             <summary>
               <span>{{ group.group }}</span>
               <small>{{ group.sections|length }} sections</small>
@@ -36,7 +36,7 @@
                   <div class="menu-links">
                     {% for link in section.links %}
                       {% if link.children %}
-                        <details class="workspace-submenu" {% if link.is_active or link.label == 'Owner Dashboard' %}open{% endif %}>
+                        <details class="workspace-submenu" {% if link.is_active %}open{% endif %}>
                           <summary>{{ link.label }}</summary>
                           <div class="workspace-submenu-links">
                             {% for child in link.children %}

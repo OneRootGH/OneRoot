@@ -2543,10 +2543,17 @@ MENU_GROUPS = [
         "Workspace",
         [
             ("Overview", ["dashboard", "owner_briefing", "analytics", "reports"]),
-            ("Counter & Orders", ["pos", "food_pos", "mobile_money_transactions", "online_orders", "delivery_dispatch"]),
-            ("Stock", ["inventory", "warehouse", "inventory_barcode"]),
         ],
     ),
+    ("Sales & Services", [
+        ("Counters", ["pos", "food_pos", "mobile_money_transactions"]),
+        ("Orders & Delivery", ["online_orders", "delivery_dispatch"]),
+        ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
+    ]),
+    ("Stock & Suppliers", [
+        ("Inventory & Receiving", ["inventory", "warehouse", "inventory_barcode"]),
+        ("Suppliers & Purchasing", ["supplier_directory", "suppliers", "supplier_price_updates"]),
+    ]),
     (
         "Finance",
         [
@@ -2559,7 +2566,6 @@ MENU_GROUPS = [
         [
             ("Shift & Counter Handover", ["morning_opening", "daily_handovers", "business_calendar"]),
             ("Property & Work Orders", ["apartments", "tenant_payment_plans", "tenant_portal_requests", "security_deposit_records", "maintenance_records"]),
-            ("Service Desk", ["laundry_tickets", "equipment_rental_bookings", "kitchen_orders", "kitchen_recipe_plans", "catering_quotes"]),
         ],
     ),
     (
@@ -2567,7 +2573,6 @@ MENU_GROUPS = [
         [
             ("Payroll, Schedules & Training", ["salary_records", "staff_documents", "workforce_attendance", "staff_reporting_schedule", "staff_meal_schedule", "knowledge_base"]),
             ("Recruitment", ["job_vacancies"]),
-            ("Suppliers", ["supplier_directory", "suppliers", "supplier_price_updates"]),
         ],
     ),
     (

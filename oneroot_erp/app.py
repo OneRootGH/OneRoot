@@ -14417,8 +14417,21 @@ def build_sidebar(user: User | None = None):
                         link["children"] = [child for child in link["children"] if child.get("module") not in account_keys]
             group["sections"] = [section for section in group["sections"] if section["links"]]
         active = any(link["is_active"] for link in account_links)
-        items.insert(0, {"group": "Accounts & Calendar", "is_active": active,
-                         "sections": [{"label": "Customer Accounts & Responsibilities", "links": account_links, "is_active": active}]})
+        items.insert(0, {"group": "Cash & Daily Tasks", "is_active": active,
+                         "sections": [{"label": "Daily Cash, Calendar & Accounts", "links": account_links, "is_active": active}]})
+    seen_links = set()
+    for group in items:
+        if group["group"] == "Workspace":
+            group["group"] = "Management"
+        for section in group["sections"]:
+            unique_links = []
+            for link in section["links"]:
+                identity = (link.get("endpoint"), link.get("module"))
+                if identity not in seen_links:
+                    seen_links.add(identity)
+                    unique_links.append(link)
+            section["links"] = unique_links
+        group["sections"] = [section for section in group["sections"] if section["links"]]
     return [group for group in items if group["sections"]]
 
 
