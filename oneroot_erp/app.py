@@ -25545,6 +25545,39 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if line_tracks_inventory:
                 adjust_product_stock(g.db, product, quantity, direction=-1)
 
+        # Gifts are stock movements and costs, never extra sales revenue.
+        if not kitchen_issue_mode and subtotal >= 100 and payment_method in {"Cash", "Mobile Money", "Bank Transfer", "Card"}:
+            candidates = g.db.scalars(select(Product).where(
+                Product.active.is_(True), Product.track_inventory.is_(True),
+                Product.quantity_known.is_(True),
+                Product.sales_price > 0, Product.sales_price <= 5,
+                Product.quantity_on_hand >= 1,
+                Product.business_area_id.in_(pos_desk_area_ids(pos_desk)),
+                or_(Product.stock_source_product_id == "", Product.stock_source_product_id.is_(None)),
+            ).with_for_update(skip_locked=True)).all()
+            candidates = [p for p in candidates if product_tracks_inventory(p)
+                          and (not p.expiry_date or p.expiry_date >= current_local_datetime().date())
+                          and p.quantity_on_hand >= product_stock_units_per_sale(p)]
+            demand = build_inventory_demand_rows(g.db, candidates) if candidates else []
+            slow_ids = {r["productId"] for r in demand if r["movement"] in {"Slow Moving", "No Recent Sales", "No Sales Recorded"}}
+            eligible = [p for p in candidates if p.id in slow_ids]
+            if eligible:
+                from secrets import choice
+                gift = choice(eligible)
+                position = len(order.lines) + 1
+                order.lines.append(PosOrderLine(
+                    id=f"{order_id}:{position}", position=position, product_id=gift.id,
+                    business_area_id=gift.business_area_id, sku=gift.sku, barcode=gift.barcode,
+                    name=f"FREE GIFT - {gift.name}", category=gift.category, item_type="stock",
+                    track_inventory=True, quantity=1, unit_price=0, unit_cost=gift.cost_price,
+                    cost_amount=round(parse_amount(gift.cost_price), 2), total_amount=0,
+                    stock_source_product_id=gift.id, stock_units_per_sale=product_stock_units_per_sale(gift),
+                ))
+                adjust_product_stock(g.db, gift, 1, direction=-1)
+                area_ids.append(gift.business_area_id)
+                item_count += 1
+                order.notes = (order.notes + f" | Free gift on purchase of GHS100+: {gift.name}").strip(" |")
+
         order.business_area_ids = sorted(set(area_ids))
         order.primary_business_area_id = order.business_area_ids[0] if order.business_area_ids else ""
         order.subtotal = round(subtotal, 2)
