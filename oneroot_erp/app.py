@@ -5138,6 +5138,9 @@ def service_total_due(module_key: str, payload: dict[str, Any]) -> float:
 
 
 def service_cost_amount(module_key: str, payload: dict[str, Any]) -> float:
+    if module_key == "equipment_rental_bookings":
+        # Catalog rental costs represent a reserve, not an incurred expense.
+        return 0.0
     line_items = service_line_items(module_key, payload)
     if line_items:
         return round(sum(parse_amount(item.get("lineCost")) for item in line_items), 2)
@@ -5698,11 +5701,19 @@ def hydrate_service_cost_payload(db_session, module_key: str, payload: dict[str,
 
 
 def sales_cost_amount(payload: dict[str, Any]) -> float:
+    if normalize_text(payload.get("sourceType")).lower() == "equipment-rental-payment":
+        return 0.0
     return round(parse_amount(payload.get("costAmount")), 2)
 
 
 def sales_profit_amount(payload: dict[str, Any]) -> float:
     amount = round(parse_amount(payload.get("amount")), 2)
+    if normalize_text(payload.get("sourceType")).lower() == "equipment-rental-payment":
+        # Preserve the income cap for historical advances while reversing only
+        # the reserve previously deducted as a cost.
+        if normalize_text(payload.get("profitAmount")):
+            return round(max(min(parse_amount(payload.get("profitAmount")) + parse_amount(payload.get("costAmount")), amount), 0), 2)
+        return max(amount, 0)
     cost_amount = sales_cost_amount(payload)
     profit_amount = round(parse_amount(payload.get("profitAmount")), 2)
     if profit_amount or normalize_text(payload.get("profitAmount")):
@@ -19452,6 +19463,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
         sales_total = round(sum(row["salesTotal"] for row in detail_rows), 2)
         cost_total = round(sum(row["costTotal"] for row in detail_rows), 2)
         profit_total = round(sum(row["profitTotal"] for row in detail_rows), 2)
+        rental_reserve = round(sum(row["profitTotal"] for row in detail_rows if row["sourceType"] == "equipment-rental-payment") * 0.5, 2)
         transaction_total = sum(row["transactionCount"] for row in detail_rows)
         gross_margin_percent = round((profit_total / sales_total) * 100, 2) if sales_total > 0 else 0.0
         expenses_total = round(sum(parse_amount(row["expenseTotal"]) for row in reporting_area_rows), 2)
@@ -19576,6 +19588,7 @@ def create_app(config: AppConfig | None = None) -> Flask:
             source_rows=source_rows,
             daily_rows=daily_rows,
             recent_profit_rows=detail_rows[:40],
+            rental_reserve=rental_reserve,
             profit_area_chart=build_chart_rows(
                 [
                     {"label": row["areaLabel"], "short": row["areaShort"], "amount": row["netTotal"]}

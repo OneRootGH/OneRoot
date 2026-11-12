@@ -1,5 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
+{% if definition.key == 'equipment_rental_bookings' %}<p class="card">Keep 50% of recognised rental income for repairs and replacement; the other 50% is available before actual expenses. This reserve is not a direct expense and does not move cash automatically.</p>{% endif %}
 {% if definition.key == 'kitchen_orders' %}{% include 'kitchen_weekly_schedule.html' %}{% endif %}
 {% if payload.get('serviceProvidedBy') %}<p>Service handled by: <strong>{{ payload.serviceProvidedBy }}</strong></p>{% endif %}
   <section class="card module-hero service-hero">
