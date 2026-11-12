@@ -2543,6 +2543,7 @@ MENU_GROUPS = [
         "Workspace",
         [
             ("Overview", ["dashboard", "owner_briefing", "analytics", "reports"]),
+            ("Profitability", ["profits"]),
         ],
     ),
     ("Sales & Services", [

@@ -6636,7 +6636,7 @@ SIDEBAR_LINK_LABELS = {
     "owner_briefing": ("Owner Daily Briefing", "owner_daily_briefing", None),
     "analytics": ("Business Analytics", "analytics_page", None),
     "ai_growth_assistant": ("Insights & Suggested Actions", "ai_growth_assistant", None),
-    "profits": ("Profit Center", "profits_page", None),
+    "profits": ("Profit Centre", "profits_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
     "sales_summary": ("Daily Sales Review", "sales_summary_page", None),
