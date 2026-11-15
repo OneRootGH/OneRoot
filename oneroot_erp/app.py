@@ -3437,6 +3437,18 @@ def product_placeholder_svg_payload(name: str, category: str, area_id: str) -> s
     initials = "".join(part[:1].upper() for part in clean_name.split()[:2]) or "OR"
     accent = PRODUCT_IMAGE_AREA_COLORS.get(normalize_text(area_id), PRODUCT_IMAGE_AREA_COLORS["shared-operations"])
     subtitle = BUSINESS_AREA_SHORT.get(normalize_text(area_id), clean_category) or clean_category
+    text = (clean_name + " " + clean_category).lower()
+    drawing = '<path d="M120 65h80v70h-80z M120 65l40-20 40 20 M160 85v50 M120 65l40 20 40-20"/>'
+    if area_id == "laundry-services":
+        drawing = '<path d="M135 45l25 12 25-12 32 25-18 25-15-10v55h-48V85l-15 10-18-25z"/>'
+    elif any(w in text for w in ("rice", "banku", "meal", "soup", "stew", "spaghetti")):
+        drawing = '<path d="M108 95h104c-3 35-20 49-52 49s-49-14-52-49z M130 80c-12-12 12-18 0-30 M160 80c-12-12 12-18 0-30 M190 80c-12-12 12-18 0-30"/>'
+    elif any(w in text for w in ("drink", "water", "juice", "cola", "bottle")):
+        drawing = '<path d="M146 43h28v25l12 17v57h-52V85l12-17z M146 53h28 M134 100h52 M134 124h52"/>'
+    elif any(w in text for w in ("bread", "bakery")):
+        drawing = '<path d="M115 87c-20-35 11-51 45-40 34-11 65 5 45 40v54h-90z M138 76v33 M160 70v39 M182 76v33"/>'
+    elif any(w in text for w in ("phone", "cable", "charger")):
+        drawing = '<rect x="136" y="43" width="48" height="98" rx="9"/><path d="M150 55h20 M154 129h12 M200 70v45c0 20 23 20 23 0V95"/>'
     return f"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 240" role="img" aria-label="{html.escape(clean_name)}">
   <defs>
     <linearGradient id="g" x1="0" x2="1" y1="0" y2="1">
@@ -3444,7 +3456,12 @@ def product_placeholder_svg_payload(name: str, category: str, area_id: str) -> s
       <stop offset="100%" stop-color="#f4ede1"/>
     </linearGradient>
   </defs>
-  <rect width="320" height="240" rx="28" fill="url(#g)"/>
+  <rect width="320" height="240" rx="20" fill="#f7f8f4"/>
+  <g fill="none" stroke="{accent}" stroke-width="4" stroke-linecap="round" stroke-linejoin="round">{drawing}</g>
+  <text x="160" y="177" text-anchor="middle" font-family="sans-serif" font-size="14" font-weight="700" fill="#173a2e">{html.escape(clean_name[:34])}</text>
+  <text x="160" y="201" text-anchor="middle" font-family="sans-serif" font-size="11" fill="#42584c">{html.escape(clean_category[:42])}</text>
+  <text x="160" y="225" text-anchor="middle" font-family="sans-serif" font-size="10" fill="#42584c">ILLUSTRATIVE IMAGE</text>
+  <g display="none">
   <circle cx="248" cy="56" r="38" fill="rgba(255,255,255,0.18)"/>
   <circle cx="68" cy="188" r="56" fill="rgba(255,255,255,0.12)"/>
   <rect x="26" y="28" width="116" height="112" rx="24" fill="rgba(255,255,255,0.20)"/>
@@ -3452,7 +3469,7 @@ def product_placeholder_svg_payload(name: str, category: str, area_id: str) -> s
   <text x="26" y="176" font-family="Arial, sans-serif" font-size="14" letter-spacing="2" fill="rgba(255,255,255,0.92)">{html.escape(subtitle.upper()[:24])}</text>
   <text x="26" y="208" font-family="Arial, sans-serif" font-size="22" font-weight="700" fill="#ffffff">{html.escape(clean_name[:26])}</text>
   <text x="26" y="228" font-family="Arial, sans-serif" font-size="13" fill="rgba(255,255,255,0.88)">{html.escape(clean_category[:34])}</text>
-</svg>"""
+</g></svg>"""
 
 
 def iconify_svg_url(icon_name: str, *, color: str = "", width: int = 320, height: int = 240) -> str:
@@ -3544,8 +3561,10 @@ def mapped_online_product_image(name: str, category: str, area_id: str, item_typ
 def product_image_src(item_or_payload: Product | dict[str, Any]) -> str:
     # Exact unbranded matches only; never substitute raw eggs for cooked meals.
     image_name = normalize_text(item_or_payload.name if isinstance(item_or_payload, Product) else item_or_payload.get("name")).lower()
-    if image_name in {"egg", "eggs", "raw egg", "raw eggs", "fresh eggs"}:
+    if image_name in {"egg", "eggs", "raw egg", "raw eggs", "fresh eggs", "egg big", "egg small"}:
         return "https://images.pexels.com/photos/7616441/pexels-photo-7616441.jpeg?auto=compress&cs=tinysrgb&w=600"
+    if image_name == "egg crate":
+        return "https://images.pexels.com/photos/6827029/pexels-photo-6827029.jpeg?auto=compress&cs=tinysrgb&w=600"
     if isinstance(item_or_payload, Product):
         image_url = normalize_text(item_or_payload.image_url)
         product_id = item_or_payload.id
@@ -3560,6 +3579,8 @@ def product_image_src(item_or_payload: Product | dict[str, Any]) -> str:
         category = normalize_text(item_or_payload.get("category"))
         area_id = normalize_text(item_or_payload.get("businessAreaId") or item_or_payload.get("business_area_id"))
         item_type = normalize_text(item_or_payload.get("itemType") or item_or_payload.get("item_type"))
+    if "/static/catalog-images/" in image_url and product_id:
+        return url_for("product_placeholder_image", product_id=product_id, v="illustration-20261115")
     if image_url:
         return image_url
     online_image = mapped_online_product_image(name, category, area_id, item_type)
