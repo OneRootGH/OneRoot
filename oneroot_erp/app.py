@@ -3542,6 +3542,10 @@ def mapped_online_product_image(name: str, category: str, area_id: str, item_typ
 
 
 def product_image_src(item_or_payload: Product | dict[str, Any]) -> str:
+    # Exact unbranded matches only; never substitute raw eggs for cooked meals.
+    image_name = normalize_text(item_or_payload.name if isinstance(item_or_payload, Product) else item_or_payload.get("name")).lower()
+    if image_name in {"egg", "eggs", "raw egg", "raw eggs", "fresh eggs"}:
+        return "https://images.pexels.com/photos/7616441/pexels-photo-7616441.jpeg?auto=compress&cs=tinysrgb&w=600"
     if isinstance(item_or_payload, Product):
         image_url = normalize_text(item_or_payload.image_url)
         product_id = item_or_payload.id
