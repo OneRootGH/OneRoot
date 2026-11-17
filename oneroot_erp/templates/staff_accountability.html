@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="card"><h2>Staff &amp; Counter Accountability</h2>
+<form method="get"><label>Business date <input type="date" name="date" value="{{ selected }}" required></label><button class="button" type="submit">Review</button></form>
+<p>Two retail counters and one separate MoMo counter. Use individual logins and witnessed handovers; never share cashier credentials.</p>
+<p>Opening: <strong>{{ opening.status if opening else 'Not submitted' }}</strong> · Closing: <strong>{{ closing.status if closing else 'Not submitted' }}</strong></p>
+<a class="button" href="{{ url_for('daily_cash_page', date=selected, entryType='Closing') }}">Review Cash &amp; Request Rectification</a>
+<p>Missing counts mean cash accuracy is unknown, not zero. A variance is not proof of theft. The audit actor identifies who saved the sale, not necessarily everyone who served the customer.</p></section>
+<section class="card"><h3>POS Activity by Recorded Cashier</h3><div class="table-wrap"><table><thead><tr><th>Staff</th><th>Transactions</th><th>Paid POS Sales</th><th>Credit / Unconfirmed Payment</th></tr></thead><tbody>
+{% for row in scores %}<tr><td>{{ row.name }}</td><td>{{ row.transactions }}</td><td>{{ row.paid|currency }}</td><td>{{ row.credit|currency }}</td></tr>{% else %}<tr><td colspan="4">No POS transactions recorded for this date.</td></tr>{% endfor %}
+</tbody></table></div><p>Internal kitchen issues are excluded. Service payments, later credit collections and MoMo activity remain in their respective reports. This is activity, not a performance rating.</p></section>
+<section class="card"><h3>Daily Control Checklist</h3><ul><li>Named cashier and backup for each shift; another person witnesses the count.</li><li>Record every sale, authorised issue and stock transfer.</li><li>Receiving officer checks transfers and deliveries.</li><li>Manager checks stock spot counts, expiry dates, food waste and overdue service payments.</li><li>Owner reviews exceptions independently. Do not invent missing counts or deduct unexplained differences from salary.</li></ul><p>Sales-per-hour targets require reliable shift hours and counter assignment. Targets are not fabricated from incomplete records.</p></section>
+{% endblock %}

@@ -6662,6 +6662,7 @@ SIDEBAR_LINK_LABELS = {
     "analytics": ("Business Analytics", "analytics_page", None),
     "ai_growth_assistant": ("Insights & Suggested Actions", "ai_growth_assistant", None),
     "profits": ("Profit Centre", "profits_page", None),
+    "staff_accountability": ("Staff & Counter Accountability", "staff_accountability_page", None),
     "category_performance": ("Category Performance", "category_performance_page", None),
     "reports": ("Management Reporting", "reports_page", None),
     "sales_summary": ("Daily Sales Review", "sales_summary_page", None),
@@ -14390,7 +14391,7 @@ def build_sidebar(user: User | None = None):
                     else "daily_handovers" if key == "morning_opening"
                     else "pos" if key == "food_pos"
                     else "reports" if key == "analytics"
-                    else "dashboard" if key == "attention"
+                    else "dashboard" if key in {"attention", "staff_accountability"}
                     else key
                 )
                 if allowed_keys and access_key not in allowed_keys:
@@ -19472,6 +19473,29 @@ def create_app(config: AppConfig | None = None) -> Flask:
             flash("The Excel workbook is not available yet in this build.", "warning")
             return redirect(url_for("dashboard"))
         return send_from_directory(workbook_path.parent, workbook_path.name, as_attachment=True)
+
+    @app.route("/app/staff-accountability")
+    @access_required("dashboard")
+    def staff_accountability_page():
+        day = parse_date(request.args.get("date")) or current_local_datetime().date()
+        orders = g.db.scalars(select(PosOrder).where(PosOrder.order_date == day)).all()
+        ids = [order.id for order in orders]
+        actors = {}
+        if ids:
+            logs = g.db.scalars(select(AuditLog).where(AuditLog.module_key == "pos", AuditLog.action == "create", AuditLog.record_id.in_(ids)).order_by(AuditLog.created_at)).all()
+            for log in logs:
+                actors.setdefault(log.record_id, log.actor_name or "Not recorded")
+        scores = {}
+        for order in orders:
+            if is_kitchen_stock_issue(order):
+                continue
+            actor = actors.get(order.id, "Not recorded")
+            row = scores.setdefault(actor, dict(name=actor, transactions=0, paid=0.0, credit=0.0))
+            row["transactions"] += 1
+            key = "paid" if order.payment_method in {"Cash", "Mobile Money", "Card", "Bank Transfer"} else "credit"
+            row[key] = round(row[key] + parse_amount(order.total_amount), 2)
+        return render_template("staff_accountability.html", selected=day, scores=list(scores.values()),
+                               opening=find_snapshot(g.db, day, "Opening"), closing=find_snapshot(g.db, day, "Closing"))
 
     @app.route("/app/profits")
     @access_required("profits")

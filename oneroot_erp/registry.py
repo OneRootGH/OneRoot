@@ -2544,6 +2544,7 @@ MENU_GROUPS = [
         [
             ("Overview", ["dashboard", "owner_briefing", "analytics", "reports"]),
             ("Profitability", ["profits"]),
+            ("Daily Staff Review", ["staff_accountability"]),
         ],
     ),
     ("Sales & Services", [
