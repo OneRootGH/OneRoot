@@ -2162,11 +2162,14 @@ body.cart-drawer-open {
 .catalog-card-image { position: absolute; inset: 0; object-fit: contain; background: white; padding: .5rem; }
 .catalog-card-header { min-width: 0; justify-content: stretch; }
 .catalog-card-footer { display: grid; grid-template-columns: 3.5rem minmax(0,1fr); gap: .5rem; margin-top: auto; align-items: end; }
+.catalog-card-footer .catalog-stock-status { grid-column: 1 / -1; min-width: 0; overflow-wrap: anywhere; }
+.catalog-card-footer > .quantity-field { grid-column: 1; }
+.catalog-card-footer > .button { grid-column: 2; justify-self: stretch; text-align: center; overflow-wrap: normal; word-break: normal; }
 .catalog-card-footer .quantity-field { width: 3.5rem; flex: 0 0 3.5rem; }
 .catalog-card-footer .quantity-field input { width: 100%; min-height: 44px; padding: .4rem; }
 .catalog-card-footer .button { width: auto; min-width: 0; min-height: 44px; padding: .5rem .7rem; }
 .catalog-card-footer .quantity-field { display: grid; gap: .2rem; min-width: 0; }
-.catalog-card-footer .button { border-radius: 8px; white-space: normal; }
+.catalog-card-footer .button { border-radius: 8px; white-space: nowrap; }
 @media (min-width: 1025px) {
   .site-header { padding-block: .65rem; }
   .shop-layout { grid-template-columns: minmax(0, 1fr) 340px; gap: 1rem; }
