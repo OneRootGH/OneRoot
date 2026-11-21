@@ -13,6 +13,8 @@
 
     <hr class="thermal-receipt-rule">
     <div class="thermal-receipt-meta">
+      <div><span>Served by / saved by</span><strong>{{ served_by }}</strong></div>
+      <div><span>Total account balance now</span><strong>{{ account_balance|currency if account_balance is not none else 'Phone required to match account' }}</strong></div>
       <div><span>Receipt</span><strong>{{ credit.receiptNumber }}</strong></div>
       <div><span>Date</span><strong>{{ credit.entryDate|pretty_date }}</strong></div>
       <div><span>Customer</span><strong>{{ credit.customerName }}</strong></div>

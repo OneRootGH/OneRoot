@@ -25296,6 +25296,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             ]
         return render_template(
             "customer_credit_receipt.html",
+            account_balance=round(sum(customer_credit_balance_effect(r.payload or {}) for r in g.db.scalars(select(ModuleRecord).where(ModuleRecord.module_key == "customer_credit_accounts")).all() if normalize_phone(payload.get("customerPhone")) and normalize_phone((r.payload or {}).get("customerPhone")) == normalize_phone(payload.get("customerPhone"))), 2) if normalize_phone(payload.get("customerPhone")) else None,
+            served_by=g.db.scalar(select(AuditLog.actor_name).where(AuditLog.record_id == (reference.removeprefix("pos-credit|") if reference.startswith("pos-credit|") else record.id), AuditLog.action == "create").order_by(AuditLog.created_at).limit(1)) or "Not recorded",
             page_title=f"Credit Receipt - {normalize_text(payload.get('customerName')) or 'Customer'}",
             back_url=url_for("module_list", module_key="customer_credit_accounts"),
             credit={
@@ -25472,6 +25474,8 @@ def create_app(config: AppConfig | None = None) -> Flask:
             if not kitchen_target_meal:
                 return jsonify({"ok": False, "error": "Choose the meal these ingredients are being used for before issuing stock."}), 400
         payment_method = KITCHEN_STOCK_ISSUE_PAYMENT_METHOD if kitchen_issue_mode else (normalize_text(payload.get("paymentMethod")) or "Cash")
+        if not kitchen_issue_mode and payment_method.lower() == "credit" and not user_is_owner(g.current_user):
+            return jsonify({"ok": False, "error": "Owner approval required. Do not release goods on credit. Ask the owner to review and finalise this sale using their own account."}), 403
         items = payload.get("items") if isinstance(payload.get("items"), list) else []
         if not items:
             return jsonify({"ok": False, "error": "Add at least one item."}), 400
